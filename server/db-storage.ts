@@ -2177,8 +2177,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async closeStaleOrders(): Promise<number> {
-    // Cierra todas las órdenes activas de días anteriores (Argentina) y libera las mesas.
-    // Usa SQL nativo para timezone-aware comparison — no depende del timezone del servidor Node.
+    // 1. Cierra órdenes activas de días anteriores (Argentina) y libera sus mesas.
     const staleOrders = await db.select({ id: restaurantOrders.id, tableId: restaurantOrders.tableId })
       .from(restaurantOrders)
       .where(
@@ -2188,33 +2187,61 @@ export class DatabaseStorage implements IStorage {
         )
       );
 
-    if (staleOrders.length === 0) return 0;
+    if (staleOrders.length > 0) {
+      const staleIds = staleOrders.map(o => o.id);
+      await db.update(restaurantOrders)
+        .set({ status: "closed" as any })
+        .where(inArray(restaurantOrders.id, staleIds));
 
-    const staleIds = staleOrders.map(o => o.id);
-    await db.update(restaurantOrders)
-      .set({ status: "closed" as any })
-      .where(inArray(restaurantOrders.id, staleIds));
+      // Liberar mesas cuyo único pedido activo era el stale
+      const staleTableIds = [...new Set(staleOrders.filter(o => o.tableId).map(o => o.tableId!))];
+      for (const tableId of staleTableIds) {
+        const remaining = await db.select({ id: restaurantOrders.id })
+          .from(restaurantOrders)
+          .where(
+            and(
+              eq(restaurantOrders.tableId, tableId),
+              not(inArray(restaurantOrders.status, ["closed", "cancelled"]))
+            )
+          )
+          .limit(1);
+        if (remaining.length === 0) {
+          await db.update(restaurantTables)
+            .set({ status: "available" as any })
+            .where(eq(restaurantTables.id, tableId));
+        }
+      }
+      console.log(`[closeStaleOrders] Cerradas ${staleOrders.length} órdenes viejas, ${staleTableIds.length} mesas liberadas.`);
+    }
 
-    // Liberar mesas cuyo único pedido activo era el stale
-    const tableIds = [...new Set(staleOrders.filter(o => o.tableId).map(o => o.tableId!))];
-    for (const tableId of tableIds) {
-      const remaining = await db.select({ id: restaurantOrders.id })
+    // 2. Reparar mesas "occupied" que NO tienen ninguna orden activa (dejadas por bug anterior).
+    //    Esto es idempotente y safe — solo libera mesas genuinamente huérfanas.
+    const occupiedTables = await db.select({ id: restaurantTables.id })
+      .from(restaurantTables)
+      .where(eq(restaurantTables.status, "occupied" as any));
+
+    let repairedCount = 0;
+    for (const table of occupiedTables) {
+      const activeOrder = await db.select({ id: restaurantOrders.id })
         .from(restaurantOrders)
         .where(
           and(
-            eq(restaurantOrders.tableId, tableId),
+            eq(restaurantOrders.tableId, table.id),
             not(inArray(restaurantOrders.status, ["closed", "cancelled"]))
           )
         )
         .limit(1);
-      if (remaining.length === 0) {
+      if (activeOrder.length === 0) {
         await db.update(restaurantTables)
           .set({ status: "available" as any })
-          .where(eq(restaurantTables.id, tableId));
+          .where(eq(restaurantTables.id, table.id));
+        repairedCount++;
       }
     }
+    if (repairedCount > 0) {
+      console.log(`[closeStaleOrders] Reparadas ${repairedCount} mesas "occupied" sin orden activa.`);
+    }
 
-    console.log(`[closeStaleOrders] Cerradas ${staleOrders.length} órdenes viejas, ${tableIds.length} mesas liberadas.`);
     return staleOrders.length;
   }
 

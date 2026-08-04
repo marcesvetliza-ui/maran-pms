@@ -1355,10 +1355,18 @@ export default function RestaurantPage() {
       return res.json();
     },
     onSuccess: (newItem: any) => {
-      // Actualización optimista inmediata: agregar el ítem al currentOrder sin esperar el refetch
+      // Capturar nombre antes de limpiar el estado (las closures de React aún tienen el valor anterior)
+      const displayName = isEditableItem
+        ? (customItemName || "Ítem personalizado")
+        : (pendingItem?.name || "Ítem");
+      // Actualización optimista inmediata: agregar el ítem al currentOrder sin esperar el refetch.
+      // Enriquecer con menuItem.name para que la comanda muestre el nombre (no solo "Item").
       setCurrentOrder((prev: any) => {
         if (!prev) return prev;
-        return { ...prev, items: [...(prev.items || []), newItem] };
+        return {
+          ...prev,
+          items: [...(prev.items || []), { ...newItem, menuItem: { name: displayName } }],
+        };
       });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       setPendingItem(null);
@@ -1919,8 +1927,11 @@ export default function RestaurantPage() {
         setIsOrderDialogOpen(true);
       } else {
         // Mesa aparece "occupied" pero la caché no tiene su orden.
-        // Puede ser caché desactualizada — refetchear antes de asumir que es nueva.
-        queryClient.fetchQuery<typeof orders>({ queryKey: ["/api/restaurant/orders"] }).then((freshOrders) => {
+        // staleTime: 0 fuerza un network call real ignorando la caché de 30s.
+        queryClient.fetchQuery<typeof orders>({
+          queryKey: ["/api/restaurant/orders"],
+          staleTime: 0,
+        }).then((freshOrders) => {
           const freshOrder = findTodayOrder(freshOrders as typeof orders);
           if (freshOrder) {
             setCurrentOrder(freshOrder);
@@ -1929,14 +1940,16 @@ export default function RestaurantPage() {
             setSelectedCategory(null);
             setIsOrderDialogOpen(true);
           } else {
-            // Genuinamente no hay orden activa — mesa trabada de jornada anterior.
-            setCurrentOrder(null);
-            setNewCovers(table.capacity);
-            setNewWaiterName("");
-            setIsNewOrderDialogOpen(true);
+            // No hay orden activa hoy — mesa trabada. Invalidar tables para que
+            // el próximo fetch llame closeStaleOrders y la libere.
+            queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+            toast({
+              title: "Mesa sin pedido activo",
+              description: "La mesa quedó ocupada de una jornada anterior. Se liberará en unos segundos.",
+            });
           }
         }).catch(() => {
-          // Si el fetch falla, no abrir nuevo pedido para no destruir datos
+          toast({ title: "Error al verificar estado de la mesa", variant: "destructive" });
         });
       }
     }
