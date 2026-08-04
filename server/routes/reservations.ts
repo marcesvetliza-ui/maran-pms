@@ -572,7 +572,20 @@ export function registerReservationsRoutes(app: Express) {
         r => r.id !== req.params.id && r.roomId === reservation.roomId && r.status === "checked_in"
       );
       if (otherCheckedIn) {
-        return res.status(400).json({ error: "La habitación está ocupada por otro huésped" });
+        const guestName = (otherCheckedIn as any).guest
+          ? `${(otherCheckedIn as any).guest.lastName ?? ""} ${(otherCheckedIn as any).guest.firstName ?? ""}`.trim()
+          : "Huésped desconocido";
+        const checkOut = (otherCheckedIn as any).checkOutDate ?? "?";
+        console.warn(`[check-in] Bloqueado: hab ${room.roomNumber} ocupada por ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}`);
+        return res.status(400).json({
+          error: `La habitación ${room.roomNumber} está ocupada por otro huésped`,
+          detail: {
+            reservationId: otherCheckedIn.id,
+            reservationCode: (otherCheckedIn as any).reservationCode,
+            guest: guestName,
+            checkOut,
+          }
+        });
       }
 
       await storage.updateReservation(req.params.id, { status: "checked_in" });

@@ -2465,7 +2465,7 @@ function BulkTransferDialog({
       if (!res.ok) throw new Error("Error cargando reservas");
       const all: any[] = await res.json();
       return all.filter((r: any) =>
-        (r.status === "checked_in" || r.status === "confirmed") &&
+        r.status === "checked_in" &&
         String(r.id) !== String(reservationId)
       );
     },
@@ -2546,7 +2546,7 @@ function BulkTransferDialog({
                   const guestName = r.guest
                     ? `${r.guest.lastName ?? ""} ${r.guest.firstName ?? ""}`.trim()
                     : "Huésped";
-                  const statusLabel = r.status === "checked_in" ? "CI" : "Conf.";
+                  const statusLabel = "CI";
                   return (
                     <SelectItem key={r.id} value={String(r.id)}>
                       Hab. {roomNum} — {guestName} ({statusLabel})
@@ -2685,7 +2685,7 @@ function TransferChargeDialog({
   const [amount, setAmount] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch active reservations (checked_in and confirmed) for the target picker
+  // Fetch active reservations (in-house / checked_in only) for the target picker
   const { data: activeReservations = [] } = useQuery<any[]>({
     queryKey: ["/api/reservations", "active-for-transfer"],
     queryFn: async () => {
@@ -2693,7 +2693,7 @@ function TransferChargeDialog({
       if (!res.ok) throw new Error("Error cargando reservas");
       const all: any[] = await res.json();
       return all.filter((r: any) =>
-        (r.status === "checked_in" || r.status === "confirmed") &&
+        r.status === "checked_in" &&
         String(r.id) !== String(reservationId)
       );
     },
@@ -2793,7 +2793,7 @@ function TransferChargeDialog({
                       const guestName = r.guest
                         ? `${r.guest.lastName ?? ""} ${r.guest.firstName ?? ""}`.trim()
                         : "Huésped";
-                      const statusLabel = r.status === "checked_in" ? "CI" : "Conf.";
+                      const statusLabel = "CI";
                       return (
                         <SelectItem key={r.id} value={String(r.id)}>
                           Hab. {roomNum} — {guestName} ({statusLabel})
