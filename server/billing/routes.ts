@@ -745,6 +745,64 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
+      // Write void movement to spa_account folio when the NC reverses a SPA invoice
+      if (!original.restaurant_order_id && !original.reserva_id) {
+        try {
+          const operador = user?.fullName || user?.username || "sistema";
+          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+          const voidDesc = `Anulación — ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
+          const spaRow = await db.execute(sql`
+            SELECT id FROM spa_accounts WHERE invoice_id = ${original.id} LIMIT 1
+          `);
+          const spaAccountId = (spaRow.rows?.[0] as any)?.id;
+          if (spaAccountId) {
+            const folioRow = await db.execute(sql`
+              SELECT id FROM folios
+              WHERE entity_type = 'spa_account' AND entity_id = ${String(spaAccountId)}
+              LIMIT 1
+            `);
+            const folioRec = (folioRow.rows?.[0] as any);
+            if (folioRec) {
+              await storage.addFolioAdjustment(
+                folioRec.id, "void", parseFloat(String((nc as any).montoTotal || montoNC)),
+                voidDesc, operador, undefined, voidDesc
+              );
+            }
+          }
+        } catch (e) {
+          console.error("[nc-void-spa] folio void adjustment:", e);
+        }
+      }
+
+      // Write void movement to event folio when the NC reverses an Event invoice
+      if (!original.restaurant_order_id && !original.reserva_id) {
+        try {
+          const operador = user?.fullName || user?.username || "sistema";
+          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+          const voidDesc = `Anulación — ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
+          const eventRow = await db.execute(sql`
+            SELECT id FROM events WHERE invoice_id = ${original.id} LIMIT 1
+          `);
+          const eventId = (eventRow.rows?.[0] as any)?.id;
+          if (eventId) {
+            const folioRow = await db.execute(sql`
+              SELECT id FROM folios
+              WHERE entity_type = 'event' AND entity_id = ${String(eventId)}
+              LIMIT 1
+            `);
+            const folioRec = (folioRow.rows?.[0] as any);
+            if (folioRec) {
+              await storage.addFolioAdjustment(
+                folioRec.id, "void", parseFloat(String((nc as any).montoTotal || montoNC)),
+                voidDesc, operador, undefined, voidDesc
+              );
+            }
+          }
+        } catch (e) {
+          console.error("[nc-void-event] folio void adjustment:", e);
+        }
+      }
+
       // Void selected restaurant folio payment movements to restore the order's folio balance
       const voidedFolioMovementIds: string[] = [];
       if (Array.isArray(folioMovementIdsToVoid) && folioMovementIdsToVoid.length > 0 && original.restaurant_order_id) {
