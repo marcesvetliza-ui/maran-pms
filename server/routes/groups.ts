@@ -1386,12 +1386,13 @@ export function registerGroupsRoutes(app: Express) {
       y += 12;
 
       // Room breakdown table header
+      const extrasColLabel = config === "none" ? "EXTRAS (directo)" : "EXTRAS";
       doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555")
         .text("HAB.", 40, y)
         .text("HUÉSPED", 80, y)
         .text("NOCHES", 280, y, { align: "right", width: 60 })
         .text("ALOJAMIENTO", 350, y, { align: "right", width: 80 })
-        .text("EXTRAS", 440, y, { align: "right", width: 60 })
+        .text(extrasColLabel, 440, y, { align: "right", width: 60 })
         .text("PAGADO", 505, y, { align: "right", width: 50 });
       y += 4;
       doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
