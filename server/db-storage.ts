@@ -2218,6 +2218,154 @@ export class DatabaseStorage implements IStorage {
     return staleOrders.length;
   }
 
+  // Single round-trip: correlated subquery aggregates order items (with menu item details)
+  // as a JSON array; table + table area, direct area, and guest are resolved via LEFT JOINs.
+  private async enrichRestaurantOrder(order: RestaurantOrder): Promise<RestaurantOrderWithDetails> {
+    const result = await db.execute(sql`
+      SELECT
+        (
+          SELECT COALESCE(json_agg(jsonb_build_object(
+            'id',         oi.id,
+            'orderId',    oi.order_id,
+            'menuItemId', oi.menu_item_id,
+            'quantity',   oi.quantity,
+            'unitPrice',  oi.unit_price,
+            'subtotal',   oi.subtotal,
+            'status',     oi.status,
+            'course',     oi.course,
+            'notes',      oi.notes,
+            'sentAt',     oi.sent_at,
+            'paid',       oi.paid,
+            'menuItem', jsonb_build_object(
+              'id',              mi.id,
+              'categoryId',      mi.category_id,
+              'name',            mi.name,
+              'description',     mi.description,
+              'price',           mi.price,
+              'preparationTime', mi.preparation_time,
+              'isAvailable',     mi.is_available,
+              'isActive',        mi.is_active,
+              'isEditable',      mi.is_editable,
+              'allergens',       mi.allergens,
+              'displayOrder',    mi.display_order,
+              'defaultCourse',   mi.default_course,
+              'inventoryItemId', mi.inventory_item_id
+            )
+          )), '[]'::json)
+          FROM order_items oi
+          JOIN menu_items mi ON mi.id = oi.menu_item_id
+          WHERE oi.order_id = ${order.id}
+        ) AS items,
+        CASE WHEN rt.id IS NOT NULL
+          THEN jsonb_build_object(
+            'id',                 rt.id,
+            'tableNumber',        rt.table_number,
+            'areaId',             rt.area_id,
+            'capacity',           rt.capacity,
+            'shape',              rt.shape,
+            'status',             rt.status,
+            'positionX',          rt.position_x,
+            'positionY',          rt.position_y,
+            'hasWindow',          rt.has_window,
+            'isActive',           rt.is_active,
+            'eventClientName',    rt.event_client_name,
+            'eventClientPhone',   rt.event_client_phone,
+            'eventClientEmail',   rt.event_client_email,
+            'eventSeats',         rt.event_seats,
+            'eventNotes',         rt.event_notes,
+            'eventAdvanceAmount', rt.event_advance_amount,
+            'eventAdvanceMethod', rt.event_advance_method,
+            'eventAdvanceDate',   rt.event_advance_date,
+            'area', jsonb_build_object(
+              'id',        ta.id,
+              'name',      ta.name,
+              'areaType',  ta.area_type,
+              'capacity',  ta.capacity,
+              'hasTables', ta.has_tables,
+              'isActive',  ta.is_active,
+              'notes',     ta.notes
+            )
+          )
+          ELSE NULL
+        END AS "table",
+        CASE
+          WHEN oa.id IS NOT NULL THEN jsonb_build_object(
+            'id',        oa.id,
+            'name',      oa.name,
+            'areaType',  oa.area_type,
+            'capacity',  oa.capacity,
+            'hasTables', oa.has_tables,
+            'isActive',  oa.is_active,
+            'notes',     oa.notes
+          )
+          WHEN ta.id IS NOT NULL THEN jsonb_build_object(
+            'id',        ta.id,
+            'name',      ta.name,
+            'areaType',  ta.area_type,
+            'capacity',  ta.capacity,
+            'hasTables', ta.has_tables,
+            'isActive',  ta.is_active,
+            'notes',     ta.notes
+          )
+          ELSE NULL
+        END AS area,
+        CASE WHEN g.id IS NOT NULL
+          THEN jsonb_build_object(
+            'id',                          g.id,
+            'codigo',                      g.codigo,
+            'firstName',                   g.first_name,
+            'lastName',                    g.last_name,
+            'email',                       g.email,
+            'phone',                       g.phone,
+            'documentType',                g.document_type,
+            'documentNumber',              g.document_number,
+            'nationality',                 g.nationality,
+            'direccion',                   g.direccion,
+            'localidad',                   g.localidad,
+            'codigoPostal',                g.codigo_postal,
+            'fechaNacimiento',             g.fecha_nacimiento,
+            'sexo',                        g.sexo,
+            'segment',                     g.segment,
+            'cuilCuit',                    g.cuil_cuit,
+            'companyId',                   g.company_id,
+            'agencyId',                    g.agency_id,
+            'fechaAlta',                   g.fecha_alta,
+            'vehiculoPatente',             g.vehiculo_patente,
+            'vehiculoMarca',               g.vehiculo_marca,
+            'vehiculoModelo',              g.vehiculo_modelo,
+            'vehiculoColor',               g.vehiculo_color,
+            'active',                      g.active,
+            'vatCondition',                g.vat_condition,
+            'provincia',                   g.provincia,
+            'estadoCivil',                 g.estado_civil,
+            'procedencia',                 g.procedencia,
+            'nationalityCode',             g.nationality_code,
+            'fechaIngresoArgentina',       g.fecha_ingreso_argentina,
+            'fechaSalidaArgentina',        g.fecha_salida_argentina,
+            'esEmpresaGrande',             g.es_empresa_grande,
+            'montoBaseFce',                g.monto_base_fce,
+            'tipoPersona',                 g.tipo_persona,
+            'condicionVentaPredeterminada',g.condicion_venta_predeterminada
+          )
+          ELSE NULL
+        END AS guest
+      FROM restaurant_orders ro
+      LEFT JOIN restaurant_tables rt ON rt.id = ro.table_id
+      LEFT JOIN restaurant_areas  ta ON ta.id = rt.area_id
+      LEFT JOIN restaurant_areas  oa ON oa.id = ro.area_id
+      LEFT JOIN guests             g  ON g.id  = ro.guest_id
+      WHERE ro.id = ${order.id}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      ...order,
+      items:  (row?.items  as any[]) ?? [],
+      table:  (row?.table  as any)   ?? undefined,
+      area:   (row?.area   as any)   ?? undefined,
+      guest:  (row?.guest  as any)   ?? undefined,
+    };
+  }
+
   async getRestaurantOrders(status?: OrderStatus, from?: string, to?: string): Promise<RestaurantOrderWithDetails[]> {
     const conditions = [];
     if (status) {
@@ -2233,64 +2381,21 @@ export class DatabaseStorage implements IStorage {
     if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
     if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
 
-    let orders: RestaurantOrder[];
+    let orderList: RestaurantOrder[];
     if (conditions.length > 0) {
-      orders = await db.select().from(restaurantOrders).where(and(...conditions));
+      orderList = await db.select().from(restaurantOrders).where(and(...conditions));
     } else {
-      orders = await db.select().from(restaurantOrders);
+      orderList = await db.select().from(restaurantOrders);
     }
 
-    const allTables = await db.select().from(restaurantTables);
-    const allAreas = await db.select().from(restaurantAreas);
-    const allGuests2 = await db.select().from(guests);
-    const allOrderItems = await db.select().from(orderItems);
-    const allMenuItems = await db.select().from(menuItems);
-
-    const tablesMap = new Map(allTables.map(t => [t.id, t]));
-    const areasMap = new Map(allAreas.map(a => [a.id, a]));
-    const guestsMap = new Map(allGuests2.map(g => [g.id, g]));
-    const menuItemsMap = new Map(allMenuItems.map(m => [m.id, m]));
-
-    return orders.map(order => {
-      const table = order.tableId ? tablesMap.get(order.tableId) : undefined;
-      const tableArea = table ? areasMap.get(table.areaId) : undefined;
-      const area = order.areaId ? areasMap.get(order.areaId) : tableArea;
-      const guest = order.guestId ? guestsMap.get(order.guestId) : undefined;
-      const items = allOrderItems
-        .filter(i => i.orderId === order.id)
-        .map(item => ({ ...item, menuItem: menuItemsMap.get(item.menuItemId)! }));
-      return {
-        ...order,
-        table: table ? { ...table, area: tableArea! } : undefined,
-        area,
-        guest,
-        items,
-      };
-    }).sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+    const enriched = await Promise.all(orderList.map(o => this.enrichRestaurantOrder(o)));
+    return enriched.sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
   }
 
   async getRestaurantOrder(id: string): Promise<RestaurantOrderWithDetails | undefined> {
     const [order] = await db.select().from(restaurantOrders).where(eq(restaurantOrders.id, id));
     if (!order) return undefined;
-
-    const table = order.tableId ? (await db.select().from(restaurantTables).where(eq(restaurantTables.id, order.tableId)))[0] : undefined;
-    const tableArea = table ? (await db.select().from(restaurantAreas).where(eq(restaurantAreas.id, table.areaId)))[0] : undefined;
-    const area = order.areaId ? (await db.select().from(restaurantAreas).where(eq(restaurantAreas.id, order.areaId)))[0] : tableArea;
-    const guest = order.guestId ? (await db.select().from(guests).where(eq(guests.id, order.guestId)))[0] : undefined;
-
-    const allOrderItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
-    const allMenuItems = await db.select().from(menuItems);
-    const menuItemsMap = new Map(allMenuItems.map(m => [m.id, m]));
-
-    const items = allOrderItems.map(item => ({ ...item, menuItem: menuItemsMap.get(item.menuItemId)! }));
-
-    return {
-      ...order,
-      table: table ? { ...table, area: tableArea! } : undefined,
-      area,
-      guest,
-      items,
-    };
+    return this.enrichRestaurantOrder(order);
   }
 
   async getOrdersByTable(tableId: string): Promise<RestaurantOrder[]> {
