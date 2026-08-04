@@ -1346,7 +1346,12 @@ export default function RestaurantPage() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (newItem: any) => {
+      // Actualización optimista inmediata: agregar el ítem al currentOrder sin esperar el refetch
+      setCurrentOrder((prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, items: [...(prev.items || []), newItem] };
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       setPendingItem(null);
       setItemNotes("");
@@ -1358,13 +1363,26 @@ export default function RestaurantPage() {
     },
   });
 
+  // Helper: refetch orders y sincroniza currentOrder desde la caché fresca.
+  // Usar cuando la mutación modifica items existentes (no agrega/elimina) y necesitamos
+  // ver el nuevo estado (status, course) antes de que el usuario interactúe.
+  const syncCurrentOrderAfterRefetch = async (orderId?: string) => {
+    await queryClient.refetchQueries({ queryKey: ["/api/restaurant/orders"] });
+    setCurrentOrder((prev: any) => {
+      if (!prev) return prev;
+      const id = orderId || prev.id;
+      const fresh = (queryClient.getQueryData<any[]>(["/api/restaurant/orders"]) || []).find((o: any) => o.id === id);
+      return fresh || prev;
+    });
+  };
+
   const advanceCourseMutation = useMutation({
     mutationFn: async (orderId: string) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/advance-course`);
       return res.json();
     },
-    onSuccess: (data: { activeCourse: number; activatedItems: number }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+    onSuccess: async (data: { activeCourse: number; activatedItems: number }, orderId: string) => {
+      await syncCurrentOrderAfterRefetch(orderId);
       toast({ title: `Curso activado: ${courseLabels[data.activeCourse]}`, description: `${data.activatedItems} items enviados a cocina` });
     },
   });
@@ -1374,8 +1392,8 @@ export default function RestaurantPage() {
       const res = await apiRequest("PATCH", `/api/restaurant/orders/${data.orderId}/items/${data.itemId}`, { course: data.course });
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+    onSuccess: async (_: any, variables: { orderId: string; itemId: string; course: number }) => {
+      await syncCurrentOrderAfterRefetch(variables.orderId);
     },
   });
 
@@ -1561,12 +1579,17 @@ export default function RestaurantPage() {
       if (res.status === 204 || res.status === 200) return { success: true };
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_: any, variables: { orderId: string; itemId: string }) => {
       if (itemToVoid) {
         printCancellationComanda(getUpdatedOrder(), [itemToVoid.item], itemVoidReason || "Anulación de ítem");
       }
       setItemToVoid(null);
       setItemVoidReason("");
+      // Remoción optimista inmediata: sacar el ítem del currentOrder sin esperar el refetch
+      setCurrentOrder((prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, items: (prev.items || []).filter((i: any) => i.id !== variables.itemId) };
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
       toast({ title: "Ítem anulado", description: "La comanda de anulación fue enviada a cocina." });
     },
