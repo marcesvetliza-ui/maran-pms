@@ -537,7 +537,11 @@ export function ReservationFormDialog({
     }
     const plan = ratePlans?.find(p => p.id === ratePlanId);
     if (plan) {
-      const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+      if (!formData.checkInDate || !formData.checkOutDate) {
+        setFormData({ ...formData, ratePlanId, specialRateReason: "", baseRatePerNight: getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2) });
+        return;
+      }
+      const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
       const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
       const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
       setFormData({ 
@@ -1140,10 +1144,15 @@ export function ReservationFormDialog({
                       // Reset price to rate plan values (or clear if no rate plan)
                       const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
                       if (plan) {
-                        const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+                        if (!formData.checkInDate || !formData.checkOutDate) {
+                          const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
+                          setFormData(prev => ({ ...prev, baseRatePerNight: rate, notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "" }));
+                        } else {
+                        const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
                         const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
                         const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
                         setFormData(prev => ({ ...prev, baseRatePerNight: rate, ...totals, notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "" }));
+                        }
                       } else {
                         setFormData(prev => ({ ...prev, baseRatePerNight: "", finalRatePerNight: "", totalRoomAmount: "", notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "" }));
                       }
@@ -1292,9 +1301,13 @@ export function ReservationFormDialog({
                     const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
                     if (plan) {
                       const rate = getPaxRate(plan, numGuests);
-                      const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
-                      const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
-                      setFormData({ ...formData, numberOfGuests: numGuests, baseRatePerNight: rate, ...totals });
+                      if (!formData.checkInDate || !formData.checkOutDate) {
+                        setFormData({ ...formData, numberOfGuests: numGuests, baseRatePerNight: rate });
+                      } else {
+                        const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
+                        const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
+                        setFormData({ ...formData, numberOfGuests: numGuests, baseRatePerNight: rate, ...totals });
+                      }
                     } else {
                       setFormData({ ...formData, numberOfGuests: numGuests });
                     }
