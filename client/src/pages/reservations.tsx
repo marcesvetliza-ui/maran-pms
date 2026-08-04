@@ -602,7 +602,11 @@ export function ReservationFormDialog({
   };
 
   const handleBaseRateChange = (newBaseRate: string) => {
-    const nights = calculateNights(formData.checkInDate || today, formData.checkOutDate || tomorrow);
+    if (!formData.checkInDate || !formData.checkOutDate) {
+      setFormData({ ...formData, baseRatePerNight: newBaseRate });
+      return;
+    }
+    const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
     const totals = calculateTotals(
       newBaseRate,
       formData.discountType as DiscountType,
