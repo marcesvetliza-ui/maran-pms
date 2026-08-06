@@ -2320,6 +2320,7 @@ export const salesInvoices = pgTable("sales_invoices", {
   concepto: text("concepto").default("2"),
   items: jsonb("items"),
   operador: text("operador"),
+  cashFormaPago: text("cash_forma_pago"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

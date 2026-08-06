@@ -279,7 +279,10 @@ export default function BillingPage() {
                                 <div className="font-medium text-xs truncate max-w-[160px]">{f.cliente_razon_social}</div>
                                 <div className="text-xs text-muted-foreground">{f.cliente_cuit || f.cliente_dni || f.cliente_condicion_iva}</div>
                               </td>
-                              <td className="px-3 py-2 text-right font-semibold">${fPeso(f.monto_total)}</td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="font-semibold">${fPeso(f.monto_total)}</div>
+                                {f.cash_forma_pago && <div className="text-xs text-muted-foreground">{f.cash_forma_pago === "transferencia" ? "Transferencia" : f.cash_forma_pago === "echeq" ? "eCheq" : f.cash_forma_pago === "cheque" ? "Cheque" : f.cash_forma_pago === "efectivo" ? "Efectivo" : f.cash_forma_pago === "compensacion" ? "Compensación" : f.cash_forma_pago === "tarjeta" ? "Tarjeta" : f.cash_forma_pago === "cuenta_corriente" ? "Cta. Corriente" : f.cash_forma_pago}</div>}
+                              </td>
                               <td className="px-3 py-2">
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs font-mono">{f.cae ? f.cae.substring(0, 8) + "..." : "—"}</span>
@@ -507,8 +510,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setCuit(cuitVal);
     setCondicionIva(condVal);
     if (domVal) setDomicilio(domVal);
-    if (cuitVal) {
-      const auto = (condVal === "Responsable Inscripto" || condVal === "Exento") ? "FA" : "FB";
+    if (cuitVal || condVal === "Responsable Inscripto" || condVal === "Exento" || condVal === "Monotributista") {
+      // FA requiere CUIT; sin CUIT usar FB como fallback
+      const auto = (condVal === "Responsable Inscripto" || condVal === "Exento") ? (cuitVal ? "FA" : "FB") : "FB";
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
       setTipo(nextTipo);
       recalcForTipo(nextTipo, tipo);
@@ -1003,7 +1007,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             {isFA ? (
               <div className="space-y-1">
                 <Label className="text-xs">CUIT *</Label>
-                <Input value={cuit} onChange={e => { setCuit(e.target.value.replace(/-/g, "")); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="20-12345678-9" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
+                <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
                 {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
               </div>
             ) : (

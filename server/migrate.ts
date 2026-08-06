@@ -1285,5 +1285,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS billing_entity_id varchar`)
   );
 
+  await withTimeout("sales_invoices.cash_forma_pago", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS cash_forma_pago text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

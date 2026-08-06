@@ -6885,7 +6885,7 @@ export default function RestaurantPage() {
               {compTipo === "FA" ? (
                 <div className="space-y-1">
                   <Label className="text-xs">CUIT *</Label>
-                  <Input value={compCuit} onChange={e => setCompCuit(e.target.value)} placeholder="XX-XXXXXXXX-X" data-testid="input-comp-cuit" />
+                  <Input value={compCuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCompCuit(f); }} placeholder="XX-XXXXXXXX-X" data-testid="input-comp-cuit" />
                 </div>
               ) : (
                 <div className="space-y-1">

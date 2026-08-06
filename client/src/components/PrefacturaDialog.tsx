@@ -151,10 +151,13 @@ function buildInvoiceItems(
 // ─── Auto-suggest tipo from condicionIva / cuit ───────────────────────────────
 
 function suggestTipo(cuit: string, condicionIva: string): string {
-  if (!cuit) return "cierre_habitacion";
-  if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") return "FA";
+  if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") {
+    // Factura A requiere CUIT; sin CUIT usamos Factura B como fallback seguro
+    return cuit ? "FA" : "FB";
+  }
   if (condicionIva === "Monotributista") return "FB";
-  return "FB";
+  // Consumidor Final sin CUIT → mantener tipo no fiscal (checkout)
+  return cuit ? "FB" : "cierre_habitacion";
 }
 
 let rowIdCounter = 0;
@@ -494,6 +497,11 @@ export function PrefacturaDialog({
     }
   }
 
+  // True when the folio is already fully paid AND at least one invoice was emitted.
+  // In this state the only valid action is check-out — no new invoice should be created.
+  const alreadyPaidAndInvoiced =
+    (folio?.balance ?? 1) <= 0.01 && emittedInvoices.length > 0;
+
   // ── Submit ──────────────────────────────────────────────────────────────────
 
   // Gate: warn if user enters less than the full balance before actually submitting
@@ -525,12 +533,14 @@ export function PrefacturaDialog({
       toast({ title: "Factura A requiere una empresa o agencia", description: "Cambiá el destinatario a Empresa o Agencia y seleccioná el receptor.", variant: "destructive" });
       return;
     }
-    if (billingTarget === "company" && !billingEntityId) {
-      toast({ title: "Seleccioná la empresa a facturar", variant: "destructive" });
+    // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
+    // razón social a mano. El CUIT se valida más abajo para Factura A.
+    if (billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
+      toast({ title: "Ingresá la razón social de la empresa o seleccionala del listado", variant: "destructive" });
       return;
     }
-    if (billingTarget === "agency" && !billingEntityId) {
-      toast({ title: "Seleccioná la agencia a facturar", variant: "destructive" });
+    if (billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
+      toast({ title: "Ingresá la razón social de la agencia o seleccionala del listado", variant: "destructive" });
       return;
     }
     if (isFiscalTipo && !razonSocial.trim()) {
@@ -550,6 +560,33 @@ export function PrefacturaDialog({
 
     try {
       const receiptType = RECEIPT_TYPE_MAP[tipo] || "cierre_habitacion";
+
+      // Guard: if the folio is already fully paid AND has invoices, skip payment+invoice
+      // and go straight to checkout. This prevents duplicate invoices.
+      if (alreadyPaidAndInvoiced) {
+        if (mode === "checkout" && doCheckout) {
+          try {
+            const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+            if (!coRes.ok) {
+              const coBody = await coRes.json().catch(() => ({}));
+              throw new Error(coBody?.error || "Error al realizar check-out");
+            }
+            setCheckoutDone(true);
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
+            queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+            onCheckoutComplete?.();
+          } catch (coErr: any) {
+            setCheckoutFailed(true);
+          }
+        }
+        setEmittedInvoice(null);
+        setStep(3);
+        return;
+      }
 
       // 1. Register each payment row — collect IDs for invoice linking
       // Skip rows with zero amounts (happens when balance is already fully covered).
@@ -585,6 +622,11 @@ export function PrefacturaDialog({
       let invoiceData: any = null;
       const invoiceItems = folio ? buildInvoiceItems(selectedIds, itemDescriptions, folio, tipo) : [];
       if (invoiceItems.length > 0) {
+        // Si algún row de cobro es "cuenta_corriente" y hay una empresa/agencia seleccionada,
+        // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
+        const ccRow = paymentRows.find(r => r.method === "cuenta_corriente" && (parseFloat(r.amount) || 0) > 0);
+        const isCcPayment = !!ccRow && (billingTarget === "company" || billingTarget === "agency") && !!billingEntityId;
+
         const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
           tipoComprobante: tipo,
           cliente: {
@@ -597,6 +639,11 @@ export function PrefacturaDialog({
           items: invoiceItems,
           reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
+          ...(isCcPayment ? {
+            cashFormaPago: "cuenta_corriente",
+            ccEntityType: billingTarget,
+            ccEntityId: billingEntityId,
+          } : {}),
         });
         const invoiceBody = await invoiceRes.json();
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
@@ -752,6 +799,16 @@ export function PrefacturaDialog({
               <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
                 <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-amber-800 dark:text-amber-300">Cierre histórico — salida programada: {formatDateAR(reservationData?.checkOutDate)}.</p>
+              </div>
+            )}
+            {/* Already-paid-and-invoiced: block new invoice, only allow checkout */}
+            {alreadyPaidAndInvoiced && (
+              <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
+                <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                <div className="text-sm text-green-800 dark:text-green-300 space-y-0.5">
+                  <p className="font-semibold">Esta reserva ya está cobrada y facturada.</p>
+                  <p>El saldo es $0 y ya existe un comprobante emitido. No se puede generar una nueva factura — solo podés dar el check-out.</p>
+                </div>
               </div>
             )}
             {mode === "checkout" && isEarlyCheckout && (
@@ -926,7 +983,7 @@ export function PrefacturaDialog({
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">CUIT</Label>
-                  <Input value={cuit} onChange={e => { setCuit(e.target.value); if (e.target.value) setTipo(suggestTipo(e.target.value, condicionIva)); }} placeholder="Sin CUIT" className="h-8 text-sm" />
+                  <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (f) setTipo(suggestTipo(f, condicionIva)); }} placeholder="XX-XXXXXXXX-X" className="h-8 text-sm" />
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Condición IVA</Label>
@@ -1070,12 +1127,22 @@ export function PrefacturaDialog({
               >
                 <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
               </Button>
-              <Button
-                onClick={() => setStep(2)}
-                disabled={folioLoading || selectedIds.size === 0 || facturaANeedsEntity}
-              >
-                Siguiente — Cobro <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
+              {alreadyPaidAndInvoiced ? (
+                mode === "checkout" ? (
+                  <Button onClick={doSubmit} disabled={isSubmitting}>
+                    {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}
+                  </Button>
+                ) : (
+                  <Button variant="outline" onClick={handleClose}>Cerrar</Button>
+                )
+              ) : (
+                <Button
+                  onClick={() => setStep(2)}
+                  disabled={folioLoading || selectedIds.size === 0 || facturaANeedsEntity}
+                >
+                  Siguiente — Cobro <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              )}
             </DialogFooter>
           </div>
         )}

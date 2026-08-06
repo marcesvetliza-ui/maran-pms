@@ -72,6 +72,13 @@ export async function generarFacturaPDF(factura: any, config: any, notaCredito?:
     const montoIva21     = factura.monto_iva21       ?? factura.montoIva21      ?? 0;
     const montoIva105    = factura.monto_iva105      ?? factura.montoIva105     ?? 0;
     const montoTotal     = factura.monto_total       ?? factura.montoTotal      ?? factura.total ?? 0;
+    const cashFormaPago  = factura.cash_forma_pago   ?? factura.cashFormaPago   ?? null;
+
+    const FORMA_PAGO_LABELS: Record<string, string> = {
+      transferencia: "Transferencia", echeq: "eCheq", cheque: "Cheque",
+      efectivo: "Efectivo", compensacion: "Compensación", tarjeta: "Tarjeta de crédito",
+      cuenta_corriente: "Cuenta Corriente",
+    };
 
     const tipo = TIPO_LABELS[tipoKey] ?? { nombre: tipoKey, letra: "?", codigo: "000" };
     const PV = padNum(Number(puntoVenta), 4);
@@ -214,6 +221,14 @@ export async function generarFacturaPDF(factura: any, config: any, notaCredito?:
       .text("IMPORTE TOTAL", txL, y + 2, { width: tw - 70 })
       .text(`$ ${fPeso(montoTotal)}`, txL + tw - 70, y + 2, { width: 65, align: "right" });
     y += 22;
+
+    // Forma de pago (si está disponible)
+    if (cashFormaPago) {
+      const fpLabel = FORMA_PAGO_LABELS[cashFormaPago] ?? cashFormaPago;
+      doc.font("Helvetica").fontSize(7.5).fillColor("#555")
+        .text(`Forma de pago: ${fpLabel}`, txL, y + 1, { width: tw });
+      y += 12;
+    }
 
     // ── Nota de Crédito / Anulación ──────────────────────────────
     if (notaCredito) {

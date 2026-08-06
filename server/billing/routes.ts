@@ -319,6 +319,7 @@ export function registerBillingRoutes(app: Express) {
         folioId,
         operador: user?.fullName || user?.username,
         puntoVentaOverride: pvBody ? parseInt(pvBody) : undefined,
+        cashFormaPago: cashFormaPago || undefined,
       } as NewInvoiceData);
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
