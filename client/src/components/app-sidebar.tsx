@@ -6,6 +6,7 @@ import {
   Activity,
   TrendingUp,
   BarChart2,
+  FileBarChart2,
   CalendarDays,
   BookOpen,
   Zap,
@@ -45,6 +46,7 @@ import {
   MonitorSmartphone,
   Megaphone,
   ChevronDown,
+  ChevronRight,
   KeyRound,
   ChefHat,
   Store,
@@ -118,7 +120,16 @@ const menuSections = [
       { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
       { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
       { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
-      { label: "Planilla Diaria", icon: ClipboardList,  href: "/daily-report",    roles: HABITACIONES_ROLES },
+      {
+        label: "Reportes",
+        icon: FileBarChart2,
+        roles: HABITACIONES_ROLES,
+        subItems: [
+          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: HABITACIONES_ROLES },
+          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: HABITACIONES_ROLES },
+          { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        roles: ADMIN_MOD_ROLES },
+        ],
+      },
       { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      roles: TARIFAS_ROLES },
       { label: "Huéspedes",      icon: User,            href: "/guests",          roles: HUESPEDES_ROLES },
     ],
@@ -175,10 +186,9 @@ const menuSections = [
   {
     titulo: "Administración",
     items: [
-      { label: "Administración",     icon: Calculator,    href: "/admin",         roles: ADMIN_MOD_ROLES },
-      { label: "Cuentas Corrientes", icon: CreditCard,    href: "/admin/cuentas", roles: CC_ROLES },
-      { label: "Caja",               icon: Landmark,      href: "/cash-register", roles: CAJA_ROLES },
-      { label: "Reportes INDEC",     icon: ClipboardList, href: "/admin/indec",   roles: ADMIN_MOD_ROLES },
+      { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
+      { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
+      { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
     ],
   },
 
@@ -402,6 +412,7 @@ function TurnoAlert() {
 }
 
 const COLLAPSED_KEY = "sidebar_collapsed_sections";
+const SUB_COLLAPSED_KEY = "sidebar_collapsed_subgroups";
 
 export function AppSidebar() {
   const [location] = useLocation();
@@ -410,6 +421,16 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
       const saved = localStorage.getItem(COLLAPSED_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Sub-group collapse state (keyed by "SectionTitle:SubGroupLabel")
+  const [collapsedSubs, setCollapsedSubs] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(SUB_COLLAPSED_KEY);
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
@@ -426,15 +447,30 @@ export function AppSidebar() {
     });
   };
 
-  // Auto-expand the section that contains the current active route
+  const toggleSubGroup = (key: string) => {
+    setCollapsedSubs(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem(SUB_COLLAPSED_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Auto-expand the section that contains the current active route (including sub-items)
   useEffect(() => {
     const role = user?.role || "";
     for (const section of menuSections) {
       const hasActive = section.items.some(item => {
         if ((item as any).roles && !(item as any).roles.includes(role)) return false;
-        return item.href === "/"
+        if ("subItems" in item && (item as any).subItems) {
+          return (item as any).subItems.some((sub: any) => {
+            if (!sub.roles.includes(role)) return false;
+            const subPath = sub.href.split("?")[0];
+            return location === subPath || location.startsWith(subPath + "/");
+          });
+        }
+        return (item as any).href === "/"
           ? location === "/"
-          : location === item.href || location.startsWith(item.href + "/");
+          : location === (item as any).href || location.startsWith((item as any).href + "/");
       });
       if (hasActive) {
         setCollapsed(prev => {
@@ -499,21 +535,86 @@ export function AppSidebar() {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {visibleItems.map((item) => {
+                      // ── Sub-group (collapsible) ──────────────────────────
+                      if ("subItems" in item && (item as any).subItems) {
+                        const subKey = `${section.titulo}:${item.label}`;
+                        const isSubCollapsed = !!collapsedSubs[subKey];
+                        const visibleSubItems = ((item as any).subItems as any[]).filter(
+                          (sub: any) => sub.roles.includes(role)
+                        );
+                        if (visibleSubItems.length === 0) return null;
+                        const hasActiveSubItem = visibleSubItems.some((sub: any) => {
+                          const subPath = sub.href.split("?")[0];
+                          return location === subPath || location.startsWith(subPath + "/");
+                        });
+                        return (
+                          <SidebarMenuItem key={item.label}>
+                            {/* Sub-group header */}
+                            <button
+                              onClick={() => toggleSubGroup(subKey)}
+                              className={`flex items-center w-full gap-2 px-2 py-1.5 rounded-md text-sm transition-colors hover:bg-sidebar-accent/60 ${
+                                hasActiveSubItem
+                                  ? "text-sidebar-foreground font-medium"
+                                  : "text-sidebar-foreground/70"
+                              }`}
+                            >
+                              <item.icon className="h-4 w-4 shrink-0" />
+                              <span className="flex-1 text-left">{item.label}</span>
+                              <ChevronRight
+                                className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
+                                  isSubCollapsed ? "rotate-0" : "rotate-90"
+                                }`}
+                              />
+                            </button>
+                            {/* Sub-items */}
+                            {!isSubCollapsed && (
+                              <div className="ml-3 mt-0.5 border-l border-border/40 pl-2 pb-0.5">
+                                <SidebarMenu>
+                                  {visibleSubItems.map((sub: any) => {
+                                    const subPath = sub.href.split("?")[0];
+                                    const isActive =
+                                      location === subPath ||
+                                      location.startsWith(subPath + "/");
+                                    const subTestId = `nav-${sub.href.replace(/^\//, "").replace(/[\/?]/g, "-") || "sub"}`;
+                                    return (
+                                      <SidebarMenuItem key={sub.href}>
+                                        <SidebarMenuButton
+                                          asChild
+                                          isActive={isActive}
+                                          data-testid={subTestId}
+                                        >
+                                          <Link href={sub.href}>
+                                            <sub.icon className="h-4 w-4 shrink-0" />
+                                            <span>{sub.label}</span>
+                                          </Link>
+                                        </SidebarMenuButton>
+                                      </SidebarMenuItem>
+                                    );
+                                  })}
+                                </SidebarMenu>
+                              </div>
+                            )}
+                          </SidebarMenuItem>
+                        );
+                      }
+
+                      // ── Flat item ────────────────────────────────────────
+                      const flatItem = item as any;
                       const isActive =
-                        item.href === "/"
+                        flatItem.href === "/"
                           ? location === "/"
-                          : location === item.href || location.startsWith(item.href + "/");
-                      const testId = `nav-${item.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
+                          : location === flatItem.href || location.startsWith(flatItem.href + "/");
+                      const testId = `nav-${flatItem.href.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
                       return (
-                        <SidebarMenuItem key={`${item.href}-${item.label}`}>
+                        <SidebarMenuItem key={`${flatItem.href}-${flatItem.label}`}>
                           <SidebarMenuButton
                             asChild
                             isActive={isActive}
                             data-testid={testId}
                           >
-                            <Link href={item.href}>
-                              <item.icon className="h-4 w-4 shrink-0" />
-                              <span>{item.label}</span>
+                            <Link href={flatItem.href}>
+                              <flatItem.icon className="h-4 w-4 shrink-0" />
+                              <span>{flatItem.label}</span>
                             </Link>
                           </SidebarMenuButton>
                         </SidebarMenuItem>

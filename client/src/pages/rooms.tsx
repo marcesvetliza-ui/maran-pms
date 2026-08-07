@@ -820,7 +820,15 @@ export default function RoomsPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const canManage = ROOM_ADMIN_ROLES.includes((user?.role ?? "") as SystemUserRole);
-  const [activeTab, setActiveTab] = useState<"inventario" | "ocupadas">("inventario");
+  const [activeTab, setActiveTab] = useState<"inventario" | "ocupadas">(() => {
+    // Leer ?tab=ocupadas desde la URL para que el sidebar "Hab. Ocupadas" abra directo en ese tab
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("tab") === "ocupadas" ? "ocupadas" : "inventario";
+    } catch {
+      return "inventario";
+    }
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
