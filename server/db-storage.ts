@@ -2437,6 +2437,8 @@ export class DatabaseStorage implements IStorage {
           ) FILTER (WHERE oi.id IS NOT NULL),
           '[]'::json
         ) AS items,
+        -- MAX(jsonb) no existe en PostgreSQL; se castea a text para el agregado y se vuelve a jsonb.
+        -- Cada orden tiene como máximo 1 mesa, 1 área y 1 huésped, así que MAX sobre text es correcto.
         MAX(CASE WHEN rt.id IS NOT NULL THEN jsonb_build_object(
           'id',                 rt.id,
           'tableNumber',        rt.table_number,
@@ -2465,7 +2467,7 @@ export class DatabaseStorage implements IStorage {
             'isActive',  ta.is_active,
             'notes',     ta.notes
           )
-        ) END) AS "table",
+        )::text END)::jsonb AS "table",
         MAX(CASE
           WHEN oa.id IS NOT NULL THEN jsonb_build_object(
             'id',        oa.id,
@@ -2475,7 +2477,7 @@ export class DatabaseStorage implements IStorage {
             'hasTables', oa.has_tables,
             'isActive',  oa.is_active,
             'notes',     oa.notes
-          )
+          )::text
           WHEN ta.id IS NOT NULL THEN jsonb_build_object(
             'id',        ta.id,
             'name',      ta.name,
@@ -2484,9 +2486,9 @@ export class DatabaseStorage implements IStorage {
             'hasTables', ta.has_tables,
             'isActive',  ta.is_active,
             'notes',     ta.notes
-          )
+          )::text
           ELSE NULL
-        END) AS area,
+        END)::jsonb AS area,
         MAX(CASE WHEN g.id IS NOT NULL THEN jsonb_build_object(
           'id',                          g.id,
           'codigo',                      g.codigo,
@@ -2523,7 +2525,7 @@ export class DatabaseStorage implements IStorage {
           'montoBaseFce',                g.monto_base_fce,
           'tipoPersona',                 g.tipo_persona,
           'condicionVentaPredeterminada',g.condicion_venta_predeterminada
-        ) END) AS guest
+        )::text END)::jsonb AS guest
       FROM restaurant_orders ro
       LEFT JOIN restaurant_tables rt ON rt.id = ro.table_id
       LEFT JOIN restaurant_areas  ta ON ta.id = rt.area_id
