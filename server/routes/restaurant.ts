@@ -695,8 +695,9 @@ export function registerRestaurantRoutes(app: Express) {
       });
 
       res.status(201).json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error adding item to order" });
+    } catch (error: any) {
+      console.error("[add-item] Error al agregar ítem:", error?.message, error?.code, error?.detail);
+      res.status(500).json({ error: "Error adding item to order", detail: error?.message });
     }
   });
 

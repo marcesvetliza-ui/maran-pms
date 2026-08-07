@@ -1361,33 +1361,46 @@ export default function RestaurantPage() {
       });
       return res.json();
     },
-    onSuccess: (newItem: any) => {
-      // Capturar nombre antes de limpiar el estado (las closures de React aún tienen el valor anterior)
-      const displayName = isEditableItem
-        ? (customItemName || "Ítem personalizado")
-        : (pendingItem?.name || "Ítem");
-      const newItemWithMeta = { ...newItem, menuItem: { name: displayName } };
-      // Actualización optimista inmediata: agregar el ítem al currentOrder sin esperar el refetch.
+    onSuccess: (newItem: any, variables: any) => {
+      // Reemplazar el ítem temporal (optimista) con el real devuelto por el servidor.
+      const realItem = { ...newItem, menuItem: { name: variables._displayName } };
+      const tempId = variables._tempId;
+      const replaceTemp = (items: any[]) => {
+        const idx = items.findIndex((i: any) => i.id === tempId);
+        if (idx === -1) return [...items, realItem]; // fallback: agregar si el temp no existe
+        return items.map((i: any) => (i.id === tempId ? realItem : i));
+      };
       setCurrentOrder((prev: any) => {
         if (!prev) return prev;
-        return { ...prev, items: [...(prev.items || []), newItemWithMeta] };
+        return { ...prev, items: replaceTemp(prev.items || []) };
       });
-      // CRÍTICO: también actualizar la cache de orders porque getUpdatedOrder() lee de ahí.
-      // Sin esto, la comanda muestra la versión stale (sin el ítem) aunque currentOrder ya lo tiene.
       queryClient.setQueryData<any[]>(["/api/restaurant/orders"], (old) => {
         if (!Array.isArray(old)) return old;
         return old.map((o: any) =>
-          o.id === newItem.orderId ? { ...o, items: [...(o.items || []), newItemWithMeta] } : o
+          o.id === newItem.orderId
+            ? { ...o, items: replaceTemp(o.items || []) }
+            : o
         );
       });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
-      setPendingItem(null);
-      setItemNotes("");
-      setItemQuantity(1);
-      setIsEditableItem(false);
-      setCustomItemName("");
-      setCustomItemPrice("");
       toast({ title: "Item agregado" });
+    },
+    onError: (e: any, variables: any) => {
+      // Revertir la actualización optimista al fallar
+      const tempId = variables._tempId;
+      setCurrentOrder((prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, items: (prev.items || []).filter((i: any) => i.id !== tempId) };
+      });
+      queryClient.setQueryData<any[]>(["/api/restaurant/orders"], (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((o: any) =>
+          o.id === variables.orderId
+            ? { ...o, items: (o.items || []).filter((i: any) => i.id !== tempId) }
+            : o
+        );
+      });
+      toast({ title: "Error al agregar ítem", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -2042,19 +2055,68 @@ export default function RestaurantPage() {
         toast({ title: "Complete descripción y precio", variant: "destructive" });
         return;
       }
+
+      // Calcular valores del ítem
+      const cat = menuCategories.find(c => c.id === pendingItem.categoryId);
+      const bevCats = ["bebidas sin alcohol", "cervezas", "vinos", "espumantes", "vinos de ríos", "bebidas"];
+      const computedCourse = cat && bevCats.some(bc => cat.name.toLowerCase().includes(bc)) ? null : itemCourse;
+      const displayName = isEditableItem ? (customItemName || "Ítem personalizado") : pendingItem.name;
+      const unitPrice = isEditableItem ? (customItemPrice || "0") : pendingItem.price;
+      const qty = itemQuantity || 1;
+      // El servidor aplica el prefijo [customName] igual que aquí; la nota local lo espeja para la UI
+      const notesForDisplay = isEditableItem && customItemName
+        ? `[${customItemName}]${itemNotes ? " " + itemNotes : ""}`.trim()
+        : (itemNotes || null);
+
+      // --- ACTUALIZACIÓN OPTIMISTA INMEDIATA ---
+      // El ítem aparece en comanda al instante sin esperar el servidor.
+      const tempId = `temp-${Date.now()}`;
+      const tempItem: any = {
+        id: tempId,
+        orderId: currentOrder.id,
+        menuItemId: pendingItem.id,
+        quantity: qty,
+        unitPrice: String(unitPrice),
+        subtotal: (parseFloat(String(unitPrice || "0")) * qty).toFixed(2),
+        status: "pending",
+        course: computedCourse ?? 1,
+        notes: notesForDisplay,
+        sentAt: null,
+        paid: false,
+        menuItem: { name: displayName },
+      };
+      setCurrentOrder((prev: any) => {
+        if (!prev) return prev;
+        return { ...prev, items: [...(prev.items || []), tempItem] };
+      });
+      queryClient.setQueryData<any[]>(["/api/restaurant/orders"], (old) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((o: any) =>
+          o.id === currentOrder.id
+            ? { ...o, items: [...(o.items || []), tempItem] }
+            : o
+        );
+      });
+
+      // Limpiar estado del ítem pendiente de inmediato (la UI ya tiene el ítem optimista)
+      setPendingItem(null);
+      setItemQuantity(1);
+      setIsEditableItem(false);
+      setCustomItemName("");
+      setCustomItemPrice("");
+
+      // Guardar en el servidor (onSuccess reemplaza el temp con el real)
       addItemMutation.mutate({
         orderId: currentOrder.id,
         menuItemId: pendingItem.id,
-        quantity: itemQuantity,
+        quantity: qty,
         notes: itemNotes || undefined,
-        course: (() => {
-          const cat = menuCategories.find(c => c.id === pendingItem.categoryId);
-          const bevCats = ["bebidas sin alcohol", "cervezas", "vinos", "espumantes", "vinos de ríos", "bebidas"];
-          return cat && bevCats.some(bc => cat.name.toLowerCase().includes(bc)) ? null : itemCourse;
-        })(),
+        course: computedCourse,
         customPrice: isEditableItem ? customItemPrice : undefined,
         customName: isEditableItem ? customItemName : undefined,
-      });
+        _tempId: tempId,
+        _displayName: displayName,
+      } as any);
     }
     setMenuSearch("");
     setShowItemNotes(false);
