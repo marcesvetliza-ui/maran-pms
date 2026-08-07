@@ -1065,11 +1065,16 @@ export function registerGroupsRoutes(app: Express) {
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
 
-      const { amount, method, date, reference, notes } = req.body;
-      if (!amount || !method) return res.status(400).json({ error: "amount y method son requeridos" });
+      // Support multi-row payments: { paymentRows: [{method, amount, reference}], receiptType, billingEntityType, billingEntityId }
+      // Backward compat: { amount, method, reference }
+      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId } = req.body;
+      const rows: Array<{ method: string; amount: string; reference?: string }> =
+        Array.isArray(paymentRows) && paymentRows.length > 0
+          ? paymentRows
+          : [{ method: method ?? "cash", amount: amount ?? "0", reference: reference ?? undefined }];
 
-      const totalAmount = parseFloat(amount);
-      if (totalAmount <= 0) return res.status(400).json({ error: "El monto debe ser positivo" });
+      const totalAmount = rows.reduce((s, r) => s + parseFloat(r.amount || "0"), 0);
+      if (!rows.length || totalAmount <= 0) return res.status(400).json({ error: "Monto total debe ser positivo" });
 
       const config = (group as any).masterFolioConfig || "accommodation";
       const paymentDate = date || getArgentinaToday();
@@ -1078,15 +1083,10 @@ export function registerGroupsRoutes(app: Express) {
         (r: any) => r.status === "confirmed" || r.status === "checked_in"
       );
 
-      // Distribute based on config
-      let distribution: Record<string, number> = {};
-
+      // Build room distribution proportions (same logic for all rows)
+      let roomShares: { id: string; share: number }[] = [];
+      let totalShare = 0;
       if (config === "accommodation" || config === "all") {
-        // Proportional by each room's share, CAPPED at each room's own charges
-        // to avoid generating credits (negative balances) in individual folios
-        let roomShares: { id: string; share: number }[] = [];
-        let totalShare = 0;
-
         for (const r of activeRes) {
           const accommodation = parseFloat((r as any).totalRoomAmount || "0");
           let share = accommodation;
@@ -1100,69 +1100,81 @@ export function registerGroupsRoutes(app: Express) {
           roomShares.push({ id: r.id, share });
           totalShare += share;
         }
-
-        // Distribute proportionally but cap each room at its own share (no credits)
-        let totalDistributed = 0;
-        for (const { id, share } of roomShares.slice(0, -1)) {
-          const proportional = totalShare > 0
-            ? (share / totalShare) * totalAmount
-            : totalAmount / (activeRes.length || 1);
-          const capped = Math.min(proportional, share); // never exceed room's own charges
-          const rounded = Math.round(capped * 100) / 100;
-          distribution[id] = rounded;
-          totalDistributed += rounded;
-        }
-        // Last room: gets the remainder, also capped at its own share
-        if (roomShares.length > 0) {
-          const last = roomShares[roomShares.length - 1];
-          const remainder = Math.max(0, totalAmount - totalDistributed);
-          distribution[last.id] = Math.min(remainder, last.share);
-        }
       }
 
-      // Create group payment record (master folio audit)
-      const groupPayment = await storage.createGroupPayment({
-        groupId: req.params.groupId,
-        amount: totalAmount.toFixed(2),
-        method,
-        date: paymentDate,
-        reference: reference || `Pago Folio Maestro — ${group.name}`,
-        distribution: "master_folio",
-        distributionDetail: distribution,
-        receivedBy: (req.user as any)?.username || null,
-        notes: notes || null,
-      });
+      const allCreatedPaymentIds: string[] = [];
+      const groupPayments: any[] = [];
 
-      // Apply individual room payments based on distribution
-      // Store group_payment_id so invoice_ref can be deterministically propagated later
-      let distributed = 0;
-      const createdPaymentIds: string[] = [];
-      for (const [reservationId, amt] of Object.entries(distribution)) {
-        if (amt > 0.005) {
-          const p = await storage.createPayment({
-            reservationId,
-            amount: amt.toFixed(2),
-            method,
-            reference: reference || `Pago Folio Maestro — ${group.name}`,
-            date: paymentDate,
-            groupPaymentId: groupPayment.id,
-          } as any);
-          if (p?.id) createdPaymentIds.push(String(p.id));
-          distributed++;
+      // Process each payment row independently
+      for (const row of rows) {
+        const rowAmount = parseFloat(row.amount || "0");
+        if (rowAmount <= 0.005) continue;
+
+        // Compute proportional distribution for this row's amount
+        let distribution: Record<string, number> = {};
+        if (roomShares.length > 0) {
+          let totalDistributed = 0;
+          for (const { id, share } of roomShares.slice(0, -1)) {
+            const proportional = totalShare > 0
+              ? (share / totalShare) * rowAmount
+              : rowAmount / (activeRes.length || 1);
+            const capped = Math.min(proportional, share);
+            const rounded = Math.round(capped * 100) / 100;
+            distribution[id] = rounded;
+            totalDistributed += rounded;
+          }
+          if (roomShares.length > 0) {
+            const last = roomShares[roomShares.length - 1];
+            const remainder = Math.max(0, rowAmount - totalDistributed);
+            distribution[last.id] = Math.min(remainder, last.share);
+          }
+        }
+
+        // Create group payment record
+        const groupPayment = await storage.createGroupPayment({
+          groupId: req.params.groupId,
+          amount: rowAmount.toFixed(2),
+          method: row.method,
+          date: paymentDate,
+          reference: row.reference || `Pago Folio Maestro — ${group.name}`,
+          distribution: "master_folio",
+          distributionDetail: distribution,
+          receivedBy: (req.user as any)?.username || null,
+          notes: notes || null,
+          receiptType: receiptType || "none",
+          billingEntityType: billingEntityType || null,
+          billingEntityId: billingEntityId || null,
+          paymentMethodDetail: rows.length > 1 ? rows : null,
+        } as any);
+        groupPayments.push(groupPayment);
+
+        // Apply individual room payments
+        for (const [reservationId, amt] of Object.entries(distribution)) {
+          if ((amt as number) > 0.005) {
+            const p = await storage.createPayment({
+              reservationId,
+              amount: (amt as number).toFixed(2),
+              method: row.method,
+              reference: row.reference || `Pago Folio Maestro — ${group.name}`,
+              date: paymentDate,
+              groupPaymentId: groupPayment.id,
+            } as any);
+            if (p?.id) allCreatedPaymentIds.push(String(p.id));
+          }
         }
       }
 
       await audit(req, "create", "groups",
-        `Pago Folio Maestro: $${totalAmount.toFixed(2)} (${method}) — config: ${config}`,
+        `Pago Folio Maestro: $${totalAmount.toFixed(2)} (${rows.map(r => r.method).join("+")}) — config: ${config}`,
         { entityType: "group", entityId: req.params.groupId }
       );
 
       res.json({
         success: true,
-        groupPayment,
-        paymentId: createdPaymentIds[0] ?? null,
-        paymentIds: createdPaymentIds,
-        distributed,
+        groupPayment: groupPayments[0],
+        paymentId: allCreatedPaymentIds[0] ?? null,
+        paymentIds: allCreatedPaymentIds,
+        distributed: allCreatedPaymentIds.length,
       });
     } catch (error: any) {
       console.error("master-payment error:", error);

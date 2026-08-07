@@ -1293,5 +1293,21 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS source_charge_ids jsonb`)
   );
 
+  await withTimeout("group_payments.receipt_type", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS receipt_type text`)
+  );
+
+  await withTimeout("group_payments.billing_entity_type", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS billing_entity_type text`)
+  );
+
+  await withTimeout("group_payments.billing_entity_id", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS billing_entity_id varchar(255)`)
+  );
+
+  await withTimeout("group_payments.payment_method_detail", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS payment_method_detail jsonb`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -85,6 +85,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -115,6 +121,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   credit_card: "Tarjeta Crédito",
   debit_card: "Tarjeta Débito",
   check: "Cheque",
+  cuenta_corriente: "Cuenta Corriente",
   other: "Otro",
 };
 
@@ -715,10 +722,8 @@ export default function GroupDetailPage() {
 
   // Master Folio state
   const [showMasterPaymentDialog, setShowMasterPaymentDialog] = useState(false);
-  const [masterPaymentAmount, setMasterPaymentAmount] = useState("");
-  const [masterPaymentMethod, setMasterPaymentMethod] = useState("cash");
-  const [masterPaymentReference, setMasterPaymentReference] = useState("");
-  const [masterPaymentReceiptType, setMasterPaymentReceiptType] = useState("");
+  const [masterPaymentRows, setMasterPaymentRows] = useState<Array<{method: string; amount: string; reference: string}>>([{method: "cash", amount: "", reference: ""}]);
+  const [masterPaymentReceiptType, setMasterPaymentReceiptType] = useState("none");
   const [showMasterFacturaDialog, setShowMasterFacturaDialog] = useState(false);
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   const [masterPaymentCcEntityType, setMasterPaymentCcEntityType] = useState<"company" | "agency">("company");
@@ -1101,19 +1106,29 @@ export default function GroupDetailPage() {
   });
 
   const masterPaymentMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", `/api/groups/${groupId}/master-payment`, {
-        amount: masterPaymentAmount,
-        method: masterPaymentMethod,
-        reference: masterPaymentReference || undefined,
-      }),
+    mutationFn: () => {
+      const validRows = masterPaymentRows.filter(r => parseFloat(r.amount || "0") > 0);
+      if (validRows.length === 0 && masterPaymentReceiptType !== "factura_mipyme_a") {
+        throw new Error("Ingresá al menos un monto");
+      }
+      return apiRequest("POST", `/api/groups/${groupId}/master-payment`, {
+        paymentRows: validRows.length > 0 ? validRows.map(r => ({
+          method: r.method,
+          amount: r.amount,
+          reference: r.reference || undefined,
+        })) : [{ method: masterPaymentRows[0].method, amount: "0", reference: undefined }],
+        receiptType: masterPaymentReceiptType,
+        billingEntityType: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityType : undefined,
+        billingEntityId: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityId : undefined,
+      });
+    },
     onSuccess: async (res) => {
       const data = await res.json().catch(() => ({}));
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
 
-      const needsFactura = masterPaymentReceiptType === "factura_a" || masterPaymentReceiptType === "factura_b";
+      const needsFactura = ["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType);
       if (needsFactura) {
         setShowMasterPaymentDialog(false);
         setPendingMasterPaymentId(data.paymentId ? String(data.paymentId) : "");
@@ -1123,10 +1138,8 @@ export default function GroupDetailPage() {
 
       toast({ title: "Pago al Folio Maestro registrado exitosamente" });
       setShowMasterPaymentDialog(false);
-      setMasterPaymentAmount("");
-      setMasterPaymentMethod("cash");
-      setMasterPaymentReference("");
-      setMasterPaymentReceiptType("");
+      setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
+      setMasterPaymentReceiptType("none");
     },
     onError: (e: any) => toast({ title: "Error al registrar pago maestro", description: parseApiError(e), variant: "destructive" }),
   });
@@ -1857,27 +1870,36 @@ export default function GroupDetailPage() {
                         <CardDescription>Lo que paga el organizador del grupo</CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
+                        {/* Bug 12: PDF dropdown consolidating all print options */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" data-testid="button-folio-pdf">
+                              <FileDown className="h-4 w-4 mr-1" />
+                              Consultas
+                              <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => {
+                              const a = document.createElement("a");
+                              a.href = `/api/groups/${groupId}/master-folio/pdf`;
+                              a.download = `folio-maestro-${group?.name || groupId}.pdf`;
+                              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                            }}>
+                              <FileDown className="h-4 w-4 mr-2" />Folio Maestro PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setShowRoomingListDialog(true)}>
+                              <Printer className="h-4 w-4 mr-2" />Rooming List
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button
-                          variant="outline"
                           size="sm"
                           onClick={() => {
-                            const a = document.createElement("a");
-                            a.href = `/api/groups/${groupId}/master-folio/pdf`;
-                            a.download = `folio-maestro-${group?.name || groupId}.pdf`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }}
-                          data-testid="button-folio-pdf"
-                        >
-                          <FileDown className="h-4 w-4 mr-1" />
-                          PDF
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setMasterPaymentAmount(masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "");
-                            // Pre-llenar entidad de facturación desde la configuración del grupo
+                            const balance = masterFolio.masterBalance;
+                            setMasterPaymentRows([{method: "cash", amount: balance > 0 ? String(balance.toFixed(2)) : "", reference: ""}]);
+                            setMasterPaymentReceiptType("none");
+                            // Pre-fill billing entity from group config
                             if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
                               setMasterPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
                               setMasterPaymentCcEntityId((group as any).billingEntityId);
@@ -1995,12 +2017,13 @@ export default function GroupDetailPage() {
                       )}
                     </div>
 
-                    {/* Pagos al folio maestro */}
+                    {/* Pagos al folio maestro — Bug 7+8: show entity + receipt type for ALL payments */}
                     {masterFolio.groupPayments.length > 0 && (
                       <div>
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pagos recibidos del organizador</p>
                         <div className="rounded-md border divide-y">
-                          {masterFolio.groupPayments.map((gp: any) => {
+                          {masterFolio.groupPayments.map((gp: any, gpIdx: number) => {
+                            // Bug 8: parse invoice badge (shown for electronic comprobantes)
                             const invoiceBadge = (() => {
                               if (!gp.invoiceRef) return null;
                               try {
@@ -2008,14 +2031,32 @@ export default function GroupDetailPage() {
                                 return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4, "0")}-${String(ref.numero ?? "").padStart(8, "0")}`;
                               } catch { return null; }
                             })();
+                            // Bug 8: for non-electronic payments, show receipt type as badge
+                            const receiptLabel = invoiceBadge ? null
+                              : (!gp.receiptType || gp.receiptType === "none") ? `Adelanto Grupos #${gpIdx + 1}`
+                              : gp.receiptType === "factura_a" ? "Factura A"
+                              : gp.receiptType === "factura_b" ? "Factura B"
+                              : gp.receiptType === "factura_t" ? "Factura T"
+                              : gp.receiptType === "factura_mipyme_a" ? "MiPyme A"
+                              : gp.receiptType;
+                            // Bug 7: resolve entity name from companies/agencies
+                            const entityName = (() => {
+                              if (!gp.billingEntityId) return null;
+                              const list = gp.billingEntityType === "agency" ? agencies : companies;
+                              const found = (list as any[]).find((e: any) => e.id === gp.billingEntityId);
+                              return found ? (found.razonSocial || found.nombreFantasia) : null;
+                            })();
                             return (
                               <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
-                                <div className="flex items-center gap-3 flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
                                   <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
-                                  {gp.reference && <span className="text-xs text-muted-foreground">{gp.reference}</span>}
-                                  {gp.distribution === "master_folio" && (
-                                    <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs">Folio Maestro</Badge>
+                                  {/* Bug 8: receipt type for all comprobantes */}
+                                  {receiptLabel && (
+                                    <Badge variant="outline" className="text-xs gap-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+                                      <Receipt className="h-3 w-3" />
+                                      {receiptLabel}
+                                    </Badge>
                                   )}
                                   {invoiceBadge && (
                                     <Badge variant="outline" className="text-xs font-mono gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
@@ -2023,8 +2064,13 @@ export default function GroupDetailPage() {
                                       {invoiceBadge}
                                     </Badge>
                                   )}
+                                  {/* Bug 7: entity name */}
+                                  {entityName && (
+                                    <span className="text-xs text-muted-foreground">→ {entityName}</span>
+                                  )}
+                                  {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
                                 </div>
-                                <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                <span className="font-semibold text-green-600 shrink-0 ml-2">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               </div>
                             );
                           })}
@@ -2959,84 +3005,99 @@ export default function GroupDetailPage() {
       {/* ─── Dialog: Pago al Folio Maestro ─── */}
       <Dialog open={showMasterPaymentDialog} onOpenChange={(open) => {
         setShowMasterPaymentDialog(open);
-        if (!open) { setMasterPaymentAmount(""); setMasterPaymentMethod("cash"); setMasterPaymentReference(""); setMasterPaymentReceiptType(""); setMasterPaymentCcEntityType("company"); setMasterPaymentCcEntityId(""); }
+        if (!open) {
+          setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
+          setMasterPaymentReceiptType("none");
+          setMasterPaymentCcEntityType("company");
+          setMasterPaymentCcEntityId("");
+        }
       }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Banknote className="h-5 w-5 text-primary" />
               Pago al Folio Maestro
             </DialogTitle>
             <DialogDescription>
-              Este pago cubre los cargos del organizador del grupo. Se distribuirá proporcionalmente entre las habitaciones.
+              Los pagos se distribuyen proporcionalmente entre las habitaciones activas del grupo.
             </DialogDescription>
           </DialogHeader>
-          {masterFolio && (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-muted/40 px-4 py-3 text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total del Folio Maestro</span>
-                  <span className="font-semibold">${masterFolio.masterTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+          {masterFolio && (() => {
+            const isFiscal = masterPaymentReceiptType !== "none";
+            const selectedEntity = masterPaymentCcEntityId
+              ? (masterPaymentCcEntityType === "company" ? companies : agencies as any[]).find((e: any) => e.id === masterPaymentCcEntityId) ?? null
+              : null;
+            const condIva = selectedEntity?.condicionIva ?? "";
+            const isRI = condIva === "responsable_inscripto" || condIva === "exento";
+            const allowFT = masterFolio.config === "accommodation";
+            const allowedMethods = masterPaymentReceiptType === "factura_t"
+              ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
+              : PAYMENT_METHOD_LABELS;
+            const rowsTotal = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+            const isMipyme = masterPaymentReceiptType === "factura_mipyme_a";
+            const isFiscalAndNeedsEntity = isFiscal && !masterPaymentCcEntityId;
+            const rowsHaveAmount = masterPaymentRows.some(r => parseFloat(r.amount || "0") > 0);
+            const canSubmit = !masterPaymentMutation.isPending
+              && (isMipyme ? !isFiscalAndNeedsEntity : (rowsHaveAmount && !isFiscalAndNeedsEntity));
+
+            return (
+              <div className="space-y-4">
+                {/* Balance summary */}
+                <div className="rounded-lg bg-muted/40 px-4 py-3 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Total del Folio Maestro</span>
+                    <span className="font-semibold">${masterFolio.masterTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {masterFolio.masterPaid > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Ya pagado / adelantos</span>
+                      <span className="font-semibold text-green-600">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>Saldo pendiente</span>
+                    <span className={masterFolio.masterBalance > 0.01 ? "text-red-600" : "text-green-600"}>
+                      ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Ya pagado</span>
-                  <span className="font-semibold text-green-600">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+
+                {/* 1. Comprobante fiscal — elegir primero */}
+                <div>
+                  <Label>Comprobante</Label>
+                  <Select value={masterPaymentReceiptType} onValueChange={(v) => {
+                    setMasterPaymentReceiptType(v);
+                    // Bug 1: fiscal + advances → suggest full total
+                    if (v !== "none" && masterFolio.masterPaid > 0) {
+                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: String(masterFolio.masterTotal.toFixed(2)) } : r));
+                    } else if (v === "none") {
+                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "" } : r));
+                    }
+                  }}>
+                    <SelectTrigger data-testid="select-master-payment-receipt-type">
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Adelanto Grupos (sin comprobante fiscal)</SelectItem>
+                      {/* Bug 5: filter by entity condicionIva when entity selected; if no entity, show all */}
+                      {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
+                      {(!masterPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
+                      {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                      {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
+                    </SelectContent>
+                  </Select>
+                  {isMipyme && (
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
+                    </p>
+                  )}
                 </div>
-                <div className="flex justify-between font-semibold border-t pt-1">
-                  <span>Saldo pendiente</span>
-                  <span className={masterFolio.masterBalance > 0.01 ? "text-red-600" : "text-green-600"}>
-                    ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-              <div>
-                <Label>Monto a pagar</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={masterPaymentAmount}
-                  onChange={(e) => setMasterPaymentAmount(e.target.value)}
-                  placeholder={fmtMoney(masterFolio.masterBalance)}
-                  data-testid="input-master-payment-amount"
-                />
-              </div>
-              <div>
-                <Label>Método de pago</Label>
-                <Select value={masterPaymentMethod} onValueChange={setMasterPaymentMethod}>
-                  <SelectTrigger data-testid="select-master-payment-method">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(PAYMENT_METHOD_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Referencia / comprobante (opcional)</Label>
-                <Input
-                  value={masterPaymentReference}
-                  onChange={(e) => setMasterPaymentReference(e.target.value)}
-                  placeholder="Nro de transferencia, cheque, etc."
-                  data-testid="input-master-payment-reference"
-                />
-              </div>
-              <div>
-                <Label>Comprobante fiscal (opcional)</Label>
-                <Select value={masterPaymentReceiptType} onValueChange={setMasterPaymentReceiptType}>
-                  <SelectTrigger data-testid="select-master-payment-receipt-type">
-                    <SelectValue placeholder="Sin comprobante" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin comprobante</SelectItem>
-                    <SelectItem value="factura_a">Factura A</SelectItem>
-                    <SelectItem value="factura_b">Factura B</SelectItem>
-                  </SelectContent>
-                </Select>
-                {masterPaymentReceiptType === "factura_a" && (
-                  <div className="mt-2 space-y-2">
-                    <Label className="text-xs text-muted-foreground">Empresa / Agencia (para Factura A)</Label>
+
+                {/* 2. Empresa / Agencia — para todos los comprobantes fiscales */}
+                {isFiscal && (
+                  <div>
+                    <Label>Empresa / Agencia receptora</Label>
                     <div className="grid grid-cols-2 gap-2">
                       <Select value={masterPaymentCcEntityType} onValueChange={v => { setMasterPaymentCcEntityType(v as "company" | "agency"); setMasterPaymentCcEntityId(""); }}>
                         <SelectTrigger data-testid="select-master-cc-entity-type"><SelectValue /></SelectTrigger>
@@ -3050,31 +3111,104 @@ export default function GroupDetailPage() {
                           <SelectValue placeholder={masterPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
                         </SelectTrigger>
                         <SelectContent>
-                          {(masterPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
-                            <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                          {(masterPaymentCcEntityType === "company" ? companies : agencies as any[]).map((e: any) => (
+                            <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.id}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    {masterPaymentCcEntityId ? (
-                      <p className="text-xs text-muted-foreground">
-                        Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
+                    {selectedEntity && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {selectedEntity.condicionIva}
+                        {selectedEntity.cuilCuit && ` — CUIT: ${selectedEntity.cuilCuit}`}
                       </p>
-                    ) : (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">
-                        Seleccione una empresa o agencia para poder emitir Factura A.
+                    )}
+                    {isFiscalAndNeedsEntity && (
+                      <p className="text-xs text-amber-600 mt-1">Seleccioná la empresa o agencia receptora del comprobante.</p>
+                    )}
+                    {["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType) && masterPaymentCcEntityId && (
+                      <p className="text-xs text-muted-foreground mt-1">Al registrar se abrirá el formulario de emisión ARCA.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. Monto — después de elegir comprobante (Bug 1 + 4) */}
+                {!isMipyme && (
+                  <div>
+                    <Label>Monto a pagar</Label>
+                    {isFiscal && masterFolio.masterPaid > 0 && (
+                      <p className="text-xs text-amber-600 mb-1">
+                        Existen adelantos previos. La factura debe cubrir el total del folio ({fmtMoney(masterFolio.masterTotal)}).
                       </p>
                     )}
                   </div>
                 )}
+
+                {/* 4. Método(s) de pago — después del comprobante (Bug 3 + 4) */}
+                {!isMipyme && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Método(s) de pago</Label>
+                      {masterPaymentRows.length < 4 && (
+                        <Button variant="outline" size="sm" type="button"
+                          onClick={() => setMasterPaymentRows(prev => [...prev, {method: "cash", amount: "", reference: ""}])}>
+                          <Plus className="h-3.5 w-3.5 mr-1" />Agregar método
+                        </Button>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Método — Monto — Referencia / Observaciones</div>
+                    {masterPaymentRows.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-1 items-center">
+                        <div className="col-span-4">
+                          <Select value={row.method} onValueChange={v => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
+                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(allowedMethods).map(([k, v]) => (
+                                <SelectItem key={k} value={k}>{v as string}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-3">
+                          <Input type="number" step="0.01" placeholder="Monto" className="h-9"
+                            value={row.amount}
+                            data-testid={idx === 0 ? "input-master-payment-amount" : undefined}
+                            onChange={e => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))} />
+                        </div>
+                        <div className="col-span-4">
+                          <Input placeholder="Referencia / Observaciones" className="h-9"
+                            value={row.reference}
+                            onChange={e => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: e.target.value} : r))} />
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          {masterPaymentRows.length > 1 && (
+                            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-muted-foreground hover:text-red-500"
+                              onClick={() => setMasterPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {masterPaymentRows.length > 1 && (
+                      <div className="flex justify-between text-sm font-semibold border-t pt-2">
+                        <span>Total:</span>
+                        <span>${rowsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowMasterPaymentDialog(false)}>Cancelar</Button>
             <Button
               onClick={() => masterPaymentMutation.mutate()}
-              disabled={!masterPaymentAmount || parseFloat(masterPaymentAmount) <= 0 || masterPaymentMutation.isPending || (masterPaymentReceiptType === "factura_a" && !masterPaymentCcEntityId)}
+              disabled={!masterFolio || masterPaymentMutation.isPending
+                || (masterPaymentReceiptType !== "factura_mipyme_a"
+                    && !masterPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+                || (masterPaymentReceiptType !== "none" && !masterPaymentCcEntityId)}
               data-testid="button-confirm-master-payment"
             >
               {masterPaymentMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : "Registrar pago"}
@@ -3083,53 +3217,61 @@ export default function GroupDetailPage() {
         </DialogContent>
       </Dialog>
 
-      {showMasterFacturaDialog && (
-        <EmitirFacturaDialog
-          open={showMasterFacturaDialog}
-          onClose={() => {
-            setShowMasterFacturaDialog(false);
-            setPendingMasterPaymentId("");
-          }}
-          config={billingConfig}
-          allowedTipos={masterPaymentReceiptType === "factura_a" ? ["FA"] : ["FB"]}
-          initialValues={(() => {
-            const condicionIvaMap: Record<string, string> = {
-              responsable_inscripto: "Responsable Inscripto",
-              consumidor_final: "Consumidor Final",
-              monotributo: "Monotributista",
-              monotributista: "Monotributista",
-              exento: "Exento",
-            };
-            const entityList = masterPaymentCcEntityType === "company" ? companies : agencies;
-            const entity = masterPaymentReceiptType === "factura_a" && masterPaymentCcEntityId
-              ? (entityList as any[]).find((e: any) => e.id === masterPaymentCcEntityId)
-              : null;
-            return {
+      {showMasterFacturaDialog && (() => {
+        const condicionIvaMap: Record<string, string> = {
+          responsable_inscripto: "Responsable Inscripto",
+          consumidor_final: "Consumidor Final",
+          monotributo: "Monotributista",
+          monotributista: "Monotributista",
+          exento: "Exento",
+        };
+        const entityList = masterPaymentCcEntityType === "company" ? companies : agencies;
+        const entity = masterPaymentCcEntityId
+          ? (entityList as any[]).find((e: any) => e.id === masterPaymentCcEntityId) ?? null
+          : null;
+        const totalPaid = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+        const allowedTiposMap: Record<string, string[]> = {
+          factura_a: ["FA"],
+          factura_b: ["FB"],
+          factura_mipyme_a: ["FM"],
+          factura_t: ["FT"],
+        };
+        return (
+          <EmitirFacturaDialog
+            open={showMasterFacturaDialog}
+            onClose={() => {
+              setShowMasterFacturaDialog(false);
+              setPendingMasterPaymentId("");
+            }}
+            config={billingConfig}
+            allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
+            lockCondicionIva={!!entity}
+            hideAddItems
+            initialValues={{
               razonSocial: entity
                 ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
                 : (group?.name ?? ""),
               cuit: entity?.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : undefined,
               condicionIva: entity?.condicionIva
                 ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
-                : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
+                : undefined,
               domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
-              items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: parseFloat(masterPaymentAmount) || 0 }],
-            };
-          })()}
-          paymentId={pendingMasterPaymentId || undefined}
-          onSuccess={() => {
-            setShowMasterFacturaDialog(false);
-            setPendingMasterPaymentId("");
-            setMasterPaymentAmount("");
-            setMasterPaymentMethod("cash");
-            setMasterPaymentReference("");
-            setMasterPaymentReceiptType("");
-            setMasterPaymentCcEntityType("company");
-            setMasterPaymentCcEntityId("");
-            toast({ title: "Pago al Folio Maestro registrado exitosamente" });
-          }}
-        />
-      )}
+              items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }],
+            }}
+            paymentId={pendingMasterPaymentId || undefined}
+            onSuccess={() => {
+              setShowMasterFacturaDialog(false);
+              setPendingMasterPaymentId("");
+              setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
+              setMasterPaymentReceiptType("none");
+              setMasterPaymentCcEntityType("company");
+              setMasterPaymentCcEntityId("");
+              queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+              toast({ title: "Pago al Folio Maestro registrado exitosamente" });
+            }}
+          />
+        );
+      })()}
 
       {/* ─── Dialog: Agregar cargo al folio grupal ─── */}
       <Dialog open={showAddGroupChargeDialog} onOpenChange={setShowAddGroupChargeDialog}>

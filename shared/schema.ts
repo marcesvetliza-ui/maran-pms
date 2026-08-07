@@ -609,6 +609,10 @@ export const groupPayments = pgTable("group_payments", {
   receivedBy: varchar("received_by"),
   notes: text("notes"),
   invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
+  receiptType: text("receipt_type"),           // "none" = Adelanto Grupos, "factura_a", "factura_b", etc.
+  billingEntityType: text("billing_entity_type"), // "company" | "agency" — who received the fiscal comprobante
+  billingEntityId: varchar("billing_entity_id"),  // FK to companies or agencies
+  paymentMethodDetail: jsonb("payment_method_detail"), // [{method, amount, reference}] for multi-method splits
   createdAt: timestamp("created_at").defaultNow(),
 });
 

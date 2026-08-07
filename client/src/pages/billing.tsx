@@ -425,7 +425,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -435,6 +435,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   cashArea?: string;
   requiresEmission?: boolean;
   paymentId?: string;
+  /** When true, the condición IVA field is read-only (pre-set from entity) */
+  lockCondicionIva?: boolean;
+  /** When true, the "Agregar ítem" button and extra item rows are hidden */
+  hideAddItems?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -1015,10 +1019,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             )}
             <div className="space-y-1">
               <Label className="text-xs">Condición IVA</Label>
-              <Select value={condicionIva} onValueChange={v => { setCondicionIva(v); if (fieldErrors.condicionIva) setFieldErrors(p => ({ ...p, condicionIva: "" })); }}>
-                <SelectTrigger className={fieldErrors.condicionIva ? "border-red-500" : ""}><SelectValue /></SelectTrigger>
-                <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
-              </Select>
+              {lockCondicionIva ? (
+                <div className="h-9 flex items-center px-3 border rounded-md bg-muted/30 text-sm text-muted-foreground">{condicionIva}</div>
+              ) : (
+                <Select value={condicionIva} onValueChange={v => { setCondicionIva(v); if (fieldErrors.condicionIva) setFieldErrors(p => ({ ...p, condicionIva: "" })); }}>
+                  <SelectTrigger className={fieldErrors.condicionIva ? "border-red-500" : ""}><SelectValue /></SelectTrigger>
+                  <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
               {fieldErrors.condicionIva && <p className="text-xs text-red-500">{fieldErrors.condicionIva}</p>}
             </div>
             <div className="col-span-2 space-y-1">
@@ -1033,7 +1041,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
-            <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>
+            {!hideAddItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
