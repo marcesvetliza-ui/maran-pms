@@ -2587,6 +2587,22 @@ function ReservationDetailDialog({
     const validRows = paymentRows.filter(r => r.amount && parseFloat(r.amount) > 0);
     if (validRows.length === 0) return;
 
+    // Bug C fix: prevent advances to a company/agency not associated with this reservation
+    const invalidCompany = validRows.find(
+      r => r.billingTarget === "company" && !reservation.companyId && !r.companyId
+    );
+    if (invalidCompany) {
+      toast({ title: "Reserva sin empresa", description: "Esta reserva no tiene ninguna empresa asociada. Asociá una empresa a la reserva antes de registrar el anticipo a cuenta corriente de empresa.", variant: "destructive" });
+      return;
+    }
+    const invalidAgency = validRows.find(
+      r => r.billingTarget === "agency" && !reservation.agencyId && !r.agencyId
+    );
+    if (invalidAgency) {
+      toast({ title: "Reserva sin agencia", description: "Esta reserva no tiene ninguna agencia asociada. Asociá una agencia a la reserva antes de registrar el anticipo a cuenta corriente de agencia.", variant: "destructive" });
+      return;
+    }
+
     const missingCompany = validRows.find(
       r => r.method === "cuenta_corriente" && r.billingTarget === "company" && !reservation.companyId && !r.companyId
     );

@@ -303,7 +303,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -320,6 +320,7 @@ export function registerBillingRoutes(app: Express) {
         operador: user?.fullName || user?.username,
         puntoVentaOverride: pvBody ? parseInt(pvBody) : undefined,
         cashFormaPago: cashFormaPago || undefined,
+        sourceChargeIds: Array.isArray(sourceChargeIds) ? sourceChargeIds : undefined,
       } as NewInvoiceData);
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)

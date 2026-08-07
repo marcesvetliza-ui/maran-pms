@@ -38,6 +38,7 @@ export interface NewInvoiceData {
   operador?: string;
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
+  sourceChargeIds?: string[]; // IDs de cargos del folio incluidos en esta factura
 }
 
 const TIPOS_CBT_WSFE: Record<string, number> = {
@@ -271,6 +272,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     items: data.items as any,
     operador: data.operador || null,
     cashFormaPago: data.cashFormaPago || null,
+    sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
   }).returning();
 
   return factura;

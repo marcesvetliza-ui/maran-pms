@@ -393,8 +393,11 @@ export function PrefacturaDialog({
       setBillingEntityId("");
       const isJuridica = g.tipoPersona === "juridica";
       const name = isJuridica ? (g.firstName || "") : [g.lastName, g.firstName].filter(Boolean).join(" ");
-      const cuitVal = g.cuilCuit || "";
-      const dniVal = !cuitVal && g.documentNumber ? g.documentNumber : "";
+      const rawCuit = (g.cuilCuit || "").replace(/\D/g, "").slice(0, 11);
+      const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
+        ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
+        : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
+      const dniVal = !rawCuit && g.documentNumber ? g.documentNumber : "";
       const condVal = VAT_MAP[g.vatCondition || "consumidor_final"] || "Consumidor Final";
       setRazonSocial(name);
       setCuit(cuitVal);
@@ -407,7 +410,10 @@ export function PrefacturaDialog({
 
   function applyEntity(e: any, type: "company" | "agency") {
     const rs = e.razonSocial || e.nombreFantasia || "";
-    const cuitVal = e.cuilCuit || "";
+    const rawCuit = (e.cuilCuit || "").replace(/\D/g, "").slice(0, 11);
+    const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
+      ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
+      : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
     const condVal = e.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
     const dom = e.domicilio || e.direccion || "";
     setRazonSocial(rs);
@@ -501,6 +507,16 @@ export function PrefacturaDialog({
   // In this state the only valid action is check-out — no new invoice should be created.
   const alreadyPaidAndInvoiced =
     (folio?.balance ?? 1) <= 0.01 && emittedInvoices.length > 0;
+
+  // Charge IDs already included in previously-emitted invoices for this folio
+  const invoicedChargeIds = new Set<string>(
+    emittedInvoices.flatMap((inv: any) => {
+      const ids = inv.source_charge_ids;
+      if (!ids) return [];
+      if (Array.isArray(ids)) return ids as string[];
+      try { return JSON.parse(ids) as string[]; } catch { return []; }
+    })
+  );
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
@@ -639,6 +655,7 @@ export function PrefacturaDialog({
           items: invoiceItems,
           reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
+          sourceChargeIds: Array.from(selectedIds),
           ...(isCcPayment ? {
             cashFormaPago: "cuenta_corriente",
             ccEntityType: billingTarget,
@@ -842,8 +859,9 @@ export function PrefacturaDialog({
                         amount={folio.roomTotal}
                         description={itemDescriptions["accommodation"] || `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`}
                         alreadyPaid={0}
+                        alreadyInvoiced={invoicedChargeIds.has("accommodation")}
                         selected={selectedIds.has("accommodation")}
-                        onToggle={() => setSelectedIds(prev => { const n = new Set(prev); n.has("accommodation") ? n.delete("accommodation") : n.add("accommodation"); return n; })}
+                        onToggle={() => { if (invoicedChargeIds.has("accommodation")) return; setSelectedIds(prev => { const n = new Set(prev); n.has("accommodation") ? n.delete("accommodation") : n.add("accommodation"); return n; }); }}
                         editing={editingId === "accommodation"}
                         editingValue={editingValue}
                         onStartEdit={() => startEdit("accommodation", itemDescriptions["accommodation"] || `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`)}
@@ -873,8 +891,9 @@ export function PrefacturaDialog({
                             description={itemDescriptions[String(charge.id)] || charge.description}
                             date={charge.date}
                             alreadyPaid={0}
+                            alreadyInvoiced={!isTransfer && invoicedChargeIds.has(String(charge.id))}
                             selected={!isTransfer && selectedIds.has(String(charge.id))}
-                            onToggle={() => { if (isTransfer) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
+                            onToggle={() => { if (isTransfer || invoicedChargeIds.has(String(charge.id))) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
                             editing={editingId === String(charge.id)}
                             editingValue={editingValue}
                             onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
@@ -1137,7 +1156,17 @@ export function PrefacturaDialog({
                 )
               ) : (
                 <Button
-                  onClick={() => setStep(2)}
+                  onClick={() => {
+                    // Sync payment amount to match only the selected items (not full balance)
+                    if (totalSelected > 0) {
+                      setPaymentRows(prev =>
+                        prev.length === 1
+                          ? [{ ...prev[0], amount: String(totalSelected.toFixed(2)) }]
+                          : prev
+                      );
+                    }
+                    setStep(2);
+                  }}
                   disabled={folioLoading || selectedIds.size === 0 || facturaANeedsEntity}
                 >
                   Siguiente — Cobro <ChevronRight className="h-4 w-4 ml-1" />
@@ -1491,6 +1520,7 @@ export function PrefacturaDialog({
         onClose={() => setShowBulkTransfer(false)}
         reservationId={reservationId}
         folio={folio ?? null}
+        transferRemaining={transferRemaining}
         onSuccess={() => {
           setShowBulkTransfer(false);
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
@@ -2214,7 +2244,7 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, onRevert, alreadyReversed, category,
+  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category,
 }: {
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
@@ -2224,6 +2254,7 @@ function ChargeRow({
   onTransfer?: () => void;
   onRevert?: () => void;
   alreadyReversed?: boolean;
+  alreadyInvoiced?: boolean;
   category?: string;
 }) {
   const pending = Math.max(0, amount - alreadyPaid);
@@ -2278,12 +2309,12 @@ function ChargeRow({
     : (!selected ? "opacity-40" : undefined);
 
   return (
-    <TableRow className={`${rowCls ?? ""} ${alreadyReversed ? "opacity-40" : ""}`}>
+    <TableRow className={`${rowCls ?? ""} ${alreadyReversed || alreadyInvoiced ? "opacity-40" : ""}`}>
       <TableCell className="w-8">
         {isTransfer ? (
           <ArrowRightLeft className={`h-3.5 w-3.5 mx-auto ${isTransferOut ? "text-orange-500" : "text-blue-500"}`} />
         ) : (
-          <Checkbox checked={selected} onCheckedChange={onToggle} />
+          <Checkbox checked={selected} onCheckedChange={alreadyInvoiced ? undefined : onToggle} disabled={alreadyInvoiced} />
         )}
       </TableCell>
       <TableCell>
@@ -2309,6 +2340,11 @@ function ChargeRow({
             {alreadyReversed && (
               <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 border-gray-400 text-gray-500 dark:text-gray-400">
                 Revertida
+              </Badge>
+            )}
+            {alreadyInvoiced && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 border-green-500 text-green-700 dark:text-green-400">
+                Ya facturado
               </Badge>
             )}
             {isTransfer ? renderTransferDescription() : <span className="text-sm">{cleanDescription}</span>}
@@ -2509,12 +2545,13 @@ export function RevertTransferDialog({
 // ─── BulkTransferDialog sub-component ────────────────────────────────────────
 
 function BulkTransferDialog({
-  open, onClose, reservationId, folio, onSuccess,
+  open, onClose, reservationId, folio, transferRemaining, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   reservationId: string | number;
   folio: PrefacturaFolioData | null;
+  transferRemaining?: { accommodation: number; charges: Record<string, number> };
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
@@ -2637,21 +2674,30 @@ function BulkTransferDialog({
             <Label className="text-sm font-medium">Cargos a transferir</Label>
             <div className="border rounded-lg divide-y">
               {/* Accommodation */}
-              {(folio?.roomTotal ?? 0) > 0 && (
-                <div className="flex items-center gap-3 p-3">
-                  <input
-                    type="checkbox"
-                    id="bulk-pfx-accommodation"
-                    className="h-4 w-4 rounded border-gray-300 shrink-0"
-                    checked={includeAccommodation}
-                    onChange={e => setIncludeAccommodation(e.target.checked)}
-                  />
-                  <label htmlFor="bulk-pfx-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
-                    <span className="font-medium">Alojamiento Hab. {folio?.roomNumber} ({folio?.nights} noche{folio?.nights !== 1 ? "s" : ""})</span>
-                    <span className="font-semibold tabular-nums shrink-0">${fmtMoney(folio?.roomTotal ?? 0)}</span>
-                  </label>
-                </div>
-              )}
+              {(folio?.roomTotal ?? 0) > 0 && (() => {
+                const accomRemaining = transferRemaining?.accommodation ?? folio?.roomTotal ?? 0;
+                if (accomRemaining <= 0) return null; // fully transferred already
+                return (
+                  <div className="flex items-center gap-3 p-3">
+                    <input
+                      type="checkbox"
+                      id="bulk-pfx-accommodation"
+                      className="h-4 w-4 rounded border-gray-300 shrink-0"
+                      checked={includeAccommodation}
+                      onChange={e => setIncludeAccommodation(e.target.checked)}
+                    />
+                    <label htmlFor="bulk-pfx-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                      <span className="font-medium">Alojamiento Hab. {folio?.roomNumber} ({folio?.nights} noche{folio?.nights !== 1 ? "s" : ""})</span>
+                      <div className="text-right shrink-0">
+                        {transferRemaining && accomRemaining < (folio?.roomTotal ?? 0) && (
+                          <div className="text-xs text-muted-foreground line-through">${fmtMoney(folio?.roomTotal ?? 0)}</div>
+                        )}
+                        <span className="font-semibold tabular-nums">${fmtMoney(accomRemaining)}</span>
+                      </div>
+                    </label>
+                  </div>
+                );
+              })()}
               {/* Extra charges */}
               {billableCharges.length === 0 && (folio?.roomTotal ?? 0) === 0 ? (
                 <div className="p-3 text-sm text-muted-foreground text-center">Sin cargos disponibles</div>
@@ -2672,26 +2718,40 @@ function BulkTransferDialog({
                       <label htmlFor="bulk-pfx-all" className="text-xs text-muted-foreground cursor-pointer">Seleccionar todos los consumos</label>
                     </div>
                   )}
-                  {billableCharges.map((charge: any) => (
-                    <div key={charge.id} className="flex items-center gap-3 p-3">
-                      <input
-                        type="checkbox"
-                        id={`bulk-pfx-${charge.id}`}
-                        className="h-4 w-4 rounded border-gray-300 shrink-0"
-                        checked={selectedChargeIds.has(String(charge.id))}
-                        onChange={e => {
-                          const next = new Set(selectedChargeIds);
-                          if (e.target.checked) next.add(String(charge.id));
-                          else next.delete(String(charge.id));
-                          setSelectedChargeIds(next);
-                        }}
-                      />
-                      <label htmlFor={`bulk-pfx-${charge.id}`} className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
-                        <span className="truncate">{charge.description}</span>
-                        <span className="font-medium tabular-nums shrink-0">${fmtMoney(charge.amount)}</span>
-                      </label>
-                    </div>
-                  ))}
+                  {billableCharges.map((charge: any) => {
+                    const remaining = transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount);
+                    const alreadyTransferred = remaining <= 0;
+                    return (
+                      <div key={charge.id} className={`flex items-center gap-3 p-3 ${alreadyTransferred ? "opacity-40" : ""}`}>
+                        <input
+                          type="checkbox"
+                          id={`bulk-pfx-${charge.id}`}
+                          className="h-4 w-4 rounded border-gray-300 shrink-0"
+                          checked={selectedChargeIds.has(String(charge.id))}
+                          disabled={alreadyTransferred}
+                          onChange={e => {
+                            if (alreadyTransferred) return;
+                            const next = new Set(selectedChargeIds);
+                            if (e.target.checked) next.add(String(charge.id));
+                            else next.delete(String(charge.id));
+                            setSelectedChargeIds(next);
+                          }}
+                        />
+                        <label htmlFor={`bulk-pfx-${charge.id}`} className={`flex-1 flex justify-between items-center ${alreadyTransferred ? "" : "cursor-pointer"} text-sm gap-2`}>
+                          <span className="truncate">{charge.description}</span>
+                          <div className="text-right shrink-0">
+                            {!alreadyTransferred && remaining < parseFloat(charge.amount) && (
+                              <div className="text-xs text-muted-foreground line-through">${fmtMoney(charge.amount)}</div>
+                            )}
+                            <span className={`font-medium tabular-nums ${alreadyTransferred ? "line-through" : ""}`}>
+                              ${fmtMoney(alreadyTransferred ? parseFloat(charge.amount) : remaining)}
+                            </span>
+                            {alreadyTransferred && <span className="text-xs text-muted-foreground ml-1">(transferido)</span>}
+                          </div>
+                        </label>
+                      </div>
+                    );
+                  })}
                 </>
               ) : null}
             </div>
