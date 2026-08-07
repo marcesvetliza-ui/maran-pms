@@ -5407,45 +5407,20 @@ export class DatabaseStorage implements IStorage {
     agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
     guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
   }> {
+    // Balance de empresas: usamos account_movements como fuente de verdad (igual que agencias),
+    // porque el listado de movimientos muestra account_movements y el saldo debe coincidir.
+    // La fórmula anterior (basada en reservations.company_id) divergía de los movimientos reales
+    // en producción cuando los cargos se creaban sin company_id seteado en la reserva.
     const companiesRes = await db.execute(sql`
-      WITH company_balances AS (
-        SELECT c.id,
-               COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social) AS name,
-               (
-                 COALESCE((
-                   SELECT SUM(
-                     r.total_room_amount::numeric
-                     + COALESCE(cs.tc, 0)
-                     - COALESCE(ps.tp, 0)
-                   )
-                   FROM reservations r
-                   LEFT JOIN (
-                     SELECT reservation_id, SUM(amount::numeric) AS tc
-                     FROM charges WHERE status = 'active' GROUP BY reservation_id
-                   ) cs ON cs.reservation_id = r.id
-                   LEFT JOIN (
-                     SELECT reservation_id, SUM(amount::numeric) AS tp
-                     FROM payments WHERE status != 'anulado' GROUP BY reservation_id
-                   ) ps ON ps.reservation_id = r.id
-                   WHERE r.company_id = c.id
-                     AND r.total_room_amount IS NOT NULL
-                     AND r.total_room_amount::numeric > 0
-                 ), 0)
-                 + COALESCE((
-                   SELECT SUM(amount::numeric)
-                   FROM account_movements
-                   WHERE entity_id = c.id AND entity_type = 'company' AND type = 'pago'
-                 ), 0)
-               ) AS balance,
-               GREATEST(
-                 (SELECT MAX(r.check_out_date::text) FROM reservations r WHERE r.company_id = c.id),
-                 (SELECT MAX(date::text) FROM account_movements WHERE entity_id = c.id AND entity_type = 'company')
-               ) AS last_movement
-        FROM companies c
-        WHERE c.is_active = 'true'
-      )
-      SELECT * FROM company_balances
-      WHERE balance IS NOT NULL AND balance <> 0
+      SELECT c.id,
+             COALESCE(NULLIF(c.nombre_fantasia, ''), c.razon_social) AS name,
+             COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
+             MAX(m.date::text)                                        AS last_movement
+      FROM companies c
+      LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
+      WHERE c.is_active = 'true'
+      GROUP BY c.id, c.nombre_fantasia, c.razon_social
+      HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
     `);
 

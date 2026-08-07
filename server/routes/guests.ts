@@ -250,41 +250,17 @@ export function registerGuestsRoutes(app: Express) {
       // All CC movements (cargos + pagos) — used to display movement history
       const movements = await storage.getAccountMovements("company", companyId);
 
-      // Reservation-based outstanding (total_room + charges - payments from reservations/payments tables)
-      const resResult = await db.execute(sql`
-        SELECT COALESCE(SUM(
-          r.total_room_amount::numeric
-          + COALESCE(cs.tc, 0)
-          - COALESCE(ps.tp, 0)
-        ), 0) AS res_balance
-        FROM reservations r
-        LEFT JOIN (
-          SELECT reservation_id, SUM(amount::numeric) AS tc
-          FROM charges WHERE status = 'active' GROUP BY reservation_id
-        ) cs ON cs.reservation_id = r.id
-        LEFT JOIN (
-          SELECT reservation_id, SUM(amount::numeric) AS tp
-          FROM payments WHERE status != 'anulado' GROUP BY reservation_id
-        ) ps ON ps.reservation_id = r.id
-        WHERE r.company_id = ${companyId}
-          AND r.total_room_amount IS NOT NULL
-          AND r.total_room_amount::numeric > 0
-      `);
-      const reservationBalance = parseFloat((resResult.rows[0] as any)?.res_balance ?? "0");
-
-      // Only sum CC *payments* (type='pago', stored as negative numbers) — DO NOT add cargos
-      // because cargos are auto-derived from the same reservation data above (would double-count)
-      const ccPagosResult = await db.execute(sql`
-        SELECT COALESCE(SUM(amount::numeric), 0) AS pagos_sum
+      // Balance = SUM de todos los account_movements (cargos positivos + pagos negativos).
+      // Usamos account_movements como fuente de verdad para que el saldo coincida
+      // exactamente con lo que se muestra en el listado de movimientos.
+      const balResult = await db.execute(sql`
+        SELECT COALESCE(SUM(amount::numeric), 0) AS total
         FROM account_movements
-        WHERE entity_type = 'company' AND entity_id = ${companyId} AND type = 'pago'
+        WHERE entity_type = 'company' AND entity_id = ${companyId}
       `);
-      const ccPagos = parseFloat((ccPagosResult.rows[0] as any)?.pagos_sum ?? "0");
+      const totalBalance = parseFloat((balResult.rows[0] as any)?.total ?? "0");
 
-      // Total = what reservations say is owed + CC payments already received (negative)
-      const totalBalance = reservationBalance + ccPagos;
-
-      res.json({ movements, balance: totalBalance, reservationBalance });
+      res.json({ movements, balance: totalBalance, reservationBalance: totalBalance });
     } catch (error) {
       console.error("[company-account] Error:", error);
       res.status(500).json({ error: "Error fetching account" });
