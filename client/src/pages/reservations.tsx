@@ -2057,6 +2057,7 @@ function ReservationDetailDialog({
   onOpenChange,
   onCancel,
   onEdit,
+  currentUserRole,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
