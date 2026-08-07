@@ -929,6 +929,21 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
+      // Propagate NC reference to any group_payments linked to this original invoice.
+      // The invoice_ref column stores JSON with an "id" field equal to the sales_invoice id.
+      // This is server-side and non-fatal: if it fails the NC itself is already emitted.
+      try {
+        await db.execute(sql`
+          UPDATE group_payments
+          SET invoice_nc_ref = ${JSON.stringify(nc)}
+          WHERE invoice_ref IS NOT NULL
+            AND invoice_ref::jsonb->>'id' = ${String(id)}
+            AND invoice_nc_ref IS NULL
+        `);
+      } catch (propagateErr) {
+        console.error("[NC] Failed to propagate invoice_nc_ref to group_payments:", propagateErr);
+      }
+
       res.status(201).json({ ...nc, voidedPaymentIds, voidedFolioMovementIds });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

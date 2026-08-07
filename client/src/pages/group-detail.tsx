@@ -53,7 +53,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmitirFacturaDialog } from "./billing";
+import { EmitirFacturaDialog, NotaCreditoDialog } from "./billing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -728,6 +728,8 @@ export default function GroupDetailPage() {
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   const [masterPaymentCcEntityType, setMasterPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [masterPaymentCcEntityId, setMasterPaymentCcEntityId] = useState("");
+  // NC dialog: invoice DB id from the payment's invoiceRef
+  const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
   // Edit rate + late checkout
@@ -2024,13 +2026,20 @@ export default function GroupDetailPage() {
                         <div className="rounded-md border divide-y">
                           {masterFolio.groupPayments.map((gp: any, gpIdx: number) => {
                             // Bug 8: parse invoice badge (shown for electronic comprobantes)
-                            const invoiceBadge = (() => {
+                            const invoiceRefParsed = (() => {
                               if (!gp.invoiceRef) return null;
-                              try {
-                                const ref = JSON.parse(gp.invoiceRef);
-                                return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4, "0")}-${String(ref.numero ?? "").padStart(8, "0")}`;
-                              } catch { return null; }
+                              try { return JSON.parse(gp.invoiceRef); } catch { return null; }
                             })();
+                            const invoiceBadge = invoiceRefParsed
+                              ? `${invoiceRefParsed.tipo_comprobante ?? "FAC"} ${String(invoiceRefParsed.punto_venta ?? "").padStart(4, "0")}-${String(invoiceRefParsed.numero ?? "").padStart(8, "0")}`
+                              : null;
+                            const ncRefParsed = (() => {
+                              if (!gp.invoiceNcRef) return null;
+                              try { return JSON.parse(gp.invoiceNcRef); } catch { return null; }
+                            })();
+                            const ncBadge = ncRefParsed
+                              ? `${ncRefParsed.tipo_comprobante ?? "NC"} ${String(ncRefParsed.punto_venta ?? "").padStart(4, "0")}-${String(ncRefParsed.numero ?? "").padStart(8, "0")}`
+                              : null;
                             // Bug 8: for non-electronic payments, show receipt type as badge
                             const receiptLabel = invoiceBadge ? null
                               : (!gp.receiptType || gp.receiptType === "none") ? `Adelanto Grupos #${gpIdx + 1}`
@@ -2046,6 +2055,8 @@ export default function GroupDetailPage() {
                               const found = (list as any[]).find((e: any) => e.id === gp.billingEntityId);
                               return found ? (found.razonSocial || found.nombreFantasia) : null;
                             })();
+                            // NC button: show only when there's an invoice with a known DB id and no NC yet
+                            const canEmitNc = invoiceRefParsed?.id && !ncRefParsed;
                             return (
                               <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -2064,13 +2075,35 @@ export default function GroupDetailPage() {
                                       {invoiceBadge}
                                     </Badge>
                                   )}
+                                  {/* NC badge: shown when a nota de crédito has already been emitted */}
+                                  {ncBadge && (
+                                    <Badge variant="outline" className="text-xs font-mono gap-1 border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-400">
+                                      <FileX className="h-3 w-3" />
+                                      {ncBadge}
+                                    </Badge>
+                                  )}
                                   {/* Bug 7: entity name */}
                                   {entityName && (
                                     <span className="text-xs text-muted-foreground">→ {entityName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
                                 </div>
-                                <span className="font-semibold text-green-600 shrink-0 ml-2">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                <div className="flex items-center gap-2 shrink-0 ml-2">
+                                  {/* NC button: only for payments with an emitted invoice and no NC yet */}
+                                  {canEmitNc && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs text-orange-600 border-orange-300 hover:bg-orange-50 hover:text-orange-700 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-950/20"
+                                      onClick={() => setNcInvoiceId(invoiceRefParsed.id)}
+                                      data-testid={`btn-nc-group-payment-${gp.id}`}
+                                    >
+                                      <FileX className="h-3 w-3 mr-1" />
+                                      NC
+                                    </Button>
+                                  )}
+                                  <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                </div>
                               </div>
                             );
                           })}
@@ -3835,6 +3868,19 @@ export default function GroupDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ─── NC Dialog: Nota de Crédito desde pago del Folio Maestro ─── */}
+      {ncInvoiceId !== null && (
+        <NotaCreditoDialog
+          invoiceId={ncInvoiceId}
+          onClose={() => setNcInvoiceId(null)}
+          onSuccess={() => {
+            // The server propagates invoice_nc_ref to the linked group_payment automatically.
+            // Refresh master-folio so the NC badge appears and the NC button disappears.
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+          }}
+        />
+      )}
 
     </div>
   );

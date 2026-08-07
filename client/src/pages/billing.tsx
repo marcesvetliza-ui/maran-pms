@@ -1143,7 +1143,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
 // ─── Nota de Crédito Dialog ────────────────────────────────────────────────────
 
-export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
+export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId: number; onClose: () => void; onSuccess?: (ncData: any) => void }) {
   const { toast } = useToast();
   const { data: invoice } = useQuery<any>({
     queryKey: ["/api/billing/invoices", invoiceId],
@@ -1160,6 +1160,7 @@ export function NotaCreditoDialog({ invoiceId, onClose }: { invoiceId: number; o
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       toast({ title: "Nota de Crédito emitida", description: `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
+      onSuccess?.(data);
       onClose();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
     },

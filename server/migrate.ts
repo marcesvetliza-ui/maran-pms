@@ -1309,5 +1309,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS payment_method_detail jsonb`)
   );
 
+  // invoice_nc_ref on group_payments: JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
+  await withTimeout("group_payments.invoice_nc_ref", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
