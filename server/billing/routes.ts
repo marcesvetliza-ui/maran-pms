@@ -529,13 +529,10 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "La factura ya fue anulada completamente" });
       }
 
-      // Guard: reject if there is already an open/pending NC linked to this invoice.
-      // This prevents two staff members from concurrently issuing NCs on the same partially-credited invoice.
-      if (original.nota_credito_id != null && original.estado !== "anulada") {
-        return res.status(409).json({
-          error: "Ya existe una Nota de Crédito en curso para esta factura. Verifique el estado del comprobante antes de emitir otra.",
-        });
-      }
+      // Note: we intentionally allow multiple NCs on the same invoice as long as the
+      // remaining balance (monto_total - monto_acreditado) allows it. The old guard that
+      // blocked any NC when nota_credito_id was set prevented legitimate partial-NC workflows
+      // (e.g., two separate partial credits weeks apart for the same invoice).
 
       const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
       const tipoNC =

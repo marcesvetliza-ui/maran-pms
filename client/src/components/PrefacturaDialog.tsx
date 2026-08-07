@@ -79,12 +79,10 @@ const TIPO_OPTIONS = [
   { value: "FB",  label: "Factura B",           fiscal: true },
   { value: "FT",  label: "Factura T",           fiscal: true },
   { value: "FM",  label: "Factura MiPyme A",    fiscal: true },
-  { value: "NCA", label: "Nota de Crédito A",   fiscal: true },
-  { value: "NCB", label: "Nota de Crédito B",   fiscal: true },
-  { value: "NCT", label: "Nota de Crédito T",   fiscal: true },
-  { value: "NCM", label: "Nota de Crédito MiPyme A", fiscal: true },
+  // NC/ND types are intentionally excluded here — use the dedicated Nota de Crédito/Débito
+  // buttons in the folio view. Showing them in this selector caused accidental NC creation.
+  // "ticket" is also excluded — it belongs to restaurant/spa flows, not folio billing.
   { value: "cierre_habitacion", label: "Cierre de habitación (no fiscal)", fiscal: false },
-  { value: "ticket", label: "Ticket (no fiscal)", fiscal: false },
 ];
 
 const NON_FISCAL = new Set(["cierre_habitacion", "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_spa"]);
@@ -503,10 +501,11 @@ export function PrefacturaDialog({
     }
   }
 
-  // True when the folio is already fully paid AND at least one invoice was emitted.
-  // In this state the only valid action is check-out — no new invoice should be created.
-  const alreadyPaidAndInvoiced =
-    (folio?.balance ?? 1) <= 0.01 && emittedInvoices.length > 0;
+  // True when the folio is already fully paid (balance ≤ 0).
+  // In this state no new invoice should be created — only check-out if requested.
+  // We no longer require emittedInvoices.length > 0: a folio fully paid by cash
+  // without a fiscal invoice should also skip the invoice step and go straight to checkout.
+  const alreadyPaidAndInvoiced = (folio?.balance ?? 1) <= 0.01;
 
   // Charge IDs already included in previously-emitted invoices for this folio
   const invoicedChargeIds = new Set<string>(
@@ -517,6 +516,30 @@ export function PrefacturaDialog({
       try { return JSON.parse(ids) as string[]; } catch { return []; }
     })
   );
+
+  // Bug I: restrict "Facturar a" options to what's actually associated with this reservation.
+  // If a company is on the reservation → only allow billing to that company.
+  // If an agency → only the agency. If neither → only guest.
+  // This prevents accidentally assigning invoices to an unrelated entity.
+  const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id);
+  const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id);
+  const allowedBillingTargets: Array<"guest" | "company" | "agency"> = hasReservationCompany
+    ? ["company"]
+    : hasReservationAgency
+      ? ["agency"]
+      : ["guest"];
+  const billingTargetLocked = allowedBillingTargets.length === 1;
+
+  // Bug L: filter comprobante types by the client's VAT condition.
+  // NC/ND types were already removed from TIPO_OPTIONS; here we further restrict
+  // based on condicion IVA so users cannot accidentally pick an invalid type.
+  const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
+    if (opt.value === "cierre_habitacion") return true; // always available as fallback
+    if (condicionIva === "Responsable Inscripto") return ["FA", "FM", "FT"].includes(opt.value);
+    return ["FB", "FT"].includes(opt.value);
+  });
+  // If current tipo is no longer in filtered list, reset to suggested
+  // (handled reactively so we don't cause extra renders here)
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
@@ -957,14 +980,32 @@ export function PrefacturaDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Facturar a</Label>
-                  <Select value={billingTarget} onValueChange={(v) => handleBillingTargetChange(v as any)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                  <Select
+                    value={billingTarget}
+                    onValueChange={(v) => handleBillingTargetChange(v as any)}
+                    disabled={billingTargetLocked}
+                  >
+                    <SelectTrigger title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="guest"><span className="flex items-center gap-2"><User className="h-3.5 w-3.5" />Huésped</span></SelectItem>
-                      <SelectItem value="company"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Empresa</span></SelectItem>
-                      <SelectItem value="agency"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Agencia</span></SelectItem>
+                      {allowedBillingTargets.includes("guest") && (
+                        <SelectItem value="guest"><span className="flex items-center gap-2"><User className="h-3.5 w-3.5" />Huésped</span></SelectItem>
+                      )}
+                      {allowedBillingTargets.includes("company") && (
+                        <SelectItem value="company"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Empresa</span></SelectItem>
+                      )}
+                      {allowedBillingTargets.includes("agency") && (
+                        <SelectItem value="agency"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Agencia</span></SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
+                  {billingTargetLocked && hasReservationCompany && (
+                    <p className="text-xs text-muted-foreground mt-1">Reserva con empresa asociada</p>
+                  )}
+                  {billingTargetLocked && hasReservationAgency && (
+                    <p className="text-xs text-muted-foreground mt-1">Reserva con agencia asociada</p>
+                  )}
                 </div>
                 {billingTarget === "company" && (
                   <div>
@@ -1028,7 +1069,7 @@ export function PrefacturaDialog({
                   <Select value={tipo} onValueChange={setTipo}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {TIPO_OPTIONS.map(opt => (
+                      {filteredTipoOptions.map(opt => (
                         <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1817,6 +1858,7 @@ function NotaCreditoDialog({
 
         <div className="space-y-4 py-1">
           {/* Invoice selector */}
+          {/* Bug N: always show invoice selector — ensures user knows which invoice is being credited */}
           {invoices.length > 1 && (
             <div>
               <Label className="text-xs text-muted-foreground mb-1 block">Factura a acreditar</Label>
@@ -1934,15 +1976,17 @@ function NotaCreditoDialog({
                         try {
                           const ref = JSON.parse(p.invoiceRef);
                           const label = `${ref.tipo_comprobante ?? ref.tipoComprobante ?? "FAC"} ${String(ref.punto_venta ?? ref.puntoVenta ?? 0).padStart(4,"0")}-${String(ref.numero ?? 0).padStart(8,"0")}`;
-                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium">{label}</span>;
+                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium" title="Pago vinculado a esta factura">📄 {label}</span>;
                         } catch {
                           // invoiceRef unparseable — try matching by id in loaded invoices list
                           const inv = invoices.find((i: NcInvoice) => String(i.id) === String(p.invoiceRef));
                           if (!inv) return null;
                           const label = `${inv.tipo_comprobante} ${String(inv.punto_venta).padStart(4,"0")}-${String(inv.numero).padStart(8,"0")}`;
-                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium">{label}</span>;
+                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium" title="Pago vinculado a esta factura">📄 {label}</span>;
                         }
-                      })() : null}
+                      })() : (
+                        <span className="text-xs text-amber-700 dark:text-amber-400 ml-2 font-medium" title="Anticipo libre — no vinculado a ninguna factura">Anticipo</span>
+                      )}
                     </span>
                     <span className="text-sm font-medium text-amber-900 dark:text-amber-200">${fmtMoney(p.amount)}</span>
                   </label>

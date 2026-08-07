@@ -2066,6 +2066,27 @@ function ReservationDetailDialog({
 }) {
   const { toast } = useToast();
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
+
+  // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
+  // already invoiced (prevent cancel/transfer of billed items).
+  const { data: reservationInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", String(reservation.id), "invoices"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/invoices`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !isLocked,
+  });
+  const invoicedChargeIds = new Set<string>(
+    reservationInvoices.flatMap((inv: any) => {
+      const ids = inv.source_charge_ids;
+      if (!ids) return [];
+      if (Array.isArray(ids)) return ids as string[];
+      try { return JSON.parse(ids) as string[]; } catch { return []; }
+    })
+  );
+
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
   const [showUninvoicedWarning, setShowUninvoicedWarning] = useState(false);
@@ -3519,6 +3540,8 @@ function ReservationDetailDialog({
                         >
                           <PlusCircle className="h-3 w-3 text-green-600" />
                         </Button>
+                        {/* Bug K: invoiced charges cannot be transferred or cancelled — must go through NC */}
+                        {!invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="icon" 
                           variant="ghost" 
@@ -3529,6 +3552,8 @@ function ReservationDetailDialog({
                         >
                           <ArrowRightLeft className="h-3 w-3 text-blue-600" />
                         </Button>
+                        )}
+                        {!invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="icon" 
                           variant="ghost" 
@@ -3539,6 +3564,7 @@ function ReservationDetailDialog({
                         >
                           <Ban className="h-3 w-3 text-destructive" />
                         </Button>
+                        )}
                         </>
                       )}
                     </div>
@@ -3890,16 +3916,18 @@ function ReservationDetailDialog({
                           <Undo2 className="h-3 w-3 mr-1" />Re-vincular
                         </Button>
                       )}
-                      {!isLocked && !isAnulado && (
+                      {/* Bug J: payments with invoiceRef are locked — cancel via NC in folio */}
+                      {!isLocked && !isAnulado && !invoiceRef && (
                       <Button 
                         size="icon" 
                         variant="ghost" 
                         className="h-6 w-6"
                         onClick={() => {
-                          const inv = (() => { try { return (payment as any).invoiceRef ? JSON.parse((payment as any).invoiceRef) : null; } catch { return null; } })();
+                          // Bug J: payments linked to an invoice cannot be cancelled here;
+                          // they must be handled via Nota de Crédito from the folio prefactura view.
                           setAnularTarget({ type: "pago", id: payment.id });
                           setMotivoAnulacion("");
-                          setAnularEmitirNC(!!inv); // auto-check NC when payment has invoice
+                          setAnularEmitirNC(false)
                         }}
                         title="Anular pago"
                         data-testid={`button-anular-payment-${payment.id}`}
