@@ -1367,9 +1367,10 @@ export function registerGroupsRoutes(app: Express) {
 
       doc.moveTo(40, 80).lineTo(555, 80).lineWidth(1.5).stroke("#1a1a1a");
 
-      doc.fontSize(14).font("Helvetica-Bold").text("FOLIO MAESTRO", 40, 90);
+      doc.fontSize(14).font("Helvetica-Bold").text("DETALLE DE CUENTA", 40, 90);
       doc.fontSize(9).font("Helvetica").fillColor("#555555");
-      const configLabel = config === "accommodation" ? "Cubre: Solo Alojamiento" : config === "all" ? "Cubre: Alojamiento + Extras" : "Sin cobertura grupal";
+      const coverageLabel = config === "accommodation" ? "Cubre: Solo Alojamiento" : config === "all" ? "Cubre: Alojamiento + Extras" : "Sin cobertura grupal";
+      const configLabel = billingEntityName ? `${coverageLabel} | Factura: ${billingEntityName}` : coverageLabel;
       doc.text(configLabel, 40, 108);
       doc.fillColor("#000000");
 
@@ -1514,13 +1515,14 @@ export function registerGroupsRoutes(app: Express) {
       // Coverage legend note below room table
       {
         let legendText: string;
+        const entityRef = billingEntityName ? billingEntityName : "el organizador";
         if (config === "none") {
-          legendText = "(*) Columna EXTRAS (directo): cargos facturados al huésped, no cubiertos por el folio maestro.";
+          legendText = `(*) Columna EXTRAS (directo): cargos facturados al huésped, no cubiertos por ${entityRef}.`;
         } else if (config === "accommodation") {
-          legendText = "(*) Columna EXTRAS: cargos adicionales facturados directamente al huésped. Solo el alojamiento está cubierto por el folio maestro.";
+          legendText = `(*) Columna EXTRAS: cargos adicionales facturados directamente al huésped. Solo el alojamiento está cubierto por ${entityRef}.`;
         } else {
           // "all"
-          legendText = "(*) Columna EXTRAS: alojamiento y extras cubiertos por el folio maestro. Sin cargos directos al huésped por estas columnas.";
+          legendText = `(*) Columna EXTRAS: alojamiento y extras cubiertos por ${entityRef}. Sin cargos directos al huésped por estas columnas.`;
         }
         if (y > 740) { doc.addPage(); y = 40; }
         doc.fontSize(7.5).font("Helvetica").fillColor("#666666").text(legendText, 40, y, { width: 515 });
@@ -1562,7 +1564,7 @@ export function registerGroupsRoutes(app: Express) {
         ["Total alojamiento", `$${masterAccommodation.toLocaleString("es-AR")}`],
         ...(config === "all" ? [["Extras (habitaciones)", `$${masterExtras.toLocaleString("es-AR")}`]] : []),
         ...(groupChargesTotal > 0 ? [["Cargos grupales", `$${groupChargesTotal.toLocaleString("es-AR")}`]] : []),
-        ["TOTAL FOLIO MAESTRO", `$${masterTotal.toLocaleString("es-AR")}`],
+        ["TOTAL DETALLE DE CUENTA", `$${masterTotal.toLocaleString("es-AR")}`],
         ["Pagado", `$${masterPaid.toLocaleString("es-AR")}`],
         ...(voidMovementsTotal > 0 ? [["Anulaciones (NC)", `$${voidMovementsTotal.toLocaleString("es-AR")}`]] : []),
         ["SALDO PENDIENTE", `$${masterBalance.toLocaleString("es-AR")}`],

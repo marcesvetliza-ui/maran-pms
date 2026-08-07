@@ -419,7 +419,7 @@ function GroupFormDialog({
                 <p className="text-xs text-muted-foreground mb-2">Se pre-seleccionará automáticamente al registrar pagos del grupo.</p>
                 <div className="grid grid-cols-2 gap-2">
                   <select
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
                     value={formData.billingEntityType || ""}
                     onChange={(e) => setFormData({ ...formData, billingEntityType: e.target.value, billingEntityId: "" })}
                     data-testid="select-group-billing-entity-type"
@@ -430,7 +430,7 @@ function GroupFormDialog({
                   </select>
                   {formData.billingEntityType && (
                     <select
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
                       value={formData.billingEntityId || ""}
                       onChange={(e) => setFormData({ ...formData, billingEntityId: e.target.value })}
                       data-testid="select-group-billing-entity-id"

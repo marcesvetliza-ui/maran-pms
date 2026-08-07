@@ -1207,7 +1207,7 @@ export default function GroupDetailPage() {
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};text-align:center;">${idx + 1}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-weight:bold;">${res.room?.roomNumber || "-"}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${getBedLabel(res)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.codigo?.startsWith("GROUP-") ? "" : ((res.guest?.lastName || "") + " " + (res.guest?.firstName || "")).trim()}</td>
+        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.codigo?.startsWith("GROUP-") ? ((res as any).guestName || "") : ((res.guest?.lastName || "") + " " + (res.guest?.firstName || "")).trim() || ((res as any).guestName || "")}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${fmtDate(res.checkInDate)}</td>
         <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${lateCheckout ? `${fmtDate(res.checkOutDate)} <span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : fmtDate(res.checkOutDate)}</td>
