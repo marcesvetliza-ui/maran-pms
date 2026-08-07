@@ -541,6 +541,21 @@ export function PrefacturaDialog({
   // If current tipo is no longer in filtered list, reset to suggested
   // (handled reactively so we don't cause extra renders here)
 
+  // Bug R: auto-sync first payment row amount when user changes selected charges.
+  // Previously this happened in the "Siguiente" button click; now that both steps are
+  // on one screen we do it reactively so the payment field always stays in sync.
+  useEffect(() => {
+    if (step === 3) return; // don't interfere with result state
+    if (totalSelected > 0.01) {
+      setPaymentRows(prev =>
+        prev.length === 1
+          ? [{ ...prev[0], amount: String(totalSelected.toFixed(2)) }]
+          : prev
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalSelected]);
+
   // ── Submit ──────────────────────────────────────────────────────────────────
 
   // Gate: warn if user enters less than the full balance before actually submitting
@@ -795,8 +810,7 @@ export function PrefacturaDialog({
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {step === 1 && <><FileText className="h-5 w-5" />Prefactura</>}
-            {step === 2 && <><Receipt className="h-5 w-5" />Registrar cobro</>}
+            {step < 3 && <><FileText className="h-5 w-5" />Prefactura</>}
             {step === 3 && <><CircleCheck className="h-5 w-5 text-green-600" />Resultado</>}
             {reservation && (
               <span className="font-normal text-muted-foreground text-sm ml-2">
@@ -806,27 +820,10 @@ export function PrefacturaDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Step indicators */}
-        {step < 3 && (
-          <div className="flex items-center gap-2 mb-1">
-            {[1, 2].map((s) => (
-              <div key={s} className="flex items-center gap-2">
-                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-                  step === s ? "bg-primary text-primary-foreground" : step > s ? "bg-green-500 text-white" : "bg-muted text-muted-foreground"
-                }`}>
-                  {step > s ? <Check className="h-3.5 w-3.5" /> : s}
-                </div>
-                <span className={`text-sm ${step === s ? "font-semibold" : "text-muted-foreground"}`}>
-                  {s === 1 ? "Prefactura" : "Cobro"}
-                </span>
-                {s < 2 && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-              </div>
-            ))}
-          </div>
-        )}
 
-        {/* ── STEP 1: Prefactura ─────────────────────────────────────────────── */}
-        {step === 1 && (
+
+        {/* ── Prefactura (cargos + cobro en una sola pantalla) ────────────── */}
+        {step < 3 && (
           <div className="space-y-4">
             {/* Alerts for checkout mode */}
             {mode === "checkout" && reservation && (reservation as any).status !== "checked_in" && (
@@ -1206,11 +1203,12 @@ export function PrefacturaDialog({
                           : prev
                       );
                     }
-                    setStep(2);
+                    // amount already synced via useEffect on totalSelected
                   }}
-                  disabled={folioLoading || selectedIds.size === 0 || facturaANeedsEntity}
+                  disabled={true}
+                  className="hidden"
                 >
-                  Siguiente — Cobro <ChevronRight className="h-4 w-4 ml-1" />
+                  hidden
                 </Button>
               )}
             </DialogFooter>
@@ -1218,10 +1216,10 @@ export function PrefacturaDialog({
         )}
 
         {/* ── STEP 2: Cobro ──────────────────────────────────────────────────── */}
-        {step === 2 && (
-          <div className="space-y-4">
-            {/* Summary recap */}
-            <div className="rounded-lg border bg-muted/20 px-4 py-3 flex flex-wrap gap-4 text-sm">
+        {true && (
+          <div className="space-y-0">
+            {/* Cobro section — directly below prefactura on same screen */}
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 flex flex-wrap gap-4 text-sm mt-4 mb-4">
               <div><span className="text-muted-foreground">A facturar a: </span><span className="font-medium">{razonSocial || "—"}</span></div>
               <div><span className="text-muted-foreground">Tipo: </span>
                 <span className="font-medium">{TIPO_OPTIONS.find(t => t.value === tipo)?.label || tipo}</span>
@@ -1276,11 +1274,11 @@ export function PrefacturaDialog({
                         </Select>
                       </div>
                       <div className="col-span-4">
-                        <Label className="text-xs text-muted-foreground mb-1 block">Referencia (opcional)</Label>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Referencia / Observaciones</Label>
                         <Input
                           value={row.reference}
                           onChange={e => updateRow(row.id, "reference", e.target.value)}
-                          placeholder="Nro. comprobante..."
+                          placeholder="Ej: cheque 1234, obs. interna…"
                           className="h-8 text-sm"
                         />
                       </div>
@@ -1385,9 +1383,6 @@ export function PrefacturaDialog({
             )}
 
             <DialogFooter className="gap-2 flex-wrap">
-              <Button variant="outline" onClick={() => setStep(1)} disabled={isSubmitting}>
-                <ChevronLeft className="h-4 w-4 mr-1" />Volver
-              </Button>
               <Button
                 variant="outline"
                 size="sm"

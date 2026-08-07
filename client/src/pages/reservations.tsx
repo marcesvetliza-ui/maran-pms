@@ -2063,9 +2063,13 @@ function ReservationDetailDialog({
   onOpenChange: (open: boolean) => void;
   onCancel: () => void;
   onEdit?: () => void;
+  currentUserRole?: string;
 }) {
   const { toast } = useToast();
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
+  // Bug T: only admin/manager/jefe_recepcion can void payments
+  // If role is not passed (undefined), we allow by default for backwards compat
+  const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
 
   // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
   // already invoiced (prevent cancel/transfer of billed items).
@@ -3916,8 +3920,8 @@ function ReservationDetailDialog({
                           <Undo2 className="h-3 w-3 mr-1" />Re-vincular
                         </Button>
                       )}
-                      {/* Bug J: payments with invoiceRef are locked — cancel via NC in folio */}
-                      {!isLocked && !isAnulado && !invoiceRef && (
+                      {/* Bug J+T: payments with invoiceRef are locked (NC only), and voiding requires supervisor permission */}
+                      {!isLocked && !isAnulado && !invoiceRef && canAnularPago && (
                       <Button 
                         size="icon" 
                         variant="ghost" 
@@ -4047,7 +4051,7 @@ function ReservationDetailDialog({
                       data-testid="button-facturar-folio"
                     >
                       <FileText className="h-4 w-4 mr-1" />
-                      Facturar Saldo (${fmtMoney(balance)})
+                      Prefactura
                       {facturaEmitida && <span className="ml-1 text-xs opacity-70">(ya facturado)</span>}
                     </Button>
                   </div>
@@ -4061,7 +4065,7 @@ function ReservationDetailDialog({
                     data-testid="button-facturar-folio-saldado"
                   >
                     <FileText className="h-4 w-4 mr-1" />
-                    Emitir Factura
+                    Prefactura
                   </Button>
                 )}
               </div>
@@ -6062,6 +6066,7 @@ export default function ReservationsPage() {
             setDetailDialogOpen(false);
             setDialogOpen(true);
           }}
+          currentUserRole={(user as any)?.role}
         />
       )}
 

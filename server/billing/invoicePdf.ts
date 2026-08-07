@@ -518,6 +518,30 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
       y += 18;
     }
 
+    // ── Comprobantes fiscales emitidos ────────────────────────
+    if (data.invoices && data.invoices.length > 0) {
+      if (y > 700) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 16).fillColor("#fef3c7").fill().rect(x0, y, W, 16).strokeColor("#ccc").stroke();
+      doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5);
+      doc.text("Comprobantes fiscales emitidos", x0 + 4, y + 4, { width: 220 });
+      doc.text("Fecha", x0 + 224, y + 4, { width: 80, align: "center" });
+      doc.text("Tipo / Número", x0 + 308, y + 4, { width: 100, align: "center" });
+      doc.text("Importe", x0 + 412, y + 4, { width: 115, align: "right" });
+      y += 16;
+      doc.font("Helvetica").fontSize(7.5);
+      for (const inv of data.invoices) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        const nroLabel = `${inv.tipo_comprobante} ${String(inv.punto_venta).padStart(4,"0")}-${String(inv.numero).padStart(8,"0")}`;
+        doc.rect(x0, y, W, 14).strokeColor("#eee").stroke();
+        doc.text(nroLabel, x0 + 4, y + 3, { width: 300 });
+        doc.text(fDate(inv.fecha_emision), x0 + 224, y + 3, { width: 80, align: "center" });
+        doc.text(nroLabel, x0 + 308, y + 3, { width: 100, align: "center" });
+        doc.text(`$ ${fPeso(inv.monto_total)}`, x0 + 412, y + 3, { width: 115, align: "right" });
+        y += 14;
+      }
+      y += 8;
+    }
+
     // ── Saldo ──────────────────────────────────────────────────
     if (y > 720) { doc.addPage(); y = 40; }
     const saldoColor = data.balance <= 0.01 ? "#2e7d32" : "#c62828";
@@ -556,6 +580,8 @@ export interface ResumenCuentaData {
   payments: Array<{ date: string; method: string; amount: string; reference?: string | null; notes?: string | null }>;
   /** Void adjustments written when a Nota de Crédito voids a payment */
   adjustments?: Array<{ description: string; date: string; amount: string }>;
+  /** Fiscal invoices emitted for this folio — shown in the summary for traceability */
+  invoices?: Array<{ tipo_comprobante: string; punto_venta: number; numero: number; fecha_emision: string; monto_total: string | number; cae?: string | null }>;
   grandTotal: number;
   totalPayments: number;
   balance: number;

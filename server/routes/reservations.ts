@@ -814,11 +814,27 @@ export function registerReservationsRoutes(app: Express) {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
 
-      const [chargesList, paymentsList, config] = await Promise.all([
+      const [chargesList, paymentsList, config, invoicesResult] = await Promise.all([
         storage.getCharges(req.params.id),
         storage.getPayments(req.params.id),
         getBillingConfig(),
+        db.execute(sql`
+          SELECT tipo_comprobante, punto_venta, numero, fecha_emision, monto_total, cae
+          FROM sales_invoices
+          WHERE reserva_id = ${req.params.id}
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
+            AND estado IN ('emitida','parcial')
+          ORDER BY created_at ASC
+        `).catch(() => ({ rows: [] })),
       ]);
+      const emittedInvoices = (invoicesResult.rows as any[]).map((r: any) => ({
+        tipo_comprobante: r.tipo_comprobante as string,
+        punto_venta: Number(r.punto_venta),
+        numero: Number(r.numero),
+        fecha_emision: r.fecha_emision as string,
+        monto_total: r.monto_total,
+        cae: r.cae ?? null,
+      }));
 
       // Fetch void adjustments from folio_movements (written when an NC voids a payment)
       let voidAdjustments: Array<{ description: string; date: string; amount: string }> = [];
@@ -862,6 +878,7 @@ export function registerReservationsRoutes(app: Express) {
         charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
         payments: activePayments.map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
         adjustments: voidAdjustments.length > 0 ? voidAdjustments : undefined,
+        invoices: emittedInvoices.length > 0 ? emittedInvoices : undefined,
         grandTotal,
         totalPayments,
         balance,
