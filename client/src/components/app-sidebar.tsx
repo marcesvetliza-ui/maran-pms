@@ -118,6 +118,7 @@ const menuSections = [
       { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
       { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
       { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
+      { label: "Planilla Diaria", icon: ClipboardList,  href: "/daily-report",    roles: HABITACIONES_ROLES },
       { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      roles: TARIFAS_ROLES },
       { label: "Huéspedes",      icon: User,            href: "/guests",          roles: HUESPEDES_ROLES },
     ],

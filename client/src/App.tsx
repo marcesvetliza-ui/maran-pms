@@ -48,6 +48,7 @@ const CashRegisterPage = lazy(() => import("@/pages/cash-register"));
 const SourceCodePage = lazy(() => import("@/pages/source-code"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const PosConfigsPage = lazy(() => import("@/pages/pos-configs"));
+const DailyReportPage = lazy(() => import("@/pages/daily-report"));
 const SpaClientsPage = lazy(() => import("@/pages/spa-clients"));
 const GiftVouchersPage = lazy(() => import("@/pages/gift-vouchers"));
 const PresupuestosPage = lazy(() => import("@/pages/presupuestos"));
@@ -197,6 +198,7 @@ function Router() {
         <Route path="/guests" component={GuestsPage} />
         <Route path="/groups" component={GroupsPage} />
         <Route path="/groups/:id" component={GroupDetailPage} />
+        <Route path="/daily-report" component={DailyReportPage} />
         <Route path="/check-in" component={CheckInPage} />
         <Route path="/check-out" component={CheckOutPage} />
         <Route path="/rate-plans" component={RatePlansPage} />

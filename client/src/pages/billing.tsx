@@ -425,7 +425,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -439,6 +439,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   lockCondicionIva?: boolean;
   /** When true, the "Agregar ítem" button and extra item rows are hidden */
   hideAddItems?: boolean;
+  /** Pre-set billing entity — its address will be updated if the user changes domicilio */
+  billingEntityType?: "company" | "agency";
+  /** ID of the pre-set billing entity */
+  billingEntityId?: string;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -452,6 +456,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+  // Track the billing entity so we can update its address if the user edits domicilio
+  const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "company" | "agency"; id: string } | null>(null);
+  const originalDomicilioRef = useRef<string>("");
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
   const [entitySearch, setEntitySearch] = useState("");
   const [showEntityDropdown, setShowEntityDropdown] = useState(false);
@@ -483,7 +490,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       if (initialValues.razonSocial !== undefined) setRazonSocial(initialValues.razonSocial);
       if (initialValues.cuit !== undefined) setCuit(initialValues.cuit);
       if (initialValues.dni !== undefined) setDni(initialValues.dni);
-      if (initialValues.domicilio !== undefined) setDomicilio(initialValues.domicilio);
+      const initDom = initialValues.domicilio ?? "";
+      if (initialValues.domicilio !== undefined) setDomicilio(initDom);
+      originalDomicilioRef.current = initDom;
       if (initialValues.condicionIva !== undefined) setCondicionIva(initialValues.condicionIva);
       // Auto-select comprobante type based on cuit + condición IVA
       if (initialValues.cuit) {
@@ -501,6 +510,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         }));
       }
     }
+    if (open) {
+      // Set entity info from props if provided (e.g. from grupos module)
+      if (billingEntityType && billingEntityId) {
+        setSelectedEntityInfo({ type: billingEntityType, id: billingEntityId });
+      }
+    }
     if (!open) resetForm();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialValues]);
@@ -513,7 +528,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setRazonSocial(rs);
     setCuit(cuitVal);
     setCondicionIva(condVal);
-    if (domVal) setDomicilio(domVal);
+    const nextDom = domVal || "";
+    setDomicilio(nextDom);
+    originalDomicilioRef.current = nextDom;
+    // Track the entity so we can update its address if domicilio is edited
+    const eType: "company" | "agency" = entity._type === "Agencia" ? "agency" : "company";
+    setSelectedEntityInfo({ type: eType, id: entity.id });
     if (cuitVal || condVal === "Responsable Inscripto" || condVal === "Exento" || condVal === "Monotributista") {
       // FA requiere CUIT; sin CUIT usar FB como fallback
       const auto = (condVal === "Responsable Inscripto" || condVal === "Exento") ? (cuitVal ? "FA" : "FB") : "FB";
@@ -620,6 +640,19 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
 
+      // If the user changed the domicilio, silently update the entity's stored address
+      if (selectedEntityInfo && domicilio.trim() !== originalDomicilioRef.current.trim()) {
+        const endpoint = selectedEntityInfo.type === "company"
+          ? `/api/companies/${selectedEntityInfo.id}`
+          : `/api/agencies/${selectedEntityInfo.id}`;
+        try {
+          await apiRequest("PATCH", endpoint, { domicilio: domicilio.trim() });
+          queryClient.invalidateQueries({ queryKey: [selectedEntityInfo.type === "company" ? "/api/companies" : "/api/agencies"] });
+        } catch {
+          // Non-critical — ignore silently
+        }
+      }
+
       // Automatically link the emitted invoice to the payment if paymentId was provided
       if (paymentId) {
         setEmittedInvoiceData(data);
@@ -659,6 +692,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
+    setSelectedEntityInfo(null); originalDomicilioRef.current = "";
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1030,7 +1064,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               {fieldErrors.condicionIva && <p className="text-xs text-red-500">{fieldErrors.condicionIva}</p>}
             </div>
             <div className="col-span-2 space-y-1">
-              <Label className="text-xs">Domicilio (opcional)</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Domicilio (opcional)</Label>
+                {selectedEntityInfo && domicilio.trim() && domicilio.trim() !== originalDomicilioRef.current.trim() && (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                    Se actualizará en la ficha al emitir
+                  </span>
+                )}
+              </div>
               <Input value={domicilio} onChange={e => setDomicilio(e.target.value)} placeholder="Calle 123, Ciudad" data-testid="input-domicilio" />
             </div>
           </div>

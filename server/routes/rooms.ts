@@ -3,7 +3,7 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
 import { db } from "../db";
-import { reservations, rooms as roomsTable, guests, guestPreferences, folios, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable } from "@shared/schema";
+import { reservations, rooms as roomsTable, guests, guestPreferences, folios, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
 import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
@@ -256,6 +256,121 @@ export function registerRoomsRoutes(app: Express) {
     } catch (error: any) {
       console.error("[in-house] error:", error.message);
       res.status(500).json({ error: "Error fetching in-house rooms" });
+    }
+  });
+
+  // ── Daily operations report ──────────────────────────────────────────────
+  app.get("/api/daily-report", async (req, res) => {
+    try {
+      const date = (req.query.date as string) || getArgentinaToday();
+
+      const [checkOutRows, checkInRows] = await Promise.all([
+        // Check-outs: checked_in reservations whose checkOutDate = date
+        db.select({ res: reservations, room: roomsTable })
+          .from(reservations)
+          .innerJoin(roomsTable, eq(roomsTable.id, reservations.roomId))
+          .where(and(
+            sql`${reservations.checkOutDate} = ${date}`,
+            eq(reservations.status, "checked_in"),
+            sql`(${roomsTable.isVirtual} IS NULL OR ${roomsTable.isVirtual} = false)`
+          )),
+        // Check-ins: confirmed/web_checkin reservations whose checkInDate = date
+        db.select({ res: reservations, room: roomsTable })
+          .from(reservations)
+          .innerJoin(roomsTable, eq(roomsTable.id, reservations.roomId))
+          .where(and(
+            sql`${reservations.checkInDate} = ${date}`,
+            or(eq(reservations.status, "confirmed"), eq(reservations.status, "web_checkin")),
+            sql`(${roomsTable.isVirtual} IS NULL OR ${roomsTable.isVirtual} = false)`
+          )),
+      ]);
+
+      const allGuestIds = [
+        ...checkOutRows.map(r => r.res.guestId),
+        ...checkInRows.map(r => r.res.guestId),
+      ].filter(Boolean) as string[];
+      const checkOutResIds = checkOutRows.map(r => r.res.id);
+
+      const [guestList, allFolios, allRoomTypes, allBedTypeList] = await Promise.all([
+        allGuestIds.length > 0
+          ? db.select().from(guests).where(inArray(guests.id, allGuestIds))
+          : Promise.resolve([]),
+        checkOutResIds.length > 0
+          ? db.select().from(folios).where(and(eq(folios.entityType, "reservation"), inArray(folios.entityId, checkOutResIds)))
+          : Promise.resolve([]),
+        db.select().from(roomTypesTable),
+        db.select().from(bedTypes),
+      ]);
+
+      const guestMap = new Map(guestList.map(g => [g.id, g]));
+      const folioByRes = new Map(allFolios.map(f => [f.entityId, f]));
+      const roomTypeMap = new Map(allRoomTypes.map(rt => [rt.id, rt]));
+      const bedTypeMap = new Map(allBedTypeList.map(bt => [bt.id, bt]));
+
+      const daysDiff = (a: string, b: string) =>
+        Math.round((new Date(b + "T12:00:00").getTime() - new Date(a + "T12:00:00").getTime()) / 86400000);
+
+      const sortByRoom = (a: { room: typeof roomsTable.$inferSelect }, b: { room: typeof roomsTable.$inferSelect }) =>
+        a.room.roomNumber.localeCompare(b.room.roomNumber, undefined, { numeric: true });
+
+      const checkOuts = checkOutRows.sort(sortByRoom).map(({ res, room }) => {
+        const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
+        const folio = folioByRes.get(res.id);
+        const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
+        const bedTypeName = res.bedTypeNotes || (res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) as any)?.name : null) || null;
+        return {
+          reservationId: res.id,
+          reservationCode: (res as any).reservationCode ?? null,
+          roomNumber: room.roomNumber,
+          roomTypeName: roomType?.name ?? null,
+          guestName: guest ? `${guest.lastName} ${guest.firstName}`.trim() : ((res as any).guestName || "Sin asignar"),
+          guestPhone: guest?.phone ?? null,
+          checkInDate: res.checkInDate,
+          checkOutDate: res.checkOutDate,
+          nightsStayed: daysDiff(res.checkInDate, date),
+          nights: res.nights ?? daysDiff(res.checkInDate, res.checkOutDate),
+          finalRatePerNight: res.finalRatePerNight ? parseFloat(String(res.finalRatePerNight)) : null,
+          totalRoomAmount: res.totalRoomAmount ? parseFloat(String(res.totalRoomAmount)) : null,
+          folioBalance: folio ? parseFloat(String(folio.balance ?? "0")) : 0,
+          bedTypeNotes: bedTypeName,
+          lateCheckOut: res.lateCheckOut ?? false,
+          lateCheckOutTime: res.lateCheckOutTime ?? null,
+          notes: res.notes ?? null,
+          numberOfGuests: res.numberOfGuests ?? 1,
+        };
+      });
+
+      const checkIns = checkInRows.sort(sortByRoom).map(({ res, room }) => {
+        const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
+        const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
+        const bedTypeName = res.bedTypeNotes || (res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) as any)?.name : null) || null;
+        return {
+          reservationId: res.id,
+          reservationCode: (res as any).reservationCode ?? null,
+          roomNumber: room.roomNumber,
+          floor: room.floor ?? null,
+          roomTypeName: roomType?.name ?? null,
+          guestName: guest ? `${guest.lastName} ${guest.firstName}`.trim() : ((res as any).guestName || "Sin asignar"),
+          guestPhone: guest?.phone ?? null,
+          checkInDate: res.checkInDate,
+          checkOutDate: res.checkOutDate,
+          nights: res.nights ?? daysDiff(res.checkInDate, res.checkOutDate),
+          finalRatePerNight: res.finalRatePerNight ? parseFloat(String(res.finalRatePerNight)) : null,
+          totalRoomAmount: res.totalRoomAmount ? parseFloat(String(res.totalRoomAmount)) : null,
+          bedTypeNotes: bedTypeName,
+          earlyCheckIn: res.earlyCheckIn ?? false,
+          earlyCheckInTime: res.earlyCheckInTime ?? null,
+          numberOfGuests: res.numberOfGuests ?? 1,
+          notes: res.notes ?? null,
+          source: res.source ?? null,
+          status: res.status,
+        };
+      });
+
+      res.json({ date, checkOuts, checkIns });
+    } catch (error: any) {
+      console.error("[daily-report] error:", error.message);
+      res.status(500).json({ error: "Error generating daily report" });
     }
   });
 
