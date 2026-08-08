@@ -578,8 +578,9 @@ export function registerReservationsRoutes(app: Express) {
           : "Huésped desconocido";
         const checkOut = (otherCheckedIn as any).checkOutDate ?? "?";
 
-        // Si la reserva bloqueante tiene checkout vencido (ya pasó), auto-cerrarla y continuar
-        const isOverdue = checkOut !== "?" && checkOut < todayForCheck;
+        // Si la reserva bloqueante tiene checkout vencido (ya pasó) O es HOY, auto-cerrarla y continuar.
+        // Checkout hoy significa que el huésped debe salir antes del horario de check-in del nuevo huésped.
+        const isOverdue = checkOut !== "?" && checkOut <= todayForCheck;
         if (isOverdue) {
           console.warn(`[check-in] Reserva vencida detectada en hab ${room.roomNumber}: ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}. Auto-checkout forzado.`);
           try {
