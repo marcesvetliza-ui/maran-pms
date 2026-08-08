@@ -1689,17 +1689,43 @@ function PaymentOrderDialog({
 // ─── Pagos a Proveedores Tab ──────────────────────────────────────────────────
 
 function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => void }) {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const [fechaCorte, setFechaCorte] = useState(todayISO);
+
   const { data: proveedores = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/accounting-suppliers/cuenta-corriente"],
+    queryKey: ["/api/accounting-suppliers/cuenta-corriente", fechaCorte],
+    queryFn: () =>
+      fetch(`/api/accounting-suppliers/cuenta-corriente?fechaCorte=${fechaCorte}`, { credentials: "include" }).then((r) => r.json()),
   });
 
   if (isLoading) return <div className="py-8 text-center text-muted-foreground text-sm">Cargando proveedores...</div>;
 
+  const fmtDate = (iso: string) => iso.split("-").reverse().join("/");
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Proveedores con facturas pendientes</CardTitle>
-        <CardDescription>Seleccioná un proveedor para emitir la orden de pago</CardDescription>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle className="text-base">Proveedores con facturas pendientes</CardTitle>
+            <CardDescription>Seleccioná un proveedor para emitir la orden de pago</CardDescription>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label htmlFor="pagos-fecha-corte" className="text-xs whitespace-nowrap text-muted-foreground">Saldo al:</Label>
+            <Input
+              id="pagos-fecha-corte"
+              type="date"
+              value={fechaCorte}
+              onChange={(e) => setFechaCorte(e.target.value)}
+              className="h-8 text-sm w-44"
+            />
+          </div>
+        </div>
+        {fechaCorte !== todayISO && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            Mostrando facturas emitidas hasta el {fmtDate(fechaCorte)} que aún están pendientes.
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         {proveedores.length === 0 ? (

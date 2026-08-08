@@ -2561,15 +2561,34 @@ export async function registerRoutes(
 
   app.get("/api/accounting-suppliers/cuenta-corriente", requireAuth, async (req, res) => {
     try {
-      const result = await db.execute(sql`
-        SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
-          COUNT(pi.id) AS facturas_pendientes,
-          COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
-        FROM accounting_suppliers s
-        INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
-        GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
-        ORDER BY total_saldo DESC
-      `);
+      // fechaCorte: saldo al [fecha] — incluye facturas con fecha_emision <= fechaCorte y estado pendiente.
+      // Sin fechaCorte devuelve todas las pendientes (comportamiento anterior).
+      const fechaCorte = req.query.fechaCorte as string | undefined;
+      const result = await db.execute(
+        fechaCorte
+          ? sql`
+              SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
+                COUNT(pi.id) AS facturas_pendientes,
+                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+              FROM accounting_suppliers s
+              INNER JOIN purchase_invoices pi
+                ON pi.supplier_id = s.id
+                AND pi.estado = 'pendiente'
+                AND pi.fecha_emision <= ${fechaCorte}::date
+              GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
+              HAVING COALESCE(SUM(pi.monto_total::numeric), 0) > 0
+              ORDER BY total_saldo DESC
+            `
+          : sql`
+              SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
+                COUNT(pi.id) AS facturas_pendientes,
+                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+              FROM accounting_suppliers s
+              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+              GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
+              ORDER BY total_saldo DESC
+            `
+      );
       res.json(result.rows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

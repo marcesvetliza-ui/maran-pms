@@ -352,18 +352,40 @@ function LibroIVAVentasSection() {
 // ─── CC Proveedores ───────────────────────────────────────────────────────────
 
 function CCProveedoresSection() {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const [fechaCorte, setFechaCorte] = useState(todayISO);
+
+  const pdfUrl = fechaCorte
+    ? `/api/exports/cc-proveedores?fechaCorte=${fechaCorte}`
+    : "/api/exports/cc-proveedores";
+
+  const fmtLabel = fechaCorte
+    ? `cc_proveedores_al_${fechaCorte.replace(/-/g, "")}.pdf`
+    : "cc_proveedores.pdf";
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Cuenta Corriente Proveedores</CardTitle>
-        <CardDescription>PDF con saldos pendientes por proveedor</CardDescription>
+        <CardDescription>PDF con saldos pendientes por proveedor a una fecha de corte</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="cc-fecha-corte" className="text-xs whitespace-nowrap">Saldo al:</Label>
+          <Input
+            id="cc-fecha-corte"
+            type="date"
+            value={fechaCorte}
+            onChange={(e) => setFechaCorte(e.target.value)}
+            className="h-8 text-sm w-44"
+          />
+        </div>
         <DownloadButton
           label="Cuenta Corriente Proveedores (PDF)"
           icon={FileText}
-          url="/api/exports/cc-proveedores"
-          filename="cc_proveedores.pdf"
+          url={pdfUrl}
+          filename={fmtLabel}
+          disabled={!fechaCorte}
         />
       </CardContent>
     </Card>

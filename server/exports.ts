@@ -652,18 +652,39 @@ export function registerExportRoutes(app: Express) {
 
   app.get("/api/exports/cc-proveedores", requireAuth, async (req, res) => {
     try {
-      const suppliers = (await db.execute(sql`
-        SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
-          COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo,
-          COUNT(pi.id) AS cant_facturas
-        FROM accounting_suppliers s
-        INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
-        GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
-        ORDER BY s.razon_social
-      `)).rows as any[];
+      const fechaCorte = req.query.fechaCorte as string | undefined;
+      const suppliers = (await db.execute(
+        fechaCorte
+          ? sql`
+              SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
+                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo,
+                COUNT(pi.id) AS cant_facturas
+              FROM accounting_suppliers s
+              INNER JOIN purchase_invoices pi
+                ON pi.supplier_id = s.id
+                AND pi.estado = 'pendiente'
+                AND pi.fecha_emision <= ${fechaCorte}::date
+              GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
+              HAVING COALESCE(SUM(pi.monto_total::numeric), 0) > 0
+              ORDER BY s.razon_social
+            `
+          : sql`
+              SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
+                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo,
+                COUNT(pi.id) AS cant_facturas
+              FROM accounting_suppliers s
+              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+              GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
+              ORDER BY s.razon_social
+            `
+      )).rows as any[];
+
+      const titulo = fechaCorte
+        ? `Cuenta Corriente Proveedores — Saldo al ${fechaCorte.split("-").reverse().join("/")}`
+        : "Cuenta Corriente Proveedores";
 
       const pdfBuf = await genPDF(async (doc) => {
-        pdfHeader(doc, "Cuenta Corriente Proveedores");
+        pdfHeader(doc, titulo);
 
         const x0 = 40;
         let y = doc.y;
