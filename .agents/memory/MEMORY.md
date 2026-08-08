@@ -1,3 +1,4 @@
+- [pg date columns timezone bug](pg-date-timezone-bug.md) — node-postgres returns date as Date object (UTC midnight); causes UTC-3 offset, isSameDay fails. Fixed via pg.types.setTypeParser(1082) in db.ts.
 - [Restaurant items cache bug](restaurant-items-cache-bug.md) — getUpdatedOrder() reads React Query cache, NOT currentOrder; all item mutations must update both.
 - [Radix SelectItem empty value crashes](radix-select-empty-values.md) — any SelectItem with `value=""` crashes the whole React tree; dynamic sources from API can silently introduce empty strings. All known occurrences fixed as of May 2026.
 - [Restaurant close dialog billing refactor](restaurant-billing-refactor.md) — Forma de Cobro (payment) is separate from Comprobante (document type); cuenta_habitacion is a payment method, not a receipt type; AFIP invoice emits when receipt is factura_a/b/c.
