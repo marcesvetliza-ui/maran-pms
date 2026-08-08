@@ -245,6 +245,25 @@ function GroupFormDialog({
       });
       return;
     }
+
+    // Validate custom date ranges on blocks
+    const hasInvertedDates = blocks.some((b) =>
+      b.useCustomDates && b.blockCheckInDate && b.blockCheckOutDate && b.blockCheckOutDate <= b.blockCheckInDate
+    );
+    if (hasInvertedDates) {
+      setBlocks(blocks.map((b) => {
+        if (b.useCustomDates && b.blockCheckInDate && b.blockCheckOutDate && b.blockCheckOutDate <= b.blockCheckInDate) {
+          return { ...b, error: "El check-out del bloque debe ser posterior al check-in." };
+        }
+        return b;
+      }));
+      toast({
+        title: "Fechas de bloque inválidas",
+        description: "El check-out debe ser posterior al check-in en todos los bloques.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setIsCreating(true);
     

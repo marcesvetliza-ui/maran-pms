@@ -217,6 +217,14 @@ function AddBlockDialog({
     }
   };
 
+  const handleSaveBlock = () => {
+    if (useCustomDates && blockCheckInDate && blockCheckOutDate && blockCheckOutDate <= blockCheckInDate) {
+      toast({ title: "Fechas inválidas", description: "El check-out debe ser posterior al check-in.", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -334,7 +342,7 @@ function AddBlockDialog({
             Cancelar
           </Button>
           <Button
-            onClick={() => createMutation.mutate()}
+            onClick={handleSaveBlock}
             disabled={!roomTypeId || createMutation.isPending}
             data-testid="button-save-block"
           >

@@ -103,6 +103,14 @@ export function registerGroupsRoutes(app: Express) {
       if (eventTime !== undefined) updateData.eventTime = nullIfEmpty(eventTime);
       if (checkInDate !== undefined) updateData.checkInDate = checkInDate;
       if (checkOutDate !== undefined) updateData.checkOutDate = checkOutDate;
+
+      // Date integrity check — checkout must be strictly after checkin
+      const finalCheckIn = (updateData.checkInDate as string) || undefined;
+      const finalCheckOut = (updateData.checkOutDate as string) || undefined;
+      if (finalCheckIn && finalCheckOut && finalCheckOut <= finalCheckIn) {
+        return res.status(400).json({ error: "La fecha de check-out debe ser posterior al check-in." });
+      }
+
       if (status !== undefined) updateData.status = status;
       if (releaseDate !== undefined) updateData.releaseDate = nullIfEmpty(releaseDate);
       if (notes !== undefined) updateData.notes = nullIfEmpty(notes);
@@ -430,6 +438,12 @@ export function registerGroupsRoutes(app: Express) {
       if (!roomId || !guestFirstName) {
         return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
+
+      // Date integrity check — checkout must be strictly after checkin
+      if (checkInDate && checkOutDate && checkOutDate <= checkInDate) {
+        return res.status(400).json({ error: "La fecha de check-out debe ser posterior al check-in." });
+      }
+
       const group = await storage.getGroup(req.params.groupId);
       if (!group) {
         return res.status(404).json({ error: "Grupo no encontrado" });
