@@ -1314,5 +1314,27 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)
   );
 
+  // Clean up 9 orphaned spa_accounts from March 2026 whose parent appointments
+  // were deleted. Mark as 'cancelled' (not DELETE) to preserve payment history.
+  // The 3 closed accounts have room_charge payments already applied to folios.
+  await withTimeout("spa_accounts.cancel_orphans_mar2026", T, () =>
+    db.execute(sql`
+      UPDATE spa_accounts
+      SET status = 'cancelled'
+      WHERE id IN (
+        '386e690e-e53c-4681-b437-0ac819326670',
+        '23843e10-e5e4-4f09-a876-f2c6aca2dfad',
+        '27a80722-d49b-402c-a450-55605aad58b3',
+        'ff8023f0-cd02-47d1-ad4e-3bc01c8175fb',
+        'e00b84fe-2cf3-4b00-b50f-c3d20918c5a1',
+        '19fbd230-4d0f-4505-82cc-f5a4b8624455',
+        '3d9f67ed-86a9-4065-bf81-053d2174ec6b',
+        '9eef1548-3442-4785-ba9e-46dbca1829d4',
+        '10866f01-f1db-48ea-9c5a-cc09ab2bd899'
+      )
+      AND status != 'cancelled'
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
