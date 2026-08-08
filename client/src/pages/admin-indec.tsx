@@ -42,11 +42,21 @@ type IndecRow = {
   baseRatePerNight: string | null;
 };
 
+/* ─── Helpers ────────────────────────────────────────────── */
+function getArgentinaToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+}
+
+function getArgentinaFirstOfMonth() {
+  const d = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  // d is "YYYY-MM-DD"
+  return d.slice(0, 7) + "-01";
+}
+
 /* ─── Page ───────────────────────────────────────────────── */
 export default function AdminIndecPage() {
-  const now = new Date();
-  const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  const today = now.toISOString().slice(0, 10);
+  const today = getArgentinaToday();
+  const firstOfMonth = getArgentinaFirstOfMonth();
 
   const [from, setFrom] = useState(firstOfMonth);
   const [to, setTo]     = useState(today);
