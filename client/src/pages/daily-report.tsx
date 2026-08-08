@@ -88,15 +88,80 @@ interface DailyReport {
 
 // ── Print stylesheet injected into document ──────────────────────────────────
 const PRINT_STYLE = `
+@page {
+  size: A4 portrait;
+  margin: 12mm 10mm;
+}
 @media print {
-  [data-sidebar], nav, header, aside, [data-no-print], .print\\:hidden { display: none !important; }
-  body { background: white !important; color: black !important; font-size: 11pt; }
-  .print-container { padding: 0 !important; }
-  table { font-size: 9pt; width: 100%; border-collapse: collapse; }
-  th { background: #f0f0f0 !important; font-size: 8pt; text-transform: uppercase; }
+  /* ── Ocultar chrome de la app ── */
+  [data-sidebar], nav, header, aside, [data-no-print] { display: none !important; }
+  body { background: white !important; color: black !important; margin: 0; padding: 0; }
+
+  /* ── Contenedor sin restricción de ancho ── */
+  .print-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    min-height: unset !important;
+  }
+
+  /* ── Forzar visibilidad de columnas que se ocultan por breakpoint ── */
+  .print-show { display: table-cell !important; }
+  /* ── Ocultar columnas no esenciales en impresión ── */
+  .print-hide { display: none !important; }
+
+  /* ── Tabla principal ── */
+  table {
+    font-size: 8pt;
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+  th {
+    background: #e8e8e8 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 5px !important;
+    white-space: nowrap;
+  }
+  td {
+    padding: 3px 5px !important;
+    font-size: 8pt;
+    vertical-align: top;
+  }
+  /* Hab. column: compacta y en negrita */
+  td:first-child { font-size: 9pt; white-space: nowrap; }
+
   tr { page-break-inside: avoid; }
-  .section-title { page-break-before: auto; }
-  .page-break { page-break-before: always; }
+  tbody tr:nth-child(even) { background: #f9f9f9 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+
+  /* ── Bordes de tabla visibles en papel ── */
+  table, th, td { border: 0.5px solid #ccc; }
+
+  /* ── Badges de sección (rojo/verde) con color ── */
+  .section-badge {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    border-radius: 3px !important;
+    padding: 2px 8px !important;
+    font-size: 9pt !important;
+  }
+
+  /* ── Texto de saldo: colores para identificar pendiente vs saldado ── */
+  .text-red-600, .dark\\:text-red-400 { color: #dc2626 !important; }
+  .text-green-600, .dark\\:text-green-400 { color: #16a34a !important; }
+
+  /* ── Espaciado entre secciones ── */
+  .mb-8 { margin-bottom: 10mm !important; }
+  .mb-3 { margin-bottom: 3mm !important; }
+
+  /* ── Evitar corte de sección a mitad de página ── */
+  .section-block { page-break-inside: avoid; }
 }
 `;
 
@@ -210,10 +275,10 @@ export default function DailyReportPage() {
             {/* ══════════════════════════════════════════════════════════════
                 SECTION 1: CHECK-OUTS
             ══════════════════════════════════════════════════════════════ */}
-            <div className="mb-8">
+            <div className="mb-8 section-block">
               <div className="section-title flex items-center gap-2 mb-3">
-                <div className="flex items-center gap-2 bg-red-600 text-white rounded-md px-3 py-1.5">
-                  <LogOut className="h-4 w-4" />
+                <div className="section-badge flex items-center gap-2 bg-red-600 text-white rounded-md px-3 py-1.5">
+                  <LogOut className="h-4 w-4 print:hidden" />
                   <span className="font-bold text-sm uppercase tracking-wide">Salidas del día — {fmtDate(date)}</span>
                 </div>
                 <span className="text-sm text-muted-foreground">{checkOuts.length} habitacion{checkOuts.length !== 1 ? "es" : ""}</span>
@@ -228,14 +293,17 @@ export default function DailyReportPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="text-left px-3 py-2.5 font-semibold w-14">HAB.</th>
+                        <th className="text-left px-3 py-2.5 font-semibold w-12">HAB.</th>
                         <th className="text-left px-3 py-2.5 font-semibold">HUÉSPED</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden sm:table-cell">TIPO / CAMAJE</th>
-                        <th className="text-center px-3 py-2.5 font-semibold w-16">NOCHES</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-24">CHECK-IN</th>
+                        {/* TIPO/CAMAJE — siempre visible en print */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden sm:table-cell print-show">TIPO / CAMAJE</th>
+                        <th className="text-center px-3 py-2.5 font-semibold w-14">NOCHES</th>
+                        {/* CHECK-IN — se oculta en print para que no desborde */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-24 print-hide">CHECK-IN</th>
                         <th className="text-right px-3 py-2.5 font-semibold w-28">TARIFA</th>
-                        <th className="text-right px-3 py-2.5 font-semibold w-28">SALDO</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden lg:table-cell">NOTAS</th>
+                        <th className="text-right px-3 py-2.5 font-semibold w-24">SALDO</th>
+                        {/* NOTAS — solo pantalla */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden lg:table-cell print-hide">NOTAS</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -253,23 +321,23 @@ export default function DailyReportPage() {
                               </div>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 hidden sm:table-cell">
-                            <div className="text-xs text-muted-foreground">{co.roomTypeName || ""}</div>
-                            {co.bedTypeNotes && <div className="text-xs">{co.bedTypeNotes}</div>}
+                          <td className="px-3 py-2.5 hidden sm:table-cell print-show">
+                            <div className="text-xs">{co.roomTypeName || ""}</div>
+                            {co.bedTypeNotes && <div className="text-xs text-muted-foreground">{co.bedTypeNotes}</div>}
                           </td>
                           <td className="px-3 py-2.5 text-center tabular-nums">{co.nightsStayed || co.nights}</td>
-                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground">{fmtDate(co.checkInDate)}</td>
+                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground print-hide">{fmtDate(co.checkInDate)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-xs">
                             {co.finalRatePerNight != null ? (
                               <div>
-                                <div>{fmtMoney(co.finalRatePerNight)}<span className="text-muted-foreground">/n</span></div>
-                                {co.totalRoomAmount != null && <div className="text-muted-foreground">{fmtMoney(co.totalRoomAmount)} total</div>}
+                                <div className="whitespace-nowrap">{fmtMoney(co.finalRatePerNight)}<span className="text-muted-foreground">/n</span></div>
+                                {co.totalRoomAmount != null && <div className="text-muted-foreground whitespace-nowrap">{fmtMoney(co.totalRoomAmount)} total</div>}
                               </div>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap">
                             {co.folioBalance > 0.5 ? (
                               <span className="text-red-600 dark:text-red-400">{fmtMoney(co.folioBalance)}</span>
                             ) : co.folioBalance < -0.5 ? (
@@ -278,7 +346,7 @@ export default function DailyReportPage() {
                               <span className="text-green-600 dark:text-green-400 font-medium">✓ Saldado</span>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 hidden lg:table-cell text-xs text-muted-foreground max-w-[180px] truncate">
+                          <td className="px-3 py-2.5 hidden lg:table-cell text-xs text-muted-foreground max-w-[180px] truncate print-hide">
                             {co.notes || "-"}
                           </td>
                         </tr>
@@ -292,10 +360,10 @@ export default function DailyReportPage() {
             {/* ══════════════════════════════════════════════════════════════
                 SECTION 2: CHECK-INS
             ══════════════════════════════════════════════════════════════ */}
-            <div>
+            <div className="section-block">
               <div className="section-title flex items-center gap-2 mb-3">
-                <div className="flex items-center gap-2 bg-green-600 text-white rounded-md px-3 py-1.5">
-                  <LogIn className="h-4 w-4" />
+                <div className="section-badge flex items-center gap-2 bg-green-600 text-white rounded-md px-3 py-1.5">
+                  <LogIn className="h-4 w-4 print:hidden" />
                   <span className="font-bold text-sm uppercase tracking-wide">Entradas del día — {fmtDate(date)}</span>
                 </div>
                 <span className="text-sm text-muted-foreground">{checkIns.length} habitacion{checkIns.length !== 1 ? "es" : ""}</span>
@@ -310,14 +378,18 @@ export default function DailyReportPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="text-left px-3 py-2.5 font-semibold w-14">HAB.</th>
+                        <th className="text-left px-3 py-2.5 font-semibold w-12">HAB.</th>
                         <th className="text-left px-3 py-2.5 font-semibold">HUÉSPED</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden sm:table-cell">TIPO / CAMAJE</th>
-                        <th className="text-center px-3 py-2.5 font-semibold w-16">NOCHES</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-24">CHECK-OUT</th>
+                        {/* TIPO/CAMAJE — siempre en print */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden sm:table-cell print-show">TIPO / CAMAJE</th>
+                        <th className="text-center px-3 py-2.5 font-semibold w-14">NOCHES</th>
+                        {/* CHECK-OUT — importante para entradas, mostrar en print */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-24 print-show">CHECK-OUT</th>
                         <th className="text-right px-3 py-2.5 font-semibold w-28">TARIFA</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-24">ORIGEN</th>
-                        <th className="text-left px-3 py-2.5 font-semibold hidden lg:table-cell">NOTAS</th>
+                        {/* ORIGEN — mostrar en print (texto corto) */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden md:table-cell w-20 print-show">ORIGEN</th>
+                        {/* NOTAS — solo pantalla */}
+                        <th className="text-left px-3 py-2.5 font-semibold hidden lg:table-cell print-hide">NOTAS</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -335,31 +407,31 @@ export default function DailyReportPage() {
                               </div>
                             )}
                             {ci.status === "web_checkin" && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 mt-0.5 border-blue-300 text-blue-700 dark:border-blue-700 dark:text-blue-300">
+                              <Badge variant="outline" className="text-[10px] px-1 py-0 mt-0.5 border-blue-300 text-blue-700 dark:border-blue-700 dark:text-blue-300 print:hidden">
                                 Web Check-in
                               </Badge>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 hidden sm:table-cell">
-                            <div className="text-xs text-muted-foreground">{ci.roomTypeName || ""}</div>
-                            {ci.bedTypeNotes && <div className="text-xs">{ci.bedTypeNotes}</div>}
+                          <td className="px-3 py-2.5 hidden sm:table-cell print-show">
+                            <div className="text-xs">{ci.roomTypeName || ""}</div>
+                            {ci.bedTypeNotes && <div className="text-xs text-muted-foreground">{ci.bedTypeNotes}</div>}
                           </td>
                           <td className="px-3 py-2.5 text-center tabular-nums">{ci.nights}</td>
-                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground">{fmtDate(ci.checkOutDate)}</td>
+                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground print-show whitespace-nowrap">{fmtDate(ci.checkOutDate)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-xs">
                             {ci.finalRatePerNight != null ? (
                               <div>
-                                <div>{fmtMoney(ci.finalRatePerNight)}<span className="text-muted-foreground">/n</span></div>
-                                {ci.totalRoomAmount != null && <div className="text-muted-foreground">{fmtMoney(ci.totalRoomAmount)} total</div>}
+                                <div className="whitespace-nowrap">{fmtMoney(ci.finalRatePerNight)}<span className="text-muted-foreground">/n</span></div>
+                                {ci.totalRoomAmount != null && <div className="text-muted-foreground whitespace-nowrap">{fmtMoney(ci.totalRoomAmount)} total</div>}
                               </div>
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground">
+                          <td className="px-3 py-2.5 hidden md:table-cell text-xs text-muted-foreground print-show">
                             {ci.source ? (sourceLabel[ci.source] || ci.source) : "-"}
                           </td>
-                          <td className="px-3 py-2.5 hidden lg:table-cell text-xs text-muted-foreground max-w-[180px] truncate">
+                          <td className="px-3 py-2.5 hidden lg:table-cell text-xs text-muted-foreground max-w-[180px] truncate print-hide">
                             {ci.notes || "-"}
                           </td>
                         </tr>
