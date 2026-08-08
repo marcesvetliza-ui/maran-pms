@@ -821,9 +821,11 @@ function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
     pending: { label: "Pendiente", variant: "secondary" },
     tentative: { label: "Tentativa", variant: "secondary" },
     confirmed: { label: "Confirmada", variant: "default" },
+    web_checkin: { label: "Pre Check-in", variant: "outline" },
     checked_in: { label: "Hospedado", variant: "outline" },
     checked_out: { label: "Finalizada", variant: "secondary" },
     cancelled: { label: "Cancelada", variant: "destructive" },
+    no_show: { label: "No Show", variant: "destructive" },
   };
   const config = statusConfig[status];
   return <Badge variant={config.variant}>{config.label}</Badge>;

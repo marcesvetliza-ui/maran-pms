@@ -214,7 +214,7 @@ export type InsertBedType = z.infer<typeof insertBedTypeSchema>;
 export type BedType = typeof bedTypes.$inferSelect;
 
 // Reservations
-export type ReservationStatus = "tentative" | "pending" | "confirmed" | "web_checkin" | "checked_in" | "checked_out" | "cancelled";
+export type ReservationStatus = "tentative" | "pending" | "confirmed" | "web_checkin" | "checked_in" | "checked_out" | "cancelled" | "no_show";
 export type DiscountType = "none" | "percent" | "fixed";
 export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "ota" | "empresa" | "telefono" | "agencia";
 

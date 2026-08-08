@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { assetPath } from "../utils/assetPath";
-import { storage } from "../db-storage";
+import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
@@ -124,7 +124,7 @@ export function registerReservationsRoutes(app: Express) {
       const all = await storage.getReservations();
       const found = all.find(r => {
         if (r.roomId !== roomId) return false;
-        if (["cancelled", "checked_out"].includes(r.status)) return false;
+        if (["cancelled", "checked_out", "no_show"].includes(r.status)) return false;
         if (direction === "before") return r.checkOutDate === date;
         return r.checkInDate === date;
       });
@@ -132,6 +132,78 @@ export function registerReservationsRoutes(app: Express) {
     } catch (error) {
       console.error("check-adjacent error:", error);
       res.status(500).json({ error: "Error al consultar reservas adyacentes" });
+    }
+  });
+
+  // ─── No-shows: reservas confirmadas/pendientes con check-in ya pasado ─────────
+  // DEBE ir antes de /:id para evitar colisión de rutas
+  app.get("/api/reservations/no-shows", requireAuth, async (req, res) => {
+    try {
+      const today = getArgentinaToday();
+      const rows = await db.execute(sql`
+        SELECT
+          r.*,
+          row_to_json(g.*) AS guest,
+          row_to_json(rm.*) AS room,
+          row_to_json(rt.*) AS room_type
+        FROM reservations r
+        LEFT JOIN guests g ON g.id = r.guest_id
+        LEFT JOIN rooms rm ON rm.id = r.room_id
+        LEFT JOIN room_types rt ON rt.id = r.room_type_id
+        WHERE r.status IN ('confirmed','pending','tentative')
+          AND r.check_in_date < ${today}
+        ORDER BY r.check_in_date ASC
+      `);
+      res.json(rows.rows);
+    } catch (error: any) {
+      console.error("[no-shows] Error:", error?.message);
+      res.status(500).json({ error: "Error al obtener no-shows" });
+    }
+  });
+
+  // POST /api/reservations/:id/no-show  — cierra la reserva como no-show
+  // withCharge=true → el cobro ya fue gestionado por el cliente (PrefacturaDialog);
+  //                    aquí solo se marca el status y se libera la habitación.
+  // withCharge=false → cierre sin cobro: ídem pero además registra nota.
+  app.post("/api/reservations/:id/no-show", requireAuth, async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+
+      const allowedStatuses = ["confirmed", "pending", "tentative", "no_show"];
+      if (!allowedStatuses.includes(reservation.status)) {
+        return res.status(400).json({
+          error: `La reserva no puede marcarse como no-show desde el estado '${reservation.status}'.`,
+        });
+      }
+
+      const { withCharge = false } = req.body as { withCharge?: boolean };
+      const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
+
+      // Marcar la reserva como no_show
+      await storage.updateReservation(req.params.id, { status: "no_show" } as any);
+
+      // Liberar la habitación → dirty (estaba reservada, no se usó)
+      if (reservation.roomId) {
+        await storage.updateRoom(reservation.roomId, { status: "dirty" });
+      }
+
+      // Registrar en el changelog
+      try {
+        await db.insert(reservationChangelog).values({
+          reservationId: req.params.id,
+          operador,
+          tipo: "estado",
+          descripcion: withCharge
+            ? "No-show cerrado con cobro de penalidad"
+            : "No-show cerrado sin cobro",
+        });
+      } catch { /* non-fatal */ }
+
+      res.json({ ok: true, withCharge });
+    } catch (error: any) {
+      console.error("[no-show] Error:", error?.message);
+      res.status(500).json({ error: error?.message || "Error al procesar no-show" });
     }
   });
 
@@ -256,7 +328,7 @@ export function registerReservationsRoutes(app: Express) {
           error: "Para anular una reserva usá el botón 'Anular Reserva'. Eso requiere un motivo y queda registrado en el historial.",
         });
       }
-      const VALID_STATUSES = ["tentative", "pending", "confirmed", "checked_in", "checked_out"];
+      const VALID_STATUSES = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "no_show"];
       if (req.body.status !== undefined && !VALID_STATUSES.includes(req.body.status)) delete req.body.status;
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
@@ -329,6 +401,7 @@ export function registerReservationsRoutes(app: Express) {
       const statusLabels: Record<string, string> = {
         tentative: "Tentativa", pending: "Pendiente", confirmed: "Confirmada",
         checked_in: "Check-in realizado", checked_out: "Check-out realizado", cancelled: "Cancelada",
+        no_show: "No show",
       };
       const cambios: { tipo: string; descripcion: string }[] = [];
       if (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) {

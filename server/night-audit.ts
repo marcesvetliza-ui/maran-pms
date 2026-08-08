@@ -186,6 +186,8 @@ export async function runNightAudit(options: {
       }
 
       // No-shows: confirmed/pending/tentative con checkout vencido (más de 1 día)
+      // Se marcan como "no_show" para distinguirlas de cancelaciones voluntarias.
+      // Reservas ya marcadas manualmente como no_show se saltean.
       const noShows = await db
         .select({ id: reservations.id, reservationCode: reservations.reservationCode })
         .from(reservations)
@@ -196,10 +198,10 @@ export async function runNightAudit(options: {
 
       if (noShows.length > 0) {
         for (const r of noShows) {
-          await db.update(reservations).set({ status: "cancelled" } as any).where(eq(reservations.id, r.id));
+          await db.update(reservations).set({ status: "no_show" } as any).where(eq(reservations.id, r.id));
           autoNoShowCount++;
         }
-        naLog(`Auto-cancelación: ${autoNoShowCount} reservas no-show canceladas`);
+        naLog(`Auto no-show: ${autoNoShowCount} reservas marcadas como no_show`);
       }
     } catch (autoErr: any) {
       naLog(`Error en auto-cierre de vencidas: ${autoErr.message}`);
