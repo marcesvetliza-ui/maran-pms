@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -58,7 +58,7 @@ let rowCounter = 0;
 const newRowId = () => `row-${++rowCounter}`;
 
 export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, entityLabel, balance, onSuccess }: CCPaymentDialogProps) {
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
+  const [paymentDate, setPaymentDate] = useState(getArgentinaToday());
   const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
@@ -82,7 +82,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   // Reset on open
   useEffect(() => {
     if (open) {
-      setPaymentDate(new Date().toISOString().split("T")[0]);
+      setPaymentDate(getArgentinaToday());
       setPaymentDescription("Pago recibido");
       setPaymentReference("");
       setPaymentRows([{ id: newRowId(), method: "transferencia", methodOther: "", amount: "" }]);

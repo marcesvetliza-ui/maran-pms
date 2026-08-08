@@ -16,7 +16,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { toArgentinaDateStr, fmtMoney } from "@/lib/utils";
+import { toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, RatePlan, Package, BedType, Company, Agency } from "@shared/schema";
@@ -210,7 +210,7 @@ export function QuickReservationDialog({
         discountValue: selectedPackage?.discountPercent || "0", createdAt: new Date().toISOString(),
       });
       if (pendingCharges.length > 0 && createdRes?.id) {
-        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const todayStr = getArgentinaToday();
         try {
           for (const charge of pendingCharges) {
             const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);

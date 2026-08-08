@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -21,7 +21,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+const today = () => getArgentinaToday();
 const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
 
 function fPeso(n: number | string | undefined | null) {

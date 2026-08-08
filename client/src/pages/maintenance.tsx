@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -204,7 +205,7 @@ function PreventiveTab() {
   const [formAssignedTo, setFormAssignedTo] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
 
   const { data: tasks = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/maintenance/preventive"],
@@ -267,18 +268,18 @@ function PreventiveTab() {
   }
 
   const overdue = tasks.filter(t => t.next_due_at < today);
-  const dueThisWeek = tasks.filter(t => t.next_due_at >= today && t.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]);
-  const upcoming = tasks.filter(t => t.next_due_at > new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]);
+  const dueThisWeek = tasks.filter(t => t.next_due_at >= today && t.next_due_at <= toArgentinaDateStr(new Date(Date.now() + 7 * 86400000)));
+  const upcoming = tasks.filter(t => t.next_due_at > toArgentinaDateStr(new Date(Date.now() + 7 * 86400000)));
 
   function urgencyStyle(task: any): string {
     if (task.next_due_at < today) return "border-l-4 border-l-red-500";
-    if (task.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]) return "border-l-4 border-l-yellow-500";
+    if (task.next_due_at <= toArgentinaDateStr(new Date(Date.now() + 7 * 86400000))) return "border-l-4 border-l-yellow-500";
     return "border-l-4 border-l-green-500";
   }
 
   function urgencyBadge(task: any) {
     if (task.next_due_at < today) return <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 text-xs">Vencida</Badge>;
-    if (task.next_due_at <= new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]) return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 text-xs">Esta semana</Badge>;
+    if (task.next_due_at <= toArgentinaDateStr(new Date(Date.now() + 7 * 86400000))) return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 text-xs">Esta semana</Badge>;
     return <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">Al día</Badge>;
   }
 

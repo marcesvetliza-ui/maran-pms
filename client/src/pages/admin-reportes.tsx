@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, startOfMonth, endOfMonth } from "date-fns";
+import { getArgentinaToday } from "@/lib/date-utils";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
@@ -23,10 +24,6 @@ function fPeso(n: number | undefined | null) {
 function fPct(n: number | undefined | null) {
   const v = n ?? 0;
   return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
-}
-
-function getArgentinaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }
 
 function currentPeriodo() {
@@ -778,7 +775,7 @@ function ProveedoresReport() {
 // ─── Comparativo Mensual ──────────────────────────────────────────────────────
 
 function ComparativoReport() {
-  const [año, setAño] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 4));
+  const [año, setAño] = useState(() => getArgentinaToday().slice(0, 4));
 
   const { data, isLoading } = useQuery<any>({
     queryKey: ["/api/reports/comparativo", año],

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -496,7 +496,7 @@ function AgingReportSection({ accountSummary }: {
     queryKey: ["/api/account-movements/report-aging"],
     queryFn: async () => {
       const from = "2000-01-01";
-      const to = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const to = getArgentinaToday();
       const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}`);
       return res.json();
     },
@@ -652,15 +652,15 @@ export default function AdminCuentasPage() {
   });
 
   const [reporteFrom, setReporteFrom] = useState(() => {
-    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7) + "-01";
+    return getArgentinaToday().slice(0, 7) + "-01";
   });
-  const [reporteTo, setReporteTo] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [reporteTo, setReporteTo] = useState(() => getArgentinaToday());
 
   // Recibos emitidos filters
   const [recibosFrom, setRecibosFrom] = useState(() => {
-    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7) + "-01";
+    return getArgentinaToday().slice(0, 7) + "-01";
   });
-  const [recibosTo, setRecibosTo] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [recibosTo, setRecibosTo] = useState(() => getArgentinaToday());
   const [recibosEntityType, setRecibosEntityType] = useState("");
   const [recibosSearch, setRecibosSearch] = useState("");
 

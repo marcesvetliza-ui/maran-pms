@@ -5,12 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getArgentinaToday } from "@/lib/date-utils";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function getArgentinaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
 
 function fmtDate(d: string) {
   if (!d) return "-";

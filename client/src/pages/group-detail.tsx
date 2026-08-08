@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -677,7 +677,7 @@ export default function GroupDetailPage() {
   const groupId = params.id as string;
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   
   const [showAddBlockDialog, setShowAddBlockDialog] = useState(false);
   const [assigningBlock, setAssigningBlock] = useState<GroupRoomBlockWithDetails | null>(null);
@@ -718,7 +718,7 @@ export default function GroupDetailPage() {
   const [showFolioPaymentDialog, setShowFolioPaymentDialog] = useState(false);
   const [folioChargeDescription, setFolioChargeDescription] = useState("");
   const [folioChargeAmount, setFolioChargeAmount] = useState("");
-  const [folioChargeDate, setFolioChargeDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [folioChargeDate, setFolioChargeDate] = useState(getArgentinaToday());
   const [folioChargeCategory, setFolioChargeCategory] = useState("otros");
   const [folioPaymentAmount, setFolioPaymentAmount] = useState("");
   const [folioPaymentMethod, setFolioPaymentMethod] = useState("");
@@ -800,7 +800,7 @@ export default function GroupDetailPage() {
 
   const addIndividualChargeMutation = useMutation({
     mutationFn: async ({ reservationId, description, amount, category }: { reservationId: string; description: string; amount: string; category: string }) => {
-      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const todayStr = getArgentinaToday();
       return apiRequest("POST", "/api/charges", { reservationId, description, amount, category, date: todayStr });
     },
     onSuccess: () => {
@@ -1042,7 +1042,7 @@ export default function GroupDetailPage() {
       setShowAddGroupChargeDialog(false);
       setFolioChargeDescription("");
       setFolioChargeAmount("");
-      setFolioChargeDate(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+      setFolioChargeDate(getArgentinaToday());
       setFolioChargeCategory("otros");
     },
     onError: (e: any) => toast({ title: "Error al agregar cargo", description: parseApiError(e), variant: "destructive" }),

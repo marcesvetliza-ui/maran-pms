@@ -21,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
-import { getLocalToday, fmtMoney } from "@/lib/utils";
+import { getLocalToday, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
@@ -252,7 +252,7 @@ export function ReservationDetailModal({
   const canUndoCheckIn = reservation?.status === "checked_in" && reservation?.checkInDate === todayLocal;
   const canUndoCheckOut = reservation?.status === "checked_out" &&
     reservation?.checkedOutAt != null &&
-    new Date(reservation.checkedOutAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) === todayLocal;
+    toArgentinaDateStr(new Date(reservation.checkedOutAt)) === todayLocal;
   const canCancel = reservation?.status === "confirmed" || reservation?.status === "web_checkin" || reservation?.status === "pending" || reservation?.status === "tentative";
   const totalCharges = reservation?.charges?.reduce((sum, c) => sum + parseFloat(c.amount), 0) || 0;
 

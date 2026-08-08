@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
-import { getLocalToday, formatDateAR, toArgentinaDateStr, fmtMoney } from "@/lib/utils";
+import { getLocalToday, formatDateAR, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import {
   CalendarCheck,
   CalendarRange,
@@ -190,7 +190,7 @@ export function ReservationFormDialog({
   const today = getLocalToday();
   const tomorrowDate = new Date();
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const tomorrow = toArgentinaDateStr(tomorrowDate);
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(
     reservation?.guest || null
@@ -259,7 +259,7 @@ export function ReservationFormDialog({
       if (defaultValues?.checkInDate) {
         const d = new Date(defaultValues.checkInDate + "T12:00:00");
         d.setDate(d.getDate() + 1);
-        return d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        return toArgentinaDateStr(d);
       }
       return tomorrow;
     })(),
@@ -310,7 +310,7 @@ export function ReservationFormDialog({
           if (defaultValues?.checkInDate) {
             const d = new Date(defaultValues.checkInDate + "T12:00:00");
             d.setDate(d.getDate() + 1);
-            return d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            return toArgentinaDateStr(d);
           }
           return tomorrow;
         })(),
@@ -598,7 +598,7 @@ export function ReservationFormDialog({
       const next = new Date(value + "T12:00:00");
       if (!isNaN(next.getTime())) {
         next.setDate(next.getDate() + 1);
-        newCheckOut = next.toISOString().split("T")[0];
+        newCheckOut = toArgentinaDateStr(next);
       }
     }
     const nights = calculateNights(newCheckIn, newCheckOut);
@@ -670,7 +670,7 @@ export function ReservationFormDialog({
       // must still appear in the board. Errors here are shown as warnings without
       // rolling back the already-saved reservation.
       if (pendingCharges.length > 0) {
-        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const todayStr = getArgentinaToday();
         try {
           for (const charge of pendingCharges) {
             const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
@@ -1310,7 +1310,7 @@ export function ReservationFormDialog({
                       id="checkOut"
                       type="date"
                       value={formData.checkOutDate}
-                      min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return d.toISOString().split("T")[0]; })() : undefined}
+                      min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return toArgentinaDateStr(d); })() : undefined}
                       onChange={(e) => handleDateChange("checkOutDate", e.target.value)}
                       required
                       className={datesInvalid ? "border-destructive" : ""}
@@ -6155,7 +6155,7 @@ export default function ReservationsPage() {
                 if (selectedReservation && duplicateCheckIn && duplicateCheckOut) {
                   // Use string comparison (YYYY-MM-DD is lexicographically sortable) to avoid
                   // UTC-midnight parsing issues with new Date("YYYY-MM-DD") in Argentina (UTC-3)
-                  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                  const todayStr = getArgentinaToday();
                   
                   if (duplicateCheckIn < todayStr) {
                     toast({ title: "Error", description: "La fecha de entrada no puede ser en el pasado", variant: "destructive" });

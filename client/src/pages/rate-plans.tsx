@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { subDays } from "date-fns";
-import { formatDateAR, fmtMoney } from "@/lib/utils";
+import { formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import {
   DollarSign,
   Plus,
@@ -142,7 +142,7 @@ function RatePlanFormDialog({
   const createVersionMutation = useMutation({
     mutationFn: async () => {
       if (!effectiveFrom) throw new Error("Fecha requerida");
-      const closeDate = subDays(new Date(effectiveFrom + "T12:00:00"), 1).toISOString().split("T")[0];
+      const closeDate = toArgentinaDateStr(subDays(new Date(effectiveFrom + "T12:00:00"), 1));
       await apiRequest("PATCH", `/api/rate-plans/${ratePlan!.id}`, { validTo: closeDate });
       const payload = Object.fromEntries(
         Object.entries(formData).filter(([_, v]) => v !== "" && v !== undefined)

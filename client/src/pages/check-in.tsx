@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { getLocalToday, formatDateAR, fmtMoney } from "@/lib/utils";
+import { getLocalToday, formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import {
   LogIn,
   Search,
@@ -183,7 +183,7 @@ export default function CheckInPage() {
     // Fecha de check-out según las noches seleccionadas
     const checkOutDate = new Date();
     checkOutDate.setDate(checkOutDate.getDate() + nights);
-    const checkOutStr = checkOutDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const checkOutStr = toArgentinaDateStr(checkOutDate);
 
     // Habitaciones con reservas que se superponen al período del walk-in
     const blockedByReservation = new Set(
@@ -338,7 +338,7 @@ export default function CheckInPage() {
       const today = getLocalToday();
       const coDate = new Date();
       coDate.setDate(coDate.getDate() + nights);
-      const checkOutDate = coDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const checkOutDate = toArgentinaDateStr(coDate);
       
       const res = await apiRequest("POST", "/api/reservations", {
         reservationCode: "", 

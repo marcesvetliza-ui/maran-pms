@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -928,8 +929,8 @@ export function AdminCajaConfigPage() {
               <div className="flex flex-wrap gap-2">
                 {[
                   { label: "Enero", start: "2025-01-01", end: "2025-01-31" },
-                  { label: "Mes anterior", start: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 2))); })(), end: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 2))); })() },
-                  { label: "Este mes", start: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 1))); })(), end: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 1))); })() },
+                  { label: "Mes anterior", start: (() => { const [y,m] = getArgentinaToday().split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 2))); })(), end: (() => { const [y,m] = getArgentinaToday().split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 2))); })() },
+                  { label: "Este mes", start: (() => { const [y,m] = getArgentinaToday().split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 1))); })(), end: (() => { const [y,m] = getArgentinaToday().split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 1))); })() },
                   { label: "2025 completo", start: "2025-01-01", end: "2025-12-31" },
                 ].map(r => (
                   <Button

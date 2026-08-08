@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -538,7 +539,7 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const todayAR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayAR = getArgentinaToday();
 
   const voidPaymentMutation = useMutation({
     mutationFn: async ({ paymentId, motivo }: { paymentId: string; motivo: string }) => {
@@ -698,7 +699,7 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
           <p className="text-sm text-muted-foreground text-center py-4">Sin movimientos aún</p>
         ) : (
           folio.movements.map(mov => {
-            const movDateAR = new Date(mov.createdAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            const movDateAR = toArgentinaDateStr(new Date(mov.createdAt));
             const canVoid = allowVoid
               && mov.type === "payment"
               && !!mov.sourceId

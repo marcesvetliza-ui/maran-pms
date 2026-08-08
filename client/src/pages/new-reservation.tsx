@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
@@ -50,13 +50,12 @@ export default function NewReservationPage() {
   const [selectedRatePlanId, setSelectedRatePlanId] = useState<string>("");
   const [checkInDate, setCheckInDate] = useState<string>(() => {
     if (prefilledDate) return prefilledDate;
-    const today = new Date();
-    return today.toISOString().split("T")[0];
+    return getArgentinaToday();
   });
   const [checkOutDate, setCheckOutDate] = useState<string>(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split("T")[0];
+    return toArgentinaDateStr(tomorrow);
   });
   const [numberOfGuests, setNumberOfGuests] = useState<number>(1);
   const [notes, setNotes] = useState<string>("");
@@ -309,7 +308,7 @@ export default function NewReservationPage() {
       });
       const created = await res.json();
       if (pendingCharges.length > 0 && created?.id) {
-        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const todayStr = getArgentinaToday();
         for (const charge of pendingCharges) {
           const totalAmt = charge.isRecurring
             ? charge.amount

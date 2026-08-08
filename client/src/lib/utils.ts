@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -11,13 +12,11 @@ export function fmtMoney(value: number | string | null | undefined, decimals = 2
   return n.toLocaleString("es-AR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-export function getLocalToday(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
+// Re-exported from date-utils — canonical implementation lives there.
+export { getArgentinaToday, toArgentinaDateStr };
 
-export function toArgentinaDateStr(date: Date): string {
-  return date.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
+/** @deprecated Use getArgentinaToday() instead */
+export const getLocalToday = getArgentinaToday;
 
 export function formatDateAR(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";

@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { getLocalToday } from "@/lib/utils";
+import { getLocalToday, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
 import {
   DoorOpen,
   Users,
@@ -233,13 +233,13 @@ export default function Dashboard() {
   const [inHouseOpen, setInHouseOpen] = useLocalState(false);
   const [breakfastOpen, setBreakfastOpen] = useLocalState(false);
   const [inHouseDate, setInHouseDate] = useLocalState(() =>
-    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    getArgentinaToday()
   );
   const [policeFrom, setPoliceFrom] = useLocalState(() =>
-    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    getArgentinaToday()
   );
   const [policeTo, setPoliceTo] = useLocalState(() =>
-    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    getArgentinaToday()
   );
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
@@ -392,10 +392,10 @@ export default function Dashboard() {
   const { data: cancelledLogs = [] } = useQuery<any[]>({
     queryKey: ["/api/cancelled-reservations"],
   });
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayStr = getArgentinaToday();
   const todayCancelled = cancelledLogs.filter((log: any) => {
     const d = new Date(log.cancellationDate);
-    const s = d.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const s = toArgentinaDateStr(d);
     return s === todayStr;
   });
 

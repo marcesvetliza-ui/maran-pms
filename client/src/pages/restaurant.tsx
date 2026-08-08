@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
 import { useAuth } from "@/App";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -691,7 +691,7 @@ export default function RestaurantPage() {
   const [restEmailReceiptAddress, setRestEmailReceiptAddress] = useState("");
   const [isReservationDialogOpen, setIsReservationDialogOpen] = useState(false);
   const [isDailyReservationsOpen, setIsDailyReservationsOpen] = useState(false);
-  const [reservationDate, setReservationDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [reservationDate, setReservationDate] = useState(getArgentinaToday());
   const [editingReservation, setEditingReservation] = useState<TableReservation | null>(null);
   const [isEditReservationOpen, setIsEditReservationOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -767,11 +767,11 @@ export default function RestaurantPage() {
   const [evtNotes, setEvtNotes] = useState("");
   const [evtAdvanceAmount, setEvtAdvanceAmount] = useState("");
   const [evtAdvanceMethod, setEvtAdvanceMethod] = useState("efectivo");
-  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => getArgentinaToday());
   const [showItemNotes, setShowItemNotes] = useState(false);
   const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
-    new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    getArgentinaToday()
   );
   const [reservationSearchText, setReservationSearchText] = useState("");
   const [reservationStatusFilter, setReservationStatusFilter] = useState<string>("all");
@@ -796,7 +796,7 @@ export default function RestaurantPage() {
   const [ncParcial, setNcParcial] = useState(false);
   const [ncMontoParcial, setNcMontoParcial] = useState("");
   const [ncVoidFolioPaymentIds, setNcVoidFolioPaymentIds] = useState<Set<string>>(new Set());
-  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 7 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [ncDateFrom, setNcDateFrom] = useState(toArgentinaDateStr(new Date(Date.now() - 7 * 86400000)));
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
   const [ncPuntoVenta, setNcPuntoVenta] = useState("todos");
@@ -814,7 +814,7 @@ export default function RestaurantPage() {
   const [compFormaPago, setCompFormaPago] = useState("efectivo");
   const [compCcEntityType, setCompCcEntityType] = useState<"company" | "agency">("company");
   const [compCcEntityId, setCompCcEntityId] = useState("");
-  const [ncDateTo, setNcDateTo] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const [ncDateTo, setNcDateTo] = useState(getArgentinaToday());
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
   const [fbIsExento, setFbIsExento] = useState(false);
@@ -925,7 +925,7 @@ export default function RestaurantPage() {
       guestPhone: "",
       guestEmail: "",
       partySize: 2,
-      reservationDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+      reservationDate: getArgentinaToday(),
       reservationTime: "20:00",
       notes: "",
       clientId: null,
@@ -1001,12 +1001,12 @@ export default function RestaurantPage() {
     queryKey: ["/api/agencies"],
   });
 
-  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayISO = getArgentinaToday();
   const closeOrderTableId = currentOrder?.tableId ?? null;
   // Use the date the order was opened (not today) to find the correct reservation advances.
   // Orders opened yesterday should look for yesterday's reservation advances, not today's.
   const closeOrderDate = currentOrder?.openedAt
-    ? new Date(currentOrder.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
+    ? toArgentinaDateStr(new Date(currentOrder.openedAt))
     : todayISO;
   const { data: closeDialogTableAdvances = [] } = useQuery<RestaurantReservationAdvance[]>({
     queryKey: ["/api/restaurant/tables", closeOrderTableId, "advances", closeOrderDate],
@@ -1065,7 +1065,7 @@ export default function RestaurantPage() {
     setCloseBillingClientSearch("");
     setCloseBillingClientSearchOpen(false);
     if (!currentOrder.tableId) { setCloseBillingClient(null); return; }
-    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const todayStr = getArgentinaToday();
     const linkedRes = (reservations || []).find(
       (r: any) => r.tableId === currentOrder.tableId && r.status === "check_in" && r.reservationDate === todayStr
     );
@@ -1139,7 +1139,7 @@ export default function RestaurantPage() {
     onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
   });
 
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayStr = getArgentinaToday();
   const todayReservations = reservations.filter(r =>
     r.reservationDate === todayStr &&
     !["cancelled", "completed", "historical", "no_show"].includes(r.status)
@@ -1328,7 +1328,7 @@ export default function RestaurantPage() {
       }
       // Auto check-in: if the new order's table has a "confirmed" reservation for today, auto-set to check_in
       if (order.tableId) {
-        const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const _todayStr = getArgentinaToday();
         const _confirmedRes = reservations.find(r =>
           r.tableId === order.tableId && r.status === "confirmed" && r.reservationDate === _todayStr
         );
@@ -1716,7 +1716,7 @@ export default function RestaurantPage() {
       // Auto-complete: if the closed order's table has a check_in reservation today, move it to historical
       if (currentOrder?.tableId) {
         const _closedTableId = currentOrder.tableId;
-        const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const _todayStr = getArgentinaToday();
         const _checkedInRes = reservations.find(r =>
           r.tableId === _closedTableId && r.status === "check_in" && r.reservationDate === _todayStr
         );
@@ -1928,7 +1928,7 @@ export default function RestaurantPage() {
     setEvtNotes(table.eventNotes || "");
     setEvtAdvanceAmount((table as any).eventAdvanceAmount || "");
     setEvtAdvanceMethod((table as any).eventAdvanceMethod || "efectivo");
-    setEvtAdvanceDate((table as any).eventAdvanceDate || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
+    setEvtAdvanceDate((table as any).eventAdvanceDate || getArgentinaToday());
     setIsEventConfigOpen(true);
   };
 
@@ -1957,10 +1957,10 @@ export default function RestaurantPage() {
       // Defensa frontend: solo considerar órdenes de HOY en Argentina.
       // Aunque el backend ya filtra por fecha, esta capa extra previene que
       // órdenes viejas (de días anteriores) que escaparon el filtro abran el dialog.
-      const todayArgentina = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const todayArgentina = getArgentinaToday();
       const findTodayOrder = (orderList: typeof orders) => orderList.find((o) => {
         if (o.tableId !== table.id || o.status === "closed" || o.status === "cancelled") return false;
-        const orderDate = new Date(o.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+        const orderDate = toArgentinaDateStr(new Date(o.openedAt));
         return orderDate === todayArgentina;
       });
       const tableOrder = findTodayOrder(orders);
@@ -2164,7 +2164,7 @@ export default function RestaurantPage() {
     setDraggedTable(null);
   };
 
-  const todayForFilter = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayForFilter = getArgentinaToday();
   const filteredReservations = reservations
     .filter(r => {
       if (reservationViewMode === "day") {
@@ -2530,7 +2530,7 @@ export default function RestaurantPage() {
 
           {/* Reservas sin mesa asignada — hoy */}
           {(() => {
-            const todayFloor = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            const todayFloor = getArgentinaToday();
             const tablelessToday = reservations.filter(
               r => !r.tableId && r.reservationDate === todayFloor && ["pending","confirmed","check_in"].includes(r.status)
             ).sort((a,b) => a.reservationTime.localeCompare(b.reservationTime));
@@ -2716,7 +2716,7 @@ export default function RestaurantPage() {
                           const table = areaTables.find(t => t.positionX === x && t.positionY === y);
 
                           if (table) {
-                            const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                            const todayISO = getArgentinaToday();
                             const todayTableReservations = reservations.filter(
                               (r) => r.tableId === table.id && r.reservationDate === todayISO &&
                                 ["pending", "confirmed", "check_in", "seated"].includes(r.status)
@@ -2883,7 +2883,7 @@ export default function RestaurantPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {activeOrders.map((order) => {
-                const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                const todayISO = getArgentinaToday();
                 const orderTableReservation = order.tableId
                   ? reservations
                       .filter(r => r.tableId === order.tableId && r.reservationDate === todayISO &&
@@ -2966,7 +2966,7 @@ export default function RestaurantPage() {
                           setCloseDiscountType("percent");
                           setCloseRoomId("");
                           setRoomSearchFilter("");
-                          const _todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const _todayISO = getArgentinaToday();
                           const _tableRes = reservations.find(r => r.tableId === order.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISO);
                           const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
                           const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
@@ -3035,7 +3035,7 @@ export default function RestaurantPage() {
                         data-testid={`button-resend-receipt-${order.orderNumber}`}
                         onClick={() => {
                           setCurrentOrder(order);
-                          const _todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const _todayStr = getArgentinaToday();
                           const _linkedRes = order.tableId
                             ? (reservations || []).find((r) => r.tableId === order.tableId && r.reservationDate === _todayStr)
                             : null;
@@ -5153,7 +5153,7 @@ export default function RestaurantPage() {
                   setCloseDiscountType("percent");
                   setCloseRoomId("");
                   setRoomSearchFilter("");
-                  const _todayISOc = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                  const _todayISOc = getArgentinaToday();
                   const _tableResc = currentOrder ? reservations.find(r => r.tableId === currentOrder.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISOc) : null;
                   const _resClientc = (_tableResc as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableResc as any).clientId) : null;
                   const _needsFacturac = _resClientc && _resClientc.vatCondition && !["consumidor_final", ""].includes(_resClientc.vatCondition || "");
@@ -7760,7 +7760,7 @@ export default function RestaurantPage() {
               onChange={(e) => setReservationSearchText(e.target.value)}
             />
             {(() => {
-              const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+              const todayStr = getArgentinaToday();
               const filteredRes = reservations.filter(r => {
                 if (r.status === "cancelled") return false;
                 if (reservationViewMode === "day" && r.reservationDate !== reservationDateFilter) return false;
@@ -7824,7 +7824,7 @@ export default function RestaurantPage() {
                           </div>
                         </div>
                         {(() => {
-                          const todayStr2 = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const todayStr2 = getArgentinaToday();
                           const isPast = reservation.reservationDate < todayStr2;
                           const isFinished = isPast && (reservation.status === "confirmed" || reservation.status === "pending");
                           return (

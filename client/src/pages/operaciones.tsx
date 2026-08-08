@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -302,7 +302,7 @@ export default function OperacionesPage() {
                     {(data?.mantenimiento?.tareas ?? []).length > 0 && (
                       <div className="space-y-1.5">
                         {data.mantenimiento.tareas.map((t: any) => {
-                          const isOverdue = t.next_due_at < new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+                          const isOverdue = t.next_due_at < getArgentinaToday();
                           return (
                             <div key={t.id} className={`flex items-center justify-between gap-2 text-xs rounded px-2 py-1 ${isOverdue ? "bg-red-50 dark:bg-red-900/20" : "bg-yellow-50 dark:bg-yellow-900/20"}`}>
                               <span className={`truncate font-medium ${isOverdue ? "text-red-700 dark:text-red-300" : "text-yellow-700 dark:text-yellow-300"}`}>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { getArgentinaToday, toArgentinaDateStr, getArgentinaFirstOfMonth } from "@/lib/date-utils";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
@@ -90,17 +91,17 @@ function formatCurrency(value: number): string {
 }
 
 function getDateRange(period: PeriodType): { from: string; to: string } {
-  const now = new Date();
-  const to = now.toISOString().split("T")[0];
+  const to = getArgentinaToday();
   let from = to;
   if (period === "week") {
+    const now = new Date();
     const d = new Date(now);
     d.setDate(d.getDate() - d.getDay());
-    from = d.toISOString().split("T")[0];
+    from = toArgentinaDateStr(d);
   } else if (period === "month") {
-    from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+    from = getArgentinaFirstOfMonth();
   } else if (period === "year") {
-    from = new Date(now.getFullYear(), 0, 1).toISOString().split("T")[0];
+    from = to.slice(0, 4) + "-01-01";
   }
   return { from, to };
 }

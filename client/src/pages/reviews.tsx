@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   MessageSquare,
@@ -116,7 +117,7 @@ function ReviewFormDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
 
   const [formData, setFormData] = useState({
     guestId: "",

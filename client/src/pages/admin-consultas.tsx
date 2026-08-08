@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { useLocation } from "wouter";
 import {
   FileText, Download, FileSpreadsheet, FileCode,
@@ -352,7 +353,7 @@ function LibroIVAVentasSection() {
 // ─── CC Proveedores ───────────────────────────────────────────────────────────
 
 function CCProveedoresSection() {
-  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayISO = getArgentinaToday();
   const [fechaCorte, setFechaCorte] = useState(todayISO);
 
   const pdfUrl = fechaCorte

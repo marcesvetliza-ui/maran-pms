@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -1923,7 +1923,7 @@ ${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${
 }
 
 function ResumenDiaTab() {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const [fecha, setFecha] = useState(today);
   const { data, isLoading } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
     queryKey: ["/api/reports/caja-unificada", fecha],

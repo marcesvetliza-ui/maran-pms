@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -100,10 +101,10 @@ function GroupFormDialog({
   const { toast } = useToast();
   const isEditing = !!group;
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const tomorrowDate = new Date();
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = tomorrowDate.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const tomorrow = toArgentinaDateStr(tomorrowDate);
 
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<Partial<InsertGroup> & { billingEntityType?: string; billingEntityId?: string }>({
@@ -936,7 +937,7 @@ export default function GroupsPage() {
     },
   });
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
 
   const matchesFilter = (group: GroupWithDetails) => {
     const matchesSearch =

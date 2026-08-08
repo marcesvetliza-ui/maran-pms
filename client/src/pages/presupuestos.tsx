@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import {
@@ -72,7 +72,7 @@ const ESTADO_CONFIG: Record<PresupuestoEstado, { label: string; icon: typeof Che
 const toNum = (v: string) => parseFloat(v.replace(",", ".")) || 0;
 const fmt = (v: number) => v.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string) => { try { const [y,m,day] = d.split("-"); return `${day}/${m}/${y}`; } catch { return d; } };
-const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+const today = getArgentinaToday();
 
 function calcSubtotal(cant: string, precio: string, dto: string): string {
   const s = toNum(cant) * toNum(precio) * (1 - toNum(dto) / 100);

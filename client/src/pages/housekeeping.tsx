@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useAuth } from "@/App";
@@ -486,7 +487,7 @@ function LostFoundForm({
   onSubmit: (data: Partial<InsertLostFound>) => void;
   isPending: boolean;
 }) {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const [description, setDescription] = useState(item?.description || "");
   const [category, setCategory] = useState<string>(item?.category || "otro");
   const [location, setLocation] = useState(item?.location || "");
@@ -709,7 +710,7 @@ function DeliveryDialog({
   onConfirm: (data: { status: string; claimedBy: string; claimedDate: string; deliveryType: string; deliveredBy: string; notes?: string }) => void;
   isPending: boolean;
 }) {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const [claimedBy, setClaimedBy] = useState("");
   const [claimedDate, setClaimedDate] = useState(today);
   const [deliveryType, setDeliveryType] = useState("retiro_hotel");
@@ -1302,7 +1303,7 @@ export default function Housekeeping() {
     queryKey: ["/api/rooms"],
   });
 
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
     queryKey: ["/api/housekeeping", today],
     queryFn: () =>

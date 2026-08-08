@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   ClipboardList, Download, Globe, Bed, CalendarDays, Users,
 } from "lucide-react";
+import { getArgentinaToday, getArgentinaFirstOfMonth } from "@/lib/date-utils";
 
 /* ─── CSV export ─────────────────────────────────────────── */
 function exportCSV(filename: string, sections: { title: string; headers: string[]; rows: (string | number)[][] }[]) {
@@ -41,17 +42,6 @@ type IndecRow = {
   finalRatePerNight: string | null;
   baseRatePerNight: string | null;
 };
-
-/* ─── Helpers ────────────────────────────────────────────── */
-function getArgentinaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
-
-function getArgentinaFirstOfMonth() {
-  const d = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-  // d is "YYYY-MM-DD"
-  return d.slice(0, 7) + "-01";
-}
 
 /* ─── Page ───────────────────────────────────────────────── */
 export default function AdminIndecPage() {

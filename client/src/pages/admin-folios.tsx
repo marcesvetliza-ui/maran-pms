@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FolioViewer from "@/components/FolioViewer";
+import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 
 // ─── Transfer description link helper ────────────────────────────────────────
 
@@ -189,14 +190,10 @@ function formatTime(iso: string) {
   catch { return ""; }
 }
 
-function getArgentinaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-}
-
 function addDays(dateStr: string, n: number) {
   const d = new Date(dateStr + "T12:00:00");
   d.setDate(d.getDate() + n);
-  return d.toLocaleDateString("en-CA");
+  return toArgentinaDateStr(d);
 }
 
 function movementIcon(type: string) {

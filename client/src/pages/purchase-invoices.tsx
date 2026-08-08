@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Link } from "wouter";
-import { getLocalToday, fmtMoney } from "@/lib/utils";
+import { getLocalToday, fmtMoney, getArgentinaToday } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1689,7 +1689,7 @@ function PaymentOrderDialog({
 // ─── Pagos a Proveedores Tab ──────────────────────────────────────────────────
 
 function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => void }) {
-  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayISO = getArgentinaToday();
   const [fechaCorte, setFechaCorte] = useState(todayISO);
 
   const { data: proveedores = [], isLoading } = useQuery<any[]>({

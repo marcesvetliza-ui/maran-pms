@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -219,7 +220,7 @@ export default function InventoryPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
   const [searchQuery, setSearchQuery] = useState("");
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const today = getArgentinaToday();
   const [consumoFrom, setConsumoFrom] = useState(today);
   const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);

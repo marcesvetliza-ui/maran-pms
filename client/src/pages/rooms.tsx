@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getArgentinaToday } from "@/lib/date-utils";
 import { useLocation } from "wouter";
 import { ReservationDetailModal } from "@/components/planning-reservation-detail";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -416,7 +417,7 @@ const SEGMENT_LABELS: Record<string, string> = {
 };
 
 function OcupadaCard({ item, onOpen }: { item: any; onOpen?: () => void }) {
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayStr = getArgentinaToday();
   const checkOutToday = item.checkOut === todayStr;
   const checkOutTomorrow = item.nightsRemaining === 1;
 
@@ -945,7 +946,7 @@ export default function RoomsPage() {
       .filter(Boolean)
   );
 
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const todayStr = getArgentinaToday();
 
   const activeResByRoom = new Map<string, any>();
   const entradaHoyRoomIds = new Set<string>();
