@@ -6154,16 +6154,15 @@ export default function ReservationsPage() {
             <Button
               onClick={() => {
                 if (selectedReservation && duplicateCheckIn && duplicateCheckOut) {
-                  const checkIn = new Date(duplicateCheckIn);
-                  const checkOut = new Date(duplicateCheckOut);
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
+                  // Use string comparison (YYYY-MM-DD is lexicographically sortable) to avoid
+                  // UTC-midnight parsing issues with new Date("YYYY-MM-DD") in Argentina (UTC-3)
+                  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
                   
-                  if (checkIn < today) {
+                  if (duplicateCheckIn < todayStr) {
                     toast({ title: "Error", description: "La fecha de entrada no puede ser en el pasado", variant: "destructive" });
                     return;
                   }
-                  if (checkOut <= checkIn) {
+                  if (duplicateCheckOut <= duplicateCheckIn) {
                     toast({ title: "Error", description: "La fecha de salida debe ser posterior a la entrada", variant: "destructive" });
                     return;
                   }

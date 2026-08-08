@@ -361,11 +361,11 @@ function ReservationDetailPanel({ reservationId }: { reservationId: string }) {
         </div>
         <div>
           <span className="text-xs text-muted-foreground">Check-in</span>
-          <p className="font-medium">{format(new Date(res.checkInDate), "dd/MM/yyyy", { locale: es })}</p>
+          <p className="font-medium">{format(new Date(res.checkInDate + "T12:00:00"), "dd/MM/yyyy", { locale: es })}</p>
         </div>
         <div>
           <span className="text-xs text-muted-foreground">Check-out</span>
-          <p className="font-medium">{format(new Date(res.checkOutDate), "dd/MM/yyyy", { locale: es })}</p>
+          <p className="font-medium">{format(new Date(res.checkOutDate + "T12:00:00"), "dd/MM/yyyy", { locale: es })}</p>
         </div>
       </div>
 
