@@ -964,14 +964,13 @@ export function ReservationFormDialog({
                   value={isUpgrade ? (formData.originalRoomTypeId || selectedRoomTypeId) : selectedRoomTypeId}
                   onValueChange={isUpgrade
                     ? (value) => {
+                        // En modo upgrade solo cambia el tipo de referencia tarifaria;
+                        // NO se borran las tarifas existentes — el punto del upgrade es
+                        // mantener la tarifa original del huésped en la nueva categoría.
                         setSelectedRoomTypeId(value);
                         setFormData(prev => ({
                           ...prev,
                           originalRoomTypeId: value,
-                          ratePlanId: "",
-                          baseRatePerNight: "",
-                          finalRatePerNight: "",
-                          totalRoomAmount: "",
                         }));
                       }
                     : handleRoomTypeChange}

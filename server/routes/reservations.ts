@@ -327,7 +327,8 @@ export function registerReservationsRoutes(app: Express) {
       if (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate) {
         cambios.push({ tipo: "fecha", descripcion: `Check-out modificado: ${fmtDate(existing.checkOutDate)} → ${fmtDate(req.body.checkOutDate)}` });
       }
-      if (req.body.roomId && req.body.roomId !== existing.roomId) {
+      const roomChanging = req.body.roomId && req.body.roomId !== existing.roomId;
+      if (roomChanging) {
         const oldRoom = await storage.getRoom(existing.roomId);
         const newRoom = await storage.getRoom(req.body.roomId);
         cambios.push({ tipo: "habitacion", descripcion: `Habitación cambiada: ${oldRoom?.roomNumber || existing.roomId} → ${newRoom?.roomNumber || req.body.roomId}` });
@@ -348,6 +349,22 @@ export function registerReservationsRoutes(app: Express) {
       const reservation = await storage.updateReservation(req.params.id, req.body);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
+      }
+
+      // Movimiento in-house: si la reserva estaba checked_in y cambió de habitación,
+      // actualizar el estado de las habitaciones: vieja → dirty, nueva → occupied.
+      if (roomChanging && existing.status === "checked_in") {
+        try {
+          if (existing.roomId) {
+            await storage.updateRoom(existing.roomId, { status: "dirty" });
+          }
+          if (req.body.roomId) {
+            await storage.updateRoom(req.body.roomId, { status: "occupied" });
+          }
+          console.log(`[room-move] In-house move: hab ${existing.roomId} → dirty, hab ${req.body.roomId} → occupied`);
+        } catch (moveErr: any) {
+          console.warn(`[room-move] Error actualizando estado de habitaciones (non-fatal): ${moveErr?.message}`);
+        }
       }
 
       // Recalcular cargos repetitivos si cambiaron las noches
