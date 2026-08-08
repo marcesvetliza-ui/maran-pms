@@ -1042,7 +1042,7 @@ export default function SpaPage() {
     const slotMinutes = timeToMinutes(slotTime);
     for (const apt of appointments) {
       if (apt.cabinId !== cabinId) continue;
-      if (apt.appointmentDate !== dateStr) continue;
+      if (apt.appointmentDate.slice(0, 10) !== dateStr) continue;
       const startMinutes = timeToMinutes(apt.startTime);
       const endMinutes = timeToMinutes(apt.endTime);
       if (slotMinutes >= startMinutes && slotMinutes < endMinutes) return apt;
@@ -1054,7 +1054,7 @@ export default function SpaPage() {
     return appointments.some(apt => 
       apt.cabinId === cabinId && 
       apt.startTime === slotTime &&
-      apt.appointmentDate === dateStr
+      apt.appointmentDate.slice(0, 10) === dateStr
     );
   };
 
@@ -1432,7 +1432,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                   const colSpan = getAppointmentColSpan(appointment);
                                   for (let i = 1; i < colSpan; i++) skipSlots.add(slotIdx + i);
                                   const isCancelled = appointment.status === "cancelled";
-                                  const isPast = isBefore(parseISO(appointment.appointmentDate), startOfDay(new Date()));
+                                  const isPast = isBefore(parseISO(appointment.appointmentDate.slice(0, 10)), startOfDay(new Date()));
                                   
                                   return (
                                     <td key={slotIdx} colSpan={colSpan} className="border-b border-r p-0.5 h-14">
