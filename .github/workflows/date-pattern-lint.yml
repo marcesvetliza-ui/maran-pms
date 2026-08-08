@@ -1,0 +1,28 @@
+name: Date Pattern Lint
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint-dates:
+    name: Catch forbidden date patterns
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verificar patrones de fecha incorrectos
+        run: npm run lint:dates
+
+      - name: Correr fixture tests del checker
+        run: npm run test:dates
