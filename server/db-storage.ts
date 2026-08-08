@@ -3194,12 +3194,13 @@ export class DatabaseStorage implements IStorage {
     const result = await db.execute(sql`
       SELECT
         sa.id AS "appointmentId",
+        -- MAX(jsonb) no existe en PostgreSQL; castear a text para el agregado y volver a jsonb.
         MAX(CASE WHEN sc.id IS NOT NULL THEN jsonb_build_object(
           'id',          sc.id,
           'name',        sc.name,
           'description', sc.description,
           'isActive',    sc.is_active
-        ) END) AS cabin,
+        )::text END)::jsonb AS cabin,
         MAX(CASE WHEN st.id IS NOT NULL THEN jsonb_build_object(
           'id',              st.id,
           'categoryId',      st.category_id,
@@ -3208,7 +3209,7 @@ export class DatabaseStorage implements IStorage {
           'durationMinutes', st.duration_minutes,
           'price',           st.price,
           'isActive',        st.is_active
-        ) END) AS treatment
+        )::text END)::jsonb AS treatment
       FROM spa_appointments sa
       LEFT JOIN spa_cabins     sc ON sc.id = sa.cabin_id
       LEFT JOIN spa_treatments st ON st.id = sa.treatment_id
