@@ -1042,8 +1042,7 @@ export default function SpaPage() {
     const slotMinutes = timeToMinutes(slotTime);
     for (const apt of appointments) {
       if (apt.cabinId !== cabinId) continue;
-      const aptDate = parseISO(apt.appointmentDate);
-      if (!isSameDay(aptDate, selectedDate)) continue;
+      if (apt.appointmentDate !== dateStr) continue;
       const startMinutes = timeToMinutes(apt.startTime);
       const endMinutes = timeToMinutes(apt.endTime);
       if (slotMinutes >= startMinutes && slotMinutes < endMinutes) return apt;
@@ -1055,7 +1054,7 @@ export default function SpaPage() {
     return appointments.some(apt => 
       apt.cabinId === cabinId && 
       apt.startTime === slotTime &&
-      isSameDay(parseISO(apt.appointmentDate), selectedDate)
+      apt.appointmentDate === dateStr
     );
   };
 
