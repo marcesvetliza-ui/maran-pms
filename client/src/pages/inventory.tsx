@@ -219,7 +219,7 @@ export default function InventoryPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
   const [searchQuery, setSearchQuery] = useState("");
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const [consumoFrom, setConsumoFrom] = useState(today);
   const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);

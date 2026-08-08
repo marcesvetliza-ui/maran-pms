@@ -116,7 +116,7 @@ function ReviewFormDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
   const [formData, setFormData] = useState({
     guestId: "",

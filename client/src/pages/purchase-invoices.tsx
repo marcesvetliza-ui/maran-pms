@@ -1689,7 +1689,7 @@ function PaymentOrderDialog({
 // ─── Pagos a Proveedores Tab ──────────────────────────────────────────────────
 
 function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => void }) {
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const [fechaCorte, setFechaCorte] = useState(todayISO);
 
   const { data: proveedores = [], isLoading } = useQuery<any[]>({

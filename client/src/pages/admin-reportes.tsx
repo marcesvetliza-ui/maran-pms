@@ -25,19 +25,25 @@ function fPct(n: number | undefined | null) {
   return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
 }
 
+function getArgentinaToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+}
+
 function currentPeriodo() {
-  const now = new Date();
-  return `${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+  const [yyyy, mm] = getArgentinaToday().split("-");
+  return `${mm}/${yyyy}`;
 }
 
 function genPeriodoOptions() {
   const opts = [];
-  const now = new Date();
+  const [yyyy, mm] = getArgentinaToday().split("-");
+  const nowYear = parseInt(yyyy, 10);
+  const nowMonth = parseInt(mm, 10) - 1; // 0-based
   for (let i = 0; i < 18; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    opts.push({ value: `${mm}/${yyyy}`, label: `${["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][d.getMonth()]} ${yyyy}` });
+    const d = new Date(nowYear, nowMonth - i, 1);
+    const mmStr = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyyStr = d.getFullYear();
+    opts.push({ value: `${mmStr}/${yyyyStr}`, label: `${["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][d.getMonth()]} ${yyyyStr}` });
   }
   return opts;
 }
@@ -772,7 +778,7 @@ function ProveedoresReport() {
 // ─── Comparativo Mensual ──────────────────────────────────────────────────────
 
 function ComparativoReport() {
-  const [año, setAño] = useState(String(new Date().getFullYear()));
+  const [año, setAño] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 4));
 
   const { data, isLoading } = useQuery<any>({
     queryKey: ["/api/reports/comparativo", año],

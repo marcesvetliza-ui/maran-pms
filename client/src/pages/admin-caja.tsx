@@ -928,8 +928,8 @@ export function AdminCajaConfigPage() {
               <div className="flex flex-wrap gap-2">
                 {[
                   { label: "Enero", start: "2025-01-01", end: "2025-01-31" },
-                  { label: "Mes anterior", start: toArg(startOfMonth(new Date(new Date().getFullYear(), new Date().getMonth() - 1))), end: toArg(endOfMonth(new Date(new Date().getFullYear(), new Date().getMonth() - 1))) },
-                  { label: "Este mes", start: toArg(startOfMonth(new Date())), end: toArg(endOfMonth(new Date())) },
+                  { label: "Mes anterior", start: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 2))); })(), end: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 2))); })() },
+                  { label: "Este mes", start: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(startOfMonth(new Date(y, m - 1))); })(), end: (() => { const [y,m] = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).split("-").map(Number); return toArg(endOfMonth(new Date(y, m - 1))); })() },
                   { label: "2025 completo", start: "2025-01-01", end: "2025-12-31" },
                 ].map(r => (
                   <Button

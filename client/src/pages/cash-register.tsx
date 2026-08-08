@@ -1923,7 +1923,7 @@ ${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${
 }
 
 function ResumenDiaTab() {
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const [fecha, setFecha] = useState(today);
   const { data, isLoading } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
     queryKey: ["/api/reports/caja-unificada", fecha],

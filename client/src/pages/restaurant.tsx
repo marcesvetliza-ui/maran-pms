@@ -691,7 +691,7 @@ export default function RestaurantPage() {
   const [restEmailReceiptAddress, setRestEmailReceiptAddress] = useState("");
   const [isReservationDialogOpen, setIsReservationDialogOpen] = useState(false);
   const [isDailyReservationsOpen, setIsDailyReservationsOpen] = useState(false);
-  const [reservationDate, setReservationDate] = useState(new Date().toISOString().split("T")[0]);
+  const [reservationDate, setReservationDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [editingReservation, setEditingReservation] = useState<TableReservation | null>(null);
   const [isEditReservationOpen, setIsEditReservationOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -767,7 +767,7 @@ export default function RestaurantPage() {
   const [evtNotes, setEvtNotes] = useState("");
   const [evtAdvanceAmount, setEvtAdvanceAmount] = useState("");
   const [evtAdvanceMethod, setEvtAdvanceMethod] = useState("efectivo");
-  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [showItemNotes, setShowItemNotes] = useState(false);
   const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
@@ -796,7 +796,7 @@ export default function RestaurantPage() {
   const [ncParcial, setNcParcial] = useState(false);
   const [ncMontoParcial, setNcMontoParcial] = useState("");
   const [ncVoidFolioPaymentIds, setNcVoidFolioPaymentIds] = useState<Set<string>>(new Set());
-  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]);
+  const [ncDateFrom, setNcDateFrom] = useState(new Date(Date.now() - 7 * 86400000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [ncTipo, setNcTipo] = useState("todos");
   const [ncCliente, setNcCliente] = useState("");
   const [ncPuntoVenta, setNcPuntoVenta] = useState("todos");
@@ -814,7 +814,7 @@ export default function RestaurantPage() {
   const [compFormaPago, setCompFormaPago] = useState("efectivo");
   const [compCcEntityType, setCompCcEntityType] = useState<"company" | "agency">("company");
   const [compCcEntityId, setCompCcEntityId] = useState("");
-  const [ncDateTo, setNcDateTo] = useState(new Date().toISOString().split("T")[0]);
+  const [ncDateTo, setNcDateTo] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [billingSearch, setBillingSearch] = useState("");
   const [billingSearchOpen, setBillingSearchOpen] = useState(false);
   const [fbIsExento, setFbIsExento] = useState(false);
@@ -1001,7 +1001,7 @@ export default function RestaurantPage() {
     queryKey: ["/api/agencies"],
   });
 
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const closeOrderTableId = currentOrder?.tableId ?? null;
   // Use the date the order was opened (not today) to find the correct reservation advances.
   // Orders opened yesterday should look for yesterday's reservation advances, not today's.
@@ -1928,7 +1928,7 @@ export default function RestaurantPage() {
     setEvtNotes(table.eventNotes || "");
     setEvtAdvanceAmount((table as any).eventAdvanceAmount || "");
     setEvtAdvanceMethod((table as any).eventAdvanceMethod || "efectivo");
-    setEvtAdvanceDate((table as any).eventAdvanceDate || new Date().toISOString().split("T")[0]);
+    setEvtAdvanceDate((table as any).eventAdvanceDate || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
     setIsEventConfigOpen(true);
   };
 

@@ -204,7 +204,7 @@ function PreventiveTab() {
   const [formAssignedTo, setFormAssignedTo] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
   const { data: tasks = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/maintenance/preventive"],

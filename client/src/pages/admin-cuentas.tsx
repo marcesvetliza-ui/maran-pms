@@ -496,7 +496,7 @@ function AgingReportSection({ accountSummary }: {
     queryKey: ["/api/account-movements/report-aging"],
     queryFn: async () => {
       const from = "2000-01-01";
-      const to = new Date().toISOString().split("T")[0];
+      const to = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}`);
       return res.json();
     },
@@ -652,19 +652,15 @@ export default function AdminCuentasPage() {
   });
 
   const [reporteFrom, setReporteFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7) + "-01";
   });
-  const [reporteTo, setReporteTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [reporteTo, setReporteTo] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
 
   // Recibos emitidos filters
   const [recibosFrom, setRecibosFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).slice(0, 7) + "-01";
   });
-  const [recibosTo, setRecibosTo] = useState(() => new Date().toISOString().split("T")[0]);
+  const [recibosTo, setRecibosTo] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [recibosEntityType, setRecibosEntityType] = useState("");
   const [recibosSearch, setRecibosSearch] = useState("");
 

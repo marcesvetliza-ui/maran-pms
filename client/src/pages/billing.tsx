@@ -21,7 +21,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-const today = () => format(new Date(), "yyyy-MM-dd");
+const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
 
 function fPeso(n: number | string | undefined | null) {
   const num = parseFloat(String(n ?? 0)) || 0;
@@ -127,7 +128,7 @@ export default function BillingPage() {
     staleTime: 30_000,
   });
   const [showNC, setShowNC] = useState<number | null>(null);
-  const [filtroDesde, setFiltroDesde] = useState(format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), "yyyy-MM-dd"));
+  const [filtroDesde, setFiltroDesde] = useState(firstOfCurrentMonth());
   const [filtroHasta, setFiltroHasta] = useState(today());
   const [filtroTipo, setFiltroTipo] = useState("");
   const [filtroArea, setFiltroArea] = useState("");

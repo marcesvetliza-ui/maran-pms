@@ -718,7 +718,7 @@ export default function GroupDetailPage() {
   const [showFolioPaymentDialog, setShowFolioPaymentDialog] = useState(false);
   const [folioChargeDescription, setFolioChargeDescription] = useState("");
   const [folioChargeAmount, setFolioChargeAmount] = useState("");
-  const [folioChargeDate, setFolioChargeDate] = useState(new Date().toISOString().split("T")[0]);
+  const [folioChargeDate, setFolioChargeDate] = useState(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
   const [folioChargeCategory, setFolioChargeCategory] = useState("otros");
   const [folioPaymentAmount, setFolioPaymentAmount] = useState("");
   const [folioPaymentMethod, setFolioPaymentMethod] = useState("");
@@ -1042,7 +1042,7 @@ export default function GroupDetailPage() {
       setShowAddGroupChargeDialog(false);
       setFolioChargeDescription("");
       setFolioChargeAmount("");
-      setFolioChargeDate(new Date().toISOString().split("T")[0]);
+      setFolioChargeDate(new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }));
       setFolioChargeCategory("otros");
     },
     onError: (e: any) => toast({ title: "Error al agregar cargo", description: parseApiError(e), variant: "destructive" }),

@@ -352,7 +352,7 @@ function LibroIVAVentasSection() {
 // ─── CC Proveedores ───────────────────────────────────────────────────────────
 
 function CCProveedoresSection() {
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
   const [fechaCorte, setFechaCorte] = useState(todayISO);
 
   const pdfUrl = fechaCorte
