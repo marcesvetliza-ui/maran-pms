@@ -311,6 +311,16 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
+      // Bloqueo adicional: no permitir mover una reserva checked_in a una habitación ocupada
+      if (existing.status === "checked_in" && roomChanged) {
+        const destRoom = await storage.getRoom(finalRoomId);
+        if (destRoom?.status === "occupied") {
+          return res.status(409).json({
+            error: `No se puede mover la reserva: la habitación ${destRoom.roomNumber} ya tiene un huésped alojado (ocupada).`,
+          });
+        }
+      }
+
       const fmtDate = (d: string) => {
         if (!d) return d;
         const parts = d.split("T")[0].split("-");

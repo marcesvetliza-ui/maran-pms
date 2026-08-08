@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
@@ -299,8 +299,8 @@ export default function PlanningPage() {
       setMoveConfirm(null);
     },
     onError: (error: any) => {
-      const msg = error?.message || "No se pudo mover la reserva.";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      const msg = parseApiError(error) || "No se pudo mover la reserva.";
+      toast({ title: "Error al mover reserva", description: msg, variant: "destructive" });
     },
   });
 
@@ -368,6 +368,16 @@ export default function PlanningPage() {
       const newCheckOutDate = new Date(toDay + "T12:00:00");
       newCheckOutDate.setDate(newCheckOutDate.getDate() + nights);
       newCheckOut = toArgentinaDateStr(newCheckOutDate);
+    }
+
+    // Bloquear movimiento de reserva checked_in a habitación con huésped in-house
+    if (reservation.status === "checked_in" && fromRoomId !== toRoomId && toRoom.status === "occupied") {
+      toast({
+        title: "Habitación ocupada",
+        description: `No se puede mover la reserva: la habitación ${toRoom.roomNumber} ya tiene un huésped alojado.`,
+        variant: "destructive",
+      });
+      return;
     }
 
     for (const [cellDay, existingResId] of Object.entries(data.cellReservations[toRoomId] || {})) {
