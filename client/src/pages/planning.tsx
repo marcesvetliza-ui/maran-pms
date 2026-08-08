@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -1194,7 +1194,10 @@ export default function PlanningPage() {
                                             {reservation.earlyCheckIn && day === reservation.checkIn && (
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
                                             )}
-                                            {reservation.isUpgrade && day === reservation.checkIn && (
+                                            {reservation.movedFromRoomNumber && day === reservation.checkIn && (
+                                              <ArrowRightLeft className="h-3 w-3 text-sky-400 flex-shrink-0" title={`Movido desde hab. ${reservation.movedFromRoomNumber}`} />
+                                            )}
+                                            {reservation.isUpgrade && !reservation.movedFromRoomNumber && day === reservation.checkIn && (
                                               <TrendingUp className="h-3 w-3 text-amber-400 flex-shrink-0" title="Up Grade" />
                                             )}
                                             {reservation.guestName === "Sin Asignar" || !reservation.guestName
@@ -1308,6 +1311,12 @@ export default function PlanningPage() {
                                             <div className="text-muted-foreground">
                                               {getSourceLabel(reservation.source)}
                                             </div>
+                                            {reservation.movedFromRoomNumber && (
+                                              <div className="flex items-center gap-1 text-sky-500 dark:text-sky-400 font-medium">
+                                                <ArrowRightLeft className="h-3 w-3 flex-shrink-0" />
+                                                Movido desde hab. {reservation.movedFromRoomNumber}
+                                              </div>
+                                            )}
                                             {reservation.earlyCheckIn && (
                                               <div className="text-orange-400 font-medium">
                                                 Early Check-in: {reservation.earlyCheckInTime || "--"} hs

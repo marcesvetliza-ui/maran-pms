@@ -2197,6 +2197,8 @@ export class MemStorage implements IStorage {
           earlyCheckInTime: res.earlyCheckInTime ?? null,
           lateCheckOut: res.lateCheckOut ?? false,
           lateCheckOutTime: res.lateCheckOutTime ?? null,
+          isUpgrade: res.isUpgrade ?? false,
+          movedFromRoomNumber: (res as any).movedFromRoomNumber ?? null,
         };
       }
     }

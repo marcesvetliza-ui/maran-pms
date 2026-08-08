@@ -1336,5 +1336,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // moved_from_room_number on reservations: stores original room number when a checked-in reservation is moved in-house
+  await withTimeout("reservations.moved_from_room_number", T, () =>
+    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS moved_from_room_number text`)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

@@ -1062,6 +1062,7 @@ export class DatabaseStorage implements IStorage {
           lateCheckOutTime: res.lateCheckOutTime ?? null,
           prefSummary,
           isUpgrade: res.isUpgrade ?? false,
+          movedFromRoomNumber: (res as any).movedFromRoomNumber ?? null,
           color: (res as any).color ?? null,
           numberOfGuests: res.numberOfGuests ?? null,
           bedTypeName: res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) ?? null) : null,

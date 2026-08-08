@@ -332,6 +332,11 @@ export function registerReservationsRoutes(app: Express) {
         const oldRoom = await storage.getRoom(existing.roomId);
         const newRoom = await storage.getRoom(req.body.roomId);
         cambios.push({ tipo: "habitacion", descripcion: `Habitación cambiada: ${oldRoom?.roomNumber || existing.roomId} → ${newRoom?.roomNumber || req.body.roomId}` });
+        // For in-house moves (checked_in), persist the original room number atomically
+        // so planning can display the "moved from" indicator.
+        if (existing.status === "checked_in" && !existing.movedFromRoomNumber && oldRoom) {
+          req.body.movedFromRoomNumber = oldRoom.roomNumber;
+        }
       }
       if (req.body.status && req.body.status !== existing.status) {
         cambios.push({ tipo: "estado", descripcion: `Estado: ${statusLabels[existing.status] || existing.status} → ${statusLabels[req.body.status] || req.body.status}` });
