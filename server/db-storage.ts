@@ -658,7 +658,7 @@ export class DatabaseStorage implements IStorage {
     const safeData: Record<string, any> = {};
     const protectedFields = ["id", "createdAt", "reservationCode"];
     const fkFields = ["guestId", "roomId", "roomTypeId"];
-    const validStatuses = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled"];
+    const validStatuses = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled", "no_show"];
     for (const [key, value] of Object.entries(reservation)) {
       if (protectedFields.includes(key)) continue;
       if (value === undefined) continue;
