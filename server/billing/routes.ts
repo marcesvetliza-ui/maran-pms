@@ -1,4 +1,6 @@
 import type { Express } from "express";
+import fs from "fs";
+import path from "path";
 import { db } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
@@ -7,6 +9,32 @@ import { emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../db-storage";
+import { assetPath } from "../utils/assetPath";
+
+// ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
+let _logoCache: Buffer | null | undefined = undefined; // undefined = no intentado
+
+async function loadLogoBuffer(logoUrl?: string | null): Promise<Buffer | undefined> {
+  // Prioridad: logo_url configurado → logo local del hotel
+  if (logoUrl) {
+    try {
+      const res = await fetch(logoUrl);
+      if (res.ok) return Buffer.from(await res.arrayBuffer());
+    } catch { /* fall through */ }
+  }
+  // Logo local
+  if (_logoCache !== null) {
+    if (_logoCache !== undefined) return _logoCache;
+    try {
+      const localPath = assetPath("hotel-logo.png");
+      _logoCache = fs.readFileSync(localPath);
+      return _logoCache;
+    } catch {
+      _logoCache = null; // mark as unavailable
+    }
+  }
+  return undefined;
+}
 
 export function registerBillingRoutes(app: Express) {
 
@@ -493,7 +521,8 @@ export function registerBillingRoutes(app: Express) {
         } catch { /* non-fatal — guest data is optional */ }
       }
 
-      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData);
+      const logoBuffer = await loadLogoBuffer((config as any).logoUrl);
+      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData, logoBuffer);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");

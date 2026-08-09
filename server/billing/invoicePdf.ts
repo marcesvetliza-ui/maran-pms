@@ -102,6 +102,7 @@ export async function generarFacturaPDF(
   config: any,
   notaCredito?: NotaCreditoInfo,
   guestData?: InvoiceGuestData,
+  logoBuffer?: Buffer,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4" });
@@ -191,16 +192,33 @@ export async function generarFacturaPDF(
        .text("ORIGINAL", ctrX, y + 77, { width: ctrW, align: "center" });
     doc.fillColor("#000");
 
-    // ── Izquierda: info emisor ─────────────────────────────────────────────
+    // ── Izquierda: logo (si existe) + info emisor ──────────────────────────
     const lx = x0 + 7;
     const lw = ctrX - x0 - 10;
-    doc.font("Helvetica-Bold").fontSize(10)
-       .text(cfgRazonSocial, lx, y + 8, { width: lw });
+
+    let ly = y + 8;
+    if (logoBuffer) {
+      // Logo proporcional: max 120px ancho × 52px alto dentro del header
+      const logoMaxW = Math.min(lw, 120);
+      const logoMaxH = 50;
+      // Calcular proporción real (1491×756 → ~1.97:1)
+      const aspectRatio = 1491 / 756; // original aspect ratio
+      let logoW = logoMaxW;
+      let logoH = logoW / aspectRatio;
+      if (logoH > logoMaxH) { logoH = logoMaxH; logoW = logoH * aspectRatio; }
+      try {
+        doc.image(logoBuffer, lx, ly, { width: logoW, height: logoH });
+      } catch { /* non-fatal: if image fails, continue without it */ }
+      ly += logoH + 4;
+    }
+
+    doc.font("Helvetica-Bold").fontSize(logoBuffer ? 9 : 10)
+       .text(cfgRazonSocial, lx, ly, { width: lw });
+    ly += logoBuffer ? 13 : 15;
     doc.font("Helvetica").fontSize(7.8);
-    let ly = y + 23;
-    doc.text(`Dirección: ${cfgDomicilio}`, lx, ly, { width: lw }); ly += 11;
-    doc.text(`Localidad: ${cfgLocalidad} (${cfgCp}), ${cfgProvincia}, Argentina`, lx, ly, { width: lw }); ly += 11;
-    if (cfgTelefono) { doc.text(`Teléfono: ${cfgTelefono}`, lx, ly, { width: lw }); ly += 11; }
+    doc.text(`Dirección: ${cfgDomicilio}`, lx, lyStart, { width: lw }); lyStart += 11;
+    doc.text(`Localidad: ${cfgLocalidad} (${cfgCp}), ${cfgProvincia}, Argentina`, lx, lyStart, { width: lw }); lyStart += 11;
+    if (cfgTelefono) { doc.text(`Teléfono: ${cfgTelefono}`, lx, lyStart, { width: lw }); lyStart += 11; }
 
     // ── Derecha: tipo de comprobante + CUIT + IIBB + actividades ───────────
     const rx = ctrX + ctrW + 7;

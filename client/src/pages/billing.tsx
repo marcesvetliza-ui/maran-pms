@@ -1286,7 +1286,7 @@ function BillingConfigPanel({ config }: { config: any }) {
   const keyRef  = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
-    razonSocial: "", cuit: "", iibb: "", telefono: "", domicilioComercial: "", localidad: "",
+    razonSocial: "", cuit: "", iibb: "", telefono: "", logoUrl: "", domicilioComercial: "", localidad: "",
     provincia: "", cp: "", condicionIva: "Responsable Inscripto",
     inicioActividades: "", puntoVenta: 1, puntoVentaHomolog: 99,
     arcaAmbiente: "ficticio" as AmbienteMode, arcaCuit: "",
@@ -1302,6 +1302,7 @@ function BillingConfigPanel({ config }: { config: any }) {
       cuit: config.cuit ?? "33-68110008-9",
       iibb: config.iibb ?? "",
       telefono: config.telefono ?? "",
+      logoUrl: config.logoUrl ?? "",
       domicilioComercial: config.domicilioComercial ?? "",
       localidad: config.localidad ?? "",
       provincia: config.provincia ?? "",
@@ -1393,6 +1394,11 @@ function BillingConfigPanel({ config }: { config: any }) {
             <div className="space-y-1"><Label className="text-xs">CUIT</Label><Input value={form.cuit} onChange={f("cuit")} placeholder="XX-XXXXXXXX-X" /></div>
             <div className="space-y-1"><Label className="text-xs">Ingresos Brutos (IIBB)</Label><Input value={form.iibb} onChange={f("iibb")} placeholder="Igual al CUIT si no corresponde" /></div>
             <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={form.telefono} onChange={f("telefono")} placeholder="343-XXXXXXX" /></div>
+            <div className="col-span-2 space-y-1">
+              <Label className="text-xs">Logo (URL de imagen) — opcional</Label>
+              <Input value={form.logoUrl ?? ""} onChange={e => setForm(p => ({ ...p, logoUrl: e.target.value }))} placeholder="https://... (dejar vacío para usar el logo del hotel por defecto)" />
+              <p className="text-[11px] text-muted-foreground">Si está vacío se usa el logo de Maran guardado en el servidor. Ingrese una URL pública para reemplazarlo.</p>
+            </div>
             <div className="col-span-2 space-y-1"><Label className="text-xs">Domicilio Comercial</Label><Input value={form.domicilioComercial} onChange={f("domicilioComercial")} /></div>
             <div className="space-y-1"><Label className="text-xs">Localidad</Label><Input value={form.localidad} onChange={f("localidad")} /></div>
             <div className="space-y-1"><Label className="text-xs">Provincia</Label><Input value={form.provincia} onChange={f("provincia")} /></div>
