@@ -1316,6 +1316,23 @@ export function registerGroupsRoutes(app: Express) {
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
 
       const config = (group as any).masterFolioConfig || "accommodation";
+
+      // Resolve billing entity name (company / agency) for display in the PDF
+      let billingEntityName = "";
+      const beType = (group as any).billingEntityType;
+      const beId   = (group as any).billingEntityId;
+      if (beType && beId) {
+        try {
+          if (beType === "company") {
+            const ent = await storage.getCompany(beId);
+            billingEntityName = (ent as any)?.razonSocial || (ent as any)?.nombreFantasia || "";
+          } else if (beType === "agency") {
+            const ent = await storage.getAgency(beId);
+            billingEntityName = (ent as any)?.razonSocial || (ent as any)?.nombreFantasia || "";
+          }
+        } catch { /* non-fatal */ }
+      }
+
       const gCharges = await storage.getGroupCharges(req.params.groupId);
       const gPayments = await storage.getGroupPayments(req.params.groupId);
 
