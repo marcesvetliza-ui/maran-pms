@@ -17,12 +17,20 @@ let _logoCache: Buffer | null | undefined = undefined; // undefined = no intenta
 async function loadLogoBuffer(logoUrl?: string | null): Promise<Buffer | undefined> {
   // Prioridad: logo_url configurado → logo local del hotel
   if (logoUrl) {
+    // Soporte para base64 data URI (subido desde la UI)
+    if (logoUrl.startsWith("data:image/")) {
+      try {
+        const base64 = logoUrl.split(",")[1];
+        if (base64) return Buffer.from(base64, "base64");
+      } catch { /* fall through */ }
+    }
+    // URL pública
     try {
       const res = await fetch(logoUrl);
       if (res.ok) return Buffer.from(await res.arrayBuffer());
     } catch { /* fall through */ }
   }
-  // Logo local
+  // Logo local del hotel (fallback)
   if (_logoCache !== null) {
     if (_logoCache !== undefined) return _logoCache;
     try {
@@ -57,7 +65,7 @@ export function registerBillingRoutes(app: Express) {
         "modoArca", "arcaAmbiente", "cuit", "razonSocial", "domicilioComercial", "localidad",
         "provincia", "cp", "condicionIva", "inicioActividades",
         "puntoVenta", "puntoVentaHomolog", "tipoPuntoVenta", "arcaCuit", "logoUrl",
-        "arcaCert", "arcaKey",
+        "arcaCert", "arcaKey", "iibb", "telefono",
       ];
       const data: any = {};
       for (const k of allowed) {
@@ -66,6 +74,37 @@ export function registerBillingRoutes(app: Express) {
       const updated = await updateBillingConfig(data);
       const { arcaCert, arcaKey, ...safe } = updated as any;
       res.json({ ...safe, hasArcaCert: !!arcaCert, hasArcaKey: !!arcaKey });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/config/logo — sube logo del emisor como base64 data URI
+  app.post("/api/billing/config/logo", requireAuth, async (req, res) => {
+    try {
+      const { imageData } = req.body;
+      if (!imageData || !String(imageData).startsWith("data:image/")) {
+        return res.status(400).json({ error: "Imagen inválida. Debe ser una imagen PNG o JPG." });
+      }
+      // Limit ~3MB base64 (~2.25MB image)
+      if (String(imageData).length > 4_500_000) {
+        return res.status(400).json({ error: "Imagen demasiado grande (máximo ~3 MB)." });
+      }
+      // Invalidate local logo cache so the new logo is used immediately
+      _logoCache = undefined;
+      await updateBillingConfig({ logoUrl: imageData });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/billing/config/logo — elimina logo personalizado y vuelve al predeterminado
+  app.delete("/api/billing/config/logo", requireAuth, async (req, res) => {
+    try {
+      _logoCache = undefined;
+      await updateBillingConfig({ logoUrl: null });
+      res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -516,7 +555,7 @@ export function registerBillingRoutes(app: Express) {
           if (rsv) {
             guestData = {
               guestName: `${rsv.guest?.lastName ?? ""} ${rsv.guest?.firstName ?? ""}`.trim() || (rsv.guest as any)?.razonSocial || "",
-              guestDni: (rsv.guest as any)?.dni ?? null,
+              guestDni: (rsv.guest as any)?.documentNumber ?? null,
               roomNumber: rsv.room?.roomNumber ?? null,
               checkInDate: rsv.checkInDate ?? null,
               checkOutDate: rsv.checkOutDate ?? null,

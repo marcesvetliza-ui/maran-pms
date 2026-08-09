@@ -1278,6 +1278,91 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   );
 }
 
+// ─── Logo Upload Panel ────────────────────────────────────────────────────────
+
+function LogoUploadPanel() {
+  const { toast } = useToast();
+  const { data: config, refetch } = useQuery<any>({ queryKey: ["/api/billing/config"] });
+  const logoRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const hasCustomLogo = !!config?.logoUrl;
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Archivo inválido", description: "Seleccioná una imagen PNG o JPG.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      toast({ title: "Imagen demasiado grande", description: "El máximo es 3 MB.", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      const imageData = await new Promise<string>((res, rej) => {
+        reader.onload = () => res(reader.result as string);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const resp = await apiRequest("POST", "/api/billing/config/logo", { imageData });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || "Error al subir logo");
+      }
+      await refetch();
+      toast({ title: "Logo actualizado", description: "Aparecerá en las próximas facturas." });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+      if (logoRef.current) logoRef.current.value = "";
+    }
+  }
+
+  async function handleDelete() {
+    setUploading(true);
+    try {
+      await apiRequest("DELETE", "/api/billing/config/logo", undefined);
+      await refetch();
+      toast({ title: "Logo eliminado", description: "Se usará el logo del hotel por defecto." });
+    } catch {
+      toast({ title: "Error al eliminar logo", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-4 p-3 rounded-lg border bg-muted/30">
+      {/* Preview */}
+      <div className="w-28 h-14 flex items-center justify-center rounded border bg-white overflow-hidden shrink-0">
+        {hasCustomLogo
+          ? <img src={config.logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" />
+          : <span className="text-[10px] text-muted-foreground text-center px-1">Logo del hotel (predeterminado)</span>
+        }
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-col gap-1.5">
+        <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleFile} />
+        <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => logoRef.current?.click()}>
+          {uploading ? "Subiendo…" : hasCustomLogo ? "Cambiar logo" : "Subir logo"}
+        </Button>
+        {hasCustomLogo && (
+          <Button type="button" variant="ghost" size="sm" disabled={uploading} onClick={handleDelete}
+            className="text-destructive hover:text-destructive text-xs h-7">
+            Usar logo predeterminado
+          </Button>
+        )}
+        <p className="text-[10px] text-muted-foreground">PNG, JPG o WebP · máx. 3 MB</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Billing Config Panel ─────────────────────────────────────────────────────
 
 function BillingConfigPanel({ config }: { config: any }) {
@@ -1394,10 +1479,9 @@ function BillingConfigPanel({ config }: { config: any }) {
             <div className="space-y-1"><Label className="text-xs">CUIT</Label><Input value={form.cuit} onChange={f("cuit")} placeholder="XX-XXXXXXXX-X" /></div>
             <div className="space-y-1"><Label className="text-xs">Ingresos Brutos (IIBB)</Label><Input value={form.iibb} onChange={f("iibb")} placeholder="Igual al CUIT si no corresponde" /></div>
             <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={form.telefono} onChange={f("telefono")} placeholder="343-XXXXXXX" /></div>
-            <div className="col-span-2 space-y-1">
-              <Label className="text-xs">Logo (URL de imagen) — opcional</Label>
-              <Input value={form.logoUrl ?? ""} onChange={e => setForm(p => ({ ...p, logoUrl: e.target.value }))} placeholder="https://... (dejar vacío para usar el logo del hotel por defecto)" />
-              <p className="text-[11px] text-muted-foreground">Si está vacío se usa el logo de Maran guardado en el servidor. Ingrese una URL pública para reemplazarlo.</p>
+            <div className="col-span-2 space-y-2">
+              <Label className="text-xs">Logo en la factura</Label>
+              <LogoUploadPanel />
             </div>
             <div className="col-span-2 space-y-1"><Label className="text-xs">Domicilio Comercial</Label><Input value={form.domicilioComercial} onChange={f("domicilioComercial")} /></div>
             <div className="space-y-1"><Label className="text-xs">Localidad</Label><Input value={form.localidad} onChange={f("localidad")} /></div>
