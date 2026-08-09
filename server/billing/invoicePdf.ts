@@ -223,9 +223,9 @@ export async function generarFacturaPDF(
        .text(cfgRazonSocial, lx, ly, { width: lw });
     ly += logoBuffer ? 13 : 15;
     doc.font("Helvetica").fontSize(7.8);
-    doc.text(`Dirección: ${cfgDomicilio}`, lx, lyStart, { width: lw }); lyStart += 11;
-    doc.text(`Localidad: ${cfgLocalidad} (${cfgCp}), ${cfgProvincia}, Argentina`, lx, lyStart, { width: lw }); lyStart += 11;
-    if (cfgTelefono) { doc.text(`Teléfono: ${cfgTelefono}`, lx, lyStart, { width: lw }); lyStart += 11; }
+    doc.text(`Dirección: ${cfgDomicilio}`, lx, ly, { width: lw }); ly += 11;
+    doc.text(`Localidad: ${cfgLocalidad} (${cfgCp}), ${cfgProvincia}, Argentina`, lx, ly, { width: lw }); ly += 11;
+    if (cfgTelefono) { doc.text(`Teléfono: ${cfgTelefono}`, lx, ly, { width: lw }); ly += 11; }
 
     // ── Derecha: tipo de comprobante + CUIT + IIBB + actividades ───────────
     const rx = ctrX + ctrW + 7;
