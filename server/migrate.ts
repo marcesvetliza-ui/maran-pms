@@ -1341,5 +1341,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS moved_from_room_number text`)
   );
 
+  // billing_config: iibb e telefono para comprobantes fiscales
+  await withTimeout("billing_config.iibb_telefono", T, () =>
+    db.execute(sql`
+      ALTER TABLE billing_config
+        ADD COLUMN IF NOT EXISTS iibb text,
+        ADD COLUMN IF NOT EXISTS telefono text
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }

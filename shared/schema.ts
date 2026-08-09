@@ -2281,6 +2281,8 @@ export const billingConfig = pgTable("billing_config", {
   cp: text("cp").default("3100"),
   condicionIva: text("condicion_iva").default("Responsable Inscripto"),
   inicioActividades: text("inicio_actividades").default("01/01/2000"),
+  iibb: text("iibb"),
+  telefono: text("telefono"),
   puntoVenta: integer("punto_venta").default(1),
   puntoVentaHomolog: integer("punto_venta_homolog").default(99),
   tipoPuntoVenta: text("tipo_punto_venta").default("online"),

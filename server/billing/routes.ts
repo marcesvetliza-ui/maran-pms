@@ -4,7 +4,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
-import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo } from "./invoicePdf";
+import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../db-storage";
 
@@ -475,7 +475,25 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
-      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo);
+      // Enrich with guest/room data from linked reservation when available
+      let guestData: InvoiceGuestData | undefined;
+      if (factura.reserva_id) {
+        try {
+          const rsv = await storage.getReservation(factura.reserva_id);
+          if (rsv) {
+            guestData = {
+              guestName: `${rsv.guest?.lastName ?? ""} ${rsv.guest?.firstName ?? ""}`.trim() || (rsv.guest as any)?.razonSocial || "",
+              guestDni: (rsv.guest as any)?.dni ?? null,
+              roomNumber: rsv.room?.roomNumber ?? null,
+              checkInDate: rsv.checkInDate ?? null,
+              checkOutDate: rsv.checkOutDate ?? null,
+              numberOfGuests: rsv.numberOfGuests ?? null,
+            };
+          }
+        } catch { /* non-fatal — guest data is optional */ }
+      }
+
+      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");
