@@ -97,12 +97,19 @@ export interface NotaCreditoInfo {
 }
 
 // ── Main PDF generator ────────────────────────────────────────────────────────
+export interface FacturaRetenciones {
+  iibb: number;
+  ganancias: number;
+  iva: number;
+}
+
 export async function generarFacturaPDF(
   factura: any,
   config: any,
   notaCredito?: NotaCreditoInfo,
   guestData?: InvoiceGuestData,
   logoBuffer?: Buffer,
+  retenciones?: FacturaRetenciones,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4" });
@@ -446,10 +453,14 @@ export async function generarFacturaPDF(
     // ── Otros Tributos ─────────────────────────────────────────────────────
     doc.font("Helvetica-Bold").fontSize(7.5).text("Otros Tributos", x0, y + 3);
     y += 12;
+    const retGanancias = retenciones?.ganancias ?? 0;
+    const retIva       = retenciones?.iva       ?? 0;
+    const retIibb      = retenciones?.iibb      ?? 0;
+    const otrosTribTotal = retGanancias + retIva + retIibb;
     const trib = [
-      ["Per./Ret. Imp. Ganancias", "0,00"],
-      ["Per./Ret. de IVA",         "0,00"],
-      ["Importe Otros Tributos",   "0,00"],
+      ["Per./Ret. Imp. Ganancias", retGanancias > 0 ? fPeso(retGanancias) : "0,00"],
+      ["Per./Ret. de IVA",         retIva       > 0 ? fPeso(retIva)       : "0,00"],
+      ["Importe Otros Tributos",   otrosTribTotal > 0 ? fPeso(otrosTribTotal) : "0,00"],
     ];
     const tribH = trib.length * 12 + 4;
     box(x0, y, pagoSectionW, tribH, "#ccc");

@@ -6,7 +6,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
-import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData } from "./invoicePdf";
+import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { storage } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
@@ -505,9 +505,14 @@ export function registerBillingRoutes(app: Express) {
 
       // Enrich with guest/room data from linked reservation when available
       let guestData: InvoiceGuestData | undefined;
+      let retenciones: FacturaRetenciones | undefined;
+
       if (factura.reserva_id) {
         try {
-          const rsv = await storage.getReservation(factura.reserva_id);
+          const [rsv, pmts] = await Promise.all([
+            storage.getReservation(factura.reserva_id),
+            storage.getPayments(factura.reserva_id),
+          ]);
           if (rsv) {
             guestData = {
               guestName: `${rsv.guest?.lastName ?? ""} ${rsv.guest?.firstName ?? ""}`.trim() || (rsv.guest as any)?.razonSocial || "",
@@ -518,11 +523,28 @@ export function registerBillingRoutes(app: Express) {
               numberOfGuests: rsv.numberOfGuests ?? null,
             };
           }
+          // Extract retention amounts from payment notes JSON
+          // Format: { retencion: { tipo: "iibb"|"ganancias", monto: number, neto: number } }
+          let retIibb = 0, retGanancias = 0, retIva = 0;
+          for (const p of (pmts ?? [])) {
+            if (!p.notes) continue;
+            try {
+              const parsed = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes;
+              const ret = parsed?.retencion;
+              if (!ret || !ret.monto) continue;
+              if (ret.tipo === "iibb")      retIibb      += Number(ret.monto) || 0;
+              else if (ret.tipo === "ganancias") retGanancias += Number(ret.monto) || 0;
+              else if (ret.tipo === "iva")  retIva       += Number(ret.monto) || 0;
+            } catch { /* unparseable notes — skip */ }
+          }
+          if (retIibb + retGanancias + retIva > 0) {
+            retenciones = { iibb: retIibb, ganancias: retGanancias, iva: retIva };
+          }
         } catch { /* non-fatal — guest data is optional */ }
       }
 
       const logoBuffer = await loadLogoBuffer((config as any).logoUrl);
-      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData, logoBuffer);
+      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData, logoBuffer, retenciones);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");
