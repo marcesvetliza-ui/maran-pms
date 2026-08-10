@@ -765,6 +765,7 @@ function GroupTable({
   setDeleteConfirmGroup: (g: GroupWithDetails) => void;
   dimmed?: boolean;
 }) {
+  const today = getArgentinaToday();
   return (
     <Table>
       <TableHeader>
@@ -821,6 +822,14 @@ function GroupTable({
               </div>
             </TableCell>
             <TableCell>
+              {/* Alerta release date vencida — solo en tentativo */}
+              {group.status === "tentative" && group.releaseDate && group.releaseDate <= today && (
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                    ⚠ Release vencido {group.releaseDate}
+                  </span>
+                </div>
+              )}
               <Select
                 value={group.status}
                 onValueChange={(value) =>
@@ -928,8 +937,12 @@ export default function GroupsPage() {
   const updateStatusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       apiRequest("PATCH", `/api/groups/${id}`, { status }),
-    onSuccess: () => {
+    onSuccess: (_data, { status }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
+      // Invalidate planning so cancelled group blocks disappear immediately
+      if (status === "cancelled" || status === "finished") {
+        queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === "/api/planning" });
+      }
       toast({ title: "Estado actualizado" });
     },
     onError: (e: any) => {

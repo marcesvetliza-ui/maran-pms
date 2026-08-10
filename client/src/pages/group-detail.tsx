@@ -1161,7 +1161,8 @@ export default function GroupDetailPage() {
         guestLastName: lastName,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      // refetch (not just invalidate) so the rooming list updates immediately
+      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId] });
       toast({ title: "Nombre de pasajero actualizado" });
       setEditingPassengerRes(null);
     },
