@@ -149,6 +149,13 @@ export async function generarFacturaPDF(
 
     const W  = 535;
     const x0 = 30;
+    // Footer pinned to bottom of last page.
+    // FOOTER_H = pago-section(109) + monto-palabras(14) + CAE(46) + obs(22) + ts(16) = 207
+    // Shrink FOOTER_TOP when optional sections (notaCredito, ficticio) consume extra space.
+    const FOOTER_H = 207;
+    const FOOTER_TOP = Math.floor(841.89 - 30 - FOOTER_H)
+      - (notaCredito  ? 62 : 0)
+      - (modoFicticio ? 16 : 0);
 
     // Config fields
     const cfgRazonSocial  = config?.razonSocial       ?? "MARAN S.A.";
@@ -214,7 +221,9 @@ export async function generarFacturaPDF(
       let logoH = logoW / aspectRatio;
       if (logoH > logoMaxH) { logoH = logoMaxH; logoW = logoH * aspectRatio; }
       try {
-        doc.image(logoBuffer, lx, ly, { width: logoW, height: logoH });
+        // Center logo horizontally within its column
+        const logoOffsetX = Math.max(0, (lw - logoW) / 2);
+        doc.image(logoBuffer, lx + logoOffsetX, ly, { width: logoW, height: logoH });
       } catch { /* non-fatal: if image fails, continue without it */ }
       ly += logoH + 4;
     }
@@ -339,9 +348,30 @@ export async function generarFacturaPDF(
     doc.font("Helvetica").fontSize(7.5);
 
     for (const item of items) {
-      if (y > 680) { doc.addPage(); y = 40; }
-
       const rowH = 14;
+      // Break to a new page before items would overlap the footer zone
+      if (y + rowH > FOOTER_TOP - 22) {
+        doc.font("Helvetica-Oblique").fontSize(6.5).fillColor("#888")
+           .text("/ continúa en página siguiente /", x0, y + 2, { width: W, align: "center" })
+           .fillColor("#000");
+        doc.addPage();
+        y = 30;
+        // Minimal continuation header
+        box(x0, y, W, 18);
+        doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#000")
+           .text(`${tipo.nombre} ${tipo.letra}  ·  ${cfgRazonSocial}  ·  N° ${PV}-${NRO}  (hoja siguiente)`,
+             x0 + 5, y + 5, { width: W - 10 });
+        y += 26;
+        // Repeat column header
+        doc.rect(x0, y, W, tblHdr).fillColor("#e8e8e8").fill()
+           .rect(x0, y, W, tblHdr).strokeColor("#aaa").lineWidth(0.5).stroke();
+        doc.fillColor("#000").font("Helvetica-Bold").fontSize(7);
+        for (const col of cols) {
+          doc.text(col.label, col.x + 2, y + 4, { width: col.w - 4, align: col.align });
+        }
+        y += tblHdr;
+      }
+
       box(x0, y, W, rowH, "#ccc");
 
       const cod   = deriveCode(item.descripcion ?? "", item.codigo);
@@ -381,6 +411,9 @@ export async function generarFacturaPDF(
          .fillColor("#000");
       y += 12;
     }
+
+    // ── Snap footer to bottom of page ─────────────────────────────────────
+    if (y < FOOTER_TOP) y = FOOTER_TOP;
 
     // ══════════════════════════════════════════════════════════════════════════
     // SECCIÓN 5 — FORMAS DE PAGO + OTROS TRIBUTOS + TOTALES
@@ -425,8 +458,6 @@ export async function generarFacturaPDF(
     const totX = x0 + pagoSectionW;
 
     // ── Formas de pago: grid 3 columnas × 3 filas ─────────────────────────
-    if (y > 610) { doc.addPage(); y = 40; }
-
     doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#000")
        .text("Formas de Pago", x0, y);
     y += 10;
@@ -565,8 +596,7 @@ export async function generarFacturaPDF(
     // ══════════════════════════════════════════════════════════════════════════
     // SECCIÓN 9 — CONDICIÓN DE VENTA + OBSERVACIONES ARCA + CAE
     // ══════════════════════════════════════════════════════════════════════════
-    if (y > 680) { doc.addPage(); y = 40; }
-    y = Math.max(y, 660);
+    if (y > 780) { doc.addPage(); y = 40; }
 
     // Condición de venta
     const COND_LABELS: Record<string, string> = {
