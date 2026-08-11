@@ -1691,6 +1691,7 @@ function PaymentOrderDialog({
 function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => void }) {
   const todayISO = getArgentinaToday();
   const [fechaCorte, setFechaCorte] = useState(todayISO);
+  const [busqueda, setBusqueda] = useState("");
 
   const { data: proveedores = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/accounting-suppliers/cuenta-corriente", fechaCorte],
@@ -1702,23 +1703,38 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
 
   const fmtDate = (iso: string) => iso.split("-").reverse().join("/");
 
+  const proveedoresFiltrados = busqueda.trim()
+    ? proveedores.filter((p: any) =>
+        p.razon_social?.toLowerCase().includes(busqueda.toLowerCase())
+      )
+    : proveedores;
+
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <CardTitle className="text-base">Proveedores con facturas pendientes</CardTitle>
             <CardDescription>Seleccioná un proveedor para emitir la orden de pago</CardDescription>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Label htmlFor="pagos-fecha-corte" className="text-xs whitespace-nowrap text-muted-foreground">Saldo al:</Label>
+          <div className="flex items-center gap-3 shrink-0 flex-wrap">
             <Input
-              id="pagos-fecha-corte"
-              type="date"
-              value={fechaCorte}
-              onChange={(e) => setFechaCorte(e.target.value)}
-              className="h-8 text-sm w-44"
+              type="search"
+              placeholder="Buscar proveedor..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="h-8 text-sm w-52"
             />
+            <div className="flex items-center gap-2">
+              <Label htmlFor="pagos-fecha-corte" className="text-xs whitespace-nowrap text-muted-foreground">Saldo al:</Label>
+              <Input
+                id="pagos-fecha-corte"
+                type="date"
+                value={fechaCorte}
+                onChange={(e) => setFechaCorte(e.target.value)}
+                className="h-8 text-sm w-44"
+              />
+            </div>
           </div>
         </div>
         {fechaCorte !== todayISO && (
@@ -1730,15 +1746,17 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
       <CardContent>
         {/* ── Saldo total a la fecha ────────────────────────────────────── */}
         {proveedores.length > 0 && (() => {
-          const total = proveedores.reduce((sum: number, p: any) => sum + parseFloat(p.total_saldo || 0), 0);
+          const total = proveedoresFiltrados.reduce((sum: number, p: any) => sum + parseFloat(p.total_saldo || 0), 0);
+          const esFiltrado = busqueda.trim().length > 0;
           return (
             <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-3 mb-4">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">
-                  Saldo total a la fecha
+                  {esFiltrado ? "Saldo filtrado" : "Saldo total a la fecha"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {proveedores.length} proveedor{proveedores.length !== 1 ? "es" : ""} con deuda al {fmtDate(fechaCorte)}
+                  {proveedoresFiltrados.length} proveedor{proveedoresFiltrados.length !== 1 ? "es" : ""}
+                  {esFiltrado ? ` coinciden con "${busqueda}"` : ` con deuda al ${fmtDate(fechaCorte)}`}
                 </p>
               </div>
               <p className="text-2xl font-bold text-destructive">
@@ -1747,14 +1765,16 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
             </div>
           );
         })()}
-        {proveedores.length === 0 ? (
+        {proveedoresFiltrados.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <CheckCircle2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">No hay facturas pendientes de pago</p>
+            <p className="text-sm">
+              {busqueda.trim() ? `Sin resultados para "${busqueda}"` : "No hay facturas pendientes de pago"}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
-            {proveedores.map((prov: any) => (
+            {proveedoresFiltrados.map((prov: any) => (
               <div
                 key={prov.id}
                 className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/40 transition-colors"
