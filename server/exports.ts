@@ -516,6 +516,164 @@ export function registerExportRoutes(app: Express) {
     }
   });
 
+  // ── Libro IVA Ventas — Agrupado por Sector ────────────────────────────────
+  //
+  // Produces the Excel format required by the accounting office:
+  //   Row 1: short column codes
+  //   Row 2: full Spanish labels
+  //   Row 3: sub-header ("Hotel" in alojamiento column)
+  //   Row 4+: one row per sales_invoice with sector breakdown derived from items JSON
+  //
+  app.get("/api/exports/libro-iva-ventas-agrupado", requireAuth, async (req, res) => {
+    try {
+      const { desde, hasta } = req.query as Record<string, string>;
+      if (!desde || !hasta) return res.status(400).json({ error: "Se requieren 'desde' y 'hasta'" });
+
+      const rows = (await db.execute(sql`
+        SELECT
+          si.id, si.tipo_comprobante, si.punto_venta, si.numero,
+          si.fecha_emision, si.cliente_razon_social, si.cliente_cuit,
+          si.cliente_condicion_iva, si.monto_neto, si.monto_iva21, si.monto_total,
+          si.items, si.restaurant_order_id
+        FROM sales_invoices si
+        WHERE si.fecha_emision BETWEEN ${desde} AND ${hasta}
+          AND si.estado != 'anulado'
+          AND (si.modo_ficticio = false OR si.modo_ficticio IS NULL)
+        ORDER BY si.fecha_emision, si.id
+      `)).rows as any[];
+
+      // ── Sector mapping ──────────────────────────────────────────────────
+      type Sector = "alojamiento" | "bar_resto" | "spa" | "lavanderia" | "frigobar" | "eventos" | "conshotel" | "otros";
+      const deriveSector = (desc: string): Sector => {
+        const d = (desc || "").toLowerCase();
+        if (/aloja|estadi|hospeda|habitac|desayuno|media.pens|pens.completa/.test(d)) return "alojamiento";
+        if (/restaur|bar|consumo|menu|plato|almuerzo|cena|aperol|bebida|ejecutivo/.test(d)) return "bar_resto";
+        if (/spa|masaje|tratam|belleza|jacuzzi/.test(d)) return "spa";
+        if (/lavand/.test(d)) return "lavanderia";
+        if (/frigobar|minibar/.test(d)) return "frigobar";
+        if (/evento|salon|salón|congres|reuni/.test(d)) return "eventos";
+        return "otros";
+      };
+
+      // ── Comprobante code mapping (accounting-system codes) ──────────────
+      const CODCOM: Record<string, { code: number; label: string }> = {
+        FA:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
+        FM:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
+        FB:  { code: 11101, label: "FACT -B- ELECT HOTEL" },
+        FC:  { code: 11103, label: "FACT -C- ELECT HOTEL" },
+        NCA: { code: 11300, label: "NC -A- ELECT HOTEL"   },
+        NCM: { code: 11300, label: "NC -A- ELECT HOTEL"   },
+        NCB: { code: 11301, label: "NC -B- ELECT HOTEL"   },
+        NCC: { code: 11303, label: "NC -C- ELECT HOTEL"   },
+      };
+
+      const IVA_LABELS: Record<string, string> = {
+        responsable_inscripto: "R.Inscrp.", consumidor_final: "C.Final",
+        monotributo: "Monotrib.", exento: "Exento",
+      };
+
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("IVA Ventas Agrupado");
+
+      // Row 1 — short codes (matches example file header row 0)
+      const row1 = ws.addRow([
+        "codcom","comprobante","codpos","numcom","fecemi","cliente",
+        "iva","cuit","gravado","iva21","reintegro","total","tip_ca",
+        "conshotel","bar_resto","spa","lavanderia","frigobar","eventos","alojamiento","otros",
+      ]);
+      row1.font = { bold: true };
+      row1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
+
+      // Row 2 — full labels (matches example file header row 1)
+      const row2 = ws.addRow([
+        "Codigo Comprobante","Comprobante","Codigo POS","Numero Comprobnte","Fecha de Emision",
+        "Cliente","Condicion IVA","Cuit","Gravado","Iva 21","Reintegro","Total","Tipo CA",
+        "Consumo Hotel","Restaurant","SPA","Lavanderia","Frigobar","Eventos","alojamiento","Otros",
+      ]);
+      row2.font = { bold: true };
+      row2.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCE6F1" } };
+
+      // Row 3 — sub-header: "Hotel" under alojamiento column (col 20, 1-indexed)
+      const row3 = ws.addRow(Array(21).fill(null));
+      row3.getCell(20).value = "Hotel";
+      row3.font = { italic: true, color: { argb: "FF666666" } };
+
+      // Data rows
+      for (const r of rows) {
+        const tipo = r.tipo_comprobante || "FB";
+        const codInfo = CODCOM[tipo] ?? { code: 11101, label: "FACT -B- ELECT HOTEL" };
+        const pv = String(r.punto_venta || 1).padStart(4, "0");
+
+        // Parse items and sum amounts by sector
+        let rawItems: any[] = [];
+        try {
+          rawItems = Array.isArray(r.items) ? r.items
+            : (typeof r.items === "string" ? JSON.parse(r.items) : []);
+        } catch { /* leave empty */ }
+
+        const sectors: Record<Sector, number> = {
+          alojamiento: 0, bar_resto: 0, spa: 0, lavanderia: 0,
+          frigobar: 0, eventos: 0, conshotel: 0, otros: 0,
+        };
+
+        if (rawItems.length > 0) {
+          for (const item of rawItems) {
+            const sector = deriveSector(item.descripcion ?? "");
+            sectors[sector] += $n(item.subtotal ?? 0);
+          }
+          // Reconcile: if sector sum ≠ total, put remainder in otros
+          const sectorTotal = Object.values(sectors).reduce((a, b) => a + b, 0);
+          const diff = Math.round(($n(r.monto_total) - sectorTotal) * 100) / 100;
+          if (Math.abs(diff) > 0.01) sectors.otros += diff;
+        } else {
+          // No items: use restaurant_order_id to decide fallback sector
+          if (r.restaurant_order_id) {
+            sectors.bar_resto = $n(r.monto_total);
+          } else {
+            sectors.alojamiento = $n(r.monto_total);
+          }
+        }
+
+        const dataRow = ws.addRow([
+          codInfo.code,
+          codInfo.label,
+          pv,
+          r.numero,
+          new Date(r.fecha_emision + "T12:00:00"),
+          r.cliente_razon_social,
+          IVA_LABELS[r.cliente_condicion_iva] ?? r.cliente_condicion_iva ?? "C.Final",
+          (r.cliente_cuit || "").replace(/-/g, ""),
+          $n(r.monto_neto),
+          $n(r.monto_iva21),
+          0, // reintegro
+          $n(r.monto_total),
+          1, // tip_ca
+          sectors.conshotel,
+          sectors.bar_resto,
+          sectors.spa,
+          sectors.lavanderia,
+          sectors.frigobar,
+          sectors.eventos,
+          sectors.alojamiento,
+          sectors.otros,
+        ]);
+        dataRow.getCell(5).numFmt = "dd/mm/yyyy"; // fecemi as date
+      }
+
+      // Column widths
+      [18, 26, 10, 12, 14, 38, 12, 16, 14, 10, 10, 14, 8, 14, 14, 12, 12, 12, 12, 14, 12]
+        .forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+      const [d1, d2] = [desde.replace(/-/g, ""), hasta.replace(/-/g, "")];
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="libro_iva_ventas_agrupado_${d1}-${d2}.xlsx"`);
+      res.send(Buffer.from(buf as ArrayBuffer));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Mayor de Cuentas (PDF) ────────────────────────────────────────────────
 
   app.get("/api/exports/mayor", requireAuth, async (req, res) => {

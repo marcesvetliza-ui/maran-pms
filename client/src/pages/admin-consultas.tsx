@@ -331,6 +331,14 @@ function LibroIVAVentasSection() {
             disabled={!desde || !hasta}
           />
           <DownloadButton
+            label="Excel Agrupado por Sector"
+            icon={FileSpreadsheet}
+            url={`/api/exports/libro-iva-ventas-agrupado?desde=${desde}&hasta=${hasta}`}
+            filename={`libro_iva_ventas_agrupado_${ts}.xlsx`}
+            variant="default"
+            disabled={!desde || !hasta}
+          />
+          <DownloadButton
             label="TXT CBTE"
             icon={FileCode}
             url={`/api/exports/libro-iva-ventas?desde=${desde}&hasta=${hasta}&tipo=cbte`}
