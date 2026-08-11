@@ -1350,5 +1350,146 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Add regimen_hospedaje to companies
+  await withTimeout("companies.regimen_hospedaje", T, () =>
+    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS regimen_hospedaje text`)
+  );
+
+  // ── Seed inicial de empresas y agencias ──────────────────────────────────
+  const { rows: seedCheck } = await db.execute(
+    sql`SELECT COUNT(*) AS cnt FROM companies WHERE razon_social != 'Empresa E2E Maran'`
+  );
+  if (parseInt((seedCheck[0] as any).cnt) === 0) {
+    logger.info("Seeding companies and agencies...");
+    await db.execute(sql`DELETE FROM account_movements WHERE entity_type IN ('company','agency')`);
+    await db.execute(sql`DELETE FROM companies`);
+    await db.execute(sql`DELETE FROM agencies`);
+
+    // Lote 1 de empresas (1-30)
+    await db.execute(sql`
+      INSERT INTO companies (razon_social, nombre_fantasia, cuil_cuit, condicion_iva, contact_name, contact_email, contact_phone, notes, regimen_hospedaje, condicion_venta_predeterminada, is_active) VALUES
+      ('Asociacion De Cooperativas Argentinas Cooperativa Ltda','ACA','30500120882','responsable_inscripto','brunengo','brunengo@acacoop.com.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Aerolineas Argentinas SA','AEROLINEAS ARGENTINAS','30641405554','responsable_inscripto','','sucursalesfacturas@aerolineas.com.ar','','Fact: rosadmin@aerolineas.com.ar','','cuenta_corriente','true'),
+      ('Agramin Sacma','AGRAMIN','30521525998','responsable_inscripto','','eugenia@agramin.com.ar','','','A Determinar','cuenta_corriente','true'),
+      ('Agronorte SRL','AGRONORTE','30547794482','responsable_inscripto','','bonaldimatias@agronorte.com.ar','3536-547372','Pagos: pagos@agronorte.com.ar','A Determinar','cuenta_corriente','true'),
+      ('Asociacion Civil Vida y Esperanza','ASOC VIDA Y ESPERANZA','30714984396','responsable_inscripto','Luciano','oficinasvye@gmail.com','','','Full Credit','cuenta_corriente','true'),
+      ('Asociacion Civil Renacer','ASOC CIVIL RENACER','30709630527','responsable_inscripto','Carolina Quiroga','carodiazquiroga@gmail.com','','','Full Credit','cuenta_corriente','true'),
+      ('Asociacion De La Magistratura y La Funcion Judicial De La Provincia De Entre Rios','MAGISTRATURA ER','33621358419','responsable_inscripto','virginia','amagistradoentrerios@gmail.com','','','','cuenta_corriente','true'),
+      ('Asociacion Mutual Modelo De Entre Rios','MUTUAL MODELO','30700166429','responsable_inscripto','','','','','','cuenta_corriente','true'),
+      ('Banco Central De La Republica Argentina','BCRA','30500011382','responsable_inscripto','Silvana Blandi','ppastrana@bcra.gob.ar','','Reservas: sblandi@bcra.gob.ar. Pagos: Patricia Pastrana. VERIFICAR EN EXTRANET','Aloja','cuenta_corriente','true'),
+      ('Banco De La Nacion Argentina','BNA','30500010912','responsable_inscripto','pedro','2650ZAD1@bna.com.ar','','Reservas: 2650ZAD@bna.com.ar','Solo Aloja','cuenta_corriente','true'),
+      ('Bolsa De Cereales','BOLSA DE CEREALES','30500103414','responsable_inscripto','Dana Taleb','DanaOliveraTaleb@bolsacer.org.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Camara Arbitral De Cereales De Entre Rios','CAMARA ARBITRAL CEREALES ER','30525669277','responsable_inscripto','Yanina Monzon','ymonzon@cacerer.com.ar','','','A Determinar','cuenta_corriente','true'),
+      ('Confederacion Argentina De La Mediana Empresa Came','CAME','30538872128','responsable_inscripto','','','','','','cuenta_corriente','true'),
+      ('Fundacion Centro De Medicina Nuclear y Molecular Entre Rios','CEMENER','30715094394','responsable_inscripto','Ekaterina Figueroa','ekaterina.figueroa@cemener.org.ar','','','Aloj + Cochera','cuenta_corriente','true'),
+      ('Circulo Odontologico De Parana','CIRCULO ODONTOLOGICO','30547604268','responsable_inscripto','Emilia Patat','escuelaposgrado@coparana.com.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Club Atletico Patronato','CLUB ATLETICO PATRONATO','30654542208','responsable_inscripto','Abdala Gustavo','clubpatronatoparana@hotmail.com','','Abona Mutual. Fact: gerencia@ammer.com.ar','Full Credit','cuenta_corriente','true'),
+      ('Col De Abogados De Entre Rios Sede Parana','COLEGIO DE ABOGADOS','30642510203','responsable_inscripto','Valentina Schmal','valentina@caer.org.ar','','Fact: Yanina Reik - yanina@caer.org.ar. Puede reservar Juliana Schonfeld','Aloj + Cochera','cuenta_corriente','true'),
+      ('Colegio De Corredores Publico','COLEGIO DE CORREDORES','30707972250','responsable_inscripto','German','','','','Full Credit','cuenta_corriente','true'),
+      ('Comersol SA','COMERSOL','30713266406','responsable_inscripto','Agustin M','agustin.m@comersol.com.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Consejo Profesional De Cs Eco De Er','CONSEJO CS ES','30537317171','responsable_inscripto','Julieta Battauz','spcpceer@cpceer.org.ar','','Fact: Lucrecia Masseto - lmasetto@cpceer.org.ar. VERIFICAR EXTRANET','A Determinar','cuenta_corriente','true'),
+      ('Consolid SRL','CONSOLID','30710996608','responsable_inscripto','','','','','Solo Aloja','cuenta_corriente','true'),
+      ('Coop Mutual Patronal Sociedad Mutual De Seg Grales','COOP MUTUAL PATRONAL','30500047174','responsable_inscripto','','centraldereservas@cooperacionseguros.com.ar','','','Aloja + Cochera','cuenta_corriente','true'),
+      ('Derudder Hermanos SRL','DERUDDER','30611338844','responsable_inscripto','Claudio Pocai','cpocai@zenit.com.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Ener SA','ENERSA','30709176672','responsable_inscripto','Graciela Eunich','geurich@enersa.com.ar','','Contactos: Graciela Eunich e Ianina Castagno','Full Credit','cuenta_corriente','true'),
+      ('Eriochem SA','ERIOCHEM','30700142643','responsable_inscripto','','comprobantes@erio.com.ar','','Reservas: fmonzon@erio.com.ar','','cuenta_corriente','true'),
+      ('Esco Saca','ESCO','30629929742','responsable_inscripto','Cynthia Galliussi','fatimamachuca@esco.com.ar','3434168658','Fact: Fatima Machuca. Transfieren a Banco de Entre Rios','Full Credit','cuenta_corriente','true'),
+      ('Federacion Economica De Entre Rios','FEDER','30671181197','responsable_inscripto','','coordinacion@federentrerios.com.ar','','','A Determinar','cuenta_corriente','true'),
+      ('Ita SA Industria y Tecnologia En Aceros SA','FLOWINDUSTRIES ITA','30619658104','responsable_inscripto','Griotti Cristian','','','','','cuenta_corriente','true'),
+      ('Valvulas Worcester De Argentina SA','FLOWINDUSTRIES VALVULAS','30516014748','responsable_inscripto','Analia','analia.camporeale@flowmanagement.com.ar','1138387790','','A Determinar','cuenta_corriente','true'),
+      ('Frigorifico Alberdi SA','FRIGORIFICO ALBERDI','33609706959','responsable_inscripto','Tamara Silva','','','Pagos: Maxi Rios. Ordenes de pago en marcadores','A Determinar','cuenta_corriente','true')
+    `);
+
+    // Lote 2 de empresas (31-59)
+    await db.execute(sql`
+      INSERT INTO companies (razon_social, nombre_fantasia, cuil_cuit, condicion_iva, contact_name, contact_email, contact_phone, notes, regimen_hospedaje, condicion_venta_predeterminada, is_active) VALUES
+      ('Gigared SA','GIGARED','30663045179','responsable_inscripto','Emilce','efernandez@gigared.com.ar','','','','cuenta_corriente','true'),
+      ('Iapser','IAPSER','30500055509','responsable_inscripto','Mirta Gomez','proveedores@iapserseguros.seg.ar','','Fact: Florencia Yost - fyost@iapserseguros.seg.ar','Aloja','cuenta_corriente','true'),
+      ('Integra Service SRL','INTEGRA (GRUPO PETERSEN)','30715826948','responsable_inscripto','Ezequiel','integrarosario@gmail.com','','Fact: facturasgrupobancosanjuan@bancosanjuan.com. Pagos: Andrea Caminos','A Determinar','cuenta_corriente','true'),
+      ('Iter Medicina SA','ITER','30704734871','responsable_inscripto','Cristina','reclamos.contable@itermed.com.ar','','','Full Credit','cuenta_corriente','true'),
+      ('Johnson Acero SA','JOHNSON ACERO','30501991070','responsable_inscripto','Daniela Barreto','recepcionpna@johnsonacero.com','+543434261000 Int 138','Fact: recepcionpna@johnsonacero.com. Verificar estado CTA: etaffarel@johnsonacero.com','Aloja','cuenta_corriente','true'),
+      ('Laboratorios Aspen SA','LABORATORIO ASPEN','30610562228','responsable_inscripto','Rosario Rapuzzi','administracion@aspen-lab.com','','','A Determinar','cuenta_corriente','true'),
+      ('Lafedar SA','LAFEDAR','30681071381','responsable_inscripto','','mariajose.fabro@lafedar.com','','','','cuenta_corriente','true'),
+      ('Rafaela Alimentos SA','LARIO','33500529909','responsable_inscripto','','lourdesmartin@lario.com.ar','','','Aloja y Cochera','cuenta_corriente','true'),
+      ('Leiva Comercial SA','LEIVA HNOS','30718560256','responsable_inscripto','','','','Tambien: Leiva Hermanos SA (30710771576)','','cuenta_corriente','true'),
+      ('Leiva Hermanos SA','LEIVA HNOS','30710771576','responsable_inscripto','Paula Leiva','gimenacastano@leivahnos.com.ar','','Fact: Gimena Castagno','A Determinar','cuenta_corriente','true'),
+      ('Liserar SA','LISERAR','30688955749','responsable_inscripto','','','','','','cuenta_corriente','true'),
+      ('Fundacion Miradortec Parque Tecnologico','MIRADOR TEC','30719274923','responsable_inscripto','pallotti','administrador@miradortec.net.ar','','Pagos: Vanesa Masilla - 3434656285','','cuenta_corriente','true'),
+      ('Nexo SA','NEXO','30651957830','responsable_inscripto','Roxana Schiavoni','recepcion@nexo-aberturas.com.ar','','Hacer una sola factura si hay mas de 5 reservas. Pagos: pagos@nexo-aberturas.com.ar','Full Credit','cuenta_corriente','true'),
+      ('Osde Organizacion De Servicios Directos Empresarios','OSDE','30546741253','responsable_inscripto','Evelyn Livoni','','','VERIFICAR EN EXTRANET','A Determinar','cuenta_corriente','true'),
+      ('Papelera Er SA','PAPELERA ER','30504516365','responsable_inscripto','Araceli Arce','administracion@papentrerios.com.ar','+54 343 4331 444 Int 233','Enviar detalle de consumos firmados. CC: tesoreria@papentrerios.com.ar. Pagos: Jacqueline Dellepiane','Full Credit','cuenta_corriente','true'),
+      ('Petropack SA','PETROPACK','30631926491','responsable_inscripto','Maria Rumiz','compras.facturas@petropack.com','','Reservas: recepcion@petropack.com. Pagos: asistente.administracion@petropack.com','A Determinar','cuenta_corriente','true'),
+      ('Pisos y Revestimientos SA','PISOS Y REVESTIMIENTOS','30679216895','responsable_inscripto','','','','','','cuenta_corriente','true'),
+      ('Poder Judicial De Er','PODER JUDICIAL','30681097763','responsable_inscripto','Julieta Gambito','institutojuanbalberdi@gmail.com','','Suelen ser ordenes de compra','A Determinar','cuenta_corriente','true'),
+      ('Punto Turistico SA','PUNTO TURISTICO','30698479252','responsable_inscripto','Agustina Caro','administracion@pturistico.com.ar','','Reservas: arcorreservas@pturistico.com.ar','A Determinar','cuenta_corriente','true'),
+      ('Qualia Compania De Seguros SA','QUALIA','30714496804','responsable_inscripto','Evelyn Russo','asistentedirectorio@qualiaseguros.com','','','Aloja y Cochera','cuenta_corriente','true'),
+      ('Renacer','RENACER','30709542326','responsable_inscripto','Flavia Chiosso','','','','','cuenta_corriente','true'),
+      ('Secar Security Argentina SA','SECAR','30678239549','responsable_inscripto','Araceli Gonzalez','araceligonzalez@securion.com.ar','+54 343 5269254','VERIFICAR EN EXTRANET (COBRANZAS.COM)','A Determinar','cuenta_corriente','true'),
+      ('Seguros Bernardino Rivadavia Cooperativa Limitada','SEGUROS RIVADAVIA','30500050310','responsable_inscripto','Clarisa','cdonoso@segurosrivadavia.com','','','','cuenta_corriente','true'),
+      ('Sermex SA','SERMEX','30708032812','responsable_inscripto','Fernanda Ortiz','sortiz@sermex.com.ar','','Fact: Sofia Ortiz. Puede reservar Mario Frazzini','Full Credit','cuenta_corriente','true'),
+      ('Sindicato Unificado De Trabajadores De La Educacion De Bs As Suteba','SUTEBA','30630102282','responsable_inscripto','','cgonzalez@suteba.org.ar','','Reservas: ncosta@suteba.org.ar','Solo Aloja','cuenta_corriente','true'),
+      ('Universidad Catolica Argentina Sede Parana','UCA','30709499668','responsable_inscripto','','nicolasbarcos@uca.edu.ar','','Tambien: jorge_medrano@uca.edu.ar','Aloja y Cochera','cuenta_corriente','true'),
+      ('Uner','UNER','30562252157','responsable_inscripto','Diego Godoy','diego.godoy@uner.edu.ar','','','Aloja y Cochera','cuenta_corriente','true'),
+      ('Unimaco SA','UNIMACO','30708992301','responsable_inscripto','Yanina Carrasco','ycarrasco@familiabercomat.com','370 4348745','','Full Credit','cuenta_corriente','true'),
+      ('Venturance SA','VENTURANCE','30546783495','responsable_inscripto','Maria Eugenia Rusconi','erusconi@venturance.ar','','Fact: Damian Marotti - DMarotti@venturance.ar','A Determinar','cuenta_corriente','true')
+    `);
+
+    // Agencias (11)
+    await db.execute(sql`
+      INSERT INTO agencies (razon_social, nombre_fantasia, cuil_cuit, condicion_iva, contact_name, contact_email, contact_phone, notes, condicion_venta_predeterminada, is_active) VALUES
+      ('Organizacion De Servicios Turisticos SRL','AMICHI','30612067267','responsable_inscripto','','prepagos@amichi.com.ar','','Ingresa por channel manager. Contacto reservas: Lucas Landini','cuenta_corriente','true'),
+      ('Furlong Fox SA','FURLONG FOX','30707962743','responsable_inscripto','Paola','hoteles@furlong-fox.com.ar','','Fact: fproveedores@furlong-fox.com.ar. Pagos: pagoproveedores@furlong-fox.com.ar','cuenta_corriente','true'),
+      ('GBT II Argentina SRL','GBT','30714466603','responsable_inscripto','','FacturasHoteles@amexgbt.com','','Reservas: arg@vsatravel.com.mx','cuenta_corriente','true'),
+      ('Neptuno Viajes SRL','NEPTUNO','30663437166','responsable_inscripto','Carolina Leiva','carolina@neptuno.tur.ar','','Reservas: cecilia@neptuno.tur.ar. Pagos: Martin Vidal. Enviar a Carolina y copiar Martin Vidal','cuenta_corriente','true'),
+      ('ITS Internacional Travel Services SA','PEZZATTI','30676757917','responsable_inscripto','Alejandra Cartasegna','administracionmdq2@pezzati.com','','Reservas: alejandracartasegna@pezzati.com. Pagos: Sabrina Demaria / Jacqueline Luna','cuenta_corriente','true'),
+      ('Prosa Promotora Sol Argentino SA','PROSA VIAJES','30557578524','responsable_inscripto','mgabriela','mgabriela@prosaviajes.com.ar','','','cuenta_corriente','true'),
+      ('CGB Viajes SRL','TRAVEL TIPS','30715151665','responsable_inscripto','Alberto Cardullo','empresas@traveltips.com.ar','','','cuenta_corriente','true'),
+      ('Travel Services Argentina SA','TTS','30521151818','responsable_inscripto','','lreynoso@travelservices.com','','Pagos: Mariel Murrilo / Leonardo Reynoso','cuenta_corriente','true'),
+      ('Despegarcomar SA','DESPEGAR','30701307115','responsable_inscripto','','','','','cuenta_corriente','true'),
+      ('Grupo San Marcos SRL','KEEPERS TRAVEL','30714516546','responsable_inscripto','Jazmin Elias','je@keeperstravel.com','','Fact: rera@keeperstravel.com. Pagos: Reynaldo Alberto','cuenta_corriente','true'),
+      ('Coovaeco Turismo Coop De Prestacion De Serv Tur Limitada','COOVAECO TUR','30596889014','responsable_inscripto','','operadores@coovaeco.com','','Reservas: rcardillo@coovaeco.com (Rosana Cardillo). Pagos: Noelia Cartvachi','cuenta_corriente','true')
+    `);
+
+    // Saldos iniciales (deudas de las empresas/agencias con el hotel)
+    await db.execute(sql`
+      INSERT INTO account_movements (id, entity_type, entity_id, date, type, description, amount, created_at)
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',696500.00,NOW() FROM companies WHERE cuil_cuit='30547794482'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',600000.00,NOW() FROM companies WHERE cuil_cuit='33621358419'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',693300.03,NOW() FROM companies WHERE cuil_cuit='30537317171'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',2748100.14,NOW() FROM companies WHERE cuil_cuit='30709176672'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',344500.02,NOW() FROM companies WHERE cuil_cuit='30500055509'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',5874000.02,NOW() FROM companies WHERE cuil_cuit='30501991070'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',106000.00,NOW() FROM companies WHERE cuil_cuit='30688955749'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',4201900.09,NOW() FROM companies WHERE cuil_cuit='30719274923'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',129500.00,NOW() FROM companies WHERE cuil_cuit='30546741253'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',2253500.17,NOW() FROM companies WHERE cuil_cuit='30504516365'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',2660500.05,NOW() FROM companies WHERE cuil_cuit='30631926491'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',141500.00,NOW() FROM companies WHERE cuil_cuit='30679216895'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',3031500.00,NOW() FROM companies WHERE cuil_cuit='30698479252'
+      UNION ALL
+      SELECT gen_random_uuid(),'company',id,CURRENT_DATE,'cargo','Saldo inicial',810500.05,NOW() FROM companies WHERE cuil_cuit='30708032812'
+      UNION ALL
+      SELECT gen_random_uuid(),'agency',id,CURRENT_DATE,'cargo','Saldo inicial',530500.01,NOW() FROM agencies WHERE cuil_cuit='30707962743'
+      UNION ALL
+      SELECT gen_random_uuid(),'agency',id,CURRENT_DATE,'cargo','Saldo inicial',151000.00,NOW() FROM agencies WHERE cuil_cuit='30714466603'
+      UNION ALL
+      SELECT gen_random_uuid(),'agency',id,CURRENT_DATE,'cargo','Saldo inicial',3439244.58,NOW() FROM agencies WHERE cuil_cuit='30701307115'
+    `);
+
+    logger.info("Seed completado: 59 empresas, 11 agencias, 17 saldos iniciales.");
+  }
+
   logger.info("Migraciones incrementales completadas.");
 }

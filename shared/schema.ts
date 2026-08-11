@@ -95,6 +95,7 @@ export const companies = pgTable("companies", {
   esEmpresaGrande: boolean("es_empresa_grande").default(false),
   montoBaseFce: text("monto_base_fce"),
   condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
+  regimenHospedaje: text("regimen_hospedaje"),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });

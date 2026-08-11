@@ -211,6 +211,7 @@ export default function CompaniesPage() {
       creditLimit: "0",
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
+      regimenHospedaje: "",
       notes: "",
     },
   });
@@ -295,6 +296,7 @@ export default function CompaniesPage() {
       creditLimit: company.creditLimit || "0",
       paymentTermDays: company.paymentTermDays || 30,
       condicionVentaPredeterminada: (company as any).condicionVentaPredeterminada || "contado",
+      regimenHospedaje: (company as any).regimenHospedaje || "",
       notes: company.notes || "",
     });
     setShowForm(true);
@@ -327,6 +329,7 @@ export default function CompaniesPage() {
       creditLimit: "0",
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
+      regimenHospedaje: "",
       notes: "",
     });
     setShowForm(true);
@@ -589,10 +592,10 @@ export default function CompaniesPage() {
               <div className="border-t pt-4">
                 <h3 className="text-sm font-medium mb-3">Condiciones Comerciales</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <FormField control={form.control} name="creditLimit" render={({ field }) => (
+                  <FormField control={form.control} name="regimenHospedaje" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Límite de Crédito</FormLabel>
-                      <FormControl><Input {...field} type="number" data-testid="input-company-credit-limit" /></FormControl>
+                      <FormLabel>Régimen</FormLabel>
+                      <FormControl><Input {...field} value={field.value ?? ""} placeholder="Full Credit, Aloja, A Determinar…" data-testid="input-company-regimen" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
