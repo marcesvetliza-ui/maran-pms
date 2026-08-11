@@ -1728,6 +1728,25 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
         )}
       </CardHeader>
       <CardContent>
+        {/* ── Saldo total a la fecha ────────────────────────────────────── */}
+        {proveedores.length > 0 && (() => {
+          const total = proveedores.reduce((sum: number, p: any) => sum + parseFloat(p.total_saldo || 0), 0);
+          return (
+            <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-3 mb-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Saldo total a la fecha
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {proveedores.length} proveedor{proveedores.length !== 1 ? "es" : ""} con deuda al {fmtDate(fechaCorte)}
+                </p>
+              </div>
+              <p className="text-2xl font-bold text-destructive">
+                ${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+          );
+        })()}
         {proveedores.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <CheckCircle2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
