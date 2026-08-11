@@ -5175,7 +5175,7 @@ export default function RestaurantPage() {
                 data-testid="button-close-table"
               >
                 <CreditCard className="h-5 w-5 mr-2" />
-                Cerrar Mesa
+                Facturar Mesa
               </Button>
             )}
           </DialogFooter>
