@@ -128,6 +128,18 @@ function GroupFormDialog({
   const [blocks, setBlocks] = useState<BlockDraft[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
+  const [blockAvailability, setBlockAvailability] = useState<Record<string, number | null>>({});
+
+  const fetchBlockAvailability = async (blockId: string, roomTypeId: string, checkIn: string, checkOut: string) => {
+    if (!roomTypeId || !checkIn || !checkOut || checkOut <= checkIn) return;
+    try {
+      const res = await fetch(`/api/rooms/available?checkIn=${checkIn}&checkOut=${checkOut}&roomTypeId=${roomTypeId}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setBlockAvailability(prev => ({ ...prev, [blockId]: Array.isArray(data) ? data.length : null }));
+      }
+    } catch { /* ignorar */ }
+  };
 
   // Reset state when dialog opens/closes or mode changes
   useEffect(() => {
@@ -633,7 +645,12 @@ function GroupFormDialog({
                         <Label className="text-xs">Tipo de Habitación *</Label>
                         <Select
                           value={block.roomTypeId}
-                          onValueChange={(v) => updateBlock(block.id, { roomTypeId: v })}
+                          onValueChange={(v) => {
+                            updateBlock(block.id, { roomTypeId: v });
+                            const ci = block.useCustomDates ? block.blockCheckInDate : formData.checkInDate;
+                            const co = block.useCustomDates ? block.blockCheckOutDate : formData.checkOutDate;
+                            fetchBlockAvailability(block.id, v, ci || '', co || '');
+                          }}
                         >
                           <SelectTrigger data-testid={`select-block-type-${index}`}>
                             <SelectValue placeholder="Seleccionar" />
@@ -649,14 +666,26 @@ function GroupFormDialog({
                       </div>
 
                       <div>
-                        <Label className="text-xs">Cantidad *</Label>
+                        <Label className="text-xs">
+                          Cantidad *
+                          {blockAvailability[block.id] != null && (
+                            <span className={`ml-1 font-normal ${blockAvailability[block.id] === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                              ({blockAvailability[block.id]} disponibles)
+                            </span>
+                          )}
+                        </Label>
                         <Input
                           type="number"
                           min={1}
+                          max={blockAvailability[block.id] ?? undefined}
                           value={block.quantity}
                           onChange={(e) => updateBlock(block.id, { quantity: parseInt(e.target.value) || 1 })}
                           data-testid={`input-block-qty-${index}`}
+                          className={blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) ? 'border-destructive' : ''}
                         />
+                        {blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) && (
+                          <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
+                        )}
                       </div>
 
                       <div>

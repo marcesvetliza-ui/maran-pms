@@ -124,6 +124,20 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
+      // 2.2: Al cancelar el grupo, cancelar todas las reservas vinculadas (excepto las ya checked_out)
+      if (status === 'cancelled') {
+        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
+        for (const link of links) {
+          const [res] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
+          if (res && res.status !== 'checked_out' && res.status !== 'cancelled') {
+            await db.update(reservationsTable).set({ status: 'cancelled' }).where(eq(reservationsTable.id, res.id));
+            if (res.roomId) {
+              await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, res.roomId));
+            }
+          }
+        }
+      }
+
       // Si el nombre cambió, sincronizar el guest placeholder que se usa en planning,
       // rooming list, folio y cualquier otro lugar que muestra el nombre del grupo
       if (name !== undefined) {

@@ -166,10 +166,22 @@ function AddBlockDialog({
   const [useCustomDates, setUseCustomDates] = useState(false);
   const [blockCheckInDate, setBlockCheckInDate] = useState(group.checkInDate);
   const [blockCheckOutDate, setBlockCheckOutDate] = useState(group.checkOutDate);
+  const [availableCount, setAvailableCount] = useState<number | null>(null);
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
   });
+
+  const fetchAvailability = async (rtId: string, ci: string, co: string) => {
+    if (!rtId || !ci || !co || co <= ci) { setAvailableCount(null); return; }
+    try {
+      const res = await fetch(`/api/rooms/available?checkIn=${ci}&checkOut=${co}&roomTypeId=${rtId}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableCount(Array.isArray(data) ? data.length : null);
+      }
+    } catch { setAvailableCount(null); }
+  };
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans/by-room-type", roomTypeId],
@@ -238,7 +250,12 @@ function AddBlockDialog({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Tipo de Habitación *</Label>
-              <Select value={roomTypeId} onValueChange={setRoomTypeId}>
+              <Select value={roomTypeId} onValueChange={(v) => {
+                setRoomTypeId(v);
+                const ci = useCustomDates ? blockCheckInDate : group.checkInDate;
+                const co = useCustomDates ? blockCheckOutDate : group.checkOutDate;
+                fetchAvailability(v, ci, co);
+              }}>
                 <SelectTrigger data-testid="select-block-room-type">
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
@@ -253,14 +270,26 @@ function AddBlockDialog({
             </div>
 
             <div>
-              <Label>Cantidad *</Label>
+              <Label>
+                Cantidad *
+                {availableCount !== null && (
+                  <span className={`ml-1 font-normal text-xs ${availableCount === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    ({availableCount} disponibles)
+                  </span>
+                )}
+              </Label>
               <Input
                 type="number"
                 min={1}
+                max={availableCount ?? undefined}
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
                 data-testid="input-block-quantity"
+                className={availableCount !== null && quantity > availableCount ? 'border-destructive' : ''}
               />
+              {availableCount !== null && quantity > availableCount && (
+                <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
+              )}
             </div>
           </div>
 
@@ -731,6 +760,7 @@ export default function GroupDetailPage() {
   // Master Folio state
   const [showMasterPaymentDialog, setShowMasterPaymentDialog] = useState(false);
   const [masterPaymentRows, setMasterPaymentRows] = useState<Array<{method: string; amount: string; reference: string}>>([{method: "cash", amount: "", reference: ""}]);
+  const [masterPaymentReference, setMasterPaymentReference] = useState("");
   const [masterPaymentReceiptType, setMasterPaymentReceiptType] = useState("none");
   const [showMasterFacturaDialog, setShowMasterFacturaDialog] = useState(false);
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
@@ -1125,8 +1155,8 @@ export default function GroupDetailPage() {
         paymentRows: validRows.length > 0 ? validRows.map(r => ({
           method: r.method,
           amount: r.amount,
-          reference: r.reference || undefined,
-        })) : [{ method: masterPaymentRows[0].method, amount: "0", reference: undefined }],
+          reference: masterPaymentReference || undefined,
+        })) : [{ method: masterPaymentRows[0].method, amount: "0", reference: masterPaymentReference || undefined }],
         receiptType: masterPaymentReceiptType,
         billingEntityType: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityType : undefined,
         billingEntityId: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityId : undefined,
@@ -1149,6 +1179,7 @@ export default function GroupDetailPage() {
       toast({ title: "Pago al Folio Maestro registrado exitosamente" });
       setShowMasterPaymentDialog(false);
       setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
+      setMasterPaymentReference("");
       setMasterPaymentReceiptType("none");
     },
     onError: (e: any) => toast({ title: "Error al registrar pago maestro", description: parseApiError(e), variant: "destructive" }),
@@ -1680,7 +1711,7 @@ export default function GroupDetailPage() {
                         key={res.id} 
                         data-testid={`row-reservation-${res.id}`}
                         className="group/row cursor-pointer hover:bg-accent"
-                        onClick={() => navigate(`/reservations?view=${res.id}&returnTo=/groups/${groupId}`)}
+                        onClick={() => window.open(`/reservations?view=${res.id}`, '_blank')}
                       >
                         <TableCell className="font-mono text-sm">{res.reservationCode}</TableCell>
                         <TableCell>
@@ -1788,9 +1819,9 @@ export default function GroupDetailPage() {
                               </Button>
                             )}
                             <Button variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => navigate(`/reservations?view=${res.id}&returnTo=/groups/${groupId}`)}
+                              onClick={() => window.open(`/reservations?view=${res.id}`, '_blank')}
                               data-testid={`button-view-reservation-${res.id}`}
-                              title="Ver detalle de reserva"
+                              title="Ver detalle de reserva (nueva pestaña)"
                             >
                               <ExternalLink className="h-3 w-3" />
                             </Button>
@@ -2868,28 +2899,8 @@ export default function GroupDetailPage() {
                   <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
                   <SelectItem value="transferencia">Transferencia</SelectItem>
                   <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                  <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
                 </SelectContent>
               </Select>
-              {groupPaymentMethod === "cuenta_corriente" && (
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
-                    <SelectTrigger data-testid="select-group-cc-entity-type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="company">Empresa</SelectItem>
-                      <SelectItem value="agency">Agencia</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
-                    <SelectTrigger data-testid="select-group-cc-entity-id"><SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} /></SelectTrigger>
-                    <SelectContent>
-                      {(groupPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
-                        <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
             </div>
 
             <div>
@@ -3096,9 +3107,10 @@ export default function GroupDetailPage() {
             const condIva = selectedEntity?.condicionIva ?? "";
             const isRI = condIva === "responsable_inscripto" || condIva === "exento";
             const allowFT = masterFolio.config === "accommodation";
+            const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = masterPaymentReceiptType === "factura_t"
               ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
-              : PAYMENT_METHOD_LABELS;
+              : methodsWithoutOther;
             const rowsTotal = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
             const isMipyme = masterPaymentReceiptType === "factura_mipyme_a";
             const isFiscalAndNeedsEntity = isFiscal && !masterPaymentCcEntityId;
@@ -3222,10 +3234,20 @@ export default function GroupDetailPage() {
                         </Button>
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground">Método — Monto — Referencia / Observaciones</div>
+                    <div>
+                      <Label className="text-xs">Referencia / Observaciones del comprobante</Label>
+                      <Input
+                        placeholder="Nro. de transferencia, cheque, etc. (opcional)"
+                        className="h-9 mt-1"
+                        value={masterPaymentReference}
+                        onChange={e => setMasterPaymentReference(e.target.value)}
+                        data-testid="input-master-payment-reference"
+                      />
+                    </div>
+                    <div className="text-xs text-muted-foreground">Método — Monto</div>
                     {masterPaymentRows.map((row, idx) => (
                       <div key={idx} className="grid grid-cols-12 gap-1 items-center">
-                        <div className="col-span-4">
+                        <div className="col-span-6">
                           <Select value={row.method} onValueChange={v => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
                             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -3235,16 +3257,11 @@ export default function GroupDetailPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="col-span-3">
+                        <div className="col-span-5">
                           <Input type="number" step="0.01" placeholder="Monto" className="h-9"
                             value={row.amount}
                             data-testid={idx === 0 ? "input-master-payment-amount" : undefined}
                             onChange={e => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))} />
-                        </div>
-                        <div className="col-span-4">
-                          <Input placeholder="Referencia / Observaciones" className="h-9"
-                            value={row.reference}
-                            onChange={e => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: e.target.value} : r))} />
                         </div>
                         <div className="col-span-1 flex justify-end">
                           {masterPaymentRows.length > 1 && (
