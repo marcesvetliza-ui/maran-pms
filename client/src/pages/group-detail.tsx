@@ -3360,9 +3360,13 @@ export default function GroupDetailPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label>Método(s) de pago</Label>
-                      {masterPaymentRows.length < 4 && (
+                      {masterPaymentRows.length < 4 && Object.keys(allowedMethods).length > masterPaymentRows.length && (
                         <Button variant="outline" size="sm" type="button"
-                          onClick={() => setMasterPaymentRows(prev => [...prev, {method: "cash", amount: "", reference: ""}])}>
+                          onClick={() => {
+                            const usedMethods = new Set(masterPaymentRows.map(r => r.method));
+                            const nextMethod = Object.keys(allowedMethods).find(k => !usedMethods.has(k)) ?? "cash";
+                            setMasterPaymentRows(prev => [...prev, {method: nextMethod, amount: "", reference: ""}]);
+                          }}>
                           <Plus className="h-3.5 w-3.5 mr-1" />Agregar método
                         </Button>
                       )}
@@ -3385,7 +3389,7 @@ export default function GroupDetailPage() {
                             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               {Object.entries(allowedMethods)
-                                .filter(([k]) => k === row.method || !masterPaymentRows.some((r, i) => i !== idx && r.method === k))
+                                .filter(([k]) => !masterPaymentRows.some((r, i) => i !== idx && r.method === k))
                                 .map(([k, v]) => (
                                   <SelectItem key={k} value={k}>{v as string}</SelectItem>
                                 ))}
