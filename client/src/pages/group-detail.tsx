@@ -1066,6 +1066,7 @@ export default function GroupDetailPage() {
 
       const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
       const needsVoucher = groupPaymentReceiptType === "cierre_habitacion";
+      const needsTicket = groupPaymentReceiptType === "ticket";
 
       if (needsFactura || needsVoucher) {
         // Close the payment dialog and open the invoice dialog with the payment ID
@@ -1073,6 +1074,11 @@ export default function GroupDetailPage() {
         setPendingGroupPaymentId(data.paymentId ? String(data.paymentId) : "");
         setShowGroupFacturaDialog(true);
         return;
+      }
+
+      if (needsTicket) {
+        // Abrir el folio maestro del grupo como comprobante interno de respaldo
+        window.open(`/api/groups/${groupId}/master-folio/pdf`, "_blank");
       }
 
       if (groupPaymentCloseAll) {
@@ -3348,8 +3354,14 @@ export default function GroupDetailPage() {
             setGroupFacturaFromResumen(false);
           }}
           config={billingConfig}
-          allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
-          compactMode={!groupFacturaFromResumen && !!(groupPaymentCcEntityId || groupPaymentReceiptType !== "factura_a")}
+          allowedTipos={
+            groupPaymentReceiptType === "factura_a" ? ["FA"] :
+            groupPaymentReceiptType === "factura_t" ? ["FT"] :
+            groupPaymentReceiptType === "factura_mipyme_a" ? ["FM"] :
+            groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] :
+            ["FB"]
+          }
+          compactMode={!groupFacturaFromResumen && !!(groupPaymentCcEntityId || !["factura_a","factura_t","factura_mipyme_a"].includes(groupPaymentReceiptType))}
           initialValues={(() => {
             const condicionIvaMap: Record<string, string> = {
               responsable_inscripto: "Responsable Inscripto",
