@@ -1475,7 +1475,7 @@ export default function GroupDetailPage() {
             data-testid="button-group-invoice"
           >
             <FileText className="mr-2 h-4 w-4" />
-            {isLoadingInvoice ? "Cargando..." : "Factura Grupal"}
+            {isLoadingInvoice ? "Cargando..." : "Resumen del Grupo"}
           </Button>
           
           <Button
@@ -2564,10 +2564,13 @@ export default function GroupDetailPage() {
           <DialogHeader className="print:mb-4">
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Factura Grupal - {invoiceData?.group?.name}
+              Resumen del Grupo - {invoiceData?.group?.name}
             </DialogTitle>
             <DialogDescription>
               Código: {invoiceData?.group?.code} | {fmtDate(invoiceData?.group?.checkInDate || "")} - {fmtDate(invoiceData?.group?.checkOutDate || "")}
+              <span className="block mt-1 text-amber-600 dark:text-amber-400 font-medium">
+                Este es un resumen informativo del folio grupal. No constituye una factura electrónica ni se emite a ARCA.
+              </span>
             </DialogDescription>
           </DialogHeader>
 
