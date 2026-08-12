@@ -3384,9 +3384,11 @@ export default function GroupDetailPage() {
                           <Select value={row.method} onValueChange={v => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
                             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              {Object.entries(allowedMethods).map(([k, v]) => (
-                                <SelectItem key={k} value={k}>{v as string}</SelectItem>
-                              ))}
+                              {Object.entries(allowedMethods)
+                                .filter(([k]) => k === row.method || !masterPaymentRows.some((r, i) => i !== idx && r.method === k))
+                                .map(([k, v]) => (
+                                  <SelectItem key={k} value={k}>{v as string}</SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -3601,7 +3603,7 @@ export default function GroupDetailPage() {
                     <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
                     <SelectItem value="transferencia">Transferencia</SelectItem>
                     <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                    <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+
                   </SelectContent>
                 </Select>
               </div>
