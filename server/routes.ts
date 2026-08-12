@@ -179,10 +179,6 @@ export async function registerRoutes(
       return next();
     }
 
-    if (req.path === "/admin/run-data-migration-2026" && req.method === "POST") {
-      return next();
-    }
-
     // Survey routes are public — guests access them from email links without login
     if (req.path.startsWith("/api/survey/")) {
       return next();
@@ -3564,10 +3560,6 @@ export async function registerRoutes(
       res.json(loan);
     } catch { res.status(500).json({ error: "Error al registrar devolución" }); }
   });
-
-  // TEMP migration endpoint — remove after running in prod
-  const { registerMigrationRoute } = await import("./routes/dataMigration2026");
-  registerMigrationRoute(app);
 
   return httpServer;
 }
