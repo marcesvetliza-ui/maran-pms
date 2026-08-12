@@ -5779,11 +5779,14 @@ export class DatabaseStorage implements IStorage {
 
   async generateVoucherCode(): Promise<string> {
     const year = new Date().getFullYear();
-    const result = await db.execute<{ count: string }>(
-      sql`SELECT COUNT(*)::text AS count FROM gift_vouchers WHERE voucher_code LIKE ${'VCHR-' + year + '-%'}`
+    const prefix = `VCHR-${year}-`;
+    // Use MAX of the numeric suffix so gaps from deletions don't cause duplicate-key errors.
+    const result = await db.execute(
+      sql`SELECT COALESCE(MAX(CAST(RIGHT(voucher_code, 4) AS INTEGER)), 0)::text AS max_seq
+          FROM gift_vouchers WHERE voucher_code LIKE ${prefix + '%'}`
     );
-    const count = parseInt((result.rows[0] as any).count ?? "0", 10) + 1;
-    return `VCHR-${year}-${String(count).padStart(4, "0")}`;
+    const lastSeq = parseInt((result.rows[0] as any).max_seq ?? "0", 10);
+    return `${prefix}${String(lastSeq + 1).padStart(4, "0")}`;
   }
 
   // ── Toma de Inventario ────────────────────────────────────────────────────────
