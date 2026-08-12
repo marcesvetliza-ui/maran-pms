@@ -251,6 +251,17 @@ function GroupFormDialog({
       const data = await r.json();
       const conflicts: ConflictItem[] = data.conflicts ?? [];
 
+      // Blocked: group has guests already checked in
+      if (data.checkedInCount && data.checkedInCount > 0) {
+        const n = data.checkedInCount;
+        toast({
+          title: "No se pueden cambiar las fechas",
+          description: `Hay ${n} habitación${n !== 1 ? "es" : ""} actualmente en check-in en este grupo. Finalizá o revertí esos check-ins antes de modificar las fechas.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (conflicts.length === 0) {
         // No conflicts — go to confirmation
         setPendingFormData(formData);

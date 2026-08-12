@@ -106,11 +106,17 @@ export function registerGroupsRoutes(app: Express) {
       const allRoomTypes = await storage.getRoomTypes();
       const maintenanceBlocks = await storage.getMaintenanceBlocks();
 
+      // Count checked_in reservations in the group — if any, block date change entirely
+      const groupResIds = new Set(links.map(l => l.reservationId));
+      const checkedInReservations = allReservations.filter(r => groupResIds.has(r.id) && r.status === "checked_in");
+      if (checkedInReservations.length > 0) {
+        return res.json({ checkedInCount: checkedInReservations.length, conflicts: [] });
+      }
+
       const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
       // "physically unavailable" room statuses — exclude from alternatives regardless of reservation conflicts
       const unavailableRoomStatuses: string[] = ["maintenance", "oos"];
-      // This group's own reservation IDs — excluded when computing alternatives for other rooms
-      const groupResIds = new Set(links.map(l => l.reservationId));
+      // groupResIds already defined above (used for checked_in check)
 
       const conflicts: Array<{
         reservationId: string;
@@ -239,6 +245,24 @@ export function registerGroupsRoutes(app: Express) {
       const oldCheckIn = toDateStr(currentGroup?.checkInDate);
       const oldCheckOut = toDateStr(currentGroup?.checkOutDate);
 
+      // Determine whether dates are changing before touching the database
+      const newCheckIn = updateData.checkInDate as string | undefined;
+      const newCheckOut = updateData.checkOutDate as string | undefined;
+      const datesChanged = (newCheckIn && newCheckIn !== oldCheckIn) || (newCheckOut && newCheckOut !== oldCheckOut);
+
+      // Guard: if dates are changing, reject if any linked reservation is currently checked_in
+      if (datesChanged) {
+        const linksForCheck = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
+        const linkedResIds = new Set(linksForCheck.map(l => l.reservationId));
+        const allResForCheck = await storage.getReservations();
+        const checkedInCount = allResForCheck.filter(r => linkedResIds.has(r.id) && r.status === "checked_in").length;
+        if (checkedInCount > 0) {
+          return res.status(409).json({
+            error: `No se pueden cambiar las fechas mientras hay huéspedes en casa. Hay ${checkedInCount} habitación${checkedInCount !== 1 ? "es" : ""} actualmente en check-in en este grupo.`,
+          });
+        }
+      }
+
       const group = await storage.updateGroup(req.params.id, updateData);
       if (!group) {
         return res.status(404).json({ error: "Group not found" });
@@ -246,9 +270,6 @@ export function registerGroupsRoutes(app: Express) {
 
       // 3.1: If dates changed, propagate to pending/confirmed reservations that had the old dates
       let propagatedCount = 0;
-      const newCheckIn = updateData.checkInDate as string | undefined;
-      const newCheckOut = updateData.checkOutDate as string | undefined;
-      const datesChanged = (newCheckIn && newCheckIn !== oldCheckIn) || (newCheckOut && newCheckOut !== oldCheckOut);
       if (datesChanged) {
         const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
         for (const link of links) {
