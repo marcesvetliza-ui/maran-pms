@@ -179,6 +179,10 @@ export async function registerRoutes(
       return next();
     }
 
+    if (req.path === "/api/admin/run-data-migration-2026" && req.method === "POST") {
+      return next();
+    }
+
     // Survey routes are public — guests access them from email links without login
     if (req.path.startsWith("/api/survey/")) {
       return next();
