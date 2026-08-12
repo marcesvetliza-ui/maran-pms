@@ -767,6 +767,7 @@ export default function GroupDetailPage() {
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   const [masterPaymentCcEntityType, setMasterPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [masterPaymentCcEntityId, setMasterPaymentCcEntityId] = useState("");
+  const [masterInvoiceDistribution, setMasterInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
   // Delete group charge confirmation
@@ -3214,6 +3215,7 @@ export default function GroupDetailPage() {
           setMasterPaymentReceiptType("none");
           setMasterPaymentCcEntityType("company");
           setMasterPaymentCcEntityId("");
+          setMasterInvoiceDistribution("none");
         }
       }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -3298,6 +3300,45 @@ export default function GroupDetailPage() {
                     </p>
                   )}
                 </div>
+
+                {/* 1b. Distribución de ítems — sólo para comprobantes fiscales */}
+                {isFiscal && (() => {
+                  // Distribución detallada/totalizada sólo tiene sentido cuando la factura cubre el folio completo.
+                  // Para pagos parciales se mantiene el ítem único con el importe efectivamente cobrado.
+                  const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
+                  return (
+                    <div>
+                      <Label>Distribución de ítems en la factura</Label>
+                      <div className="grid grid-cols-3 gap-2 mt-1">
+                        {([
+                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
+                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
+                        ] as const).map(opt => {
+                          const disabled = !!(opt as any).requiresFull && !isFullPayment;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              disabled={disabled}
+                              onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
+                              className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                            >
+                              <p className="font-semibold">{opt.label}</p>
+                              <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {!isFullPayment && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* 2. Empresa / Agencia — para todos los comprobantes fiscales */}
                 {isFiscal && (
@@ -3458,6 +3499,58 @@ export default function GroupDetailPage() {
           factura_mipyme_a: ["FM"],
           factura_t: ["FT"],
         };
+
+        // Compute invoice items based on chosen distribution mode.
+        // Distribution modes (totalizados/detallados) only apply when the payment covers
+        // the full folio total, so that invoice items always sum to the amount being invoiced.
+        const isMipymeInvoice = masterPaymentReceiptType === "factura_mipyme_a";
+        const isFullPaymentForInvoice = isMipymeInvoice || Math.abs(totalPaid - (masterFolio?.masterTotal ?? 0)) < 0.01;
+        const effectiveDistribution = isFullPaymentForInvoice ? masterInvoiceDistribution : "none";
+
+        const computedItems: Array<{ descripcion: string; precioUnitario: number }> = (() => {
+          if (effectiveDistribution === "totalizados" && masterFolio) {
+            const items: Array<{ descripcion: string; precioUnitario: number }> = [];
+            if ((masterFolio.masterAccommodation ?? 0) > 0) {
+              items.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
+            }
+            if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all") {
+              items.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
+            }
+            if ((masterFolio.groupChargesTotal ?? 0) > 0) {
+              items.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
+            }
+            return items.length > 0
+              ? items
+              : [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
+          }
+          if (effectiveDistribution === "detallados" && masterFolio) {
+            const items: Array<{ descripcion: string; precioUnitario: number }> = [];
+            // One item per room — include extras only when config==="all" (otherwise extras stay outside Folio Maestro)
+            const includeExtras = masterFolio.config === "all";
+            (masterFolio.rooms ?? []).forEach((r: any) => {
+              const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
+              const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
+              const extrasLabel = extrasAmt > 0 ? ` (+ extras $${extrasAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })})` : "";
+              items.push({
+                descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
+                precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
+              });
+            });
+            // One item per group charge
+            (masterFolio.groupCharges ?? []).forEach((gc: any) => {
+              items.push({
+                descripcion: gc.description || "Cargo grupal",
+                precioUnitario: parseFloat(gc.amount) || 0,
+              });
+            });
+            return items.length > 0
+              ? items
+              : [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
+          }
+          // Default: single item
+          return [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
+        })();
+
         return (
           <EmitirFacturaDialog
             open={showMasterFacturaDialog}
@@ -3469,7 +3562,7 @@ export default function GroupDetailPage() {
             allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
             lockCondicionIva={!!entity}
             compactMode={!!entity}
-            hideAddItems
+            hideAddItems={masterInvoiceDistribution === "none"}
             initialValues={{
               razonSocial: entity
                 ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
@@ -3479,7 +3572,7 @@ export default function GroupDetailPage() {
                 ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
                 : undefined,
               domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
-              items: [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }],
+              items: computedItems,
             }}
             paymentId={pendingMasterPaymentId || undefined}
             onSuccess={() => {
@@ -3489,6 +3582,7 @@ export default function GroupDetailPage() {
               setMasterPaymentReceiptType("none");
               setMasterPaymentCcEntityType("company");
               setMasterPaymentCcEntityId("");
+              setMasterInvoiceDistribution("none");
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
