@@ -19,7 +19,9 @@ export function registerMigrationRoute(app: Express) {
     try {
       const log: string[] = [];
 
-      // Borrar existentes
+      // Borrar existentes (respetar FK: allocations → movements → companies/agencies)
+      await db.execute(sql`DELETE FROM account_movement_allocations WHERE cargo_id IN (SELECT id FROM account_movements WHERE entity_type IN ('company','agency'))`);
+      await db.execute(sql`DELETE FROM account_movement_allocations WHERE pago_id IN (SELECT id FROM account_movements WHERE entity_type IN ('company','agency'))`);
       await db.execute(sql`DELETE FROM account_movements WHERE entity_type = 'company'`);
       await db.execute(sql`DELETE FROM account_movements WHERE entity_type = 'agency'`);
       await db.execute(sql`DELETE FROM companies`);
