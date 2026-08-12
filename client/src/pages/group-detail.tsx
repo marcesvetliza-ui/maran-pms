@@ -3336,6 +3336,67 @@ export default function GroupDetailPage() {
                           Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
                         </p>
                       )}
+
+                      {/* Preview de ítems — visible cuando se elige Totalizados o Detallados.
+                          Uses the same effectiveDistribution logic as the ARCA dialog so the
+                          preview always matches what will actually be submitted. */}
+                      {masterInvoiceDistribution !== "none" && (() => {
+                        // Mirror computedItems logic from showMasterFacturaDialog exactly
+                        const isMipymeForPreview = masterPaymentReceiptType === "factura_mipyme_a";
+                        const isFullPaymentForPreview = isMipymeForPreview || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
+                        const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
+
+                        // If the amount is now partial, warn the user that distribution won't apply
+                        if (effectiveDistribution === "none") {
+                          return (
+                            <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
+                              Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
+                            </p>
+                          );
+                        }
+
+                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                        if (effectiveDistribution === "totalizados") {
+                          if ((masterFolio.masterAccommodation ?? 0) > 0)
+                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
+                          if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
+                            previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
+                          if ((masterFolio.groupChargesTotal ?? 0) > 0)
+                            previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                        } else {
+                          // effectiveDistribution === "detallados"
+                          const includeExtras = masterFolio.config === "all";
+                          (masterFolio.rooms ?? []).forEach((r: any) => {
+                            const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
+                            const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
+                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                            previewItems.push({
+                              descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
+                              precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
+                            });
+                          });
+                          (masterFolio.groupCharges ?? []).forEach((gc: any) => {
+                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                          });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                        }
+
+                        return (
+                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
+                            {previewItems.map((item, i) => (
+                              <div key={i} className="flex justify-between text-xs gap-2">
+                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
