@@ -389,6 +389,26 @@ function GroupFormDialog({
       return;
     }
 
+    // Validate block availability
+    const hasAvailabilityViolations = blocks.some((b) => {
+      const avail = blockAvailability[b.id];
+      return avail != null && (avail === 0 || b.quantity > avail);
+    });
+    if (hasAvailabilityViolations) {
+      setBlocks(blocks.map((b) => {
+        const avail = blockAvailability[b.id];
+        if (avail != null && avail === 0) return { ...b, error: "Sin disponibilidad para este tipo de habitación" };
+        if (avail != null && b.quantity > avail) return { ...b, error: `Solo hay ${avail} habitación${avail === 1 ? "" : "es"} disponible${avail === 1 ? "" : "s"}` };
+        return b;
+      }));
+      toast({
+        title: "Sin disponibilidad suficiente",
+        description: "Corrija los bloques marcados antes de crear el grupo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Validate custom date ranges on blocks
     const hasInvertedDates = blocks.some((b) =>
       b.useCustomDates && b.blockCheckInDate && b.blockCheckOutDate && b.blockCheckOutDate <= b.blockCheckInDate
@@ -897,7 +917,14 @@ function GroupFormDialog({
                   Terminar sin bloques
                 </Button>
               )}
-              <Button onClick={handleCreate} disabled={isPending} data-testid="button-create-group">
+              <Button
+                onClick={handleCreate}
+                disabled={isPending || blocks.some((b) => {
+                  const avail = blockAvailability[b.id];
+                  return avail != null && (avail === 0 || b.quantity > avail);
+                })}
+                data-testid="button-create-group"
+              >
                 {isPending ? "Creando..." : createdGroupId ? "Reintentar Bloques" : "Crear Grupo"}
               </Button>
             </DialogFooter>
