@@ -1214,11 +1214,11 @@ export default function GroupsPage() {
   };
 
   const activeGroups = (groups ?? [])
-    .filter(g => g.checkOutDate >= today && matchesFilter(g))
+    .filter(g => g.checkOutDate >= today && g.status !== "cancelled" && g.status !== "finished" && matchesFilter(g))
     .sort((a, b) => a.checkInDate.localeCompare(b.checkInDate));
 
   const pastGroups = (groups ?? [])
-    .filter(g => g.checkOutDate < today && matchesFilter(g))
+    .filter(g => (g.checkOutDate < today || g.status === "cancelled" || g.status === "finished") && matchesFilter(g))
     .sort((a, b) => b.checkOutDate.localeCompare(a.checkOutDate));
 
   const handleEdit = (group: GroupWithDetails) => {

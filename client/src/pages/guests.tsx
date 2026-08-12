@@ -1246,7 +1246,7 @@ function GuestDetailDialog({
                   );
                 })()}
               </div>
-              <p className="text-sm text-muted-foreground">{guest.nationality || "Sin nacionalidad registrada"}</p>
+              <p className="text-sm text-muted-foreground">{guest.nationality || "Argentina"}</p>
             </div>
           </div>
 
@@ -1558,7 +1558,7 @@ export default function GuestsPage() {
                       ? `${DOCUMENT_TYPE_LABELS[guest.documentType.toLowerCase()] || guest.documentType.toUpperCase()}: ${guest.documentNumber}`
                       : "-"}
                   </TableCell>
-                  <TableCell>{guest.nationality || "-"}</TableCell>
+                  <TableCell>{guest.nationality || "Argentina"}</TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

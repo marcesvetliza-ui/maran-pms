@@ -2427,9 +2427,9 @@ export default function GroupDetailPage() {
                               <div className="flex justify-end">
                                 <Button
                                   size="sm"
-                                  variant="ghost"
-                                  className="text-xs"
-                                  onClick={() => navigate(`/reservations?view=${r.reservationId}`)}
+                                  variant="outline"
+                                  className="text-xs border-cyan-400 text-cyan-700 hover:bg-cyan-50 dark:border-cyan-600 dark:text-cyan-400 dark:hover:bg-cyan-950"
+                                  onClick={() => window.open(`/reservations?view=${r.reservationId}`, '_blank')}
                                 >
                                   <ExternalLink className="h-3 w-3 mr-1" />
                                   Ver reserva completa
