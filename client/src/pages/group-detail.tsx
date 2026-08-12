@@ -3135,6 +3135,26 @@ export default function GroupDetailPage() {
                     </div>
                   );
                 })()}
+                {/* Warning: payment amount doesn't match folio total */}
+                {groupInvoiceDistribution !== "none" && folio && (() => {
+                  const folioTotal = (folio.totals?.accommodation ?? 0) + (folio.totals?.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                  const paymentAmt = parseFloat(groupPaymentAmount) || 0;
+                  if (folioTotal <= 0 || Math.abs(folioTotal - paymentAmt) < 0.01) return null;
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-800 dark:text-amber-300 space-y-0.5">
+                        <p className="font-medium">El monto del pago no coincide con el total del folio</p>
+                        <p>
+                          Los ítems suman <strong>{fmtMoney(folioTotal)}</strong> pero el pago registrado es <strong>{fmtMoney(paymentAmt)}</strong>.
+                          {paymentAmt < folioTotal
+                            ? " Para pagos parciales considere usar «Sin desglose»."
+                            : ""}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
