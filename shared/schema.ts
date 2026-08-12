@@ -623,6 +623,18 @@ export const insertGroupPaymentSchema = createInsertSchema(groupPayments).omit({
 export type InsertGroupPayment = z.infer<typeof insertGroupPaymentSchema>;
 export type GroupPayment = typeof groupPayments.$inferSelect;
 
+// Group Direct Invoices — facturas emitidas directamente desde el Resumen del Grupo (sin pago asociado)
+export const groupInvoices = pgTable("group_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  groupId: varchar("group_id").notNull(),
+  salesInvoiceId: integer("sales_invoice_id").unique(), // FK to sales_invoices; unique enforces idempotency
+  invoiceRef: text("invoice_ref").notNull(), // JSON-encoded ARCA invoice result (camelCase Drizzle record)
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type GroupInvoice = typeof groupInvoices.$inferSelect;
+
 // Group Folio consolidated data type
 export type GroupFolioData = {
   group: GroupWithDetails;

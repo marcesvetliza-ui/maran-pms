@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable } from "@shared/schema";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
@@ -1011,6 +1011,72 @@ export function registerGroupsRoutes(app: Express) {
       if (error.message === "Grupo no encontrado") return res.status(404).json({ error: error.message });
       console.error("[folio-grupal] Error:", error);
       res.status(500).json({ error: "Error al obtener folio grupal" });
+    }
+  });
+
+  // Direct invoices: facturas emitidas desde el Resumen del Grupo sin pago asociado
+  app.get("/api/groups/:groupId/direct-invoices", requireAuth, async (req, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(groupInvoicesTable)
+        .where(eq(groupInvoicesTable.groupId, req.params.groupId))
+        .orderBy(desc(groupInvoicesTable.createdAt));
+      res.json(rows);
+    } catch (error: any) {
+      console.error("[group-direct-invoices] GET Error:", error);
+      res.status(500).json({ error: "Error al obtener facturas del grupo" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/direct-invoice", requireAuth, async (req, res) => {
+    try {
+      const { invoiceData, notes } = req.body;
+      if (!invoiceData || typeof invoiceData !== "object") {
+        return res.status(400).json({ error: "invoiceData es requerido y debe ser un objeto" });
+      }
+
+      // emitirFactura returns camelCase Drizzle fields; validate those field names
+      const { id: invoiceId, tipoComprobante, numero, puntoVenta } = invoiceData;
+      if (!tipoComprobante || numero == null || puntoVenta == null) {
+        return res.status(400).json({ error: "invoiceData debe contener tipoComprobante, puntoVenta y numero" });
+      }
+      if (invoiceId == null) {
+        return res.status(400).json({ error: "invoiceData debe contener el id del comprobante emitido" });
+      }
+
+      // Verify the invoice was actually issued through our system (salesInvoices table)
+      const [storedInvoice] = await db
+        .select({ id: salesInvoicesTable.id })
+        .from(salesInvoicesTable)
+        .where(eq(salesInvoicesTable.id, Number(invoiceId)))
+        .limit(1);
+      if (!storedInvoice) {
+        return res.status(400).json({ error: "El comprobante indicado no existe en el sistema" });
+      }
+
+      // Verify the group exists
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      // Idempotent upsert: if this salesInvoiceId is already linked, return the existing row
+      const [created] = await db
+        .insert(groupInvoicesTable)
+        .values({
+          groupId: req.params.groupId,
+          salesInvoiceId: Number(invoiceId),
+          invoiceRef: JSON.stringify(invoiceData),
+          notes: notes ?? null,
+        })
+        .onConflictDoUpdate({
+          target: groupInvoicesTable.salesInvoiceId,
+          set: { groupId: req.params.groupId, invoiceRef: JSON.stringify(invoiceData), notes: notes ?? null },
+        })
+        .returning();
+      res.json(created);
+    } catch (error: any) {
+      console.error("[group-direct-invoices] POST Error:", error);
+      res.status(500).json({ error: "Error al guardar factura directa del grupo" });
     }
   });
 

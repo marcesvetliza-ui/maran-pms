@@ -426,7 +426,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId, compactMode }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, groupId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId, compactMode }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -436,6 +436,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   cashArea?: string;
   requiresEmission?: boolean;
   paymentId?: string;
+  /** When set, the emitted invoice will be automatically linked to the group folio (for invoices emitted from the Resumen del Grupo without a payment) */
+  groupId?: string;
   /** When true, the condición IVA field is read-only (pre-set from entity) */
   lockCondicionIva?: boolean;
   /** When true, the "Agregar ítem" button and extra item rows are hidden */
@@ -689,6 +691,25 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           try { await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData: data }); } catch {}
           queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
         }
+      } else if (groupId) {
+        // Link the invoice directly to the group folio (emitted from Resumen sin pago)
+        // Uses the same durable pattern as paymentId: dialog stays open on failure, operator can retry
+        setEmittedInvoiceData(data);
+        setLinkPending(true);
+        try {
+          const linkRes = await apiRequest("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData: data });
+          setLinkPending(false);
+          if (linkRes.ok) {
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+            onSuccess?.(data);
+            onClose(); resetForm();
+          } else {
+            setLinkError(true);
+          }
+        } catch {
+          setLinkPending(false);
+          setLinkError(true);
+        }
       } else {
         onSuccess?.(data);
         onClose(); resetForm();
@@ -726,17 +747,29 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   async function handleRetryLink() {
-    if (!paymentId || !emittedInvoiceData) return;
+    if (!emittedInvoiceData || (!paymentId && !groupId)) return;
     setLinkRetrying(true);
     try {
-      const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: emittedInvoiceData });
-      if (linkRes.ok) {
-        queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
-        toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
-        onSuccess?.(emittedInvoiceData);
-        onClose(); resetForm();
-      } else {
-        toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+      if (paymentId) {
+        const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: emittedInvoiceData });
+        if (linkRes.ok) {
+          queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+          toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al pago." });
+          onSuccess?.(emittedInvoiceData);
+          onClose(); resetForm();
+        } else {
+          toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+        }
+      } else if (groupId) {
+        const linkRes = await apiRequest("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData: emittedInvoiceData });
+        if (linkRes.ok) {
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+          toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al folio del grupo." });
+          onSuccess?.(emittedInvoiceData);
+          onClose(); resetForm();
+        } else {
+          toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+        }
       }
     } catch {
       toast({ title: "Reintento fallido", description: "Error de red. Intente nuevamente.", variant: "destructive" });
@@ -774,7 +807,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     <>
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{linkPending ? "Vinculando factura al pago…" : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{linkPending ? (groupId ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
 
         {linkPending ? (
           <div className="space-y-4 py-2">
@@ -794,7 +827,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center gap-3">
               <RefreshCw className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
               <div className="text-sm">
-                <p className="font-semibold text-blue-800 dark:text-blue-300">Vinculando al registro de pago…</p>
+                <p className="font-semibold text-blue-800 dark:text-blue-300">{groupId ? "Vinculando al folio del grupo…" : "Vinculando al registro de pago…"}</p>
                 <p className="text-blue-700 dark:text-blue-400 text-xs mt-0.5">Por favor espere. No cierre este diálogo.</p>
               </div>
             </div>
@@ -817,10 +850,11 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
               <div className="text-sm flex-1">
-                <p className="font-semibold text-red-800 dark:text-red-300">No se pudo vincular la factura al pago</p>
+                <p className="font-semibold text-red-800 dark:text-red-300">{groupId ? "No se pudo vincular la factura al folio del grupo" : "No se pudo vincular la factura al pago"}</p>
                 <p className="text-red-700 dark:text-red-400 text-xs mt-1">
-                  La factura fue generada correctamente en ARCA, pero ocurrió un error al asociarla al registro de pago.
-                  Puede reintentar ahora o cerrar y vincularlo manualmente desde el panel de pagos.
+                  {groupId
+                    ? "La factura fue generada correctamente en ARCA, pero ocurrió un error al registrarla en el folio del grupo. Puede reintentar ahora."
+                    : "La factura fue generada correctamente en ARCA, pero ocurrió un error al asociarla al registro de pago. Puede reintentar ahora o cerrar y vincularlo manualmente desde el panel de pagos."}
                 </p>
               </div>
             </div>

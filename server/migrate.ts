@@ -1314,6 +1314,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)
   );
 
+  // group_invoices: facturas emitidas directamente desde el Resumen del Grupo (sin pago asociado)
+  await withTimeout("group_invoices (create)", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS group_invoices (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        group_id varchar NOT NULL,
+        sales_invoice_id integer UNIQUE,
+        invoice_ref text NOT NULL,
+        notes text,
+        created_at timestamp DEFAULT now()
+      )
+    `)
+  );
+
+  // Add sales_invoice_id column if table was created without it (incremental add)
+  await withTimeout("group_invoices.sales_invoice_id", T, () =>
+    db.execute(sql`ALTER TABLE group_invoices ADD COLUMN IF NOT EXISTS sales_invoice_id integer UNIQUE`)
+  );
+
   // Clean up 9 orphaned spa_accounts from March 2026 whose parent appointments
   // were deleted. Mark as 'cancelled' (not DELETE) to preserve payment history.
   // The 3 closed accounts have room_charge payments already applied to folios.

@@ -825,6 +825,15 @@ export default function GroupDetailPage() {
     },
   });
 
+  const { data: directInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "direct-invoices"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/direct-invoices`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
     queryKey: ["/api/charge-types"],
   });
@@ -2473,6 +2482,49 @@ export default function GroupDetailPage() {
                     </div>
                   )}
 
+                  {/* Facturas directas del grupo (emitidas desde el Resumen sin pago asociado) */}
+                  {directInvoices.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <Receipt className="h-3.5 w-3.5 text-emerald-500" />
+                        Comprobantes emitidos para el grupo
+                      </p>
+                      <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 divide-y divide-emerald-100 dark:divide-emerald-900 overflow-hidden">
+                        {directInvoices.map((inv: any) => {
+                          const parsed = (() => { try { return JSON.parse(inv.invoiceRef); } catch { return null; } })();
+                          // invoiceRef is the camelCase Drizzle salesInvoices record returned by emitirFactura
+                          const badge = parsed
+                            ? `${parsed.tipoComprobante ?? "FAC"} ${String(parsed.puntoVenta ?? "").padStart(4, "0")}-${String(parsed.numero ?? "").padStart(8, "0")}`
+                            : "Comprobante";
+                          const total = parsed?.montoTotal ?? null;
+                          const cae = parsed?.cae;
+                          return (
+                            <div key={inv.id} className="flex items-center justify-between px-3 py-2 text-sm bg-emerald-50/50 dark:bg-emerald-950/10" data-testid={`row-direct-invoice-${inv.id}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-muted-foreground text-xs">{new Date(inv.createdAt).toLocaleDateString("es-AR")}</span>
+                                <Badge variant="outline" className="text-xs font-mono gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
+                                  <Receipt className="h-3 w-3" />
+                                  {badge}
+                                </Badge>
+                                {cae && (
+                                  <span className="text-xs text-muted-foreground font-mono">CAE: {cae}</span>
+                                )}
+                                {inv.notes && (
+                                  <span className="text-xs text-muted-foreground italic">{inv.notes}</span>
+                                )}
+                              </div>
+                              {total != null && (
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">
+                                  ${parseFloat(total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Totales resumen */}
                   {folio && masterFolio.rooms.length > 0 && (
                     <div className="mt-3 rounded-lg border bg-muted/30 px-4 py-3">
@@ -3126,6 +3178,7 @@ export default function GroupDetailPage() {
             };
           })()}
           paymentId={pendingGroupPaymentId || undefined}
+          groupId={groupFacturaFromResumen ? groupId : undefined}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
@@ -3138,11 +3191,14 @@ export default function GroupDetailPage() {
             setGroupPaymentCloseAll(false);
             setGroupPaymentCcEntityType("company");
             setGroupPaymentCcEntityId("");
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
             if (showInvoiceDialog) {
               loadInvoice();
             }
             if (groupPaymentCloseAll) {
               toast({ title: "Pago grupal registrado — grupo cerrado" });
+            } else if (groupFacturaFromResumen) {
+              toast({ title: "Factura emitida y vinculada al folio del grupo" });
             } else {
               toast({ title: "Pago grupal registrado exitosamente" });
             }
