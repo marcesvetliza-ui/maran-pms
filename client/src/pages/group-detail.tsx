@@ -1724,8 +1724,10 @@ export default function GroupDetailPage() {
             </CardHeader>
             <CardContent>
               {(() => {
-                const activeRes = group.reservations.filter(r => r.status !== "cancelled");
-                const cancelledRes = group.reservations.filter(r => r.status === "cancelled");
+                const sortByRoom = (a: typeof group.reservations[0], b: typeof group.reservations[0]) =>
+                  (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || "", "es", { numeric: true });
+                const activeRes = group.reservations.filter(r => r.status !== "cancelled").sort(sortByRoom);
+                const cancelledRes = group.reservations.filter(r => r.status === "cancelled").sort(sortByRoom);
                 const renderTable = (rows: typeof group.reservations) => (
                   <Table>
                     <TableHeader>
