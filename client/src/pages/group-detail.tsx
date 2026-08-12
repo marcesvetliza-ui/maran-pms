@@ -447,6 +447,34 @@ function AssignBlockDialog({
     })),
   ]);
 
+  const [duplicateWarnings, setDuplicateWarnings] = useState<Record<number, string | null>>({});
+
+  // Debounced duplicate-guest check: when firstName+lastName are both ≥2 chars, search guests
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    rows.forEach((row, idx) => {
+      const q = `${row.firstName.trim()} ${row.lastName.trim()}`.trim();
+      if (row.firstName.trim().length >= 2 && row.lastName.trim().length >= 2) {
+        const t = setTimeout(async () => {
+          try {
+            const res = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
+            if (!res.ok) return;
+            const results: any[] = await res.json();
+            const match = results.find(g =>
+              g.firstName?.toLowerCase() === row.firstName.trim().toLowerCase() &&
+              g.lastName?.toLowerCase() === row.lastName.trim().toLowerCase()
+            );
+            setDuplicateWarnings(prev => ({ ...prev, [idx]: match ? `${match.lastName} ${match.firstName}` : null }));
+          } catch {}
+        }, 400);
+        timers.push(t);
+      } else {
+        setDuplicateWarnings(prev => ({ ...prev, [idx]: null }));
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [rows.map(r => `${r.firstName}|${r.lastName}`).join(",")]);
+
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId, group.id],
     queryFn: async () => {
@@ -593,7 +621,8 @@ function AssignBlockDialog({
                 const roomOptions = getRoomOptions(row);
                 const otherChosenRoomIds = allChosenRoomIds.filter((id, i) => i !== index);
                 return (
-                  <div key={row.reservationId ?? `new-${index}`} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
+                  <div key={row.reservationId ?? `new-${index}`} className="flex flex-col gap-0.5">
+                    <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
                     <Select
                       value={row.roomId}
                       onValueChange={(value) => {
@@ -658,6 +687,13 @@ function AssignBlockDialog({
                     >
                       <X className="h-4 w-4" />
                     </Button>
+                  </div>
+                  {duplicateWarnings[index] && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1 px-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Ya existe un huésped con este nombre: <strong>{duplicateWarnings[index]}</strong>
+                    </p>
+                  )}
                   </div>
                 );
               })}
