@@ -834,18 +834,33 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const { amount, method, reference, receiptType, distribution, closeAllRooms, ccEntityType, ccEntityId } = req.body;
-      if (!amount || !method) {
-        return res.status(400).json({ error: "amount and method are required" });
-      }
+      const {
+        paymentRows: rawPaymentRows,
+        amount: legacyAmount, method: legacyMethod, reference: legacyReference,
+        receiptType, distribution, closeAllRooms,
+        // Legacy CC fields (kept for compat)
+        ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
+        // New unified billing entity fields
+        billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
+      } = req.body;
 
-      if (method === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
-        return res.status(400).json({ error: "ccEntityType and ccEntityId are required for cuenta_corriente" });
-      }
+      // Support multi-row paymentRows (new) or legacy single amount/method
+      const paymentRows: Array<{method: string; amount: string; reference?: string}> = rawPaymentRows?.length
+        ? rawPaymentRows
+        : [{ method: legacyMethod, amount: legacyAmount, reference: legacyReference }];
 
-      const totalAmount = parseFloat(amount);
+      const totalAmount = paymentRows.reduce((s: number, r: any) => s + (parseFloat(r.amount) || 0), 0);
       if (totalAmount <= 0) {
         return res.status(400).json({ error: "Amount must be positive" });
+      }
+
+      // Billing entity: new fields take priority, then CC legacy fields
+      const billingEntityType = rawBillingEntityType || legacyCcEntityType;
+      const billingEntityId = rawBillingEntityId || legacyCcEntityId;
+
+      const hasCuentaCorriente = paymentRows.some((r: any) => r.method === "cuenta_corriente");
+      if (hasCuentaCorriente && (!billingEntityType || !billingEntityId)) {
+        return res.status(400).json({ error: "billingEntityType and billingEntityId are required for cuenta_corriente" });
       }
 
       const activeReservations = group.reservations.filter(
@@ -857,17 +872,21 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       const today = getArgentinaToday();
-      const refText = reference || `Pago grupal${closeAllRooms ? " (cierre total)" : ""} - ${group.name}`;
+      const refText = `Pago grupal${closeAllRooms ? " (cierre total)" : ""} - ${group.name}`;
 
-      const registerCcMovement = async (reservation: any, paymentAmt: number) => {
-        if (method !== "cuenta_corriente" || paymentAmt <= 0.001) return;
+      // Primary method for single-row compat (first row's method)
+      const primaryMethod = paymentRows[0]?.method || "cash";
+      const primaryRef = paymentRows[0]?.reference || refText;
+
+      const registerCcMovement = async (reservation: any, paymentAmt: number, rowMethod = primaryMethod) => {
+        if (rowMethod !== "cuenta_corriente" || paymentAmt <= 0.001 || !billingEntityId) return;
         const guest = reservation.guest;
         const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Huésped";
         const roomNum = reservation.room?.roomNumber || reservation.roomId;
         try {
           await storage.createAccountMovement({
-            entityType: ccEntityType,
-            entityId: ccEntityId,
+            entityType: billingEntityType,
+            entityId: billingEntityId,
             date: today,
             type: "cargo",
             description: `Pago grupal ${group.name} — Hab. ${roomNum}`,
@@ -875,7 +894,7 @@ export function registerGroupsRoutes(app: Express) {
             reservationId: reservation.id,
             reservationCode: reservation.reservationCode,
             guestName,
-            reference: refText,
+            reference: primaryRef,
           });
         } catch (e) {
           console.error("Error creating group CC account movement:", e);
@@ -895,6 +914,19 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       const createdPaymentIds: string[] = [];
+
+      // Helper: create a payment entry for a single row for a reservation
+      const createRowPayment = async (reservationId: string, amt: number, row: {method: string; amount: string; reference?: string}) => {
+        const p = await storage.createPayment({
+          reservationId,
+          amount: amt.toFixed(2),
+          method: row.method,
+          reference: row.reference || refText,
+          date: today,
+          ...(row.method === "cuenta_corriente" ? { billingTarget: billingEntityType } : {}),
+        });
+        return p;
+      };
 
       if (distribution === "proportional") {
         let totalCost = 0;
@@ -917,32 +949,31 @@ export function registerGroupsRoutes(app: Express) {
             paymentAmt = totalAmount * proportion;
           }
           if (paymentAmt > 0.001) {
-            const p = await storage.createPayment({
-              reservationId: item.id,
-              amount: paymentAmt.toFixed(2),
-              method,
-              reference: refText,
-              date: today,
-              ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
-            });
-            if (p?.id) createdPaymentIds.push(String(p.id));
-            const reservation = activeReservations.find((r: any) => r.id === item.id);
-            if (reservation) await registerCcMovement(reservation, paymentAmt);
+            // Distribute across payment rows proportionally to their amounts
+            for (const row of paymentRows) {
+              const rowTotal = parseFloat(row.amount) || 0;
+              if (rowTotal <= 0) continue;
+              const rowProportion = rowTotal / totalAmount;
+              const rowAmt = paymentAmt * rowProportion;
+              const p = await createRowPayment(item.id, rowAmt, row);
+              if (p?.id) createdPaymentIds.push(String(p.id));
+              const reservation = activeReservations.find((r: any) => r.id === item.id);
+              if (reservation) await registerCcMovement(reservation, rowAmt, row.method);
+            }
           }
         }
       } else {
         const perRoom = totalAmount / activeReservations.length;
         for (const reservation of activeReservations) {
-          const p = await storage.createPayment({
-            reservationId: reservation.id,
-            amount: perRoom.toFixed(2),
-            method,
-            reference: refText,
-            date: today,
-            ...(method === "cuenta_corriente" ? { billingTarget: ccEntityType } : {}),
-          });
-          if (p?.id) createdPaymentIds.push(String(p.id));
-          await registerCcMovement(reservation, perRoom);
+          for (const row of paymentRows) {
+            const rowTotal = parseFloat(row.amount) || 0;
+            if (rowTotal <= 0) continue;
+            const rowProportion = rowTotal / totalAmount;
+            const rowAmt = perRoom * rowProportion;
+            const p = await createRowPayment(reservation.id, rowAmt, row);
+            if (p?.id) createdPaymentIds.push(String(p.id));
+            await registerCcMovement(reservation, rowAmt, row.method);
+          }
         }
       }
 

@@ -754,9 +754,7 @@ export default function GroupDetailPage() {
   const [showCheckInConfirm, setShowCheckInConfirm] = useState(false);
   const [showCheckOutConfirm, setShowCheckOutConfirm] = useState(false);
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
-  const [groupPaymentAmount, setGroupPaymentAmount] = useState("");
-  const [groupPaymentMethod, setGroupPaymentMethod] = useState("");
-  const [groupPaymentReference, setGroupPaymentReference] = useState("");
+  const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
@@ -1045,16 +1043,17 @@ export default function GroupDetailPage() {
 
   const groupPaymentMutation = useMutation({
     mutationFn: async () => {
+      const validRows = groupPaymentRows.filter(r => parseFloat(r.amount || "0") > 0);
+      if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a") {
+        throw new Error("Ingresá al menos un monto");
+      }
       return apiRequest("POST", `/api/groups/${groupId}/payment`, {
-        amount: groupPaymentAmount,
-        method: groupPaymentMethod,
-        reference: groupPaymentReference,
+        paymentRows: validRows.length > 0 ? validRows : [{ method: groupPaymentRows[0].method, amount: "0", reference: "" }],
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
         closeAllRooms: groupPaymentCloseAll,
-        ...(groupPaymentMethod === "cuenta_corriente"
-          ? { ccEntityType: groupPaymentCcEntityType, ccEntityId: groupPaymentCcEntityId }
-          : {}),
+        billingEntityType: groupPaymentCcEntityType,
+        billingEntityId: groupPaymentCcEntityId || undefined,
       });
     },
     onSuccess: async (res) => {
@@ -1093,9 +1092,7 @@ export default function GroupDetailPage() {
         toast({ title: "Pago grupal registrado exitosamente" });
       }
       setShowGroupPaymentDialog(false);
-      setGroupPaymentAmount("");
-      setGroupPaymentMethod("");
-      setGroupPaymentReference("");
+      setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
       setGroupPaymentReceiptType("");
       setGroupPaymentDistribution("equal");
       setGroupPaymentCloseAll(false);
@@ -1507,7 +1504,7 @@ export default function GroupDetailPage() {
           <Button
             variant="default"
             onClick={() => {
-              setGroupPaymentAmount("");
+              setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
               // Pre-fill billing entity from group config
               if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
                 setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
@@ -2821,7 +2818,7 @@ export default function GroupDetailPage() {
               onClick={() => {
                 const balance = invoiceData?.totals?.balance ?? 0;
                 setGroupPaymentReceiptType("factura_b");
-                setGroupPaymentAmount(String(balance));
+                setGroupPaymentRows([{method: "cash", amount: String(balance), reference: ""}]);
                 // Pre-fill billing entity from group config
                 if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
                   setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
@@ -3037,240 +3034,302 @@ export default function GroupDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={showGroupPaymentDialog} onOpenChange={setShowGroupPaymentDialog}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={showGroupPaymentDialog} onOpenChange={(open) => {
+        setShowGroupPaymentDialog(open);
+        if (!open) {
+          setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
+          setGroupPaymentReceiptType("");
+          setGroupPaymentDistribution("equal");
+          setGroupPaymentCloseAll(false);
+          setGroupPaymentCcEntityType("company");
+          setGroupPaymentCcEntityId("");
+          setGroupInvoiceDistribution("none");
+        }
+      }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <DollarSign className="h-5 w-5" />
               Pago Grupal
             </DialogTitle>
             <DialogDescription>
-              Registre un pago que se distribuirá entre las reservas activas del grupo
+              El pago se distribuirá entre las reservas activas del grupo
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Monto Total *</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                value={groupPaymentAmount}
-                onChange={(e) => setGroupPaymentAmount(e.target.value)}
-                placeholder="0.00"
-                data-testid="input-group-payment-amount"
-              />
-            </div>
 
-            <div>
-              <Label>Método de Pago *</Label>
-              <Select value={groupPaymentMethod} onValueChange={setGroupPaymentMethod}>
-                <SelectTrigger data-testid="select-group-payment-method">
-                  <SelectValue placeholder="Seleccionar método" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="efectivo">Efectivo</SelectItem>
-                  <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                  <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                  <SelectItem value="transferencia">Transferencia</SelectItem>
-                  <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          {(() => {
+            const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+            const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+            const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+            const entityList = (groupPaymentCcEntityType === "company" ? companies : agencies) as any[];
+            const selectedEntity = entityList.find((e: any) => e.id === groupPaymentCcEntityId);
+            const condIva = selectedEntity?.condicionIva ?? "";
+            const isRI = condIva === "responsable_inscripto" || condIva === "exento";
+            const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
+            const allowedMethods = groupPaymentReceiptType === "factura_t"
+              ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
+              : methodsWithoutOther;
+            const hasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
+            const entityRequired = isFiscal || hasCuentaCorriente;
+            const canSubmit = !groupPaymentMutation.isPending
+              && (isMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+              && (!entityRequired || !!groupPaymentCcEntityId);
 
-            <div>
-              <Label>Tipo de Comprobante</Label>
-              <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
-                <SelectTrigger data-testid="select-group-payment-receipt">
-                  <SelectValue placeholder="Seleccionar comprobante" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ticket">Ticket</SelectItem>
-                  <SelectItem value="factura_a">Factura A</SelectItem>
-                  <SelectItem value="factura_b">Factura B</SelectItem>
-                  <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
-                </SelectContent>
-              </Select>
-              {(groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Al registrar el pago se abrirá el formulario de emisión con CAE real de ARCA.
-                </p>
-              )}
-              {groupPaymentReceiptType === "factura_a" && groupPaymentMethod !== "cuenta_corriente" && (
-                <div className="mt-2 space-y-2">
-                  <Label className="text-xs text-muted-foreground">Empresa / Agencia (requerido para Factura A)</Label>
+            return (
+              <div className="space-y-4">
+                {/* 1. RECEPTOR (always first, always required) */}
+                <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
+                  <Label className="text-sm font-semibold">Receptor del comprobante</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
-                      <SelectTrigger data-testid="select-group-factura-entity-type"><SelectValue /></SelectTrigger>
+                      <SelectTrigger data-testid="select-group-entity-type"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="company">Empresa</SelectItem>
                         <SelectItem value="agency">Agencia</SelectItem>
                       </SelectContent>
                     </Select>
                     <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
-                      <SelectTrigger data-testid="select-group-factura-entity-id">
+                      <SelectTrigger data-testid="select-group-entity-id">
                         <SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
                       </SelectTrigger>
                       <SelectContent>
-                        {(groupPaymentCcEntityType === "company" ? companies : agencies).map((e: any) => (
+                        {entityList.map((e: any) => (
                           <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  {!groupPaymentCcEntityId && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                      Seleccione una empresa o agencia para poder emitir Factura A.
+                  {entityRequired && !groupPaymentCcEntityId && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Requerido para el comprobante seleccionado.
                     </p>
                   )}
                 </div>
-              )}
-            </div>
 
-            {/* Distribución de ítems — sólo para comprobantes fiscales */}
-            {(groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") && (
-              <div>
-                <Label>Distribución de ítems en la factura</Label>
-                <div className="grid grid-cols-3 gap-2 mt-1">
-                  {([
-                    { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                    { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
-                    { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
-                  ] as const).map(opt => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setGroupInvoiceDistribution(opt.value)}
-                      className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
-                    >
-                      <p className="font-semibold">{opt.label}</p>
-                      <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                    </button>
-                  ))}
+                {/* 2. COMPROBANTE */}
+                <div>
+                  <Label>Comprobante</Label>
+                  <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
+                    <SelectTrigger data-testid="select-group-payment-receipt">
+                      <SelectValue placeholder="Seleccionar comprobante..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Sin comprobante / Anticipo</SelectItem>
+                      <SelectItem value="ticket">Ticket</SelectItem>
+                      {(!groupPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
+                      {(!groupPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
+                      {(!groupPaymentCcEntityId || isRI) && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                      <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>
+                      <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {isFiscal && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
+                    </p>
+                  )}
+                  {isMipyme && (
+                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
+                    </p>
+                  )}
                 </div>
-                {/* Preview de ítems cuando se elige Totalizados o Detallados */}
-                {groupInvoiceDistribution !== "none" && folio && (() => {
-                  const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                  if (groupInvoiceDistribution === "totalizados") {
-                    if ((folio.totals.accommodation ?? 0) > 0)
-                      previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
-                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                    if (extrasTotal > 0)
-                      previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                    if (previewItems.length === 0)
-                      previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 });
-                  } else {
-                    // detallados
-                    (folio.reservations ?? []).forEach((r: any) => {
-                      const extrasAmt = parseFloat(r.extrasTotal) || 0;
-                      const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                      previewItems.push({
-                        descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
-                        precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
-                      });
-                    });
-                    (folio.groupCharges ?? []).forEach((gc: any) => {
-                      previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                    });
-                    if (previewItems.length === 0)
-                      previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 });
-                  }
-                  return (
-                    <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
-                      {previewItems.map((item, i) => (
-                        <div key={i} className="flex justify-between text-xs gap-2">
-                          <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                          <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+
+                {/* 3. MÉTODOS DE PAGO (multi-fila) */}
+                {!isMipyme && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Métodos de Pago</Label>
+                      {groupPaymentRows.length < 4 && Object.keys(allowedMethods).length > groupPaymentRows.length && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs gap-1"
+                          onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Agregar método
+                        </Button>
+                      )}
+                    </div>
+                    {groupPaymentRows.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-[1fr_28px_28px] gap-1.5 items-center">
+                        <div className="grid grid-cols-[1fr_1fr] gap-1.5">
+                          <Select
+                            value={row.method}
+                            onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}
+                          >
+                            <SelectTrigger data-testid={`select-group-payment-method-${idx}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(allowedMethods).filter(([k]) => !groupPaymentRows.some((r, i) => i !== idx && r.method === k)).map(([k, label]) => (
+                                <SelectItem key={k} value={k}>{label as string}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            placeholder="Monto"
+                            value={row.amount}
+                            onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
+                            data-testid={`input-group-payment-amount-${idx}`}
+                          />
                         </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-7 text-muted-foreground"
+                          title="Referencia"
+                          onClick={() => {
+                            const ref = prompt("Referencia / N° comprobante:", row.reference);
+                            if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
+                          }}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </Button>
+                        {groupPaymentRows.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-7 text-destructive/70 hover:text-destructive"
+                            onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {row.reference && (
+                          <p className="col-span-3 text-xs text-muted-foreground pl-0.5 -mt-0.5">Ref: {row.reference}</p>
+                        )}
+                      </div>
+                    ))}
+                    {groupPaymentRows.length > 1 && (
+                      <div className="flex justify-end text-xs text-muted-foreground font-medium border-t pt-1">
+                        Total: <span className="ml-1 font-semibold">{fmtMoney(rowsTotal)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 4. DISTRIBUCIÓN DE ÍTEMS EN FACTURA (solo fiscal) */}
+                {isFiscal && !isMipyme && (
+                  <div>
+                    <Label>Distribución de ítems en la factura</Label>
+                    <div className="grid grid-cols-3 gap-2 mt-1">
+                      {([
+                        { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                        { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
+                        { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setGroupInvoiceDistribution(opt.value)}
+                          className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                        >
+                          <p className="font-semibold">{opt.label}</p>
+                          <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                        </button>
                       ))}
                     </div>
-                  );
-                })()}
-                {/* Warning: payment amount doesn't match folio total */}
-                {groupInvoiceDistribution !== "none" && folio && (() => {
-                  const folioTotal = (folio.totals?.accommodation ?? 0) + (folio.totals?.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                  const paymentAmt = parseFloat(groupPaymentAmount) || 0;
-                  if (folioTotal <= 0 || Math.abs(folioTotal - paymentAmt) < 0.01) return null;
-                  return (
-                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 p-2">
-                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                      <div className="text-xs text-amber-800 dark:text-amber-300 space-y-0.5">
-                        <p className="font-medium">El monto del pago no coincide con el total del folio</p>
-                        <p>
-                          Los ítems suman <strong>{fmtMoney(folioTotal)}</strong> pero el pago registrado es <strong>{fmtMoney(paymentAmt)}</strong>.
-                          {paymentAmt < folioTotal
-                            ? " Para pagos parciales considere usar «Sin desglose»."
-                            : ""}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
+                    {groupInvoiceDistribution !== "none" && folio && (() => {
+                      const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                      if (groupInvoiceDistribution === "totalizados") {
+                        if ((folio.totals.accommodation ?? 0) > 0)
+                          previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
+                        const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                        if (extrasTotal > 0)
+                          previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
+                        if (previewItems.length === 0)
+                          previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                      } else {
+                        (folio.reservations ?? []).forEach((r: any) => {
+                          const extrasAmt = parseFloat(r.extrasTotal) || 0;
+                          const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                          previewItems.push({
+                            descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
+                            precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
+                          });
+                        });
+                        (folio.groupCharges ?? []).forEach((gc: any) => {
+                          previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                        });
+                        if (previewItems.length === 0)
+                          previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                      }
+                      return (
+                        <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">Ítems en la factura:</p>
+                          {previewItems.map((item, i) => (
+                            <div key={i} className="flex justify-between text-xs gap-2">
+                              <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                              <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
-            <div>
-              <Label>Distribución</Label>
-              <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
-                <SelectTrigger data-testid="select-group-payment-distribution">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="equal">Partes iguales</SelectItem>
-                  <SelectItem value="proportional">Proporcional al costo</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                {groupPaymentDistribution === "equal"
-                  ? "El monto se divide en partes iguales entre las reservas activas"
-                  : "El monto se distribuye proporcionalmente al costo total de cada reserva"}
-              </p>
-            </div>
-
-            <div>
-              <Label>Referencia</Label>
-              <Input
-                value={groupPaymentReference}
-                onChange={(e) => setGroupPaymentReference(e.target.value)}
-                placeholder="Número de comprobante, nota..."
-                data-testid="input-group-payment-reference"
-              />
-            </div>
-
-            <div className="border-t pt-3">
-              <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
-                <Checkbox
-                  id="close-all-rooms"
-                  checked={groupPaymentCloseAll}
-                  onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
-                  data-testid="checkbox-close-all-rooms"
-                />
-                <div className="space-y-1">
-                  <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
-                    Con este pago se cierran todas las habitaciones del grupo
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
+                {/* 5. DISTRIBUCIÓN DEL PAGO */}
+                <div>
+                  <Label>Distribución entre habitaciones</Label>
+                  <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
+                    <SelectTrigger data-testid="select-group-payment-distribution">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="equal">Partes iguales</SelectItem>
+                      <SelectItem value="proportional">Proporcional al costo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {groupPaymentDistribution === "equal"
+                      ? "El monto se divide en partes iguales entre las reservas activas"
+                      : "El monto se distribuye proporcionalmente al costo total de cada reserva"}
                   </p>
                 </div>
+
+                {/* 6. CERRAR HABITACIONES */}
+                <div className="border-t pt-3">
+                  <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                    <Checkbox
+                      id="close-all-rooms"
+                      checked={groupPaymentCloseAll}
+                      onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
+                      data-testid="checkbox-close-all-rooms"
+                    />
+                    <div className="space-y-1">
+                      <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
+                        Con este pago se cierran todas las habitaciones del grupo
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowGroupPaymentDialog(false)}>
               Cancelar
             </Button>
             <Button
-              onClick={() => {
-                if (groupPaymentMethod === "cuenta_corriente" && !groupPaymentCcEntityId) {
-                  toast({ title: `Seleccione ${groupPaymentCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
-                  return;
-                }
-                groupPaymentMutation.mutate();
-              }}
-              disabled={!groupPaymentAmount || !groupPaymentMethod || groupPaymentMutation.isPending || (groupPaymentReceiptType === "factura_a" && !groupPaymentCcEntityId)}
+              onClick={() => groupPaymentMutation.mutate()}
+              disabled={groupPaymentMutation.isPending
+                || (groupPaymentReceiptType !== "factura_mipyme_a" && !groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+                || (["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType) && !groupPaymentCcEntityId)
+                || groupPaymentRows.some(r => r.method === "cuenta_corriente" && !groupPaymentCcEntityId)
+              }
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
@@ -3300,7 +3359,7 @@ export default function GroupDetailPage() {
               exento: "Exento",
             };
             const entityList = groupPaymentCcEntityType === "company" ? companies : agencies;
-            const entity = (groupPaymentMethod === "cuenta_corriente" || groupPaymentReceiptType === "factura_a") && groupPaymentCcEntityId
+            const entity = groupPaymentCcEntityId
               ? (entityList as any[]).find((e: any) => e.id === groupPaymentCcEntityId)
               : null;
             return {
@@ -3313,8 +3372,8 @@ export default function GroupDetailPage() {
                 : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
               domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
               items: (() => {
+                const gPayTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
                 if (groupInvoiceDistribution !== "none" && folio) {
-                  const paymentAmt = parseFloat(groupPaymentAmount) || 0;
                   if (groupInvoiceDistribution === "totalizados") {
                     const result: Array<{ descripcion: string; precioUnitario: number }> = [];
                     if ((folio.totals.accommodation ?? 0) > 0)
@@ -3322,7 +3381,7 @@ export default function GroupDetailPage() {
                     const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
                     if (extrasTotal > 0)
                       result.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                    return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: paymentAmt }];
+                    return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
                   }
                   // detallados
                   const result: Array<{ descripcion: string; precioUnitario: number }> = [];
@@ -3337,9 +3396,9 @@ export default function GroupDetailPage() {
                   (folio.groupCharges ?? []).forEach((gc: any) => {
                     result.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
                   });
-                  return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: paymentAmt }];
+                  return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
                 }
-                return [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }];
+                return [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
               })(),
             };
           })()}
@@ -3349,9 +3408,7 @@ export default function GroupDetailPage() {
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
-            setGroupPaymentAmount("");
-            setGroupPaymentMethod("");
-            setGroupPaymentReference("");
+            setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
             setGroupPaymentReceiptType("");
             setGroupPaymentDistribution("equal");
             setGroupPaymentCloseAll(false);
