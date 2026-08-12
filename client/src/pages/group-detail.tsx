@@ -1064,7 +1064,7 @@ export default function GroupDetailPage() {
         Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
       });
 
-      const needsFactura = groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b";
+      const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
       const needsVoucher = groupPaymentReceiptType === "cierre_habitacion";
 
       if (needsFactura || needsVoucher) {
