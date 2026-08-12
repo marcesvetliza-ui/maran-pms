@@ -755,7 +755,7 @@ export default function GroupDetailPage() {
   const [showCheckOutConfirm, setShowCheckOutConfirm] = useState(false);
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
   const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string}>>([{method: "cash", amount: "", reference: ""}]);
-  const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("");
+  const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
@@ -1099,7 +1099,7 @@ export default function GroupDetailPage() {
       }
       setShowGroupPaymentDialog(false);
       setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-      setGroupPaymentReceiptType("");
+      setGroupPaymentReceiptType("sin_comprobante");
       setGroupPaymentDistribution("equal");
       setGroupPaymentCloseAll(false);
       setGroupPaymentCcEntityType("company");
@@ -3044,7 +3044,7 @@ export default function GroupDetailPage() {
         setShowGroupPaymentDialog(open);
         if (!open) {
           setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-          setGroupPaymentReceiptType("");
+          setGroupPaymentReceiptType("sin_comprobante");
           setGroupPaymentDistribution("equal");
           setGroupPaymentCloseAll(false);
           setGroupPaymentCcEntityType("company");
@@ -3121,7 +3121,7 @@ export default function GroupDetailPage() {
                       <SelectValue placeholder="Seleccionar comprobante..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Sin comprobante / Anticipo</SelectItem>
+                      <SelectItem value="sin_comprobante">Sin comprobante / Anticipo</SelectItem>
                       <SelectItem value="ticket">Ticket</SelectItem>
                       {(!groupPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
                       {(!groupPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
@@ -3421,7 +3421,7 @@ export default function GroupDetailPage() {
             setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
             setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-            setGroupPaymentReceiptType("");
+            setGroupPaymentReceiptType("sin_comprobante");
             setGroupPaymentDistribution("equal");
             setGroupPaymentCloseAll(false);
             setGroupPaymentCcEntityType("company");
