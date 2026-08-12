@@ -1,0 +1,29 @@
+Lo que se puede cargar sin problemas
+
+CUIT → campo cuil_cuit ✓
+Razón Social → campo razon_social ✓
+Emails y contactos → contact_name, contact_email ✓
+Observaciones (col J) → campo notes ✓
+Saldos → se cargan como movimientos iniciales en account_movements (tipo "crédito") ✓
+⚠️ Problemas / preguntas antes de actuar
+
+1. La columna RÉGIMEN (FULL CREDIT, A DETERMINAR, ALOJ, ALOJ Y COCHERA…) El sistema no tiene ese campo. Tengo dos opciones:
+
+(a) Lo guardo en el campo notes junto con las observaciones
+(b) Te agrego un campo regimenHospedaje dedicado en la ficha de empresa
+¿Querés que lo agregue como campo propio, o con meterlo en notas alcanza?
+
+2. Tres columnas de contacto (Reservas / Facturación / Pagos) El sistema solo tiene un juego de contacto (nombre + email + teléfono). Si la empresa tiene distintas personas para cada área, esas perderían la distinción. ¿Cuál contacto querés dejar como principal, o preferís que los fusione todos en el campo notes?
+
+3. El código corto (col B: ACA, AGRONORT, ARACH…) No hay campo para este alias en el esquema. ¿Lo guardo en nombreFantasia o en notes?
+
+4. Los saldos — ¿son deudas de ellos o créditos a favor del hotel? Es decir: ¿los números de la última columna representan lo que las empresas te deben (saldo a cobrar por el hotel) o al revés? Esto cambia el signo del movimiento contable.
+
+5. Filas coloreadas en rojo/rosa Veo algunas filas destacadas (FEDROALBRICA en verde oscuro, PUBLISHING FOX en rojo, FUNDACIÓN MARPADTEC en amarillo, etc.). ¿Qué significan esos colores? ¿Las incluyo todas o hay algunas que no van?
+
+6. Esta carga va a producción Los datos actuales de empresas en producción van a borrarse. Antes de ejecutar, ¿querés que haga un backup de las empresas existentes y sus movimientos de CC, o no hace falta?
+
+Respondeme estos 6 puntos y arranco con todo listo.
+Bueno te respondo todo: 1- Viendo lo que ya tenemos, nosotros ya tenemos un recuadro que dice "limite de credito" usemos ese, tenemos que cambiar el nombre a "Régimen" y en vez de números que se escriban letras. 2- Pone lo que reconozcas en nombre, email o teléfono, y que después lo acomoden en recepción. Te parece ok? 3- Eso va en nombre de fantasía. 4- Los saldos son deudas que tienen ellos con el hotel. 5-No hagas caso a los colores. 6-Perfecto dale para adelante con eso, sin backup.
+
+Decime que te parece todo lo que te puse por favor.
