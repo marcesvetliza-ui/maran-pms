@@ -3561,5 +3561,9 @@ export async function registerRoutes(
     } catch { res.status(500).json({ error: "Error al registrar devolución" }); }
   });
 
+  // TEMP migration endpoint — remove after running in prod
+  const { registerMigrationRoute } = await import("./routes/dataMigration2026");
+  registerMigrationRoute(app);
+
   return httpServer;
 }
