@@ -179,7 +179,7 @@ export async function registerRoutes(
       return next();
     }
 
-    if (req.path === "/api/admin/run-data-migration-2026" && req.method === "POST") {
+    if (req.path === "/admin/run-data-migration-2026" && req.method === "POST") {
       return next();
     }
 
