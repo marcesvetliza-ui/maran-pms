@@ -426,7 +426,7 @@ export type EmitirFacturaInitialValues = {
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId, compactMode }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -444,6 +444,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   billingEntityType?: "company" | "agency";
   /** ID of the pre-set billing entity */
   billingEntityId?: string;
+  /**
+   * When true, skip the form screen and open directly on the confirmation/summary panel.
+   * Use when all data is already pre-filled via initialValues (e.g. from a groups payment dialog).
+   * The user can still click "← Editar" to expand the full form.
+   */
+  compactMode?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -509,6 +515,11 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           const neto = Number((base / 1.21).toFixed(2));
           return { descripcion: it.descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: neto, subtotal: base };
         }));
+      }
+      // compactMode: jump straight to the confirm/summary screen — all data is pre-filled.
+      // The user can still click "← Editar" to expand the full form if needed.
+      if (compactMode) {
+        setShowConfirm(true);
       }
     }
     if (open) {

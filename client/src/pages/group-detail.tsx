@@ -3075,6 +3075,7 @@ export default function GroupDetailPage() {
           }}
           config={billingConfig}
           allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
+          compactMode={!!(groupPaymentCcEntityId || groupPaymentReceiptType !== "factura_a")}
           initialValues={(() => {
             const condicionIvaMap: Record<string, string> = {
               responsable_inscripto: "Responsable Inscripto",
@@ -3241,7 +3242,13 @@ export default function GroupDetailPage() {
                     </div>
                     {selectedEntity && (
                       <p className="text-xs text-muted-foreground mt-1">
-                        {selectedEntity.condicionIva}
+                        {({
+                          responsable_inscripto: "Responsable Inscripto",
+                          consumidor_final: "Consumidor Final",
+                          monotributo: "Monotributista",
+                          monotributista: "Monotributista",
+                          exento: "Exento",
+                        } as Record<string, string>)[selectedEntity.condicionIva] ?? selectedEntity.condicionIva}
                         {selectedEntity.cuilCuit && ` — CUIT: ${selectedEntity.cuilCuit}`}
                       </p>
                     )}
@@ -3373,6 +3380,7 @@ export default function GroupDetailPage() {
             config={billingConfig}
             allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
             lockCondicionIva={!!entity}
+            compactMode={!!entity}
             hideAddItems
             initialValues={{
               razonSocial: entity
