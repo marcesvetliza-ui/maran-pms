@@ -429,6 +429,7 @@ export class DatabaseStorage implements IStorage {
       ratePlanResult,
       companyResult,
       agencyResult,
+      groupLinkResult,
     ] = await Promise.all([
       db.select().from(guests).where(eq(guests.id, reservation.guestId)),
       db.select().from(rooms).where(eq(rooms.id, reservation.roomId)),
@@ -437,8 +438,11 @@ export class DatabaseStorage implements IStorage {
       reservation.ratePlanId ? db.select().from(ratePlans).where(eq(ratePlans.id, reservation.ratePlanId)) : Promise.resolve([]),
       reservation.companyId ? db.select().from(companies).where(eq(companies.id, reservation.companyId)) : Promise.resolve([]),
       reservation.agencyId ? db.select().from(agencies).where(eq(agencies.id, reservation.agencyId)) : Promise.resolve([]),
+      db.select().from(groupReservationLinks).where(eq(groupReservationLinks.reservationId, reservation.id)),
     ]);
     const [roomType] = room ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)) : [undefined];
+    const groupLink = groupLinkResult[0];
+    const [groupRow] = groupLink ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode }).from(groups).where(eq(groups.id, groupLink.groupId)) : [undefined];
     return {
       ...reservation,
       guest: guest!,
@@ -448,7 +452,10 @@ export class DatabaseStorage implements IStorage {
       ratePlan: ratePlanResult[0],
       charges: chargesList,
       payments: paymentsList,
-    };
+      groupId: groupRow?.id,
+      groupName: groupRow?.name,
+      groupCode: groupRow?.groupCode,
+    } as any;
   }
 
   // Bulk enrichment — loads all related data in 8 parallel queries for the entire list (no N+1)
@@ -462,7 +469,7 @@ export class DatabaseStorage implements IStorage {
     const companyIds = [...new Set(reservationList.map(r => r.companyId).filter(Boolean))] as string[];
     const agencyIds = [...new Set(reservationList.map(r => r.agencyId).filter(Boolean))] as string[];
 
-    const [guestList, roomList, allRoomTypes, ratePlanList, chargesList, paymentsList, companyList, agencyList] = await Promise.all([
+    const [guestList, roomList, allRoomTypes, ratePlanList, chargesList, paymentsList, companyList, agencyList, groupLinkList] = await Promise.all([
       guestIds.length ? db.select().from(guests).where(inArray(guests.id, guestIds)) : Promise.resolve([]),
       roomIds.length ? db.select().from(rooms).where(inArray(rooms.id, roomIds)) : Promise.resolve([]),
       db.select().from(roomTypes),
@@ -471,7 +478,14 @@ export class DatabaseStorage implements IStorage {
       db.select().from(payments).where(inArray(payments.reservationId, reservationIds)),
       companyIds.length ? db.select().from(companies).where(inArray(companies.id, companyIds)) : Promise.resolve([]),
       agencyIds.length ? db.select().from(agencies).where(inArray(agencies.id, agencyIds)) : Promise.resolve([]),
+      db.select().from(groupReservationLinks).where(inArray(groupReservationLinks.reservationId, reservationIds)),
     ]);
+
+    // Build group map: reservationId → {groupId, groupName, groupCode}
+    const groupLinkMap = new Map<string, string>((groupLinkList as any[]).map((l: any) => [l.reservationId, l.groupId]));
+    const groupIds = [...new Set((groupLinkList as any[]).map((l: any) => l.groupId))];
+    const groupList = groupIds.length ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode }).from(groups).where(inArray(groups.id, groupIds)) : [];
+    const groupMap = new Map(groupList.map((g: any) => [g.id, g]));
 
     const guestMap = new Map(guestList.map((g: any) => [g.id, g]));
     const roomMap = new Map(roomList.map((r: any) => [r.id, r]));
@@ -493,6 +507,8 @@ export class DatabaseStorage implements IStorage {
     return reservationList.map(reservation => {
       const room: any = roomMap.get(reservation.roomId);
       const roomType = room ? roomTypeMap.get(room.roomTypeId) : undefined;
+      const groupId = groupLinkMap.get(reservation.id);
+      const group: any = groupId ? groupMap.get(groupId) : undefined;
       return {
         ...reservation,
         guest: guestMap.get(reservation.guestId) as any,
@@ -502,6 +518,9 @@ export class DatabaseStorage implements IStorage {
         ratePlan: reservation.ratePlanId ? ratePlanMap.get(reservation.ratePlanId) : undefined,
         charges: chargesMap.get(reservation.id) || [],
         payments: paymentsMap.get(reservation.id) || [],
+        groupId: group?.id,
+        groupName: group?.name,
+        groupCode: group?.groupCode,
       };
     });
   }

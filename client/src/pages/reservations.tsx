@@ -2712,6 +2712,18 @@ function ReservationDetailDialog({
         </DialogHeader>
 
 
+        {(reservation as any).groupId && (
+          <div
+            className="flex items-center gap-2 p-2.5 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-300 dark:border-cyan-700 rounded-md text-sm text-cyan-800 dark:text-cyan-300 cursor-pointer hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-colors"
+            onClick={() => window.open(`/groups/${(reservation as any).groupId}`, '_blank')}
+            data-testid="banner-group-reservation"
+          >
+            <Users2 className="h-4 w-4 shrink-0" />
+            <span>Pertenece al grupo <strong>{(reservation as any).groupName}</strong> — {(reservation as any).groupCode}</span>
+            <ExternalLink className="h-3.5 w-3.5 ml-auto shrink-0" />
+          </div>
+        )}
+
         {isLocked && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="banner-locked-reservation">
             <Lock className="h-4 w-4 shrink-0" />
@@ -5284,10 +5296,13 @@ export default function ReservationsPage() {
   const filteredReservations = reservations
     ?.filter((res) => {
       const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
+      const sq = searchQuery.toLowerCase();
       const matchesSearch =
-        guestName.includes(searchQuery.toLowerCase()) ||
-        res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        res.reservationCode?.toLowerCase().includes(searchQuery.toLowerCase());
+        guestName.includes(sq) ||
+        res.room?.roomNumber?.toLowerCase().includes(sq) ||
+        res.reservationCode?.toLowerCase().includes(sq) ||
+        (res as any).groupName?.toLowerCase().includes(sq) ||
+        (res as any).groupCode?.toLowerCase().includes(sq);
       const matchesStatus = statusFilter === "all" || res.status === statusFilter;
 
       if (!showHistory) {
