@@ -641,7 +641,7 @@ function GroupFormDialog({
                           <SelectContent>
                             {roomTypes?.filter(rt => rt.id).map((rt) => (
                               <SelectItem key={rt.id} value={rt.id}>
-                                {rt.name}
+                                {rt.name}{(rt as any).code ? ` (${(rt as any).code})` : ''}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -855,35 +855,37 @@ function GroupTable({
               </Select>
             </TableCell>
             <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" data-testid={`button-actions-${group.id}`}>
-                    <MoreHorizontal className="h-4 w-4" />
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleViewDetail(group)}
+                  data-testid={`button-view-${group.id}`}
+                >
+                  <Eye className="mr-1 h-4 w-4" />
+                  Ver
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleEdit(group)}
+                  data-testid={`button-edit-${group.id}`}
+                >
+                  <Pencil className="mr-1 h-4 w-4" />
+                  Editar
+                </Button>
+                {group.status === "tentativo" && group.reservations.length === 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => setDeleteConfirmGroup(group)}
+                    data-testid={`button-delete-${group.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleViewDetail(group)}>
-                    <Eye className="mr-2 h-4 w-4" />
-                    Ver Detalle
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleEdit(group)}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Editar
-                  </DropdownMenuItem>
-                  {group.status === "tentativo" && group.reservations.length === 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => setDeleteConfirmGroup(group)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Eliminar
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}

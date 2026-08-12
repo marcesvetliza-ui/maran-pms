@@ -1364,6 +1364,11 @@ export default function GroupDetailPage() {
         </Button>
         <div className="flex-1 min-w-[200px]">
           <div className="flex items-center gap-3">
+            <div
+              className="w-5 h-5 rounded-full flex-shrink-0 border-2 border-white shadow-sm"
+              style={{ backgroundColor: (group as any).color || '#6366f1' }}
+              title="Color del grupo"
+            />
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-group-name">
               {group.name}
             </h1>
@@ -1481,6 +1486,25 @@ export default function GroupDetailPage() {
             ) : (
               <p className="text-sm text-muted-foreground">Sin contacto definido</p>
             )}
+            {(group as any).billingEntityType && (group as any).billingEntityId && (() => {
+              const list = (group as any).billingEntityType === 'agency'
+                ? (agencies as any[])
+                : (companies as any[]);
+              const entity = list.find((e: any) => e.id === (group as any).billingEntityId);
+              const label = (group as any).billingEntityType === 'agency' ? 'Agencia' : 'Empresa';
+              const entityName = entity
+                ? (entity.razonSocial || entity.nombreFantasia || entity.name || entity.id)
+                : '...';
+              return (
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{label} de facturación</p>
+                  <p className="text-sm font-medium flex items-center gap-1">
+                    <Building2 className="h-3 w-3" />
+                    {entityName}
+                  </p>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
