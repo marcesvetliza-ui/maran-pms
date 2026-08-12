@@ -729,6 +729,7 @@ export default function GroupDetailPage() {
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
+  const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Cambiar habitación
@@ -1064,6 +1065,7 @@ export default function GroupDetailPage() {
       setGroupPaymentCloseAll(false);
       setGroupPaymentCcEntityType("company");
       setGroupPaymentCcEntityId("");
+      setGroupInvoiceDistribution("none");
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -3073,6 +3075,69 @@ export default function GroupDetailPage() {
               )}
             </div>
 
+            {/* Distribución de ítems — sólo para comprobantes fiscales */}
+            {(groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_b") && (
+              <div>
+                <Label>Distribución de ítems en la factura</Label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {([
+                    { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                    { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
+                    { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setGroupInvoiceDistribution(opt.value)}
+                      className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                    >
+                      <p className="font-semibold">{opt.label}</p>
+                      <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+                {/* Preview de ítems cuando se elige Totalizados o Detallados */}
+                {groupInvoiceDistribution !== "none" && folio && (() => {
+                  const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                  if (groupInvoiceDistribution === "totalizados") {
+                    if ((folio.totals.accommodation ?? 0) > 0)
+                      previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
+                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                    if (extrasTotal > 0)
+                      previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
+                    if (previewItems.length === 0)
+                      previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 });
+                  } else {
+                    // detallados
+                    (folio.reservations ?? []).forEach((r: any) => {
+                      const extrasAmt = parseFloat(r.extrasTotal) || 0;
+                      const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                      previewItems.push({
+                        descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
+                        precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
+                      });
+                    });
+                    (folio.groupCharges ?? []).forEach((gc: any) => {
+                      previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                    });
+                    if (previewItems.length === 0)
+                      previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 });
+                  }
+                  return (
+                    <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
+                      {previewItems.map((item, i) => (
+                        <div key={i} className="flex justify-between text-xs gap-2">
+                          <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                          <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             <div>
               <Label>Distribución</Label>
               <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
@@ -3175,7 +3240,35 @@ export default function GroupDetailPage() {
                 ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
                 : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
               domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
-              items: [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }],
+              items: (() => {
+                if (groupInvoiceDistribution !== "none" && folio) {
+                  const paymentAmt = parseFloat(groupPaymentAmount) || 0;
+                  if (groupInvoiceDistribution === "totalizados") {
+                    const result: Array<{ descripcion: string; precioUnitario: number }> = [];
+                    if ((folio.totals.accommodation ?? 0) > 0)
+                      result.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
+                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                    if (extrasTotal > 0)
+                      result.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
+                    return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: paymentAmt }];
+                  }
+                  // detallados
+                  const result: Array<{ descripcion: string; precioUnitario: number }> = [];
+                  (folio.reservations ?? []).forEach((r: any) => {
+                    const extrasAmt = parseFloat(r.extrasTotal) || 0;
+                    const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                    result.push({
+                      descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
+                      precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
+                    });
+                  });
+                  (folio.groupCharges ?? []).forEach((gc: any) => {
+                    result.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                  });
+                  return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: paymentAmt }];
+                }
+                return [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: parseFloat(groupPaymentAmount) || 0 }];
+              })(),
             };
           })()}
           paymentId={pendingGroupPaymentId || undefined}
@@ -3192,6 +3285,7 @@ export default function GroupDetailPage() {
             setGroupPaymentCloseAll(false);
             setGroupPaymentCcEntityType("company");
             setGroupPaymentCcEntityId("");
+            setGroupInvoiceDistribution("none");
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
             if (showInvoiceDialog) {
               loadInvoice();
