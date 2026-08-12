@@ -1374,11 +1374,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS regimen_hospedaje text`)
   );
 
-  // cash_register_configs: unique constraint on area column
+  // cash_register_configs: unique constraint on area column (idempotent via DO block)
   await withTimeout("cash_register_configs.area_unique", T, () =>
     db.execute(sql`
-      ALTER TABLE cash_register_configs
-        ADD CONSTRAINT IF NOT EXISTS cash_register_configs_area_unique UNIQUE (area)
+      DO $$ BEGIN
+        ALTER TABLE cash_register_configs ADD CONSTRAINT cash_register_configs_area_unique UNIQUE (area);
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
     `)
   );
 
