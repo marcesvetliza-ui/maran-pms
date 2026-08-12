@@ -781,6 +781,8 @@ export default function GroupDetailPage() {
 
   // Unassign confirmation
   const [unassignResId, setUnassignResId] = useState<string | null>(null);
+  // Delete master payment confirmation
+  const [deletingMasterPaymentId, setDeletingMasterPaymentId] = useState<string | null>(null);
 
   const { data: group, isLoading } = useQuery<GroupWithDetails>({
     queryKey: ["/api/groups", groupId],
@@ -1183,6 +1185,22 @@ export default function GroupDetailPage() {
       setMasterPaymentReceiptType("none");
     },
     onError: (e: any) => toast({ title: "Error al registrar pago maestro", description: parseApiError(e), variant: "destructive" }),
+  });
+
+  const deleteMasterPaymentMutation = useMutation({
+    mutationFn: (paymentId: string) =>
+      apiRequest("DELETE", `/api/groups/${groupId}/master-payments/${paymentId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      toast({ title: "Pago eliminado del Folio Maestro" });
+      setDeletingMasterPaymentId(null);
+    },
+    onError: (e: any) => {
+      toast({ title: "Error al eliminar pago", description: parseApiError(e), variant: "destructive" });
+      setDeletingMasterPaymentId(null);
+    },
   });
 
   const updatePassengerMutation = useMutation({
@@ -1702,6 +1720,7 @@ export default function GroupDetailPage() {
                         <TableHead>Fechas</TableHead>
                         <TableHead>Estado</TableHead>
                         <TableHead>Tarifa</TableHead>
+                        {masterFolio && masterFolio.config !== "none" && <TableHead className="text-right text-xs">Saldo indiv.</TableHead>}
                         <TableHead className="w-[100px]"></TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1760,6 +1779,19 @@ export default function GroupDetailPage() {
                             )}
                           </div>
                         </TableCell>
+                        {masterFolio && masterFolio.config !== "none" && (() => {
+                          const roomData = masterFolio.rooms.find((r: any) => r.reservationId === res.id);
+                          const bal = roomData ? roomData.individualBalance : null;
+                          return (
+                            <TableCell className="text-right text-sm" onClick={(e) => e.stopPropagation()}>
+                              {bal !== null ? (
+                                <span className={`font-semibold ${bal > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                                  ${bal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                </span>
+                              ) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                          );
+                        })()}
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1 flex-wrap">
                             {!["checked_in", "checked_out", "cancelled"].includes(res.status) && (
@@ -2164,6 +2196,18 @@ export default function GroupDetailPage() {
                                     >
                                       <FileX className="h-3 w-3 mr-1" />
                                       NC
+                                    </Button>
+                                  )}
+                                  {!gp.invoiceRef && !gp.invoiceNcRef && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                      onClick={() => setDeletingMasterPaymentId(gp.id)}
+                                      data-testid={`btn-delete-group-payment-${gp.id}`}
+                                      title="Anular pago"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
                                     </Button>
                                   )}
                                   <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
@@ -3700,6 +3744,31 @@ export default function GroupDetailPage() {
       </Dialog>
 
       {/* ─── DESASIGNAR HABITACIÓN ─── */}
+      {/* ─── ANULAR PAGO MAESTRO ─── */}
+      <AlertDialog open={!!deletingMasterPaymentId} onOpenChange={(open) => { if (!open) setDeletingMasterPaymentId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Anular pago del Folio Maestro
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará este pago y se revertirán los pagos individuales distribuidos a cada habitación. Esta acción no se puede deshacer. Solo es posible si el pago no tiene factura electrónica asociada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => { if (deletingMasterPaymentId) deleteMasterPaymentMutation.mutate(deletingMasterPaymentId); }}
+              data-testid="button-confirm-delete-master-payment"
+            >
+              {deleteMasterPaymentMutation.isPending ? "Anulando..." : "Confirmar, anular pago"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={!!unassignResId} onOpenChange={(open) => { if (!open) setUnassignResId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

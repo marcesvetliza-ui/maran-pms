@@ -175,10 +175,14 @@ function GroupFormDialog({
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<InsertGroup>) =>
-      apiRequest("PATCH", `/api/groups/${group!.id}`, data),
-    onSuccess: () => {
+      apiRequest("PATCH", `/api/groups/${group!.id}`, data).then(r => r.json()),
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
-      toast({ title: "Grupo actualizado exitosamente" });
+      const count = data?.propagatedCount ?? 0;
+      toast({
+        title: "Grupo actualizado exitosamente",
+        description: count > 0 ? `Se actualizaron las fechas de ${count} reserva(s) vinculada(s).` : undefined,
+      });
       onSuccess();
       onOpenChange(false);
     },

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable } from "@shared/schema";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -119,9 +119,44 @@ export function registerGroupsRoutes(app: Express) {
       if (billingEntityType !== undefined) updateData.billingEntityType = nullIfEmpty(billingEntityType);
       if (billingEntityId !== undefined) updateData.billingEntityId = nullIfEmpty(billingEntityId);
 
+      // 3.1: Date propagation — fetch current dates BEFORE update
+      // Normalize any date value (Date object or string) to "YYYY-MM-DD"
+      const toDateStr = (d: any): string | null => {
+        if (!d) return null;
+        if (typeof d === "string") return d.substring(0, 10);
+        if (d instanceof Date) return d.toISOString().substring(0, 10);
+        return String(d).substring(0, 10);
+      };
+      const currentGroup = await storage.getGroup(req.params.id);
+      const oldCheckIn = toDateStr(currentGroup?.checkInDate);
+      const oldCheckOut = toDateStr(currentGroup?.checkOutDate);
+
       const group = await storage.updateGroup(req.params.id, updateData);
       if (!group) {
         return res.status(404).json({ error: "Group not found" });
+      }
+
+      // 3.1: If dates changed, propagate to pending/confirmed reservations that had the old dates
+      let propagatedCount = 0;
+      const newCheckIn = updateData.checkInDate as string | undefined;
+      const newCheckOut = updateData.checkOutDate as string | undefined;
+      const datesChanged = (newCheckIn && newCheckIn !== oldCheckIn) || (newCheckOut && newCheckOut !== oldCheckOut);
+      if (datesChanged) {
+        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
+        for (const link of links) {
+          const [linked] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
+          if (!linked) continue;
+          if (!["pending", "confirmed"].includes(linked.status as string)) continue;
+          // Propagate group date changes to all pending/confirmed reservations.
+          // We update only the date dimension that changed in the group.
+          const patch: Record<string, unknown> = {};
+          if (newCheckIn) patch.checkInDate = newCheckIn;
+          if (newCheckOut) patch.checkOutDate = newCheckOut;
+          if (Object.keys(patch).length) {
+            await db.update(reservationsTable).set(patch as any).where(eq(reservationsTable.id, linked.id));
+            propagatedCount++;
+          }
+        }
       }
 
       // 2.2: Al cancelar el grupo, cancelar todas las reservas vinculadas (excepto las ya checked_out)
@@ -147,7 +182,7 @@ export function registerGroupsRoutes(app: Express) {
           .where(eq(guestsTable.codigo, placeholderCode));
       }
 
-      res.json(group);
+      res.json({ ...group, propagatedCount });
     } catch (error: any) {
       console.error("Error updating group:", error?.message || error);
       res.status(500).json({ error: "Error updating group", detail: error?.message });
@@ -1207,6 +1242,26 @@ export function registerGroupsRoutes(app: Express) {
     } catch (error: any) {
       console.error("master-payment error:", error);
       res.status(500).json({ error: "Error al registrar pago maestro" });
+    }
+  });
+
+  // ─── DELETE NON-INVOICED MASTER FOLIO PAYMENT ────────────────────────────────
+  app.delete("/api/groups/:groupId/master-payments/:paymentId", requireAuth, async (req, res) => {
+    try {
+      const { groupId, paymentId } = req.params;
+      const [gp] = await db.select().from(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId)).limit(1);
+      if (!gp) return res.status(404).json({ error: "Pago no encontrado" });
+      if ((gp as any).groupId !== groupId) return res.status(403).json({ error: "El pago no pertenece a este grupo" });
+      if ((gp as any).invoiceRef) return res.status(400).json({ error: "No se puede eliminar un pago con factura electrónica emitida. Emita una Nota de Crédito en su lugar." });
+      // Delete linked individual payments first
+      await db.delete(paymentsTable).where(eq((paymentsTable as any).groupPaymentId, paymentId));
+      // Delete the group payment record
+      await db.delete(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId));
+      await audit(req, "delete", "groups", `Pago maestro eliminado: $${(gp as any).amount} (${(gp as any).method})`, { entityType: "group", entityId: groupId });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting master payment:", error?.message || error);
+      res.status(500).json({ error: "Error al eliminar pago maestro" });
     }
   });
 
