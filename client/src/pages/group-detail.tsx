@@ -728,6 +728,7 @@ export default function GroupDetailPage() {
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
+  const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Cambiar habitación
@@ -2568,8 +2569,8 @@ export default function GroupDetailPage() {
             </DialogTitle>
             <DialogDescription>
               Código: {invoiceData?.group?.code} | {fmtDate(invoiceData?.group?.checkInDate || "")} - {fmtDate(invoiceData?.group?.checkOutDate || "")}
-              <span className="block mt-1 text-amber-600 dark:text-amber-400 font-medium">
-                Este es un resumen informativo del folio grupal. No constituye una factura electrónica ni se emite a ARCA.
+              <span className="block mt-1 text-muted-foreground text-xs">
+                Resumen informativo del folio grupal. Use el botón "Emitir Factura" para emitir el comprobante electrónico en ARCA.
               </span>
             </DialogDescription>
           </DialogHeader>
@@ -2711,9 +2712,26 @@ export default function GroupDetailPage() {
             <Button variant="outline" onClick={() => setShowInvoiceDialog(false)}>
               Cerrar
             </Button>
-            <Button onClick={printInvoice} data-testid="button-print-invoice">
+            <Button variant="outline" onClick={printInvoice} data-testid="button-print-invoice">
               <Printer className="mr-2 h-4 w-4" />
               Imprimir
+            </Button>
+            <Button
+              onClick={() => {
+                const balance = invoiceData?.totals?.balance ?? 0;
+                setGroupPaymentReceiptType("factura_b");
+                setGroupPaymentAmount(String(balance));
+                setGroupPaymentCcEntityId("");
+                setGroupPaymentCcEntityType("company");
+                setPendingGroupPaymentId("");
+                setGroupFacturaFromResumen(true);
+                setShowGroupFacturaDialog(true);
+              }}
+              disabled={!invoiceData || (invoiceData?.totals?.balance ?? 0) <= 0}
+              data-testid="button-emitir-factura-resumen"
+            >
+              <Receipt className="mr-2 h-4 w-4" />
+              Emitir Factura
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3078,10 +3096,11 @@ export default function GroupDetailPage() {
           onClose={() => {
             setShowGroupFacturaDialog(false);
             setPendingGroupPaymentId("");
+            setGroupFacturaFromResumen(false);
           }}
           config={billingConfig}
           allowedTipos={groupPaymentReceiptType === "factura_a" ? ["FA"] : groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] : ["FB"]}
-          compactMode={!!(groupPaymentCcEntityId || groupPaymentReceiptType !== "factura_a")}
+          compactMode={!groupFacturaFromResumen && !!(groupPaymentCcEntityId || groupPaymentReceiptType !== "factura_a")}
           initialValues={(() => {
             const condicionIvaMap: Record<string, string> = {
               responsable_inscripto: "Responsable Inscripto",
@@ -3109,6 +3128,7 @@ export default function GroupDetailPage() {
           paymentId={pendingGroupPaymentId || undefined}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
+            setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
             setGroupPaymentAmount("");
             setGroupPaymentMethod("");
