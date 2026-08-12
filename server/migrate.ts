@@ -1355,6 +1355,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS regimen_hospedaje text`)
   );
 
+  // cash_register_configs: unique constraint on area column
+  await withTimeout("cash_register_configs.area_unique", T, () =>
+    db.execute(sql`
+      ALTER TABLE cash_register_configs
+        ADD CONSTRAINT IF NOT EXISTS cash_register_configs_area_unique UNIQUE (area)
+    `)
+  );
+
   // ── Seed inicial de empresas y agencias ──────────────────────────────────
   const { rows: seedCheck } = await db.execute(
     sql`SELECT COUNT(*) AS cnt FROM companies WHERE razon_social != 'Empresa E2E Maran'`
