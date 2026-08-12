@@ -18,6 +18,8 @@ import {
   ChevronDown,
   ChevronRight,
   Archive,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -130,6 +142,23 @@ function GroupFormDialog({
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
   const [blockAvailability, setBlockAvailability] = useState<Record<string, number | null>>({});
 
+  // 6a: Conflict resolution state
+  type ConflictItem = {
+    reservationId: string;
+    roomId: string;
+    roomNumber: string;
+    roomTypeId: string;
+    roomTypeName: string;
+    passengerName: string | null;
+    alternatives: Array<{ id: string; roomNumber: string }>;
+  };
+  const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
+  const [conflictData, setConflictData] = useState<ConflictItem[]>([]);
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
+  const [conflictResolutions, setConflictResolutions] = useState<Record<string, string>>({});
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [pendingFormData, setPendingFormData] = useState<(Partial<InsertGroup> & { roomReassignments?: Record<string, string> }) | null>(null);
+
   const fetchBlockAvailability = async (blockId: string, roomTypeId: string, checkIn: string, checkOut: string) => {
     if (!roomTypeId || !checkIn || !checkOut || checkOut <= checkIn) return;
     try {
@@ -190,6 +219,92 @@ function GroupFormDialog({
       toast({ title: "Error al actualizar grupo", description: parseApiError(e), variant: "destructive" });
     },
   });
+
+  // 6a: Intercept save for edit mode — check conflicts before submitting
+  const handleSaveEdit = async () => {
+    if (!formData.name || !formData.checkInDate || !formData.checkOutDate) {
+      toast({ title: "Complete los campos obligatorios", variant: "destructive" });
+      return;
+    }
+    if (formData.checkOutDate <= formData.checkInDate) {
+      toast({ title: "Fecha inválida", description: "El check-out debe ser posterior al check-in.", variant: "destructive" });
+      return;
+    }
+
+    const datesChanged = formData.checkInDate !== group?.checkInDate || formData.checkOutDate !== group?.checkOutDate;
+
+    if (!datesChanged) {
+      // No date change — go straight to confirmation
+      setPendingFormData(formData);
+      setShowConfirmDialog(true);
+      return;
+    }
+
+    // Date changed — check for room conflicts
+    setIsCheckingConflicts(true);
+    try {
+      const r = await fetch(
+        `/api/groups/${group!.id}/date-conflicts?checkIn=${formData.checkInDate}&checkOut=${formData.checkOutDate}`,
+        { credentials: "include" }
+      );
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      const conflicts: ConflictItem[] = data.conflicts ?? [];
+
+      if (conflicts.length === 0) {
+        // No conflicts — go to confirmation
+        setPendingFormData(formData);
+        setShowConfirmDialog(true);
+      } else {
+        // Check if any conflict is truly unresolvable (0 alternatives)
+        const unresolvable = conflicts.filter(c => c.alternatives.length === 0);
+        if (unresolvable.length > 0) {
+          const rooms = unresolvable.map(c => `Hab. ${c.roomNumber} (${c.roomTypeName})`).join(", ");
+          toast({
+            title: "Sin disponibilidad — no se pueden cambiar las fechas",
+            description: `Las siguientes habitaciones no tienen alternativas del mismo tipo en esas fechas: ${rooms}. Cambiá la habitación manualmente antes de actualizar las fechas.`,
+            variant: "destructive",
+          });
+          return;
+        }
+        // All conflicts have alternatives — show resolution dialog
+        setConflictData(conflicts);
+        setConflictResolutions(Object.fromEntries(conflicts.map(c => [c.reservationId, ""])));
+        setPendingFormData(formData);
+        setShowConflictDialog(true);
+      }
+    } catch (e: any) {
+      toast({ title: "Error al verificar disponibilidad", description: e?.message, variant: "destructive" });
+    } finally {
+      setIsCheckingConflicts(false);
+    }
+  };
+
+  const handleConflictContinue = () => {
+    // All conflicts must have a selection
+    const missing = conflictData.filter(c => !conflictResolutions[c.reservationId]);
+    if (missing.length > 0) {
+      toast({ title: "Seleccioná una habitación alternativa para cada conflicto", variant: "destructive" });
+      return;
+    }
+    setShowConflictDialog(false);
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirm = () => {
+    if (!pendingFormData) return;
+    const dataToSubmit: any = { ...pendingFormData };
+    // Attach room reassignments if any
+    const hasReassignments = Object.values(conflictResolutions).some(v => !!v);
+    if (hasReassignments) {
+      dataToSubmit.roomReassignments = conflictResolutions;
+    }
+    updateMutation.mutate(dataToSubmit);
+    setShowConfirmDialog(false);
+    setConflictData([]);
+    setConflictResolutions({});
+    setPendingFormData(null);
+  };
 
   const handleNext = () => {
     if (!formData.name || !formData.checkInDate || !formData.checkOutDate) {
@@ -358,6 +473,7 @@ function GroupFormDialog({
   const isPending = isCreating || updateMutation.isPending;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -593,8 +709,10 @@ function GroupFormDialog({
                 Cancelar
               </Button>
               {isEditing ? (
-                <Button onClick={() => updateMutation.mutate(formData)} disabled={isPending} data-testid="button-save-group">
-                  {isPending ? "Guardando..." : "Guardar Cambios"}
+                <Button onClick={handleSaveEdit} disabled={isPending || isCheckingConflicts} data-testid="button-save-group">
+                  {isCheckingConflicts ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verificando disponibilidad...</>
+                  ) : isPending ? "Guardando..." : "Guardar Cambios"}
                 </Button>
               ) : (
                 <Button type="button" onClick={handleNext} data-testid="button-next-step">
@@ -776,6 +894,94 @@ function GroupFormDialog({
         )}
       </DialogContent>
     </Dialog>
+
+    {/* 6a: Conflict resolution dialog — shown when some rooms are occupied on new dates */}
+    <Dialog open={showConflictDialog} onOpenChange={(o) => { if (!o) setShowConflictDialog(false); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            Conflictos de disponibilidad
+          </DialogTitle>
+          <DialogDescription>
+            Las siguientes habitaciones ya tienen otra reserva en las nuevas fechas. Elegí una alternativa del mismo tipo para cada una.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2 max-h-[50vh] overflow-y-auto">
+          {conflictData.map((c) => {
+            // Exclude rooms already selected for OTHER conflicts (prevent double-booking within the batch)
+            const selectedElsewhere = new Set(
+              Object.entries(conflictResolutions)
+                .filter(([resId, roomId]) => resId !== c.reservationId && !!roomId)
+                .map(([, roomId]) => roomId)
+            );
+            const availableAlternatives = c.alternatives.filter(alt => !selectedElsewhere.has(alt.id));
+            return (
+              <div key={c.reservationId} className="border rounded-md p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-sm">Hab. {c.roomNumber} — {c.roomTypeName}</p>
+                    {c.passengerName && <p className="text-xs text-muted-foreground">{c.passengerName}</p>}
+                  </div>
+                  <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium shrink-0">Conflicto</span>
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Habitación alternativa *</Label>
+                  <Select
+                    value={conflictResolutions[c.reservationId] || ""}
+                    onValueChange={(v) => setConflictResolutions(prev => ({ ...prev, [c.reservationId]: v }))}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Seleccionar habitación..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableAlternatives.map(alt => (
+                        <SelectItem key={alt.id} value={alt.id}>
+                          Hab. {alt.roomNumber}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {availableAlternatives.length === 0 && (
+                    <p className="text-xs text-destructive mt-1">Sin alternativas disponibles (ya seleccionadas para otras habitaciones)</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowConflictDialog(false)}>Cancelar</Button>
+          <Button
+            onClick={handleConflictContinue}
+            disabled={conflictData.some(c => !conflictResolutions[c.reservationId])}
+          >
+            Continuar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* 6a: Final confirmation dialog */}
+    <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Estás segura de lo que vas a hacer?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {conflictData.length > 0
+              ? `Se cambiarán las fechas del grupo y se reasignarán ${conflictData.length} habitación(es) a alternativas del mismo tipo. Esta acción actualizará todas las reservas pendientes y confirmadas vinculadas.`
+              : "Se cambiarán las fechas del grupo y se propagarán a todas las reservas pendientes y confirmadas vinculadas."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => { setShowConfirmDialog(false); }}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirm} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? "Guardando..." : "Confirmar cambio"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 

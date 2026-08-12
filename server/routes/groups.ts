@@ -88,9 +88,117 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // 6a: Check which reservations conflict in new date range and offer alternatives
+  app.get("/api/groups/:id/date-conflicts", async (req, res) => {
+    try {
+      const { checkIn, checkOut } = req.query as { checkIn?: string; checkOut?: string };
+      if (!checkIn || !checkOut || checkOut <= checkIn) {
+        return res.status(400).json({ error: "checkIn y checkOut son requeridos y checkOut debe ser posterior" });
+      }
+
+      const groupId = req.params.id;
+      const group = await storage.getGroup(groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+
+      const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, groupId));
+      const allReservations = await storage.getReservations();
+      const allRooms = await storage.getRooms();
+      const allRoomTypes = await storage.getRoomTypes();
+      const maintenanceBlocks = await storage.getMaintenanceBlocks();
+
+      const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
+      // "physically unavailable" room statuses — exclude from alternatives regardless of reservation conflicts
+      const unavailableRoomStatuses: string[] = ["maintenance", "oos"];
+      // This group's own reservation IDs — excluded when computing alternatives for other rooms
+      const groupResIds = new Set(links.map(l => l.reservationId));
+
+      const conflicts: Array<{
+        reservationId: string;
+        roomId: string;
+        roomNumber: string;
+        roomTypeId: string;
+        roomTypeName: string;
+        passengerName: string | null;
+        alternatives: Array<{ id: string; roomNumber: string }>;
+      }> = [];
+
+      for (const link of links) {
+        const [linked] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
+        if (!linked) continue;
+        if (!["pending", "confirmed"].includes(linked.status as string)) continue;
+        if (!linked.roomId) continue;
+
+        const room = allRooms.find(r => r.id === linked.roomId);
+        if (!room) continue;
+        const roomType = allRoomTypes.find(rt => rt.id === room.roomTypeId);
+
+        // Does this room have a conflict in the NEW date range? (exclude self)
+        const hasResConflict = allReservations.some(res => {
+          if (!activeStatuses.includes(res.status)) return false;
+          if (res.roomId !== room.id) return false;
+          if (res.id === linked.id) return false;
+          return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+        });
+        const hasBlockConflict = maintenanceBlocks.some(blk =>
+          blk.roomId === room.id && blk.blockFrom < checkOut && blk.blockTo > checkIn
+        );
+
+        if (!hasResConflict && !hasBlockConflict) continue; // no conflict, skip
+
+        // Get passenger name from the guest record (not from reservation row — that field may differ by ORM version)
+        let passengerName: string | null = null;
+        if (linked.guestId) {
+          const [g] = await db.select().from(guestsTable).where(eq(guestsTable.id, linked.guestId)).limit(1);
+          // Skip the group placeholder guest (codigo = GROUP-xxx) — not a real passenger name
+          if (g && (!g.codigo || !g.codigo.startsWith("GROUP-"))) {
+            passengerName = `${g.lastName || ""} ${g.firstName || ""}`.trim() || null;
+          }
+        }
+
+        // Find alternative rooms of same type available for new dates
+        const alternatives = allRooms
+          .filter(r => {
+            if (r.id === room.id) return false;
+            if (r.roomTypeId !== room.roomTypeId) return false;
+            if (unavailableRoomStatuses.includes(r.status)) return false;
+            if ((r.roomNumber as string) === "REUB") return false;
+            // Check no reservation conflicts (exclude other group reservations so they don't block each other)
+            const resConflict = allReservations.find(res => {
+              if (!activeStatuses.includes(res.status)) return false;
+              if (res.roomId !== r.id) return false;
+              if (groupResIds.has(res.id)) return false;
+              return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+            });
+            if (resConflict) return false;
+            const blockConflict = maintenanceBlocks.find(blk =>
+              blk.roomId === r.id && blk.blockFrom < checkOut && blk.blockTo > checkIn
+            );
+            if (blockConflict) return false;
+            return true;
+          })
+          .map(r => ({ id: r.id, roomNumber: r.roomNumber as string }));
+
+        conflicts.push({
+          reservationId: linked.id,
+          roomId: room.id,
+          roomNumber: room.roomNumber as string,
+          roomTypeId: room.roomTypeId,
+          roomTypeName: roomType?.name || room.roomTypeId,
+          passengerName,
+          alternatives,
+        });
+      }
+
+      res.json({ conflicts });
+    } catch (error: any) {
+      console.error("Error checking date conflicts:", error?.message);
+      res.status(500).json({ error: "Error al verificar disponibilidad" });
+    }
+  });
+
   app.patch("/api/groups/:id", async (req, res) => {
     try {
-      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig, billingEntityType, billingEntityId } = req.body;
+      const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig, billingEntityType, billingEntityId, roomReassignments } = req.body;
       const nullIfEmpty = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
       const updateData: Record<string, unknown> = {};
 
@@ -156,6 +264,60 @@ export function registerGroupsRoutes(app: Express) {
             await db.update(reservationsTable).set(patch as any).where(eq(reservationsTable.id, linked.id));
             propagatedCount++;
           }
+        }
+      }
+
+      // 6a: Apply room reassignments sent from the conflict-resolution dialog (with full server-side validation)
+      if (datesChanged && roomReassignments && typeof roomReassignments === 'object') {
+        // Build the set of reservation IDs that belong to this group for ownership validation
+        const groupLinks = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
+        const groupResIdSet = new Set(groupLinks.map(l => l.reservationId));
+
+        // Validate uniqueness: no two reservations can be reassigned to the same room
+        const targetRoomIds = Object.values(roomReassignments).filter(Boolean) as string[];
+        const uniqueTargets = new Set(targetRoomIds);
+        if (targetRoomIds.length !== uniqueTargets.size) {
+          return res.status(400).json({ error: "Dos reservas no pueden asignarse a la misma habitación." });
+        }
+
+        const ciToUse = newCheckIn || (newCheckOut ? group.checkInDate : null);
+        const coToUse = newCheckOut || (newCheckIn ? group.checkOutDate : null);
+
+        for (const [reservationId, newRoomId] of Object.entries(roomReassignments)) {
+          if (!newRoomId) continue;
+
+          // 1. Ownership: reservationId must belong to this group
+          if (!groupResIdSet.has(reservationId)) {
+            return res.status(403).json({ error: `Reserva ${reservationId} no pertenece a este grupo.` });
+          }
+
+          const [currentRes] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, reservationId)).limit(1);
+          if (!currentRes) continue;
+
+          const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, newRoomId as string)).limit(1);
+          if (!newRoom) return res.status(404).json({ error: `Habitación destino ${newRoomId} no encontrada.` });
+
+          // 2. Room type must match original reservation
+          if (newRoom.roomTypeId !== currentRes.roomTypeId) {
+            return res.status(400).json({ error: `La habitación ${newRoom.roomNumber} no es del mismo tipo que la original.` });
+          }
+
+          // 3. Recheck availability at commit time with new dates
+          const checkInForRecheck = ciToUse || currentRes.checkInDate;
+          const checkOutForRecheck = coToUse || currentRes.checkOutDate;
+          const hasConflict = await storage.checkOverbooking(newRoomId as string, checkInForRecheck, checkOutForRecheck, reservationId);
+          if (hasConflict) {
+            return res.status(409).json({ error: `La habitación ${newRoom.roomNumber} ya no está disponible en esas fechas. Recargá la página y volvé a intentarlo.` });
+          }
+
+          // All validations passed — apply the reassignment
+          if (currentRes.roomId) {
+            await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, currentRes.roomId));
+          }
+          await db.update(reservationsTable)
+            .set({ roomId: newRoomId as string, roomTypeId: newRoom.roomTypeId })
+            .where(eq(reservationsTable.id, reservationId));
+          await db.update(roomsTable).set({ status: 'occupied' }).where(eq(roomsTable.id, newRoomId as string));
         }
       }
 
@@ -273,7 +435,7 @@ export function registerGroupsRoutes(app: Express) {
 
         const availableRooms = allRoomsOfType.filter(room => {
           if (room.roomNumber === "REUB") return false;
-          if (room.status === "blocked") return false;
+          if (room.status === "maintenance" || room.status === "oos") return false;
           return !allReservations.find(res => {
             if (!activeStatuses.includes(res.status)) return false;
             if (res.roomId !== room.id) return false;
