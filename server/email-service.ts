@@ -189,6 +189,7 @@ async function sendViaSmtp(opts: {
       port: opts.port,
       secure: opts.secure,
       auth: { user: opts.user, pass: opts.pass },
+      family: 4, // force IPv4 — Replit production has no IPv6 route
     });
     await transporter.sendMail({
       from: opts.from,
@@ -329,6 +330,7 @@ export async function sendEmailWithPdfAttachment(opts: {
         port: cfg.smtpPort || 587,
         secure: cfg.smtpSecure ?? false,
         auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+        family: 4, // force IPv4 — Replit production has no IPv6 route
       });
       await transporter.sendMail({
         from,

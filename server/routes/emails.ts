@@ -233,6 +233,7 @@ export function registerEmailRoutes(app: Express) {
           port: cfg.smtpPort || 587,
           secure: cfg.smtpSecure ?? false,
           auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+          family: 4, // force IPv4 — Replit production has no IPv6 route
         });
         await transporter.sendMail({ from, to, subject, text, html });
       } else {

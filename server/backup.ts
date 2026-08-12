@@ -192,6 +192,7 @@ export async function sendBackupByEmail(targetEmail: string, type: string = "man
     port: cfg.smtpPort ?? 587,
     secure: cfg.smtpSecure ?? false,
     auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+    family: 4, // force IPv4 — Replit production has no IPv6 route
   });
 
   const sqlBuffer = await generateBackupSql();
