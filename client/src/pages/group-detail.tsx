@@ -768,6 +768,8 @@ export default function GroupDetailPage() {
   const [masterPaymentCcEntityId, setMasterPaymentCcEntityId] = useState("");
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
+  // Delete group charge confirmation
+  const [deletingGroupChargeId, setDeletingGroupChargeId] = useState<string | null>(null);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
   // Edit rate + late checkout
@@ -1084,6 +1086,7 @@ export default function GroupDetailPage() {
     mutationFn: (chargeId: string) => apiRequest("DELETE", `/api/groups/${groupId}/charges/${chargeId}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       toast({ title: "Cargo eliminado" });
     },
     onError: (e: any) => toast({ title: "Error al eliminar cargo", description: parseApiError(e), variant: "destructive" }),
@@ -2094,7 +2097,7 @@ export default function GroupDetailPage() {
                                 </Button>
                                 <Button
                                   variant="ghost" size="icon" className="h-6 w-6"
-                                  onClick={() => deleteGroupChargeMutation.mutate(gc.id)}
+                                  onClick={() => setDeletingGroupChargeId(gc.id)}
                                   disabled={deleteGroupChargeMutation.isPending}
                                   data-testid={`button-delete-group-charge-${gc.id}`}
                                 >
@@ -3772,6 +3775,41 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-delete-master-payment"
             >
               {deleteMasterPaymentMutation.isPending ? "Anulando..." : "Confirmar, anular pago"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── ELIMINAR CARGO GRUPAL ─── */}
+      <AlertDialog open={!!deletingGroupChargeId} onOpenChange={(open) => { if (!open) setDeletingGroupChargeId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Eliminar cargo grupal
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span>Se eliminará este cargo del Folio Maestro. Esta acción no se puede deshacer.</span>
+              {masterFolio && (masterFolio.masterPaid > 0 || masterFolio.groupPayments?.some((gp: any) => gp.invoiceRef)) && (
+                <span className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 mt-2">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    {masterFolio.groupPayments?.some((gp: any) => gp.invoiceRef)
+                      ? "Este folio tiene facturas electrónicas emitidas. Eliminar el cargo generará una diferencia contable."
+                      : "Este folio ya tiene pagos registrados. Eliminar el cargo modificará el saldo pendiente."}
+                  </span>
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => { if (deletingGroupChargeId) deleteGroupChargeMutation.mutate(deletingGroupChargeId); setDeletingGroupChargeId(null); }}
+              data-testid="button-confirm-delete-group-charge"
+            >
+              {deleteGroupChargeMutation.isPending ? "Eliminando..." : "Confirmar, eliminar cargo"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
