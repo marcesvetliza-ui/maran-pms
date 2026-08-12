@@ -3378,9 +3378,6 @@ export default function GroupDetailPage() {
                     {isFiscalAndNeedsEntity && (
                       <p className="text-xs text-amber-600 mt-1">Seleccioná la empresa o agencia receptora del comprobante.</p>
                     )}
-                    {["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType) && masterPaymentCcEntityId && (
-                      <p className="text-xs text-muted-foreground mt-1">Al registrar se abrirá el formulario de emisión ARCA.</p>
-                    )}
                   </div>
                 )}
 
@@ -3561,7 +3558,7 @@ export default function GroupDetailPage() {
             config={billingConfig}
             allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
             lockCondicionIva={!!entity}
-            compactMode={!!entity}
+            compactMode={true}
             hideAddItems={masterInvoiceDistribution === "none"}
             initialValues={{
               razonSocial: entity
