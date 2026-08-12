@@ -118,7 +118,6 @@ function GroupFormDialog({
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
   const tomorrow = toArgentinaDateStr(tomorrowDate);
 
-  const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<Partial<InsertGroup> & { billingEntityType?: string; billingEntityId?: string }>({
     name: group?.name || "",
     contactName: group?.contactName || "",
@@ -173,7 +172,6 @@ function GroupFormDialog({
   // Reset state when dialog opens/closes or mode changes
   useEffect(() => {
     if (open) {
-      setStep(1);
       setBlocks([]);
       setCreatedGroupId(null);
       setFormData({
@@ -317,26 +315,6 @@ function GroupFormDialog({
     setPendingFormData(null);
   };
 
-  const handleNext = () => {
-    if (!formData.name || !formData.checkInDate || !formData.checkOutDate) {
-      toast({ title: "Complete los campos obligatorios", variant: "destructive" });
-      return;
-    }
-    if (!group && formData.checkInDate < today) {
-      toast({ title: "Fecha inválida", description: "La fecha de check-in no puede ser anterior a hoy.", variant: "destructive" });
-      return;
-    }
-    if (formData.checkOutDate <= formData.checkInDate) {
-      toast({ title: "Fecha inválida", description: "El check-out debe ser posterior al check-in.", variant: "destructive" });
-      return;
-    }
-    setStep(2);
-  };
-
-  const handleBack = () => {
-    setStep(1);
-  };
-
   const addBlock = () => {
     setBlocks([
       ...blocks,
@@ -361,9 +339,25 @@ function GroupFormDialog({
   };
 
   const handleCreate = async () => {
+    // Step-1 validation (only needed when group not yet created)
+    if (!createdGroupId) {
+      if (!formData.name || !formData.checkInDate || !formData.checkOutDate) {
+        toast({ title: "Complete los campos obligatorios", variant: "destructive" });
+        return;
+      }
+      if (formData.checkInDate < today) {
+        toast({ title: "Fecha inválida", description: "La fecha de check-in no puede ser anterior a hoy.", variant: "destructive" });
+        return;
+      }
+      if (formData.checkOutDate <= formData.checkInDate) {
+        toast({ title: "Fecha inválida", description: "El check-out debe ser posterior al check-in.", variant: "destructive" });
+        return;
+      }
+    }
+
     // Clear previous errors
     setBlocks(blocks.map((b) => ({ ...b, error: undefined })));
-    
+
     // Validate blocks before submission
     const hasInvalidBlocks = blocks.some((b) => {
       const qty = Number(b.quantity);
@@ -481,7 +475,6 @@ function GroupFormDialog({
         toast({ title: blocks.length > 0 ? `Grupo creado con ${blocks.length} bloque(s)` : "Grupo creado exitosamente" });
         onSuccess();
         onOpenChange(false);
-        setStep(1);
         setBlocks([]);
         setCreatedGroupId(null);
       }
@@ -510,426 +503,405 @@ function GroupFormDialog({
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Grupo" : "Nuevo Grupo"}</DialogTitle>
           <DialogDescription>
-            {isEditing 
-              ? "Modifique los datos del grupo" 
-              : step === 1 
-                ? "Paso 1: Información del grupo" 
-                : "Paso 2: Bloques de habitaciones"}
+            {isEditing ? "Modifique los datos del grupo" : "Complete los datos y agregue los bloques de habitaciones"}
           </DialogDescription>
         </DialogHeader>
 
-        {!isEditing && (
-          <div className="flex gap-2 mb-4">
-            <div className={`flex-1 h-2 rounded ${step >= 1 ? "bg-primary" : "bg-muted"}`} />
-            <div className={`flex-1 h-2 rounded ${step >= 2 ? "bg-primary" : "bg-muted"}`} />
-          </div>
-        )}
+        <div className="space-y-4">
+          {/* ── Información del grupo ── */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <Label htmlFor="name">Nombre del Grupo *</Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Ej: Congreso Médico 2025"
+                required
+                data-testid="input-group-name"
+              />
+            </div>
 
-        {step === 1 && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <Label htmlFor="name">Nombre del Grupo *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Ej: Congreso Médico 2025"
-                  required
-                  data-testid="input-group-name"
-                />
+            <div className="col-span-2">
+              <Label>Color del grupo</Label>
+              <div className="flex gap-2 flex-wrap mt-2">
+                {[
+                  "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316",
+                  "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#84cc16",
+                ].map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                      formData.color === color ? "border-foreground scale-110" : "border-transparent"
+                    }`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setFormData({ ...formData, color })}
+                    data-testid={`button-color-${color.replace("#", "")}`}
+                    title={color}
+                  />
+                ))}
               </div>
+            </div>
 
-              <div className="col-span-2">
-                <Label>Color del grupo</Label>
-                <div className="flex gap-2 flex-wrap mt-2">
-                  {[
-                    "#6366f1", "#8b5cf6", "#ec4899", "#ef4444", "#f97316",
-                    "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#84cc16",
-                  ].map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${
-                        formData.color === color ? "border-foreground scale-110" : "border-transparent"
-                      }`}
-                      style={{ backgroundColor: color }}
-                      onClick={() => setFormData({ ...formData, color })}
-                      data-testid={`button-color-${color.replace("#", "")}`}
-                      title={color}
-                    />
-                  ))}
-                </div>
-              </div>
+            <div>
+              <Label htmlFor="contactName">Nombre de Contacto</Label>
+              <Input
+                id="contactName"
+                value={formData.contactName || ""}
+                onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
+                placeholder="Nombre del responsable"
+                data-testid="input-group-contact-name"
+              />
+            </div>
 
-              <div>
-                <Label htmlFor="contactName">Nombre de Contacto</Label>
-                <Input
-                  id="contactName"
-                  value={formData.contactName || ""}
-                  onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
-                  placeholder="Nombre del responsable"
-                  data-testid="input-group-contact-name"
-                />
-              </div>
+            <div>
+              <Label htmlFor="contactPhone">Teléfono</Label>
+              <Input
+                id="contactPhone"
+                value={formData.contactPhone || ""}
+                onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                placeholder="+54 11 1234-5678"
+                data-testid="input-group-contact-phone"
+              />
+            </div>
 
-              <div>
-                <Label htmlFor="contactPhone">Teléfono</Label>
-                <Input
-                  id="contactPhone"
-                  value={formData.contactPhone || ""}
-                  onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
-                  placeholder="+54 11 1234-5678"
-                  data-testid="input-group-contact-phone"
-                />
-              </div>
+            <div className="col-span-2">
+              <Label htmlFor="contactEmail">Email</Label>
+              <Input
+                id="contactEmail"
+                type="email"
+                value={formData.contactEmail || ""}
+                onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
+                placeholder="contacto@empresa.com"
+                data-testid="input-group-contact-email"
+              />
+            </div>
 
-              <div className="col-span-2">
-                <Label htmlFor="contactEmail">Email</Label>
-                <Input
-                  id="contactEmail"
-                  type="email"
-                  value={formData.contactEmail || ""}
-                  onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
-                  placeholder="contacto@empresa.com"
-                  data-testid="input-group-contact-email"
-                />
-              </div>
-
-              {/* Entidad de facturación del grupo */}
-              <div className="col-span-2">
-                <Label>Empresa / Agencia de facturación <span className="text-muted-foreground font-normal">(opcional)</span></Label>
-                <p className="text-xs text-muted-foreground mb-2">Se pre-seleccionará automáticamente al registrar pagos del grupo.</p>
-                <div className="grid grid-cols-2 gap-2">
+            {/* Entidad de facturación */}
+            <div className="col-span-2">
+              <Label>Empresa / Agencia de facturación <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <p className="text-xs text-muted-foreground mb-2">Se pre-seleccionará automáticamente al registrar pagos del grupo.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
+                  value={formData.billingEntityType || ""}
+                  onChange={(e) => setFormData({ ...formData, billingEntityType: e.target.value, billingEntityId: "" })}
+                  data-testid="select-group-billing-entity-type"
+                >
+                  <option value="">Sin entidad</option>
+                  <option value="company">Empresa</option>
+                  <option value="agency">Agencia</option>
+                </select>
+                {formData.billingEntityType && (
                   <select
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
-                    value={formData.billingEntityType || ""}
-                    onChange={(e) => setFormData({ ...formData, billingEntityType: e.target.value, billingEntityId: "" })}
-                    data-testid="select-group-billing-entity-type"
+                    value={formData.billingEntityId || ""}
+                    onChange={(e) => setFormData({ ...formData, billingEntityId: e.target.value })}
+                    data-testid="select-group-billing-entity-id"
                   >
-                    <option value="">Sin entidad</option>
-                    <option value="company">Empresa</option>
-                    <option value="agency">Agencia</option>
+                    <option value="">{formData.billingEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."}</option>
+                    {(formData.billingEntityType === "company" ? companies : agencies).map((e: any) => (
+                      <option key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</option>
+                    ))}
                   </select>
-                  {formData.billingEntityType && (
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
-                      value={formData.billingEntityId || ""}
-                      onChange={(e) => setFormData({ ...formData, billingEntityId: e.target.value })}
-                      data-testid="select-group-billing-entity-id"
-                    >
-                      <option value="">{formData.billingEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."}</option>
-                      {(formData.billingEntityType === "company" ? companies : agencies).map((e: any) => (
-                        <option key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="checkInDate">Fecha Check-in *</Label>
-                <Input
-                  id="checkInDate"
-                  type="date"
-                  value={formData.checkInDate}
-                  min={!group ? today : undefined}
-                  onChange={(e) => setFormData({ ...formData, checkInDate: e.target.value })}
-                  required
-                  data-testid="input-group-checkin"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="checkOutDate">Fecha Check-out *</Label>
-                <Input
-                  id="checkOutDate"
-                  type="date"
-                  value={formData.checkOutDate}
-                  min={!group ? (formData.checkInDate || today) : undefined}
-                  onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}
-                  required
-                  data-testid="input-group-checkout"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="eventDate">Fecha del Evento</Label>
-                <Input
-                  id="eventDate"
-                  type="date"
-                  value={formData.eventDate || ""}
-                  onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
-                  data-testid="input-group-event-date"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="eventSalon">Salón del Evento</Label>
-                <Input
-                  id="eventSalon"
-                  type="text"
-                  placeholder="Ej: Salón Solárium"
-                  value={(formData as any).eventSalon || ""}
-                  onChange={(e) => setFormData({ ...formData, eventSalon: e.target.value } as any)}
-                  data-testid="input-group-event-salon"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="eventTime">Horario del Evento</Label>
-                <Input
-                  id="eventTime"
-                  type="text"
-                  placeholder="Ej: 20:00 hs"
-                  value={(formData as any).eventTime || ""}
-                  onChange={(e) => setFormData({ ...formData, eventTime: e.target.value } as any)}
-                  data-testid="input-group-event-time"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="releaseDate">Fecha de Release</Label>
-                <Input
-                  id="releaseDate"
-                  type="date"
-                  value={formData.releaseDate || ""}
-                  onChange={(e) => setFormData({ ...formData, releaseDate: e.target.value })}
-                  data-testid="input-group-release-date"
-                />
-              </div>
-
-              {isEditing ? (
-                <div>
-                  <Label htmlFor="status">Estado</Label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(value) => setFormData({ ...formData, status: value as GroupStatus })}
-                  >
-                    <SelectTrigger data-testid="select-group-status">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tentative">Tentativo</SelectItem>
-                      <SelectItem value="blocked">Bloqueado</SelectItem>
-                      <SelectItem value="confirmed">Confirmado</SelectItem>
-                      <SelectItem value="inhouse">En Casa</SelectItem>
-                      <SelectItem value="finished">Finalizado</SelectItem>
-                      <SelectItem value="cancelled">Cancelado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : null}
-
-              <div className="col-span-2">
-                <Label htmlFor="notes">Notas</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes || ""}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Notas adicionales..."
-                  className="resize-none"
-                  rows={3}
-                  data-testid="textarea-group-notes"
-                />
+                )}
               </div>
             </div>
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancelar
-              </Button>
-              {isEditing ? (
-                <Button onClick={handleSaveEdit} disabled={isPending || isCheckingConflicts} data-testid="button-save-group">
-                  {isCheckingConflicts ? (
-                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verificando disponibilidad...</>
-                  ) : isPending ? "Guardando..." : "Guardar Cambios"}
-                </Button>
-              ) : (
-                <Button type="button" onClick={handleNext} data-testid="button-next-step">
-                  Siguiente
-                </Button>
-              )}
-            </DialogFooter>
-          </div>
-        )}
-
-        {step === 2 && !isEditing && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Agregue los bloques de habitaciones para el grupo. Puede configurar fechas y tarifas diferentes para cada bloque.
-              </p>
-              <Button type="button" variant="outline" size="sm" onClick={addBlock} data-testid="button-add-block-wizard">
-                <Plus className="mr-2 h-4 w-4" />
-                Agregar Bloque
-              </Button>
+            <div>
+              <Label htmlFor="checkInDate">Fecha Check-in *</Label>
+              <Input
+                id="checkInDate"
+                type="date"
+                value={formData.checkInDate}
+                min={!group ? today : undefined}
+                onChange={(e) => setFormData({ ...formData, checkInDate: e.target.value })}
+                required
+                data-testid="input-group-checkin"
+              />
             </div>
 
-            {blocks.length === 0 ? (
-              <div className="rounded-md border border-dashed p-8 text-center">
-                <Hotel className="mx-auto h-10 w-10 text-muted-foreground/50" />
-                <p className="mt-2 text-sm text-muted-foreground">
-                  No hay bloques agregados. Puede agregar bloques ahora o después desde el detalle del grupo.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {blocks.map((block, index) => (
-                  <div key={block.id} className={`rounded-md border p-4 space-y-3 ${block.error ? "border-destructive" : ""}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm">Bloque {index + 1}</span>
-                        {block.error && <span className="text-xs text-destructive">{block.error}</span>}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeBlock(block.id)}
-                        data-testid={`button-remove-block-${index}`}
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </Button>
-                    </div>
+            <div>
+              <Label htmlFor="checkOutDate">Fecha Check-out *</Label>
+              <Input
+                id="checkOutDate"
+                type="date"
+                value={formData.checkOutDate}
+                min={!group ? (formData.checkInDate || today) : undefined}
+                onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}
+                required
+                data-testid="input-group-checkout"
+              />
+            </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <div>
-                        <Label className="text-xs">Tipo de Habitación *</Label>
-                        <Select
-                          value={block.roomTypeId}
-                          onValueChange={(v) => {
-                            updateBlock(block.id, { roomTypeId: v });
-                            const ci = block.useCustomDates ? block.blockCheckInDate : formData.checkInDate;
-                            const co = block.useCustomDates ? block.blockCheckOutDate : formData.checkOutDate;
-                            fetchBlockAvailability(block.id, v, ci || '', co || '');
-                          }}
-                        >
-                          <SelectTrigger data-testid={`select-block-type-${index}`}>
-                            <SelectValue placeholder="Seleccionar" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {roomTypes?.filter(rt => rt.id).map((rt) => (
-                              <SelectItem key={rt.id} value={rt.id}>
-                                {rt.name}{(rt as any).code ? ` (${(rt as any).code})` : ''}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+            <div>
+              <Label htmlFor="eventDate">Fecha del Evento</Label>
+              <Input
+                id="eventDate"
+                type="date"
+                value={formData.eventDate || ""}
+                onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
+                data-testid="input-group-event-date"
+              />
+            </div>
 
-                      <div>
-                        <Label className="text-xs">
-                          Cantidad *
-                          {blockAvailability[block.id] != null && (
-                            <span className={`ml-1 font-normal ${blockAvailability[block.id] === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                              ({blockAvailability[block.id]} disponibles)
-                            </span>
-                          )}
-                        </Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={blockAvailability[block.id] ?? undefined}
-                          value={block.quantity}
-                          onChange={(e) => updateBlock(block.id, { quantity: parseInt(e.target.value) || 1 })}
-                          data-testid={`input-block-qty-${index}`}
-                          className={blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) ? 'border-destructive' : ''}
-                        />
-                        {blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) && (
-                          <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
-                        )}
-                      </div>
+            <div>
+              <Label htmlFor="eventSalon">Salón del Evento</Label>
+              <Input
+                id="eventSalon"
+                type="text"
+                placeholder="Ej: Salón Solárium"
+                value={(formData as any).eventSalon || ""}
+                onChange={(e) => setFormData({ ...formData, eventSalon: e.target.value } as any)}
+                data-testid="input-group-event-salon"
+              />
+            </div>
 
-                      <div>
-                        <Label className="text-xs">Tarifa Acordada <span className="text-xs font-normal text-muted-foreground">(con IVA)</span></Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min={0}
-                          value={block.agreedRate}
-                          onChange={(e) => updateBlock(block.id, { agreedRate: e.target.value })}
-                          placeholder="0.00"
-                          data-testid={`input-block-rate-${index}`}
-                        />
-                      </div>
-                    </div>
+            <div>
+              <Label htmlFor="eventTime">Horario del Evento</Label>
+              <Input
+                id="eventTime"
+                type="text"
+                placeholder="Ej: 20:00 hs"
+                value={(formData as any).eventTime || ""}
+                onChange={(e) => setFormData({ ...formData, eventTime: e.target.value } as any)}
+                data-testid="input-group-event-time"
+              />
+            </div>
 
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id={`customDates-${block.id}`}
-                        checked={block.useCustomDates}
-                        onChange={(e) => updateBlock(block.id, { useCustomDates: e.target.checked })}
-                        className="h-4 w-4"
-                        data-testid={`checkbox-custom-dates-${index}`}
-                      />
-                      <Label htmlFor={`customDates-${block.id}`} className="text-xs font-normal">
-                        Fechas diferentes al grupo
-                      </Label>
-                    </div>
+            <div>
+              <Label htmlFor="releaseDate">Fecha de Release</Label>
+              <Input
+                id="releaseDate"
+                type="date"
+                value={formData.releaseDate || ""}
+                onChange={(e) => setFormData({ ...formData, releaseDate: e.target.value })}
+                data-testid="input-group-release-date"
+              />
+            </div>
 
-                    {block.useCustomDates && (
-                      <div className="grid grid-cols-2 gap-3 rounded-md bg-muted/30 p-3">
-                        <div>
-                          <Label className="text-xs">Check-in Bloque</Label>
-                          <Input
-                            type="date"
-                            value={block.blockCheckInDate}
-                            onChange={(e) => updateBlock(block.id, { blockCheckInDate: e.target.value })}
-                            data-testid={`input-block-checkin-${index}`}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Check-out Bloque</Label>
-                          <Input
-                            type="date"
-                            value={block.blockCheckOutDate}
-                            onChange={(e) => updateBlock(block.id, { blockCheckOutDate: e.target.value })}
-                            data-testid={`input-block-checkout-${index}`}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+            {isEditing && (
+              <div>
+                <Label htmlFor="status">Estado</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData({ ...formData, status: value as GroupStatus })}
+                >
+                  <SelectTrigger data-testid="select-group-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tentative">Tentativo</SelectItem>
+                    <SelectItem value="blocked">Bloqueado</SelectItem>
+                    <SelectItem value="confirmed">Confirmado</SelectItem>
+                    <SelectItem value="inhouse">En Casa</SelectItem>
+                    <SelectItem value="finished">Finalizado</SelectItem>
+                    <SelectItem value="cancelled">Cancelado</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
-            <DialogFooter className="gap-2">
-              {!createdGroupId && (
-                <Button type="button" variant="outline" onClick={handleBack}>
-                  Anterior
-                </Button>
-              )}
-              {createdGroupId && (
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => {
-                    onSuccess();
-                    onOpenChange(false);
-                    setStep(1);
-                    setBlocks([]);
-                    setCreatedGroupId(null);
-                  }}
-                >
-                  Terminar sin bloques
-                </Button>
-              )}
-              <Button
-                onClick={handleCreate}
-                disabled={isPending || blocks.some((b) => {
-                  const avail = blockAvailability[b.id];
-                  return avail != null && (avail === 0 || b.quantity > avail);
-                })}
-                data-testid="button-create-group"
-              >
-                {isPending ? "Creando..." : createdGroupId ? "Reintentar Bloques" : "Crear Grupo"}
-              </Button>
-            </DialogFooter>
+            <div className="col-span-2">
+              <Label htmlFor="notes">Notas</Label>
+              <Textarea
+                id="notes"
+                value={formData.notes || ""}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Notas adicionales..."
+                className="resize-none"
+                rows={3}
+                data-testid="textarea-group-notes"
+              />
+            </div>
           </div>
-        )}
+
+          {/* ── Bloques de habitaciones (solo nuevo grupo) ── */}
+          {!isEditing && (
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Bloques de habitaciones</p>
+                  <p className="text-xs text-muted-foreground">Opcional — también puede agregarlos desde el detalle del grupo.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addBlock} data-testid="button-add-block-wizard">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Agregar Bloque
+                </Button>
+              </div>
+
+              {blocks.length === 0 ? (
+                <div className="rounded-md border border-dashed p-6 text-center">
+                  <Hotel className="mx-auto h-8 w-8 text-muted-foreground/40" />
+                  <p className="mt-2 text-sm text-muted-foreground">Sin bloques aún</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {blocks.map((block, index) => (
+                    <div key={block.id} className={`rounded-md border p-4 space-y-3 ${block.error ? "border-destructive" : ""}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">Bloque {index + 1}</span>
+                          {block.error && <span className="text-xs text-destructive">{block.error}</span>}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeBlock(block.id)}
+                          data-testid={`button-remove-block-${index}`}
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label className="text-xs">Tipo de Habitación *</Label>
+                          <Select
+                            value={block.roomTypeId}
+                            onValueChange={(v) => {
+                              updateBlock(block.id, { roomTypeId: v });
+                              const ci = block.useCustomDates ? block.blockCheckInDate : formData.checkInDate;
+                              const co = block.useCustomDates ? block.blockCheckOutDate : formData.checkOutDate;
+                              fetchBlockAvailability(block.id, v, ci || '', co || '');
+                            }}
+                          >
+                            <SelectTrigger data-testid={`select-block-type-${index}`}>
+                              <SelectValue placeholder="Seleccionar" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {roomTypes?.filter(rt => rt.id).map((rt) => (
+                                <SelectItem key={rt.id} value={rt.id}>
+                                  {rt.name}{(rt as any).code ? ` (${(rt as any).code})` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs">
+                            Cantidad *
+                            {blockAvailability[block.id] != null && (
+                              <span className={`ml-1 font-normal ${blockAvailability[block.id] === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                                ({blockAvailability[block.id]} disponibles)
+                              </span>
+                            )}
+                          </Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={blockAvailability[block.id] ?? undefined}
+                            value={block.quantity}
+                            onChange={(e) => updateBlock(block.id, { quantity: parseInt(e.target.value) || 1 })}
+                            data-testid={`input-block-qty-${index}`}
+                            className={blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) ? 'border-destructive' : ''}
+                          />
+                          {blockAvailability[block.id] != null && block.quantity > (blockAvailability[block.id] ?? Infinity) && (
+                            <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
+                          )}
+                        </div>
+
+                        <div>
+                          <Label className="text-xs">Tarifa Acordada <span className="text-xs font-normal text-muted-foreground">(con IVA)</span></Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            value={block.agreedRate}
+                            onChange={(e) => updateBlock(block.id, { agreedRate: e.target.value })}
+                            placeholder="0.00"
+                            data-testid={`input-block-rate-${index}`}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`customDates-${block.id}`}
+                          checked={block.useCustomDates}
+                          onChange={(e) => updateBlock(block.id, { useCustomDates: e.target.checked })}
+                          className="h-4 w-4"
+                          data-testid={`checkbox-custom-dates-${index}`}
+                        />
+                        <Label htmlFor={`customDates-${block.id}`} className="text-xs font-normal">
+                          Fechas diferentes al grupo
+                        </Label>
+                      </div>
+
+                      {block.useCustomDates && (
+                        <div className="grid grid-cols-2 gap-3 rounded-md bg-muted/30 p-3">
+                          <div>
+                            <Label className="text-xs">Check-in Bloque</Label>
+                            <Input
+                              type="date"
+                              value={block.blockCheckInDate}
+                              onChange={(e) => updateBlock(block.id, { blockCheckInDate: e.target.value })}
+                              data-testid={`input-block-checkin-${index}`}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Check-out Bloque</Label>
+                            <Input
+                              type="date"
+                              value={block.blockCheckOutDate}
+                              onChange={(e) => updateBlock(block.id, { blockCheckOutDate: e.target.value })}
+                              data-testid={`input-block-checkout-${index}`}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Footer ── */}
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            {isEditing ? (
+              <Button onClick={handleSaveEdit} disabled={isPending || isCheckingConflicts} data-testid="button-save-group">
+                {isCheckingConflicts ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verificando...</>
+                ) : isPending ? "Guardando..." : "Guardar Cambios"}
+              </Button>
+            ) : (
+              <>
+                {createdGroupId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      onSuccess();
+                      onOpenChange(false);
+                      setBlocks([]);
+                      setCreatedGroupId(null);
+                    }}
+                  >
+                    Terminar sin bloques
+                  </Button>
+                )}
+                <Button
+                  onClick={handleCreate}
+                  disabled={isPending || blocks.some((b) => {
+                    const avail = blockAvailability[b.id];
+                    return avail != null && (avail === 0 || b.quantity > avail);
+                  })}
+                  data-testid="button-create-group"
+                >
+                  {isPending ? "Creando..." : createdGroupId ? "Reintentar Bloques" : "Crear Grupo"}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
 
