@@ -1472,6 +1472,14 @@ export default function GroupDetailPage() {
             variant="default"
             onClick={() => {
               setGroupPaymentAmount("");
+              // Pre-fill billing entity from group config
+              if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
+                setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
+                setGroupPaymentCcEntityId((group as any).billingEntityId);
+              } else {
+                setGroupPaymentCcEntityType("company");
+                setGroupPaymentCcEntityId("");
+              }
               setShowGroupPaymentDialog(true);
             }}
             disabled={groupPaymentMutation.isPending}
@@ -2778,8 +2786,14 @@ export default function GroupDetailPage() {
                 const balance = invoiceData?.totals?.balance ?? 0;
                 setGroupPaymentReceiptType("factura_b");
                 setGroupPaymentAmount(String(balance));
-                setGroupPaymentCcEntityId("");
-                setGroupPaymentCcEntityType("company");
+                // Pre-fill billing entity from group config
+                if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
+                  setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
+                  setGroupPaymentCcEntityId((group as any).billingEntityId);
+                } else {
+                  setGroupPaymentCcEntityId("");
+                  setGroupPaymentCcEntityType("company");
+                }
                 setPendingGroupPaymentId("");
                 setGroupFacturaFromResumen(true);
                 setShowGroupFacturaDialog(true);
