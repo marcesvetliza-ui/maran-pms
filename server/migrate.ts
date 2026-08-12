@@ -1518,5 +1518,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     logger.info("Seed completado: 59 empresas, 11 agencias, 17 saldos iniciales.");
   }
 
+  // group_invoices: vincular facturas emitidas desde el Resumen del Grupo al folio
+  await withTimeout("group_invoices.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS group_invoices (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        group_id varchar NOT NULL,
+        sales_invoice_id integer UNIQUE,
+        invoice_ref text NOT NULL,
+        notes text,
+        created_at timestamp DEFAULT now()
+      )
+    `)
+  );
+
   logger.info("Migraciones incrementales completadas.");
 }
