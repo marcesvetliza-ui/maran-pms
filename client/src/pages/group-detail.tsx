@@ -51,6 +51,7 @@ import {
   Clock,
   FileX,
   Undo2,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirFacturaDialog, NotaCreditoDialog } from "./billing";
@@ -124,6 +125,14 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cuenta_corriente: "Cuenta Corriente",
   other: "Otro",
 };
+
+const CONDICION_IVA_OPTIONS = [
+  "Consumidor Final",
+  "Responsable Inscripto",
+  "Monotributista",
+  "Exento",
+  "No Responsable",
+];
 
 const fmtDate = (d: string) => {
   if (!d) return "-";
@@ -760,6 +769,15 @@ export default function GroupDetailPage() {
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
+  // POS-style receptor fields for Pago Grupal
+  const [groupPaymentEntitySearch, setGroupPaymentEntitySearch] = useState("");
+  const [groupPaymentShowEntityDropdown, setGroupPaymentShowEntityDropdown] = useState(false);
+  const [groupPaymentRazonSocial, setGroupPaymentRazonSocial] = useState("");
+  const [groupPaymentCuit, setGroupPaymentCuit] = useState("");
+  const [groupPaymentDni, setGroupPaymentDni] = useState("");
+  const [groupPaymentCondicionIva, setGroupPaymentCondicionIva] = useState("Consumidor Final");
+  const [groupPaymentDomicilio, setGroupPaymentDomicilio] = useState("");
+  const [groupPaymentPvNum, setGroupPaymentPvNum] = useState("");
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
@@ -802,6 +820,15 @@ export default function GroupDetailPage() {
   const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   const [masterPaymentCcEntityType, setMasterPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [masterPaymentCcEntityId, setMasterPaymentCcEntityId] = useState("");
+  // POS-style receptor fields for Pago al Folio Maestro
+  const [masterPaymentEntitySearch, setMasterPaymentEntitySearch] = useState("");
+  const [masterPaymentShowEntityDropdown, setMasterPaymentShowEntityDropdown] = useState(false);
+  const [masterPaymentRazonSocial, setMasterPaymentRazonSocial] = useState("");
+  const [masterPaymentCuit, setMasterPaymentCuit] = useState("");
+  const [masterPaymentDni, setMasterPaymentDni] = useState("");
+  const [masterPaymentCondicionIva, setMasterPaymentCondicionIva] = useState("Consumidor Final");
+  const [masterPaymentDomicilio, setMasterPaymentDomicilio] = useState("");
+  const [masterPaymentPvNum, setMasterPaymentPvNum] = useState("");
   const [masterInvoiceDistribution, setMasterInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
@@ -842,6 +869,8 @@ export default function GroupDetailPage() {
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
+
+  const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
 
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
     queryKey: ["/api/groups", groupId, "folio"],
@@ -1105,6 +1134,13 @@ export default function GroupDetailPage() {
       setGroupPaymentCcEntityType("company");
       setGroupPaymentCcEntityId("");
       setGroupInvoiceDistribution("none");
+      setGroupPaymentEntitySearch("");
+      setGroupPaymentRazonSocial("");
+      setGroupPaymentCuit("");
+      setGroupPaymentDni("");
+      setGroupPaymentCondicionIva("Consumidor Final");
+      setGroupPaymentDomicilio("");
+      setGroupPaymentPvNum("");
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -1238,6 +1274,14 @@ export default function GroupDetailPage() {
       setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
       setMasterPaymentReference("");
       setMasterPaymentReceiptType("none");
+      setMasterPaymentCcEntityType("company");
+      setMasterPaymentCcEntityId("");
+      setMasterPaymentEntitySearch("");
+      setMasterPaymentRazonSocial("");
+      setMasterPaymentCuit("");
+      setMasterPaymentDni("");
+      setMasterPaymentCondicionIva("Consumidor Final");
+      setMasterPaymentDomicilio("");
     },
     onError: (e: any) => toast({ title: "Error al registrar pago maestro", description: parseApiError(e), variant: "destructive" }),
   });
@@ -3050,6 +3094,14 @@ export default function GroupDetailPage() {
           setGroupPaymentCcEntityType("company");
           setGroupPaymentCcEntityId("");
           setGroupInvoiceDistribution("none");
+          setGroupPaymentEntitySearch("");
+          setGroupPaymentShowEntityDropdown(false);
+          setGroupPaymentRazonSocial("");
+          setGroupPaymentCuit("");
+          setGroupPaymentDni("");
+          setGroupPaymentCondicionIva("Consumidor Final");
+          setGroupPaymentDomicilio("");
+          setGroupPaymentPvNum("");
         }
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -3066,49 +3118,81 @@ export default function GroupDetailPage() {
           {(() => {
             const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
             const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+            const isFA = groupPaymentReceiptType === "factura_a";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-            const entityList = (groupPaymentCcEntityType === "company" ? companies : agencies) as any[];
-            const selectedEntity = entityList.find((e: any) => e.id === groupPaymentCcEntityId);
-            const condIva = selectedEntity?.condicionIva ?? "";
-            const isRI = condIva === "responsable_inscripto" || condIva === "exento";
+            const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = groupPaymentReceiptType === "factura_t"
               ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
               : methodsWithoutOther;
             const hasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
-            const entityRequired = isFiscal || hasCuentaCorriente;
+            const entityRequired = (isFiscal && !isMipyme) || hasCuentaCorriente;
+            const hasEntityData = !!groupPaymentRazonSocial.trim();
             const canSubmit = !groupPaymentMutation.isPending
               && (isMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-              && (!entityRequired || !!groupPaymentCcEntityId);
+              && (!entityRequired || hasEntityData);
 
-            const condIvaLabels: Record<string, string> = {
-              responsable_inscripto: "Responsable Inscripto",
-              consumidor_final: "Consumidor Final",
-              monotributo: "Monotributista",
-              monotributista: "Monotributista",
-              exento: "Exento",
+            // Entity search autocomplete
+            const entitySearchResults: any[] = groupPaymentEntitySearch.length >= 2
+              ? [
+                  ...companies.map((c: any) => ({ ...c, _type: "Empresa", _kind: "company" })),
+                  ...agencies.map((a: any) => ({ ...a, _type: "Agencia", _kind: "agency" })),
+                ].filter((e: any) => {
+                  const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
+                  const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
+                  return name.includes(groupPaymentEntitySearch.toLowerCase()) || cuitVal.includes(groupPaymentEntitySearch.replace(/-/g, ""));
+                }).slice(0, 8)
+              : [];
+
+            const selectGroupEntity = (e: any) => {
+              setGroupPaymentRazonSocial(e.razonSocial || e.nombreFantasia || "");
+              setGroupPaymentCuit(e.cuilCuit ? String(e.cuilCuit).replace(/-/g, "") : "");
+              setGroupPaymentDni("");
+              const condMap: Record<string, string> = {
+                responsable_inscripto: "Responsable Inscripto",
+                consumidor_final: "Consumidor Final",
+                monotributo: "Monotributista",
+                monotributista: "Monotributista",
+                exento: "Exento",
+              };
+              setGroupPaymentCondicionIva(e.condicionIva ? (condMap[e.condicionIva] ?? e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final"));
+              setGroupPaymentDomicilio(e.direccion || e.domicilio || "");
+              setGroupPaymentCcEntityType(e._kind);
+              setGroupPaymentCcEntityId(e.id);
+              setGroupPaymentEntitySearch("");
+              setGroupPaymentShowEntityDropdown(false);
             };
+
+            const posElectronicos = (posConfigsData as any[]).filter((p: any) => p.activo && p.tipo === "electronico");
 
             return (
               <div className="space-y-5">
                 {/* 1. TIPO DE COMPROBANTE */}
-                <div>
+                <div className="space-y-1">
                   <Label>Tipo de comprobante</Label>
-                  <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
+                  <Select value={groupPaymentReceiptType} onValueChange={v => {
+                    setGroupPaymentReceiptType(v);
+                    // Auto-adjust condición IVA when switching tipo
+                    if (v === "factura_a" || v === "factura_mipyme_a") {
+                      if (groupPaymentCondicionIva === "Consumidor Final") setGroupPaymentCondicionIva("Responsable Inscripto");
+                    } else if (v === "factura_b") {
+                      if (groupPaymentCondicionIva === "Responsable Inscripto") setGroupPaymentCondicionIva("Consumidor Final");
+                    }
+                  }}>
                     <SelectTrigger data-testid="select-group-payment-receipt">
                       <SelectValue placeholder="Seleccionar comprobante..." />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="sin_comprobante">Sin comprobante / Anticipo</SelectItem>
                       <SelectItem value="ticket">Ticket</SelectItem>
-                      {(!groupPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
-                      {(!groupPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
-                      {(!groupPaymentCcEntityId || isRI) && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                      {(!isRI || true) && <SelectItem value="factura_a">Factura A</SelectItem>}
+                      <SelectItem value="factura_b">Factura B</SelectItem>
+                      <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>
                       <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>
                       <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
                     </SelectContent>
                   </Select>
-                  {isFiscal && (
+                  {isFiscal && !isMipyme && (
                     <p className="text-xs text-muted-foreground mt-1">
                       Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
                     </p>
@@ -3121,80 +3205,11 @@ export default function GroupDetailPage() {
                   )}
                 </div>
 
-                <div className="border-t" />
-
-                {/* 2. DATOS DEL RECEPTOR */}
-                <div className="space-y-3">
-                  <div>
-                    <Label className="text-sm font-semibold">Datos del receptor</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">Buscar empresa o agencia para autocompletar</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
-                      <SelectTrigger data-testid="select-group-entity-type"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="company">Empresa</SelectItem>
-                        <SelectItem value="agency">Agencia</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
-                      <SelectTrigger data-testid="select-group-entity-id">
-                        <SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {entityList.map((e: any) => (
-                          <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {selectedEntity && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Nombre / Razón Social</Label>
-                        <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                          {selectedEntity.razonSocial || selectedEntity.nombreFantasia || "–"}
-                        </div>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Condición IVA</Label>
-                        <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                          {condIvaLabels[condIva] ?? condIva ?? "–"}
-                        </div>
-                      </div>
-                      {selectedEntity.cuilCuit && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">CUIT / DNI</Label>
-                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                            {selectedEntity.cuilCuit}
-                          </div>
-                        </div>
-                      )}
-                      {(selectedEntity.direccion || selectedEntity.domicilio) && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Domicilio</Label>
-                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm truncate">
-                            {selectedEntity.direccion || selectedEntity.domicilio}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {entityRequired && !groupPaymentCcEntityId && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Requerido para el comprobante seleccionado.
-                    </p>
-                  )}
-                </div>
-
-                <div className="border-t" />
-
-                {/* 3. MÉTODOS DE PAGO */}
+                {/* 2. MÉTODOS DE PAGO */}
                 {!isMipyme && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Métodos de pago</Label>
+                      <Label>Forma de pago</Label>
                       {groupPaymentRows.length < 4 && Object.keys(allowedMethods).length > groupPaymentRows.length && (
                         <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1"
                           onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}>
@@ -3245,7 +3260,114 @@ export default function GroupDetailPage() {
                   </div>
                 )}
 
-                {/* 4. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
+                {/* 3. PUNTO DE VENTA (solo fiscal) */}
+                {isFiscal && posElectronicos.length > 0 && (
+                  <div className="space-y-1">
+                    <Label>Punto de Venta (ARCA)</Label>
+                    <Select value={groupPaymentPvNum} onValueChange={setGroupPaymentPvNum}>
+                      <SelectTrigger><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
+                      <SelectContent>
+                        {posElectronicos.map((p: any) => (
+                          <SelectItem key={p.id} value={String(p.numero)}>
+                            PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+                  </div>
+                )}
+
+                <div className="border-t" />
+
+                {/* 4. DATOS DEL RECEPTOR — estilo POS */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Datos del receptor</Label>
+
+                  {/* Buscador */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        value={groupPaymentEntitySearch}
+                        onChange={e => { setGroupPaymentEntitySearch(e.target.value); setGroupPaymentShowEntityDropdown(true); }}
+                        onFocus={() => setGroupPaymentShowEntityDropdown(true)}
+                        onBlur={() => setTimeout(() => setGroupPaymentShowEntityDropdown(false), 200)}
+                        placeholder="Nombre o CUIT de empresa/agencia..."
+                        className="text-sm"
+                        data-testid="input-group-entity-search"
+                      />
+                      {groupPaymentShowEntityDropdown && entitySearchResults.length > 0 && (
+                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
+                          {entitySearchResults.map((e: any) => (
+                            <button key={e.id} type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
+                              onMouseDown={() => selectGroupEntity(e)}>
+                              <span>
+                                <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
+                                <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
+                              </span>
+                              {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {groupPaymentShowEntityDropdown && groupPaymentEntitySearch.length >= 2 && entitySearchResults.length === 0 && (
+                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-sm mt-1 px-3 py-2 text-sm text-muted-foreground">
+                          Sin resultados
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Campos individuales editables */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
+                      <Input value={groupPaymentRazonSocial} onChange={e => setGroupPaymentRazonSocial(e.target.value)}
+                        placeholder="EMPRESA S.A." data-testid="input-group-razon-social" />
+                    </div>
+                    {isFA ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs">CUIT *</Label>
+                        <Input value={groupPaymentCuit} onChange={e => {
+                          const d = e.target.value.replace(/\D/g, "").slice(0, 11);
+                          const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`;
+                          setGroupPaymentCuit(f);
+                        }} placeholder="XX-XXXXXXXX-X" data-testid="input-group-cuit" />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs">DNI (opcional)</Label>
+                        <Input value={groupPaymentDni} onChange={e => setGroupPaymentDni(e.target.value)} placeholder="00000000" data-testid="input-group-dni" />
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Condición IVA</Label>
+                      <Select value={groupPaymentCondicionIva} onValueChange={setGroupPaymentCondicionIva}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">Domicilio (opcional)</Label>
+                      <Input value={groupPaymentDomicilio} onChange={e => setGroupPaymentDomicilio(e.target.value)} placeholder="Calle 123, Ciudad" data-testid="input-group-domicilio" />
+                    </div>
+                  </div>
+
+                  {entityRequired && !hasEntityData && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Completá al menos el nombre/razón social del receptor.
+                    </p>
+                  )}
+                </div>
+
+                {/* 5. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
                 {isFiscal && !isMipyme && (
                   <>
                     <div className="border-t" />
@@ -3291,7 +3413,7 @@ export default function GroupDetailPage() {
                         }
                         return (
                           <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                            <p className="text-xs font-medium text-muted-foreground">Ítems en la factura:</p>
+                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
                             {previewItems.map((item, i) => (
                               <div key={i} className="flex justify-between text-xs gap-2">
                                 <span className="text-muted-foreground truncate">{item.descripcion}</span>
@@ -3305,7 +3427,7 @@ export default function GroupDetailPage() {
                   </>
                 )}
 
-                {/* 5+6. DISTRIBUCIÓN + CERRAR HABITACIONES */}
+                {/* 6. DISTRIBUCIÓN + CERRAR HABITACIONES */}
                 <div className="border-t" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -3352,8 +3474,7 @@ export default function GroupDetailPage() {
               onClick={() => groupPaymentMutation.mutate()}
               disabled={groupPaymentMutation.isPending
                 || (groupPaymentReceiptType !== "factura_mipyme_a" && !groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-                || (["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType) && !groupPaymentCcEntityId)
-                || groupPaymentRows.some(r => r.method === "cuenta_corriente" && !groupPaymentCcEntityId)
+                || (["factura_a", "factura_b", "factura_t"].includes(groupPaymentReceiptType) && !groupPaymentRazonSocial.trim())
               }
               data-testid="button-confirm-group-payment"
             >
@@ -3380,28 +3501,13 @@ export default function GroupDetailPage() {
             groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] :
             ["FB"]
           }
-          compactMode={!groupFacturaFromResumen && !!(groupPaymentCcEntityId || !["factura_a","factura_t","factura_mipyme_a"].includes(groupPaymentReceiptType))}
+          compactMode={!groupFacturaFromResumen}
           initialValues={(() => {
-            const condicionIvaMap: Record<string, string> = {
-              responsable_inscripto: "Responsable Inscripto",
-              consumidor_final: "Consumidor Final",
-              monotributo: "Monotributista",
-              monotributista: "Monotributista",
-              exento: "Exento",
-            };
-            const entityList = groupPaymentCcEntityType === "company" ? companies : agencies;
-            const entity = groupPaymentCcEntityId
-              ? (entityList as any[]).find((e: any) => e.id === groupPaymentCcEntityId)
-              : null;
             return {
-              razonSocial: entity
-                ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
-                : (group?.name ?? ""),
-              cuit: entity?.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : undefined,
-              condicionIva: entity?.condicionIva
-                ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
-                : (entity?.cuilCuit ? "Responsable Inscripto" : undefined),
-              domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
+              razonSocial: groupPaymentRazonSocial || group?.name || "",
+              cuit: groupPaymentCuit ? groupPaymentCuit.replace(/-/g, "") : undefined,
+              condicionIva: groupPaymentCondicionIva || undefined,
+              domicilio: groupPaymentDomicilio || undefined,
               items: (() => {
                 const gPayTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
                 if (groupInvoiceDistribution !== "none" && folio) {
@@ -3470,6 +3576,15 @@ export default function GroupDetailPage() {
           setMasterPaymentCcEntityType("company");
           setMasterPaymentCcEntityId("");
           setMasterInvoiceDistribution("none");
+          setMasterPaymentEntitySearch("");
+          setMasterPaymentShowEntityDropdown(false);
+          setMasterPaymentRazonSocial("");
+          setMasterPaymentCuit("");
+          setMasterPaymentDni("");
+          setMasterPaymentCondicionIva("Consumidor Final");
+          setMasterPaymentDomicilio("");
+          setMasterPaymentPvNum("");
+          setMasterPaymentReference("");
         }
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -3479,35 +3594,56 @@ export default function GroupDetailPage() {
               Pago al Folio Maestro
             </DialogTitle>
             <DialogDescription>
-              Los pagos se distribuyen proporcionalmente entre las habitaciones activas del grupo.
+              Los pagos se distribuyen entre las habitaciones activas del grupo.
             </DialogDescription>
           </DialogHeader>
           {masterFolio && (() => {
             const isFiscal = masterPaymentReceiptType !== "none";
-            const selectedEntity = masterPaymentCcEntityId
-              ? (masterPaymentCcEntityType === "company" ? companies : agencies as any[]).find((e: any) => e.id === masterPaymentCcEntityId) ?? null
-              : null;
-            const condIva = selectedEntity?.condicionIva ?? "";
-            const isRI = condIva === "responsable_inscripto" || condIva === "exento";
+            const isMipyme = masterPaymentReceiptType === "factura_mipyme_a";
+            const isFA = masterPaymentReceiptType === "factura_a";
             const allowFT = masterFolio.config === "accommodation";
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = masterPaymentReceiptType === "factura_t"
               ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
               : methodsWithoutOther;
             const rowsTotal = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-            const isMipyme = masterPaymentReceiptType === "factura_mipyme_a";
-            const isFiscalAndNeedsEntity = isFiscal && !masterPaymentCcEntityId;
-            const rowsHaveAmount = masterPaymentRows.some(r => parseFloat(r.amount || "0") > 0);
+            const hasEntityData = !!masterPaymentRazonSocial.trim();
             const canSubmit = !masterPaymentMutation.isPending
-              && (isMipyme ? !isFiscalAndNeedsEntity : (rowsHaveAmount && !isFiscalAndNeedsEntity));
+              && (isMipyme || masterPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+              && (!isFiscal || hasEntityData);
 
-            const condIvaLabels: Record<string, string> = {
-              responsable_inscripto: "Responsable Inscripto",
-              consumidor_final: "Consumidor Final",
-              monotributo: "Monotributista",
-              monotributista: "Monotributista",
-              exento: "Exento",
+            // Entity search autocomplete
+            const masterEntityResults: any[] = masterPaymentEntitySearch.length >= 2
+              ? [
+                  ...companies.map((c: any) => ({ ...c, _type: "Empresa", _kind: "company" })),
+                  ...agencies.map((a: any) => ({ ...a, _type: "Agencia", _kind: "agency" })),
+                ].filter((e: any) => {
+                  const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
+                  const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
+                  return name.includes(masterPaymentEntitySearch.toLowerCase()) || cuitVal.includes(masterPaymentEntitySearch.replace(/-/g, ""));
+                }).slice(0, 8)
+              : [];
+
+            const selectMasterEntity = (e: any) => {
+              setMasterPaymentRazonSocial(e.razonSocial || e.nombreFantasia || "");
+              setMasterPaymentCuit(e.cuilCuit ? String(e.cuilCuit).replace(/-/g, "") : "");
+              setMasterPaymentDni("");
+              const condMap: Record<string, string> = {
+                responsable_inscripto: "Responsable Inscripto",
+                consumidor_final: "Consumidor Final",
+                monotributo: "Monotributista",
+                monotributista: "Monotributista",
+                exento: "Exento",
+              };
+              setMasterPaymentCondicionIva(e.condicionIva ? (condMap[e.condicionIva] ?? e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final"));
+              setMasterPaymentDomicilio(e.direccion || e.domicilio || "");
+              setMasterPaymentCcEntityType(e._kind);
+              setMasterPaymentCcEntityId(e.id);
+              setMasterPaymentEntitySearch("");
+              setMasterPaymentShowEntityDropdown(false);
             };
+
+            const posElectronicos = (posConfigsData as any[]).filter((p: any) => p.activo && p.tipo === "electronico");
 
             return (
               <div className="space-y-5">
@@ -3532,7 +3668,7 @@ export default function GroupDetailPage() {
                 </div>
 
                 {/* 1. TIPO DE COMPROBANTE */}
-                <div>
+                <div className="space-y-1">
                   <Label>Tipo de comprobante</Label>
                   <Select value={masterPaymentReceiptType} onValueChange={(v) => {
                     setMasterPaymentReceiptType(v);
@@ -3541,15 +3677,20 @@ export default function GroupDetailPage() {
                     } else if (v === "none") {
                       setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "" } : r));
                     }
+                    if (v === "factura_a" || v === "factura_mipyme_a") {
+                      if (masterPaymentCondicionIva === "Consumidor Final") setMasterPaymentCondicionIva("Responsable Inscripto");
+                    } else if (v === "factura_b") {
+                      if (masterPaymentCondicionIva === "Responsable Inscripto") setMasterPaymentCondicionIva("Consumidor Final");
+                    }
                   }}>
                     <SelectTrigger data-testid="select-master-payment-receipt-type">
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Adelanto Grupos (sin comprobante fiscal)</SelectItem>
-                      {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
-                      {(!masterPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
-                      {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                      <SelectItem value="factura_a">Factura A</SelectItem>
+                      <SelectItem value="factura_b">Factura B</SelectItem>
+                      <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>
                       {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
                     </SelectContent>
                   </Select>
@@ -3559,174 +3700,18 @@ export default function GroupDetailPage() {
                       MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
                     </p>
                   )}
-                  {isFiscal && (
+                  {isFiscal && !isMipyme && (
                     <p className="text-xs text-muted-foreground mt-1">
                       Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
                     </p>
                   )}
                 </div>
 
-                <div className="border-t" />
-
-                {/* 2. DATOS DEL RECEPTOR (solo fiscal) */}
-                {isFiscal && (
-                  <div className="space-y-3">
-                    <div>
-                      <Label className="text-sm font-semibold">Datos del receptor</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Buscar empresa o agencia para autocompletar</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Select value={masterPaymentCcEntityType} onValueChange={v => { setMasterPaymentCcEntityType(v as "company" | "agency"); setMasterPaymentCcEntityId(""); }}>
-                        <SelectTrigger data-testid="select-master-cc-entity-type"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="company">Empresa</SelectItem>
-                          <SelectItem value="agency">Agencia</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={masterPaymentCcEntityId} onValueChange={setMasterPaymentCcEntityId}>
-                        <SelectTrigger data-testid="select-master-cc-entity-id">
-                          <SelectValue placeholder={masterPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(masterPaymentCcEntityType === "company" ? companies : agencies as any[]).map((e: any) => (
-                            <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.id}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {selectedEntity && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Nombre / Razón Social</Label>
-                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                            {selectedEntity.razonSocial || selectedEntity.nombreFantasia || "–"}
-                          </div>
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Condición IVA</Label>
-                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                            {condIvaLabels[condIva] ?? condIva ?? "–"}
-                          </div>
-                        </div>
-                        {selectedEntity.cuilCuit && (
-                          <div>
-                            <Label className="text-xs text-muted-foreground">CUIT / DNI</Label>
-                            <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                              {selectedEntity.cuilCuit}
-                            </div>
-                          </div>
-                        )}
-                        {(selectedEntity.direccion || selectedEntity.domicilio) && (
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Domicilio</Label>
-                            <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm truncate">
-                              {selectedEntity.direccion || selectedEntity.domicilio}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {isFiscalAndNeedsEntity && (
-                      <p className="text-xs text-amber-600 flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3 shrink-0" />
-                        Seleccioná la empresa o agencia receptora del comprobante.
-                      </p>
-                    )}
-                    <div className="border-t" />
-                  </div>
-                )}
-
-                {/* 3. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
-                {isFiscal && (() => {
-                  const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
-                  return (
-                    <div>
-                      <Label>Distribución de ítems en la factura</Label>
-                      <div className="grid grid-cols-3 gap-2 mt-2">
-                        {([
-                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
-                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
-                        ] as const).map(opt => {
-                          const disabled = !!(opt as any).requiresFull && !isFullPayment;
-                          return (
-                            <button key={opt.value} type="button" disabled={disabled}
-                              onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
-                              className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
-                              <p className="font-semibold">{opt.label}</p>
-                              <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {!isFullPayment && (
-                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3 shrink-0" />
-                          Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
-                        </p>
-                      )}
-                      {masterInvoiceDistribution !== "none" && (() => {
-                        const isMipymeForPreview = masterPaymentReceiptType === "factura_mipyme_a";
-                        const isFullPaymentForPreview = isMipymeForPreview || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
-                        const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
-                        if (effectiveDistribution === "none") {
-                          return (
-                            <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 shrink-0" />
-                              Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
-                            </p>
-                          );
-                        }
-                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                        if (effectiveDistribution === "totalizados") {
-                          if ((masterFolio.masterAccommodation ?? 0) > 0)
-                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
-                          if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
-                            previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
-                          if ((masterFolio.groupChargesTotal ?? 0) > 0)
-                            previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                        } else {
-                          const includeExtras = masterFolio.config === "all";
-                          (masterFolio.rooms ?? []).forEach((r: any) => {
-                            const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
-                            const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
-                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                            previewItems.push({
-                              descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
-                              precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
-                            });
-                          });
-                          (masterFolio.groupCharges ?? []).forEach((gc: any) => {
-                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                          });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                        }
-                        return (
-                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
-                            {previewItems.map((item, i) => (
-                              <div key={i} className="flex justify-between text-xs gap-2">
-                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })()}
-
-                {isFiscal && <div className="border-t" />}
-
-                {/* 4. MÉTODOS DE PAGO */}
+                {/* 2. MÉTODOS DE PAGO */}
                 {!isMipyme && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Métodos de pago</Label>
+                      <Label>Forma de pago</Label>
                       {masterPaymentRows.length < 4 && Object.keys(allowedMethods).length > masterPaymentRows.length && (
                         <Button variant="ghost" size="sm" type="button" className="h-7 text-xs gap-1"
                           onClick={() => {
@@ -3780,18 +3765,214 @@ export default function GroupDetailPage() {
                     ))}
                     {masterPaymentRows.length > 1 && (
                       <div className="flex justify-between text-sm font-semibold border-t pt-2">
-                        <span>Total:</span>
-                        <span>{fmtMoney(rowsTotal)}</span>
+                        <span>Total:</span><span>{fmtMoney(rowsTotal)}</span>
                       </div>
                     )}
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Referencia / Observaciones (opcional)</Label>
-                      <Input placeholder="Nro. de transferencia, cheque, etc."
-                        className="h-9 mt-1"
-                        value={masterPaymentReference}
-                        onChange={e => setMasterPaymentReference(e.target.value)}
-                        data-testid="input-master-payment-reference" />
+                  </div>
+                )}
+
+                {/* 3. PUNTO DE VENTA (solo fiscal) */}
+                {isFiscal && posElectronicos.length > 0 && (
+                  <div className="space-y-1">
+                    <Label>Punto de Venta (ARCA)</Label>
+                    <Select value={masterPaymentPvNum} onValueChange={setMasterPaymentPvNum}>
+                      <SelectTrigger><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
+                      <SelectContent>
+                        {posElectronicos.map((p: any) => (
+                          <SelectItem key={p.id} value={String(p.numero)}>
+                            PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+                  </div>
+                )}
+
+                <div className="border-t" />
+
+                {/* 4. DATOS DEL RECEPTOR — estilo POS */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Datos del receptor</Label>
+
+                  {/* Buscador */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar
+                    </Label>
+                    <div className="relative">
+                      <Input
+                        value={masterPaymentEntitySearch}
+                        onChange={e => { setMasterPaymentEntitySearch(e.target.value); setMasterPaymentShowEntityDropdown(true); }}
+                        onFocus={() => setMasterPaymentShowEntityDropdown(true)}
+                        onBlur={() => setTimeout(() => setMasterPaymentShowEntityDropdown(false), 200)}
+                        placeholder="Nombre o CUIT de empresa/agencia..."
+                        className="text-sm"
+                        data-testid="input-master-entity-search"
+                      />
+                      {masterPaymentShowEntityDropdown && masterEntityResults.length > 0 && (
+                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
+                          {masterEntityResults.map((e: any) => (
+                            <button key={e.id} type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
+                              onMouseDown={() => selectMasterEntity(e)}>
+                              <span>
+                                <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
+                                <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
+                              </span>
+                              {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {masterPaymentShowEntityDropdown && masterPaymentEntitySearch.length >= 2 && masterEntityResults.length === 0 && (
+                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-sm mt-1 px-3 py-2 text-sm text-muted-foreground">
+                          Sin resultados
+                        </div>
+                      )}
                     </div>
+                  </div>
+
+                  {/* Campos individuales */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
+                      <Input value={masterPaymentRazonSocial} onChange={e => setMasterPaymentRazonSocial(e.target.value)}
+                        placeholder="EMPRESA S.A." data-testid="input-master-razon-social" />
+                    </div>
+                    {isFA ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs">CUIT *</Label>
+                        <Input value={masterPaymentCuit} onChange={e => {
+                          const d = e.target.value.replace(/\D/g, "").slice(0, 11);
+                          const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`;
+                          setMasterPaymentCuit(f);
+                        }} placeholder="XX-XXXXXXXX-X" data-testid="input-master-cuit" />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <Label className="text-xs">DNI (opcional)</Label>
+                        <Input value={masterPaymentDni} onChange={e => setMasterPaymentDni(e.target.value)} placeholder="00000000" data-testid="input-master-dni" />
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Condición IVA</Label>
+                      <Select value={masterPaymentCondicionIva} onValueChange={setMasterPaymentCondicionIva}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-2 space-y-1">
+                      <Label className="text-xs">Domicilio (opcional)</Label>
+                      <Input value={masterPaymentDomicilio} onChange={e => setMasterPaymentDomicilio(e.target.value)} placeholder="Calle 123, Ciudad" data-testid="input-master-domicilio" />
+                    </div>
+                  </div>
+
+                  {isFiscal && !hasEntityData && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Completá al menos el nombre/razón social del receptor.
+                    </p>
+                  )}
+                </div>
+
+                {/* 5. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
+                {isFiscal && (() => {
+                  const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
+                  return (
+                    <>
+                      <div className="border-t" />
+                      <div>
+                        <Label>Distribución de ítems en la factura</Label>
+                        <div className="grid grid-cols-3 gap-2 mt-2">
+                          {([
+                            { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                            { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
+                            { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
+                          ] as const).map(opt => {
+                            const disabled = !!(opt as any).requiresFull && !isFullPayment;
+                            return (
+                              <button key={opt.value} type="button" disabled={disabled}
+                                onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
+                                className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
+                                <p className="font-semibold">{opt.label}</p>
+                                <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {!isFullPayment && (
+                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                          </p>
+                        )}
+                        {masterInvoiceDistribution !== "none" && (() => {
+                          const isFullPaymentForPreview = isMipyme || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
+                          const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
+                          if (effectiveDistribution === "none") {
+                            return (
+                              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
+                              </p>
+                            );
+                          }
+                          const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                          if (effectiveDistribution === "totalizados") {
+                            if ((masterFolio.masterAccommodation ?? 0) > 0)
+                              previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
+                            if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
+                              previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
+                            if ((masterFolio.groupChargesTotal ?? 0) > 0)
+                              previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
+                            if (previewItems.length === 0)
+                              previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                          } else {
+                            const includeExtras = masterFolio.config === "all";
+                            (masterFolio.rooms ?? []).forEach((r: any) => {
+                              const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
+                              const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
+                              const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                              previewItems.push({
+                                descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
+                                precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
+                              });
+                            });
+                            (masterFolio.groupCharges ?? []).forEach((gc: any) => {
+                              previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                            });
+                            if (previewItems.length === 0)
+                              previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                          }
+                          return (
+                            <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
+                              {previewItems.map((item, i) => (
+                                <div key={i} className="flex justify-between text-xs gap-2">
+                                  <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                                  <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {/* Referencia global */}
+                {!isMipyme && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Referencia / Observaciones (opcional)</Label>
+                    <Input placeholder="Nro. de transferencia, cheque, etc."
+                      className="h-9"
+                      value={masterPaymentReference}
+                      onChange={e => setMasterPaymentReference(e.target.value)}
+                      data-testid="input-master-payment-reference" />
                   </div>
                 )}
               </div>
@@ -3804,7 +3985,7 @@ export default function GroupDetailPage() {
               disabled={!masterFolio || masterPaymentMutation.isPending
                 || (masterPaymentReceiptType !== "factura_mipyme_a"
                     && !masterPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-                || (masterPaymentReceiptType !== "none" && !masterPaymentCcEntityId)}
+                || (masterPaymentReceiptType !== "none" && !masterPaymentRazonSocial.trim())}
               data-testid="button-confirm-master-payment"
             >
               {masterPaymentMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : "Registrar pago"}
@@ -3814,17 +3995,6 @@ export default function GroupDetailPage() {
       </Dialog>
 
       {showMasterFacturaDialog && (() => {
-        const condicionIvaMap: Record<string, string> = {
-          responsable_inscripto: "Responsable Inscripto",
-          consumidor_final: "Consumidor Final",
-          monotributo: "Monotributista",
-          monotributista: "Monotributista",
-          exento: "Exento",
-        };
-        const entityList = masterPaymentCcEntityType === "company" ? companies : agencies;
-        const entity = masterPaymentCcEntityId
-          ? (entityList as any[]).find((e: any) => e.id === masterPaymentCcEntityId) ?? null
-          : null;
         const totalPaid = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
         const allowedTiposMap: Record<string, string[]> = {
           factura_a: ["FA"],
@@ -3893,18 +4063,13 @@ export default function GroupDetailPage() {
             }}
             config={billingConfig}
             allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
-            lockCondicionIva={!!entity}
             compactMode={true}
             hideAddItems={masterInvoiceDistribution === "none"}
             initialValues={{
-              razonSocial: entity
-                ? (entity.razonSocial ?? entity.nombreFantasia ?? group?.name ?? "")
-                : (group?.name ?? ""),
-              cuit: entity?.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : undefined,
-              condicionIva: entity?.condicionIva
-                ? (condicionIvaMap[entity.condicionIva] ?? entity.condicionIva)
-                : undefined,
-              domicilio: entity?.direccion ?? entity?.domicilio ?? undefined,
+              razonSocial: masterPaymentRazonSocial || group?.name || "",
+              cuit: masterPaymentCuit ? masterPaymentCuit.replace(/-/g, "") : undefined,
+              condicionIva: masterPaymentCondicionIva || undefined,
+              domicilio: masterPaymentDomicilio || undefined,
               items: computedItems,
             }}
             paymentId={pendingMasterPaymentId || undefined}
@@ -3916,6 +4081,11 @@ export default function GroupDetailPage() {
               setMasterPaymentCcEntityType("company");
               setMasterPaymentCcEntityId("");
               setMasterInvoiceDistribution("none");
+              setMasterPaymentRazonSocial("");
+              setMasterPaymentCuit("");
+              setMasterPaymentDni("");
+              setMasterPaymentCondicionIva("Consumidor Final");
+              setMasterPaymentDomicilio("");
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
