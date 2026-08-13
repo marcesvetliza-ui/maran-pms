@@ -134,6 +134,34 @@ const CONDICION_IVA_OPTIONS = [
   "No Responsable",
 ];
 
+type GItem = {
+  descripcion: string;
+  cantidad: number;
+  precioUnitario: number;
+  alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
+  subtotalNeto: number;
+  subtotal: number;
+};
+function gNewItem(): GItem {
+  return { descripcion: "", cantidad: 1, precioUnitario: 0, alicuotaIva: "21", subtotalNeto: 0, subtotal: 0 };
+}
+function gUpdateItem(items: GItem[], idx: number, field: keyof GItem, value: any): GItem[] {
+  const updated = [...items];
+  const item = { ...updated[idx], [field]: value };
+  const base = item.cantidad * item.precioUnitario;
+  if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
+  else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
+  else { item.subtotalNeto = base; item.subtotal = base; }
+  updated[idx] = item;
+  return updated;
+}
+function gItemsFromSimple(simples: Array<{ descripcion: string; precioUnitario: number }>): GItem[] {
+  return simples.map(s => {
+    const base = s.precioUnitario;
+    return { descripcion: s.descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: Number((base / 1.21).toFixed(2)), subtotal: base };
+  });
+}
+
 const fmtDate = (d: string) => {
   if (!d) return "-";
   const [y, m, dd] = d.split("-").map(Number);
@@ -778,6 +806,7 @@ export default function GroupDetailPage() {
   const [groupPaymentCondicionIva, setGroupPaymentCondicionIva] = useState("Consumidor Final");
   const [groupPaymentDomicilio, setGroupPaymentDomicilio] = useState("");
   const [groupPaymentPvNum, setGroupPaymentPvNum] = useState("");
+  const [groupPaymentItems, setGroupPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
@@ -829,6 +858,7 @@ export default function GroupDetailPage() {
   const [masterPaymentCondicionIva, setMasterPaymentCondicionIva] = useState("Consumidor Final");
   const [masterPaymentDomicilio, setMasterPaymentDomicilio] = useState("");
   const [masterPaymentPvNum, setMasterPaymentPvNum] = useState("");
+  const [masterPaymentItems, setMasterPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [masterInvoiceDistribution, setMasterInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
@@ -3367,62 +3397,121 @@ export default function GroupDetailPage() {
                   )}
                 </div>
 
-                {/* 5. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
-                {isFiscal && !isMipyme && (
+                {/* 5. ÍTEMS DE LA FACTURA */}
+                {isFiscal && (
                   <>
                     <div className="border-t" />
-                    <div>
-                      <Label>Distribución de ítems en la factura</Label>
-                      <div className="grid grid-cols-3 gap-2 mt-2">
-                        {([
-                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
-                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
-                        ] as const).map(opt => (
-                          <button key={opt.value} type="button" onClick={() => setGroupInvoiceDistribution(opt.value)}
-                            className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
-                            <p className="font-semibold">{opt.label}</p>
-                            <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                          </button>
-                        ))}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-semibold">Ítems</Label>
+                        <Button variant="outline" size="sm" type="button"
+                          onClick={() => setGroupPaymentItems(p => [...p, gNewItem()])}>
+                          <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
+                        </Button>
                       </div>
-                      {groupInvoiceDistribution !== "none" && folio && (() => {
-                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                        if (groupInvoiceDistribution === "totalizados") {
-                          if ((folio.totals.accommodation ?? 0) > 0)
-                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
-                          const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                          if (extrasTotal > 0)
-                            previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                        } else {
-                          (folio.reservations ?? []).forEach((r: any) => {
-                            const extrasAmt = parseFloat(r.extrasTotal) || 0;
-                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                            previewItems.push({
-                              descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
-                              precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
-                            });
-                          });
-                          (folio.groupCharges ?? []).forEach((gc: any) => {
-                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                          });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                        }
-                        return (
-                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
-                            {previewItems.map((item, i) => (
-                              <div key={i} className="flex justify-between text-xs gap-2">
-                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
-                              </div>
+                      <p className="text-xs text-muted-foreground">Ingrese precios con IVA incluido</p>
+
+                      {/* Quick fill from folio */}
+                      {!isMipyme && folio && (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Completar desde folio:</Label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                              { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
+                              { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
+                            ] as const).map(opt => (
+                              <button key={opt.value} type="button"
+                                onClick={() => {
+                                  setGroupInvoiceDistribution(opt.value);
+                                  if (opt.value === "none") {
+                                    setGroupPaymentItems([{ ...gNewItem(), descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal, subtotal: rowsTotal, subtotalNeto: Number((rowsTotal / 1.21).toFixed(2)) }]);
+                                  } else if (opt.value === "totalizados") {
+                                    const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
+                                    if ((folio.totals.accommodation ?? 0) > 0) simples.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
+                                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                                    if (extrasTotal > 0) simples.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
+                                    if (simples.length === 0) simples.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                                    setGroupPaymentItems(gItemsFromSimple(simples));
+                                  } else {
+                                    const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
+                                    (folio.reservations ?? []).forEach((r: any) => {
+                                      const extrasAmt = parseFloat(r.extrasTotal) || 0;
+                                      const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                                      simples.push({ descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`, precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt });
+                                    });
+                                    (folio.groupCharges ?? []).forEach((gc: any) => { simples.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 }); });
+                                    if (simples.length === 0) simples.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                                    setGroupPaymentItems(gItemsFromSimple(simples));
+                                  }
+                                }}
+                                className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
+                                <p className="font-semibold">{opt.label}</p>
+                                <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                              </button>
                             ))}
                           </div>
-                        );
-                      })()}
+                        </div>
+                      )}
+
+                      {/* Editable items */}
+                      <div className="space-y-2">
+                        {groupPaymentItems.map((item, idx) => (
+                          <div key={idx} className="border rounded-lg p-3 space-y-2">
+                            <div className="grid grid-cols-12 gap-2">
+                              <div className="col-span-6 space-y-1">
+                                <Label className="text-xs">Descripción *</Label>
+                                <Input value={item.descripcion}
+                                  onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "descripcion", e.target.value))}
+                                  placeholder="Hospedaje habitación..." className="h-8 text-sm" />
+                              </div>
+                              <div className="col-span-2 space-y-1">
+                                <Label className="text-xs">Cant.</Label>
+                                <Input type="number" min="1" value={item.cantidad}
+                                  onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "cantidad", parseFloat(e.target.value) || 1))}
+                                  className="h-8 text-sm" />
+                              </div>
+                              <div className="col-span-2 space-y-1">
+                                <Label className="text-xs">P. Unit.</Label>
+                                <Input type="number" step="0.01" value={item.precioUnitario || ""}
+                                  onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "precioUnitario", parseFloat(e.target.value) || 0))}
+                                  placeholder="0.00" className="h-8 text-sm" />
+                              </div>
+                              <div className="col-span-2 space-y-1">
+                                <Label className="text-xs">Alíc. IVA</Label>
+                                <Select value={item.alicuotaIva}
+                                  onValueChange={v => setGroupPaymentItems(p => gUpdateItem(p, idx, "alicuotaIva", v))}>
+                                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="21">21%</SelectItem>
+                                    <SelectItem value="10.5">10.5%</SelectItem>
+                                    <SelectItem value="exento">Exento</SelectItem>
+                                    <SelectItem value="no_gravado">No Grav.</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">
+                                Total con IVA: {fmtMoney(item.subtotal)} (neto: {fmtMoney(item.subtotalNeto)})
+                              </span>
+                              {groupPaymentItems.length > 1 && (
+                                <Button variant="ghost" size="sm" type="button"
+                                  className="text-red-500 hover:text-red-700 h-6 text-xs"
+                                  onClick={() => setGroupPaymentItems(p => p.filter((_, i) => i !== idx))}>
+                                  Quitar
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Total preview */}
+                      <div className="bg-muted/30 rounded-lg p-3 text-sm flex justify-between font-semibold">
+                        <span>TOTAL ítems:</span>
+                        <span>{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span>
+                      </div>
                     </div>
                   </>
                 )}
@@ -3502,43 +3591,16 @@ export default function GroupDetailPage() {
             ["FB"]
           }
           compactMode={!groupFacturaFromResumen}
-          initialValues={(() => {
-            return {
-              razonSocial: groupPaymentRazonSocial || group?.name || "",
-              cuit: groupPaymentCuit ? groupPaymentCuit.replace(/-/g, "") : undefined,
-              condicionIva: groupPaymentCondicionIva || undefined,
-              domicilio: groupPaymentDomicilio || undefined,
-              items: (() => {
-                const gPayTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-                if (groupInvoiceDistribution !== "none" && folio) {
-                  if (groupInvoiceDistribution === "totalizados") {
-                    const result: Array<{ descripcion: string; precioUnitario: number }> = [];
-                    if ((folio.totals.accommodation ?? 0) > 0)
-                      result.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
-                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                    if (extrasTotal > 0)
-                      result.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                    return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
-                  }
-                  // detallados
-                  const result: Array<{ descripcion: string; precioUnitario: number }> = [];
-                  (folio.reservations ?? []).forEach((r: any) => {
-                    const extrasAmt = parseFloat(r.extrasTotal) || 0;
-                    const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                    result.push({
-                      descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
-                      precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
-                    });
-                  });
-                  (folio.groupCharges ?? []).forEach((gc: any) => {
-                    result.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                  });
-                  return result.length > 0 ? result : [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
-                }
-                return [{ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: gPayTotal }];
-              })(),
-            };
-          })()}
+          initialValues={{
+            razonSocial: groupPaymentRazonSocial || group?.name || "",
+            cuit: groupPaymentCuit ? groupPaymentCuit.replace(/-/g, "") : undefined,
+            condicionIva: groupPaymentCondicionIva || undefined,
+            domicilio: groupPaymentDomicilio || undefined,
+            items: groupPaymentItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
+              descripcion: it.descripcion || `Pago grupal — ${group?.name ?? ""}`,
+              precioUnitario: it.precioUnitario * it.cantidad,
+            })),
+          }}
           paymentId={pendingGroupPaymentId || undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
           onSuccess={() => {
@@ -3552,6 +3614,7 @@ export default function GroupDetailPage() {
             setGroupPaymentCcEntityType("company");
             setGroupPaymentCcEntityId("");
             setGroupInvoiceDistribution("none");
+            setGroupPaymentItems([gNewItem()]);
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
             if (showInvoiceDialog) {
               loadInvoice();
@@ -3878,87 +3941,135 @@ export default function GroupDetailPage() {
                   )}
                 </div>
 
-                {/* 5. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
+                {/* 5. ÍTEMS DE LA FACTURA */}
                 {isFiscal && (() => {
                   const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
                   return (
                     <>
                       <div className="border-t" />
-                      <div>
-                        <Label>Distribución de ítems en la factura</Label>
-                        <div className="grid grid-cols-3 gap-2 mt-2">
-                          {([
-                            { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                            { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
-                            { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
-                          ] as const).map(opt => {
-                            const disabled = !!(opt as any).requiresFull && !isFullPayment;
-                            return (
-                              <button key={opt.value} type="button" disabled={disabled}
-                                onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
-                                className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
-                                <p className="font-semibold">{opt.label}</p>
-                                <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                              </button>
-                            );
-                          })}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold">Ítems</Label>
+                          <Button variant="outline" size="sm" type="button"
+                            onClick={() => setMasterPaymentItems(p => [...p, gNewItem()])}>
+                            <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
+                          </Button>
                         </div>
-                        {!isFullPayment && (
-                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3 shrink-0" />
-                            Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
-                          </p>
-                        )}
-                        {masterInvoiceDistribution !== "none" && (() => {
-                          const isFullPaymentForPreview = isMipyme || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
-                          const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
-                          if (effectiveDistribution === "none") {
-                            return (
-                              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                                <AlertTriangle className="h-3 w-3 shrink-0" />
-                                Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
-                              </p>
-                            );
-                          }
-                          const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                          if (effectiveDistribution === "totalizados") {
-                            if ((masterFolio.masterAccommodation ?? 0) > 0)
-                              previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
-                            if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
-                              previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
-                            if ((masterFolio.groupChargesTotal ?? 0) > 0)
-                              previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
-                            if (previewItems.length === 0)
-                              previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                          } else {
-                            const includeExtras = masterFolio.config === "all";
-                            (masterFolio.rooms ?? []).forEach((r: any) => {
-                              const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
-                              const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
-                              const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                              previewItems.push({
-                                descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
-                                precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
-                              });
-                            });
-                            (masterFolio.groupCharges ?? []).forEach((gc: any) => {
-                              previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                            });
-                            if (previewItems.length === 0)
-                              previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                          }
-                          return (
-                            <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                              <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
-                              {previewItems.map((item, i) => (
-                                <div key={i} className="flex justify-between text-xs gap-2">
-                                  <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                                  <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
-                                </div>
-                              ))}
+                        <p className="text-xs text-muted-foreground">Ingrese precios con IVA incluido</p>
+
+                        {/* Quick fill from folio */}
+                        {!isMipyme && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Completar desde folio:</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {([
+                                { value: "none", label: "Sin desglose", desc: "1 ítem total", requiresFull: false },
+                                { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
+                                { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
+                              ] as const).map(opt => {
+                                const disabled = opt.requiresFull && !isFullPayment;
+                                return (
+                                  <button key={opt.value} type="button" disabled={disabled}
+                                    onClick={() => {
+                                      if (disabled) return;
+                                      setMasterInvoiceDistribution(opt.value);
+                                      if (opt.value === "none") {
+                                        setMasterPaymentItems([{ ...gNewItem(), descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0, subtotal: rowsTotal || 0, subtotalNeto: Number(((rowsTotal || 0) / 1.21).toFixed(2)) }]);
+                                      } else if (opt.value === "totalizados") {
+                                        const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
+                                        if ((masterFolio.masterAccommodation ?? 0) > 0) simples.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
+                                        if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all") simples.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
+                                        if ((masterFolio.groupChargesTotal ?? 0) > 0) simples.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
+                                        if (simples.length === 0) simples.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                                        setMasterPaymentItems(gItemsFromSimple(simples));
+                                      } else {
+                                        const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
+                                        const includeExtras = masterFolio.config === "all";
+                                        (masterFolio.rooms ?? []).forEach((r: any) => {
+                                          const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
+                                          const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
+                                          const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                                          simples.push({ descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`, precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt });
+                                        });
+                                        (masterFolio.groupCharges ?? []).forEach((gc: any) => { simples.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 }); });
+                                        if (simples.length === 0) simples.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                                        setMasterPaymentItems(gItemsFromSimple(simples));
+                                      }
+                                    }}
+                                    className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
+                                    <p className="font-semibold">{opt.label}</p>
+                                    <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                                  </button>
+                                );
+                              })}
                             </div>
-                          );
-                        })()}
+                            {!isFullPayment && (
+                              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Editable items */}
+                        <div className="space-y-2">
+                          {masterPaymentItems.map((item, idx) => (
+                            <div key={idx} className="border rounded-lg p-3 space-y-2">
+                              <div className="grid grid-cols-12 gap-2">
+                                <div className="col-span-6 space-y-1">
+                                  <Label className="text-xs">Descripción *</Label>
+                                  <Input value={item.descripcion}
+                                    onChange={e => setMasterPaymentItems(p => gUpdateItem(p, idx, "descripcion", e.target.value))}
+                                    placeholder="Hospedaje habitación..." className="h-8 text-sm" />
+                                </div>
+                                <div className="col-span-2 space-y-1">
+                                  <Label className="text-xs">Cant.</Label>
+                                  <Input type="number" min="1" value={item.cantidad}
+                                    onChange={e => setMasterPaymentItems(p => gUpdateItem(p, idx, "cantidad", parseFloat(e.target.value) || 1))}
+                                    className="h-8 text-sm" />
+                                </div>
+                                <div className="col-span-2 space-y-1">
+                                  <Label className="text-xs">P. Unit.</Label>
+                                  <Input type="number" step="0.01" value={item.precioUnitario || ""}
+                                    onChange={e => setMasterPaymentItems(p => gUpdateItem(p, idx, "precioUnitario", parseFloat(e.target.value) || 0))}
+                                    placeholder="0.00" className="h-8 text-sm" />
+                                </div>
+                                <div className="col-span-2 space-y-1">
+                                  <Label className="text-xs">Alíc. IVA</Label>
+                                  <Select value={item.alicuotaIva}
+                                    onValueChange={v => setMasterPaymentItems(p => gUpdateItem(p, idx, "alicuotaIva", v))}>
+                                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="21">21%</SelectItem>
+                                      <SelectItem value="10.5">10.5%</SelectItem>
+                                      <SelectItem value="exento">Exento</SelectItem>
+                                      <SelectItem value="no_gravado">No Grav.</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-muted-foreground">
+                                  Total con IVA: {fmtMoney(item.subtotal)} (neto: {fmtMoney(item.subtotalNeto)})
+                                </span>
+                                {masterPaymentItems.length > 1 && (
+                                  <Button variant="ghost" size="sm" type="button"
+                                    className="text-red-500 hover:text-red-700 h-6 text-xs"
+                                    onClick={() => setMasterPaymentItems(p => p.filter((_, i) => i !== idx))}>
+                                    Quitar
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Total preview */}
+                        <div className="bg-muted/30 rounded-lg p-3 text-sm flex justify-between font-semibold">
+                          <span>TOTAL ítems:</span>
+                          <span>{fmtMoney(masterPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span>
+                        </div>
                       </div>
                     </>
                   );
@@ -4010,50 +4121,6 @@ export default function GroupDetailPage() {
         const isFullPaymentForInvoice = isMipymeInvoice || Math.abs(totalPaid - (masterFolio?.masterTotal ?? 0)) < 0.01;
         const effectiveDistribution = isFullPaymentForInvoice ? masterInvoiceDistribution : "none";
 
-        const computedItems: Array<{ descripcion: string; precioUnitario: number }> = (() => {
-          if (effectiveDistribution === "totalizados" && masterFolio) {
-            const items: Array<{ descripcion: string; precioUnitario: number }> = [];
-            if ((masterFolio.masterAccommodation ?? 0) > 0) {
-              items.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
-            }
-            if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all") {
-              items.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
-            }
-            if ((masterFolio.groupChargesTotal ?? 0) > 0) {
-              items.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
-            }
-            return items.length > 0
-              ? items
-              : [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
-          }
-          if (effectiveDistribution === "detallados" && masterFolio) {
-            const items: Array<{ descripcion: string; precioUnitario: number }> = [];
-            // One item per room — include extras only when config==="all" (otherwise extras stay outside Folio Maestro)
-            const includeExtras = masterFolio.config === "all";
-            (masterFolio.rooms ?? []).forEach((r: any) => {
-              const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
-              const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
-              const extrasLabel = extrasAmt > 0 ? ` (+ extras $${extrasAmt.toLocaleString("es-AR", { minimumFractionDigits: 2 })})` : "";
-              items.push({
-                descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
-                precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
-              });
-            });
-            // One item per group charge
-            (masterFolio.groupCharges ?? []).forEach((gc: any) => {
-              items.push({
-                descripcion: gc.description || "Cargo grupal",
-                precioUnitario: parseFloat(gc.amount) || 0,
-              });
-            });
-            return items.length > 0
-              ? items
-              : [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
-          }
-          // Default: single item
-          return [{ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: totalPaid || 0 }];
-        })();
-
         return (
           <EmitirFacturaDialog
             open={showMasterFacturaDialog}
@@ -4064,13 +4131,15 @@ export default function GroupDetailPage() {
             config={billingConfig}
             allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
             compactMode={true}
-            hideAddItems={masterInvoiceDistribution === "none"}
             initialValues={{
               razonSocial: masterPaymentRazonSocial || group?.name || "",
               cuit: masterPaymentCuit ? masterPaymentCuit.replace(/-/g, "") : undefined,
               condicionIva: masterPaymentCondicionIva || undefined,
               domicilio: masterPaymentDomicilio || undefined,
-              items: computedItems,
+              items: masterPaymentItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
+                descripcion: it.descripcion || `Pago Folio Maestro — ${group?.name ?? ""}`,
+                precioUnitario: it.precioUnitario * it.cantidad,
+              })),
             }}
             paymentId={pendingMasterPaymentId || undefined}
             onSuccess={() => {
@@ -4086,6 +4155,7 @@ export default function GroupDetailPage() {
               setMasterPaymentDni("");
               setMasterPaymentCondicionIva("Consumidor Final");
               setMasterPaymentDomicilio("");
+              setMasterPaymentItems([gNewItem()]);
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
