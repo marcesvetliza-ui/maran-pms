@@ -9,8 +9,34 @@ import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
 
-initSentry();
+// log must be defined first — it's used in the listen callback below
+export function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
+// ── STEP 0: Open port IMMEDIATELY ───────────────────────────────────────────
+// Cloud Run healthchecks fire within milliseconds of container start.
+// We must open the port before any slow init (Sentry, session store, DB).
+const app = express();
+app.set("trust proxy", 1);
+const httpServer = createServer(app);
+const PORT = parseInt(process.env.PORT || "5000", 10);
+
+if (process.env.NODE_ENV === "production") {
+  serveStaticFiles(app); // serves index.html → healthcheck returns 200
+}
+httpServer.listen({ port: PORT, host: "0.0.0.0", reusePort: true }, () => {
+  log(`serving on port ${PORT}`);
+  if (process.send) process.send("ready");
+});
+
+// ── STEP 1: Slow sync init (runs while port is already open) ─────────────────
 const REQUIRED_ENV_VARS = ["DATABASE_URL", "SESSION_SECRET"];
 const missingVars = REQUIRED_ENV_VARS.filter((v) => !process.env[v]);
 if (missingVars.length > 0) {
@@ -21,8 +47,7 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-const app = express();
-app.set("trust proxy", 1);
+initSentry();
 
 // Allow embedding /reservar in an iframe from the hotel website
 app.use((req, res, next) => {
@@ -56,7 +81,6 @@ const loginLimiter = rateLimit({
   message: { error: "Demasiados intentos de inicio de sesión" },
 });
 app.use("/api/auth/login", loginLimiter);
-const httpServer = createServer(app);
 
 declare module "http" {
   interface IncomingMessage {
@@ -91,17 +115,6 @@ app.get("/api/debug/assets", (_req, res) => {
   res.json(assetPathDiagnostic());
 });
 
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
-
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -129,20 +142,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const port = parseInt(process.env.PORT || "5000", 10);
-
-  // ── 0. OPEN PORT IMMEDIATELY — Replit healthchecks fire within 1s of start
-  //    Serve static assets (JS/CSS/index.html) right away so GET / → 200.
-  //    API routes are registered below; the SPA catch-all comes last.
-  if (process.env.NODE_ENV === "production") {
-    serveStaticFiles(app);
-  }
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
-    log(`serving on port ${port}`);
-    if (process.send) process.send("ready");
-  });
-
   // ── 1. Register API routes ───────────────────────────────────────────────
+  //    Port is already open (listen called at top of file). Just register routes.
   await registerRoutes(httpServer, app);
 
   // ── 2. Global error handler ──────────────────────────────────────────────
