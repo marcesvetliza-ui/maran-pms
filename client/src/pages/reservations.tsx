@@ -50,6 +50,7 @@ import {
   Clock,
   Undo2,
   Heart,
+  ExternalLink,
 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
