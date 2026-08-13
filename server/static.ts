@@ -11,11 +11,9 @@ export function serveStatic(app: Express) {
   }
 
   app.use(express.static(distPath, {
-    maxAge: '1h',
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      }
+    maxAge: 0,
+    setHeaders: (res, _filePath) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
   }));
 

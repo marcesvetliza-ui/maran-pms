@@ -1,5 +1,5 @@
 node_modules
-# dist  # removed to allow pre-built artifacts
+dist
 .DS_Store
 server/public
 vite.config.ts.*
