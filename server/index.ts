@@ -182,7 +182,7 @@ app.use((req, res, next) => {
         await Promise.race([
           fn(),
           new Promise<never>((_, rej) =>
-            setTimeout(() => rej(new Error("TIMEOUT 10s")), 10_000)
+            setTimeout(() => rej(new Error("TIMEOUT 30s")), 30_000)
           ),
         ]);
       } catch (err: any) {
