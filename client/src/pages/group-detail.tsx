@@ -3052,7 +3052,7 @@ export default function GroupDetailPage() {
           setGroupInvoiceDistribution("none");
         }
       }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <DollarSign className="h-5 w-5" />
@@ -3081,41 +3081,19 @@ export default function GroupDetailPage() {
               && (isMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
               && (!entityRequired || !!groupPaymentCcEntityId);
 
-            return (
-              <div className="space-y-4">
-                {/* 1. RECEPTOR (always first, always required) */}
-                <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
-                  <Label className="text-sm font-semibold">Receptor del comprobante</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
-                      <SelectTrigger data-testid="select-group-entity-type"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="company">Empresa</SelectItem>
-                        <SelectItem value="agency">Agencia</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
-                      <SelectTrigger data-testid="select-group-entity-id">
-                        <SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {entityList.map((e: any) => (
-                          <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {entityRequired && !groupPaymentCcEntityId && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Requerido para el comprobante seleccionado.
-                    </p>
-                  )}
-                </div>
+            const condIvaLabels: Record<string, string> = {
+              responsable_inscripto: "Responsable Inscripto",
+              consumidor_final: "Consumidor Final",
+              monotributo: "Monotributista",
+              monotributista: "Monotributista",
+              exento: "Exento",
+            };
 
-                {/* 2. COMPROBANTE */}
+            return (
+              <div className="space-y-5">
+                {/* 1. TIPO DE COMPROBANTE */}
                 <div>
-                  <Label>Comprobante</Label>
+                  <Label>Tipo de comprobante</Label>
                   <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
                     <SelectTrigger data-testid="select-group-payment-receipt">
                       <SelectValue placeholder="Seleccionar comprobante..." />
@@ -3143,31 +3121,93 @@ export default function GroupDetailPage() {
                   )}
                 </div>
 
-                {/* 3. MÉTODOS DE PAGO (multi-fila) */}
+                <div className="border-t" />
+
+                {/* 2. DATOS DEL RECEPTOR */}
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-sm font-semibold">Datos del receptor</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">Buscar empresa o agencia para autocompletar</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Select value={groupPaymentCcEntityType} onValueChange={v => { setGroupPaymentCcEntityType(v as "company" | "agency"); setGroupPaymentCcEntityId(""); }}>
+                      <SelectTrigger data-testid="select-group-entity-type"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="company">Empresa</SelectItem>
+                        <SelectItem value="agency">Agencia</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={groupPaymentCcEntityId} onValueChange={setGroupPaymentCcEntityId}>
+                      <SelectTrigger data-testid="select-group-entity-id">
+                        <SelectValue placeholder={groupPaymentCcEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {entityList.map((e: any) => (
+                          <SelectItem key={e.id} value={e.id}>{e.razonSocial || e.nombreFantasia || e.name || e.id}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {selectedEntity && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Nombre / Razón Social</Label>
+                        <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                          {selectedEntity.razonSocial || selectedEntity.nombreFantasia || "–"}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Condición IVA</Label>
+                        <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                          {condIvaLabels[condIva] ?? condIva ?? "–"}
+                        </div>
+                      </div>
+                      {selectedEntity.cuilCuit && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">CUIT / DNI</Label>
+                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                            {selectedEntity.cuilCuit}
+                          </div>
+                        </div>
+                      )}
+                      {(selectedEntity.direccion || selectedEntity.domicilio) && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Domicilio</Label>
+                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm truncate">
+                            {selectedEntity.direccion || selectedEntity.domicilio}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {entityRequired && !groupPaymentCcEntityId && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Requerido para el comprobante seleccionado.
+                    </p>
+                  )}
+                </div>
+
+                <div className="border-t" />
+
+                {/* 3. MÉTODOS DE PAGO */}
                 {!isMipyme && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Métodos de Pago</Label>
+                      <Label>Métodos de pago</Label>
                       {groupPaymentRows.length < 4 && Object.keys(allowedMethods).length > groupPaymentRows.length && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs gap-1"
-                          onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}
-                        >
+                        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1"
+                          onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}>
                           <Plus className="h-3 w-3" />
                           Agregar método
                         </Button>
                       )}
                     </div>
                     {groupPaymentRows.map((row, idx) => (
-                      <div key={idx} className="grid grid-cols-[1fr_28px_28px] gap-1.5 items-center">
-                        <div className="grid grid-cols-[1fr_1fr] gap-1.5">
-                          <Select
-                            value={row.method}
-                            onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}
-                          >
+                      <div key={idx} className="space-y-0.5">
+                        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
+                          <Select value={row.method}
+                            onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
                             <SelectTrigger data-testid={`select-group-payment-method-${idx}`}><SelectValue /></SelectTrigger>
                             <SelectContent>
                               {Object.entries(allowedMethods).filter(([k]) => !groupPaymentRows.some((r, i) => i !== idx && r.method === k)).map(([k, label]) => (
@@ -3175,135 +3215,114 @@ export default function GroupDetailPage() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min={0}
-                            placeholder="Monto"
+                          <Input type="number" step="0.01" min={0} placeholder="Monto"
                             value={row.amount}
                             onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
-                            data-testid={`input-group-payment-amount-${idx}`}
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-7 text-muted-foreground"
-                          title="Referencia"
-                          onClick={() => {
-                            const ref = prompt("Referencia / N° comprobante:", row.reference);
-                            if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
-                          }}
-                        >
-                          <FileText className="h-3.5 w-3.5" />
-                        </Button>
-                        {groupPaymentRows.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-7 text-destructive/70 hover:text-destructive"
-                            onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}
-                          >
-                            <X className="h-3.5 w-3.5" />
+                            data-testid={`input-group-payment-amount-${idx}`} />
+                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground shrink-0"
+                            title="Referencia / N° comprobante"
+                            onClick={() => {
+                              const ref = prompt("Referencia / N° comprobante:", row.reference);
+                              if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
+                            }}>
+                            <FileText className="h-4 w-4" />
                           </Button>
-                        )}
-                        {row.reference && (
-                          <p className="col-span-3 text-xs text-muted-foreground pl-0.5 -mt-0.5">Ref: {row.reference}</p>
-                        )}
+                          {groupPaymentRows.length > 1 ? (
+                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-destructive/70 hover:text-destructive shrink-0"
+                              onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          ) : <div className="w-9" />}
+                        </div>
+                        {row.reference && <p className="text-xs text-muted-foreground pl-1">Ref: {row.reference}</p>}
                       </div>
                     ))}
                     {groupPaymentRows.length > 1 && (
-                      <div className="flex justify-end text-xs text-muted-foreground font-medium border-t pt-1">
-                        Total: <span className="ml-1 font-semibold">{fmtMoney(rowsTotal)}</span>
+                      <div className="flex justify-end text-sm font-semibold border-t pt-2">
+                        Total: <span className="ml-1">{fmtMoney(rowsTotal)}</span>
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* 4. DISTRIBUCIÓN DE ÍTEMS EN FACTURA (solo fiscal) */}
+                {/* 4. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
                 {isFiscal && !isMipyme && (
-                  <div>
-                    <Label>Distribución de ítems en la factura</Label>
-                    <div className="grid grid-cols-3 gap-2 mt-1">
-                      {([
-                        { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                        { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
-                        { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
-                      ] as const).map(opt => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setGroupInvoiceDistribution(opt.value)}
-                          className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
-                        >
-                          <p className="font-semibold">{opt.label}</p>
-                          <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                        </button>
-                      ))}
-                    </div>
-                    {groupInvoiceDistribution !== "none" && folio && (() => {
-                      const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                      if (groupInvoiceDistribution === "totalizados") {
-                        if ((folio.totals.accommodation ?? 0) > 0)
-                          previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
-                        const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                        if (extrasTotal > 0)
-                          previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                        if (previewItems.length === 0)
-                          previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                      } else {
-                        (folio.reservations ?? []).forEach((r: any) => {
-                          const extrasAmt = parseFloat(r.extrasTotal) || 0;
-                          const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                          previewItems.push({
-                            descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
-                            precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
+                  <>
+                    <div className="border-t" />
+                    <div>
+                      <Label>Distribución de ítems en la factura</Label>
+                      <div className="grid grid-cols-3 gap-2 mt-2">
+                        {([
+                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos" },
+                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
+                        ] as const).map(opt => (
+                          <button key={opt.value} type="button" onClick={() => setGroupInvoiceDistribution(opt.value)}
+                            className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
+                            <p className="font-semibold">{opt.label}</p>
+                            <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+                      {groupInvoiceDistribution !== "none" && folio && (() => {
+                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                        if (groupInvoiceDistribution === "totalizados") {
+                          if ((folio.totals.accommodation ?? 0) > 0)
+                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
+                          const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
+                          if (extrasTotal > 0)
+                            previewItems.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                        } else {
+                          (folio.reservations ?? []).forEach((r: any) => {
+                            const extrasAmt = parseFloat(r.extrasTotal) || 0;
+                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                            previewItems.push({
+                              descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`,
+                              precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt,
+                            });
                           });
-                        });
-                        (folio.groupCharges ?? []).forEach((gc: any) => {
-                          previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                        });
-                        if (previewItems.length === 0)
-                          previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                      }
-                      return (
-                        <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">Ítems en la factura:</p>
-                          {previewItems.map((item, i) => (
-                            <div key={i} className="flex justify-between text-xs gap-2">
-                              <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                              <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
-                  </div>
+                          (folio.groupCharges ?? []).forEach((gc: any) => {
+                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                          });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
+                        }
+                        return (
+                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                            <p className="text-xs font-medium text-muted-foreground">Ítems en la factura:</p>
+                            {previewItems.map((item, i) => (
+                              <div key={i} className="flex justify-between text-xs gap-2">
+                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </>
                 )}
 
-                {/* 5. DISTRIBUCIÓN DEL PAGO */}
-                <div>
-                  <Label>Distribución entre habitaciones</Label>
-                  <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
-                    <SelectTrigger data-testid="select-group-payment-distribution">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="equal">Partes iguales</SelectItem>
-                      <SelectItem value="proportional">Proporcional al costo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {groupPaymentDistribution === "equal"
-                      ? "El monto se divide en partes iguales entre las reservas activas"
-                      : "El monto se distribuye proporcionalmente al costo total de cada reserva"}
-                  </p>
-                </div>
-
-                {/* 6. CERRAR HABITACIONES */}
-                <div className="border-t pt-3">
+                {/* 5+6. DISTRIBUCIÓN + CERRAR HABITACIONES */}
+                <div className="border-t" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Distribución entre habitaciones</Label>
+                    <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
+                      <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="equal">Partes iguales</SelectItem>
+                        <SelectItem value="proportional">Proporcional al costo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {groupPaymentDistribution === "equal"
+                        ? "Partes iguales entre reservas activas"
+                        : "Proporcional al costo total de cada reserva"}
+                    </p>
+                  </div>
                   <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
                     <Checkbox
                       id="close-all-rooms"
@@ -3453,7 +3472,7 @@ export default function GroupDetailPage() {
           setMasterInvoiceDistribution("none");
         }
       }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Banknote className="h-5 w-5 text-primary" />
@@ -3482,9 +3501,17 @@ export default function GroupDetailPage() {
             const canSubmit = !masterPaymentMutation.isPending
               && (isMipyme ? !isFiscalAndNeedsEntity : (rowsHaveAmount && !isFiscalAndNeedsEntity));
 
+            const condIvaLabels: Record<string, string> = {
+              responsable_inscripto: "Responsable Inscripto",
+              consumidor_final: "Consumidor Final",
+              monotributo: "Monotributista",
+              monotributista: "Monotributista",
+              exento: "Exento",
+            };
+
             return (
-              <div className="space-y-4">
-                {/* Balance summary */}
+              <div className="space-y-5">
+                {/* Resumen del folio */}
                 <div className="rounded-lg bg-muted/40 px-4 py-3 text-sm space-y-1">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Total del Folio Maestro</span>
@@ -3504,12 +3531,11 @@ export default function GroupDetailPage() {
                   </div>
                 </div>
 
-                {/* 1. Comprobante fiscal — elegir primero */}
+                {/* 1. TIPO DE COMPROBANTE */}
                 <div>
-                  <Label>Comprobante</Label>
+                  <Label>Tipo de comprobante</Label>
                   <Select value={masterPaymentReceiptType} onValueChange={(v) => {
                     setMasterPaymentReceiptType(v);
-                    // Bug 1: fiscal + advances → suggest full total
                     if (v !== "none" && masterFolio.masterPaid > 0) {
                       setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: String(masterFolio.masterTotal.toFixed(2)) } : r));
                     } else if (v === "none") {
@@ -3521,7 +3547,6 @@ export default function GroupDetailPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Adelanto Grupos (sin comprobante fiscal)</SelectItem>
-                      {/* Bug 5: filter by entity condicionIva when entity selected; if no entity, show all */}
                       {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_a">Factura A</SelectItem>}
                       {(!masterPaymentCcEntityId || !isRI) && <SelectItem value="factura_b">Factura B</SelectItem>}
                       {(!masterPaymentCcEntityId || isRI) && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
@@ -3534,112 +3559,22 @@ export default function GroupDetailPage() {
                       MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
                     </p>
                   )}
+                  {isFiscal && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
+                    </p>
+                  )}
                 </div>
 
-                {/* 1b. Distribución de ítems — sólo para comprobantes fiscales */}
-                {isFiscal && (() => {
-                  // Distribución detallada/totalizada sólo tiene sentido cuando la factura cubre el folio completo.
-                  // Para pagos parciales se mantiene el ítem único con el importe efectivamente cobrado.
-                  const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
-                  return (
-                    <div>
-                      <Label>Distribución de ítems en la factura</Label>
-                      <div className="grid grid-cols-3 gap-2 mt-1">
-                        {([
-                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
-                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
-                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
-                        ] as const).map(opt => {
-                          const disabled = !!(opt as any).requiresFull && !isFullPayment;
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              disabled={disabled}
-                              onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
-                              className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
-                            >
-                              <p className="font-semibold">{opt.label}</p>
-                              <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {!isFullPayment && (
-                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3 shrink-0" />
-                          Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
-                        </p>
-                      )}
+                <div className="border-t" />
 
-                      {/* Preview de ítems — visible cuando se elige Totalizados o Detallados.
-                          Uses the same effectiveDistribution logic as the ARCA dialog so the
-                          preview always matches what will actually be submitted. */}
-                      {masterInvoiceDistribution !== "none" && (() => {
-                        // Mirror computedItems logic from showMasterFacturaDialog exactly
-                        const isMipymeForPreview = masterPaymentReceiptType === "factura_mipyme_a";
-                        const isFullPaymentForPreview = isMipymeForPreview || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
-                        const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
-
-                        // If the amount is now partial, warn the user that distribution won't apply
-                        if (effectiveDistribution === "none") {
-                          return (
-                            <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 shrink-0" />
-                              Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
-                            </p>
-                          );
-                        }
-
-                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
-                        if (effectiveDistribution === "totalizados") {
-                          if ((masterFolio.masterAccommodation ?? 0) > 0)
-                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
-                          if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
-                            previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
-                          if ((masterFolio.groupChargesTotal ?? 0) > 0)
-                            previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                        } else {
-                          // effectiveDistribution === "detallados"
-                          const includeExtras = masterFolio.config === "all";
-                          (masterFolio.rooms ?? []).forEach((r: any) => {
-                            const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
-                            const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
-                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                            previewItems.push({
-                              descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
-                              precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
-                            });
-                          });
-                          (masterFolio.groupCharges ?? []).forEach((gc: any) => {
-                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
-                          });
-                          if (previewItems.length === 0)
-                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
-                        }
-
-                        return (
-                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
-                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
-                            {previewItems.map((item, i) => (
-                              <div key={i} className="flex justify-between text-xs gap-2">
-                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
-                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })()}
-
-                {/* 2. Empresa / Agencia — para todos los comprobantes fiscales */}
+                {/* 2. DATOS DEL RECEPTOR (solo fiscal) */}
                 {isFiscal && (
-                  <div>
-                    <Label>Empresa / Agencia receptora</Label>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm font-semibold">Datos del receptor</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Buscar empresa o agencia para autocompletar</p>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <Select value={masterPaymentCcEntityType} onValueChange={v => { setMasterPaymentCcEntityType(v as "company" | "agency"); setMasterPaymentCcEntityId(""); }}>
                         <SelectTrigger data-testid="select-master-cc-entity-type"><SelectValue /></SelectTrigger>
@@ -3660,65 +3595,157 @@ export default function GroupDetailPage() {
                       </Select>
                     </div>
                     {selectedEntity && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {({
-                          responsable_inscripto: "Responsable Inscripto",
-                          consumidor_final: "Consumidor Final",
-                          monotributo: "Monotributista",
-                          monotributista: "Monotributista",
-                          exento: "Exento",
-                        } as Record<string, string>)[selectedEntity.condicionIva] ?? selectedEntity.condicionIva}
-                        {selectedEntity.cuilCuit && ` — CUIT: ${selectedEntity.cuilCuit}`}
-                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Nombre / Razón Social</Label>
+                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                            {selectedEntity.razonSocial || selectedEntity.nombreFantasia || "–"}
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Condición IVA</Label>
+                          <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                            {condIvaLabels[condIva] ?? condIva ?? "–"}
+                          </div>
+                        </div>
+                        {selectedEntity.cuilCuit && (
+                          <div>
+                            <Label className="text-xs text-muted-foreground">CUIT / DNI</Label>
+                            <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                              {selectedEntity.cuilCuit}
+                            </div>
+                          </div>
+                        )}
+                        {(selectedEntity.direccion || selectedEntity.domicilio) && (
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Domicilio</Label>
+                            <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm truncate">
+                              {selectedEntity.direccion || selectedEntity.domicilio}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                     {isFiscalAndNeedsEntity && (
-                      <p className="text-xs text-amber-600 mt-1">Seleccioná la empresa o agencia receptora del comprobante.</p>
-                    )}
-                  </div>
-                )}
-
-                {/* 3. Monto — después de elegir comprobante (Bug 1 + 4) */}
-                {!isMipyme && (
-                  <div>
-                    <Label>Monto a pagar</Label>
-                    {isFiscal && masterFolio.masterPaid > 0 && (
-                      <p className="text-xs text-amber-600 mb-1">
-                        Existen adelantos previos. La factura debe cubrir el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                      <p className="text-xs text-amber-600 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        Seleccioná la empresa o agencia receptora del comprobante.
                       </p>
                     )}
+                    <div className="border-t" />
                   </div>
                 )}
 
-                {/* 4. Método(s) de pago — después del comprobante (Bug 3 + 4) */}
+                {/* 3. DISTRIBUCIÓN DE ÍTEMS (solo fiscal) */}
+                {isFiscal && (() => {
+                  const isFullPayment = isMipyme || Math.abs(rowsTotal - masterFolio.masterTotal) < 0.01;
+                  return (
+                    <div>
+                      <Label>Distribución de ítems en la factura</Label>
+                      <div className="grid grid-cols-3 gap-2 mt-2">
+                        {([
+                          { value: "none", label: "Sin desglose", desc: "1 ítem total" },
+                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + Consumos", requiresFull: true },
+                          { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo", requiresFull: true },
+                        ] as const).map(opt => {
+                          const disabled = !!(opt as any).requiresFull && !isFullPayment;
+                          return (
+                            <button key={opt.value} type="button" disabled={disabled}
+                              onClick={() => !disabled && setMasterInvoiceDistribution(opt.value)}
+                              className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${disabled ? "opacity-40 cursor-not-allowed border-border" : masterInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
+                              <p className="font-semibold">{opt.label}</p>
+                              <p className="text-muted-foreground mt-0.5">{opt.desc}</p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {!isFullPayment && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          Totalizados/Detallados disponibles sólo al cobrar el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                        </p>
+                      )}
+                      {masterInvoiceDistribution !== "none" && (() => {
+                        const isMipymeForPreview = masterPaymentReceiptType === "factura_mipyme_a";
+                        const isFullPaymentForPreview = isMipymeForPreview || Math.abs(rowsTotal - (masterFolio.masterTotal ?? 0)) < 0.01;
+                        const effectiveDistribution = isFullPaymentForPreview ? masterInvoiceDistribution : "none";
+                        if (effectiveDistribution === "none") {
+                          return (
+                            <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 shrink-0" />
+                              Pago parcial: se usará un único ítem con el importe cobrado ({fmtMoney(rowsTotal)}).
+                            </p>
+                          );
+                        }
+                        const previewItems: Array<{ descripcion: string; precioUnitario: number }> = [];
+                        if (effectiveDistribution === "totalizados") {
+                          if ((masterFolio.masterAccommodation ?? 0) > 0)
+                            previewItems.push({ descripcion: "Alojamiento Grupal", precioUnitario: masterFolio.masterAccommodation });
+                          if ((masterFolio.masterExtras ?? 0) > 0 && masterFolio.config === "all")
+                            previewItems.push({ descripcion: "Extras de Habitaciones", precioUnitario: masterFolio.masterExtras });
+                          if ((masterFolio.groupChargesTotal ?? 0) > 0)
+                            previewItems.push({ descripcion: "Consumos Grupales", precioUnitario: masterFolio.groupChargesTotal });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                        } else {
+                          const includeExtras = masterFolio.config === "all";
+                          (masterFolio.rooms ?? []).forEach((r: any) => {
+                            const guestLabel = r.guestName ? ` — ${r.guestName}` : "";
+                            const extrasAmt = includeExtras ? (parseFloat(r.extras) || 0) : 0;
+                            const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
+                            previewItems.push({
+                              descripcion: `Hab. ${r.roomNumber}${guestLabel}${extrasLabel}`,
+                              precioUnitario: (parseFloat(r.accommodation) || 0) + extrasAmt,
+                            });
+                          });
+                          (masterFolio.groupCharges ?? []).forEach((gc: any) => {
+                            previewItems.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 });
+                          });
+                          if (previewItems.length === 0)
+                            previewItems.push({ descripcion: `Pago Folio Maestro — ${group?.name ?? ""}`, precioUnitario: rowsTotal || 0 });
+                        }
+                        return (
+                          <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1">
+                            <p className="text-xs font-medium text-muted-foreground">Ítems que se generarán en la factura:</p>
+                            {previewItems.map((item, i) => (
+                              <div key={i} className="flex justify-between text-xs gap-2">
+                                <span className="text-muted-foreground truncate">{item.descripcion}</span>
+                                <span className="font-medium tabular-nums shrink-0">{fmtMoney(item.precioUnitario)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
+
+                {isFiscal && <div className="border-t" />}
+
+                {/* 4. MÉTODOS DE PAGO */}
                 {!isMipyme && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Método(s) de pago</Label>
+                      <Label>Métodos de pago</Label>
                       {masterPaymentRows.length < 4 && Object.keys(allowedMethods).length > masterPaymentRows.length && (
-                        <Button variant="outline" size="sm" type="button"
+                        <Button variant="ghost" size="sm" type="button" className="h-7 text-xs gap-1"
                           onClick={() => {
                             const usedMethods = new Set(masterPaymentRows.map(r => r.method));
                             const nextMethod = Object.keys(allowedMethods).find(k => !usedMethods.has(k)) ?? "cash";
                             setMasterPaymentRows(prev => [...prev, {method: nextMethod, amount: "", reference: ""}]);
                           }}>
-                          <Plus className="h-3.5 w-3.5 mr-1" />Agregar método
+                          <Plus className="h-3 w-3" />Agregar método
                         </Button>
                       )}
                     </div>
-                    <div>
-                      <Label className="text-xs">Referencia / Observaciones del comprobante</Label>
-                      <Input
-                        placeholder="Nro. de transferencia, cheque, etc. (opcional)"
-                        className="h-9 mt-1"
-                        value={masterPaymentReference}
-                        onChange={e => setMasterPaymentReference(e.target.value)}
-                        data-testid="input-master-payment-reference"
-                      />
-                    </div>
-                    <div className="text-xs text-muted-foreground">Método — Monto</div>
+                    {isFiscal && masterFolio.masterPaid > 0 && (
+                      <p className="text-xs text-amber-600">
+                        Existen adelantos previos. La factura debe cubrir el total del folio ({fmtMoney(masterFolio.masterTotal)}).
+                      </p>
+                    )}
                     {masterPaymentRows.map((row, idx) => (
-                      <div key={idx} className="grid grid-cols-12 gap-1 items-center">
-                        <div className="col-span-6">
+                      <div key={idx} className="space-y-0.5">
+                        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
                           <Select value={row.method} onValueChange={v => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
                             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -3729,29 +3756,42 @@ export default function GroupDetailPage() {
                                 ))}
                             </SelectContent>
                           </Select>
-                        </div>
-                        <div className="col-span-5">
                           <Input type="number" step="0.01" placeholder="Monto" className="h-9"
                             value={row.amount}
                             data-testid={idx === 0 ? "input-master-payment-amount" : undefined}
                             onChange={e => setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))} />
-                        </div>
-                        <div className="col-span-1 flex justify-end">
-                          {masterPaymentRows.length > 1 && (
-                            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-muted-foreground hover:text-red-500"
+                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground shrink-0"
+                            title="Referencia / N° comprobante"
+                            onClick={() => {
+                              const ref = prompt("Referencia / N° comprobante:", row.reference ?? "");
+                              if (ref !== null) setMasterPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
+                            }}>
+                            <FileText className="h-4 w-4" />
+                          </Button>
+                          {masterPaymentRows.length > 1 ? (
+                            <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive/70 hover:text-destructive shrink-0"
                               onClick={() => setMasterPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
                               <X className="h-4 w-4" />
                             </Button>
-                          )}
+                          ) : <div className="w-9" />}
                         </div>
+                        {(row as any).reference && <p className="text-xs text-muted-foreground pl-1">Ref: {(row as any).reference}</p>}
                       </div>
                     ))}
                     {masterPaymentRows.length > 1 && (
                       <div className="flex justify-between text-sm font-semibold border-t pt-2">
                         <span>Total:</span>
-                        <span>${rowsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                        <span>{fmtMoney(rowsTotal)}</span>
                       </div>
                     )}
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Referencia / Observaciones (opcional)</Label>
+                      <Input placeholder="Nro. de transferencia, cheque, etc."
+                        className="h-9 mt-1"
+                        value={masterPaymentReference}
+                        onChange={e => setMasterPaymentReference(e.target.value)}
+                        data-testid="input-master-payment-reference" />
+                    </div>
                   </div>
                 )}
               </div>
