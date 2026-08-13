@@ -1,3 +1,4 @@
+- [Cloud Run deployment](deployment-cloud-run.md) — autoscale/Cloud Run (not VM); build=npm run build, run=node dist/index.cjs; never rebuild inside run container.
 - [pg date columns timezone bug](pg-date-timezone-bug.md) — node-postgres returns date as Date object (UTC midnight); causes UTC-3 offset, isSameDay fails. Fixed via pg.types.setTypeParser(1082) in db.ts.
 - [Restaurant items cache bug](restaurant-items-cache-bug.md) — getUpdatedOrder() reads React Query cache, NOT currentOrder; all item mutations must update both.
 - [Radix SelectItem empty value crashes](radix-select-empty-values.md) — any SelectItem with `value=""` crashes the whole React tree; dynamic sources from API can silently introduce empty strings. All known occurrences fixed as of May 2026.
