@@ -3998,101 +3998,116 @@ export default function GroupDetailPage() {
 
       {/* ─── Dialog: Pago desde Folio Grupal ─── */}
       <Dialog open={showFolioPaymentDialog} onOpenChange={setShowFolioPaymentDialog}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CreditCard className="h-5 w-5" />
-              Registrar Pago Grupal
+              Pago Grupal Distribuido
             </DialogTitle>
             <DialogDescription>
-              El pago se distribuirá entre las reservas activas y quedará registrado en el folio.
+              El pago se distribuirá entre las reservas activas y quedará registrado en cada folio individual.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Monto Total *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={folioPaymentAmount}
-                  onChange={(e) => setFolioPaymentAmount(e.target.value)}
-                  placeholder="0.00"
-                  data-testid="input-folio-payment-amount"
-                />
-              </div>
-              <div>
-                <Label>Método *</Label>
-                <Select value={folioPaymentMethod} onValueChange={setFolioPaymentMethod}>
-                  <SelectTrigger data-testid="select-folio-payment-method">
-                    <SelectValue placeholder="Seleccionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="efectivo">Efectivo</SelectItem>
-                    <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                    <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                    <SelectItem value="transferencia">Transferencia</SelectItem>
-                    <SelectItem value="mercadopago">MercadoPago</SelectItem>
 
-                  </SelectContent>
-                </Select>
+          <div className="space-y-5">
+            {/* ── Monto y Método ── */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-3">Datos del pago</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Monto Total *</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={folioPaymentAmount}
+                    onChange={(e) => setFolioPaymentAmount(e.target.value)}
+                    placeholder="0.00"
+                    data-testid="input-folio-payment-amount"
+                  />
+                </div>
+                <div>
+                  <Label>Método de pago *</Label>
+                  <Select value={folioPaymentMethod} onValueChange={setFolioPaymentMethod}>
+                    <SelectTrigger data-testid="select-folio-payment-method">
+                      <SelectValue placeholder="Seleccionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
+                      <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 
-            <div>
-              <Label>Distribución</Label>
-              <Select value={folioPaymentDistribution} onValueChange={setFolioPaymentDistribution}>
-                <SelectTrigger data-testid="select-folio-payment-distribution">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="equal">Partes iguales</SelectItem>
-                  <SelectItem value="proportional_nights">Proporcional por noches</SelectItem>
-                  <SelectItem value="proportional_rate">Proporcional por tarifa</SelectItem>
-                  <SelectItem value="manual">Manual (asignar por habitación)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <div className="border-t" />
 
-            {folioPaymentDistribution === "manual" && folio && (
-              <div className="space-y-2 rounded-md border p-3 bg-muted/30">
-                <Label>Asignación manual</Label>
-                {folio.reservations.map((res) => (
-                  <div key={res.reservationId} className="flex items-center gap-2">
-                    <span className="text-sm w-28 shrink-0">Hab. {res.roomNumber}</span>
-                    <span className="text-xs text-muted-foreground w-24 truncate">{res.guestName}</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={manualDistribution[res.reservationId] || ""}
-                      onChange={(e) => setManualDistribution({
-                        ...manualDistribution,
-                        [res.reservationId]: parseFloat(e.target.value) || 0,
-                      })}
-                      className="w-28"
-                      placeholder="0.00"
-                    />
-                  </div>
-                ))}
-                <p className="text-xs text-muted-foreground">
-                  Asignado: ${fmtMoney(Object.values(manualDistribution).reduce((a, b) => a + b, 0))}
-                  {" / "}Total: ${folioPaymentAmount || "0"}
-                </p>
+            {/* ── Distribución ── */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-3">Distribución entre habitaciones</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Criterio de distribución</Label>
+                  <Select value={folioPaymentDistribution} onValueChange={setFolioPaymentDistribution}>
+                    <SelectTrigger data-testid="select-folio-payment-distribution">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="equal">Partes iguales</SelectItem>
+                      <SelectItem value="proportional_nights">Proporcional por noches</SelectItem>
+                      <SelectItem value="proportional_rate">Proporcional por tarifa</SelectItem>
+                      <SelectItem value="manual">Manual (asignar por habitación)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Referencia / N° comprobante</Label>
+                  <Input
+                    value={folioPaymentReference}
+                    onChange={(e) => setFolioPaymentReference(e.target.value)}
+                    placeholder="N° de comprobante..."
+                    data-testid="input-folio-payment-reference"
+                  />
+                </div>
               </div>
-            )}
 
-            <div>
-              <Label>Referencia</Label>
-              <Input
-                value={folioPaymentReference}
-                onChange={(e) => setFolioPaymentReference(e.target.value)}
-                placeholder="N° de comprobante..."
-                data-testid="input-folio-payment-reference"
-              />
+              {folioPaymentDistribution === "manual" && folio && (
+                <div className="mt-3 space-y-2 rounded-md border p-3 bg-muted/30">
+                  <Label>Asignación por habitación</Label>
+                  {folio.reservations.map((res) => (
+                    <div key={res.reservationId} className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                      <span className="text-sm font-medium w-20 shrink-0">Hab. {res.roomNumber}</span>
+                      <span className="text-xs text-muted-foreground truncate">{res.guestName}</span>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={manualDistribution[res.reservationId] || ""}
+                        onChange={(e) => setManualDistribution({
+                          ...manualDistribution,
+                          [res.reservationId]: parseFloat(e.target.value) || 0,
+                        })}
+                        className="w-28"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground pt-1 border-t">
+                    Asignado: <span className="font-medium">${fmtMoney(Object.values(manualDistribution).reduce((a, b) => a + b, 0))}</span>
+                    {" / "}Total: <span className="font-medium">${folioPaymentAmount || "0"}</span>
+                  </p>
+                </div>
+              )}
             </div>
+
+            <div className="border-t" />
+
+            {/* ── Notas ── */}
             <div>
-              <Label>Notas</Label>
+              <Label>Notas / Observaciones</Label>
               <Input
                 value={folioPaymentNotes}
                 onChange={(e) => setFolioPaymentNotes(e.target.value)}
@@ -4101,7 +4116,8 @@ export default function GroupDetailPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setShowFolioPaymentDialog(false)}>Cancelar</Button>
             <Button
               onClick={() => folioPaymentMutation.mutate()}
