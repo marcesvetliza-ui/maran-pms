@@ -162,6 +162,8 @@ app.use((req, res, next) => {
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
     log(`serving on port ${port}`);
+    // Signal prod-start.cjs parent (if any) that we're ready to receive traffic.
+    if (process.send) process.send("ready");
   });
 
   // ── 5. Background startup tasks (DB migrations, seed, schedulers) ────────
