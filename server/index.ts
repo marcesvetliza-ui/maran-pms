@@ -1,7 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import path from "path";
 import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
+import { serveStaticFiles, serveSpaFallback } from "./static";
 import { createServer } from "http";
 import { setupAuth } from "./auth";
 import helmet from "helmet";
@@ -129,7 +129,20 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // ── 1. Register routes (synchronous, no DB needed) ──────────────────────
+  const port = parseInt(process.env.PORT || "5000", 10);
+
+  // ── 0. OPEN PORT IMMEDIATELY — Replit healthchecks fire within 1s of start
+  //    Serve static assets (JS/CSS/index.html) right away so GET / → 200.
+  //    API routes are registered below; the SPA catch-all comes last.
+  if (process.env.NODE_ENV === "production") {
+    serveStaticFiles(app);
+  }
+  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+    log(`serving on port ${port}`);
+    if (process.send) process.send("ready");
+  });
+
+  // ── 1. Register API routes ───────────────────────────────────────────────
   await registerRoutes(httpServer, app);
 
   // ── 2. Global error handler ──────────────────────────────────────────────
@@ -150,21 +163,14 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
   });
 
-  // ── 3. Static serving / Vite dev ────────────────────────────────────────
+  // ── 3. SPA catch-all / Vite dev ─────────────────────────────────────────
+  //    Must come AFTER all API routes so /api/* routes are matched first.
   if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
+    serveSpaFallback(app);
   } else {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
-
-  // ── 4. OPEN PORT FIRST — Railway health check depends on this ───────────
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
-    log(`serving on port ${port}`);
-    // Signal prod-start.cjs parent (if any) that we're ready to receive traffic.
-    if (process.send) process.send("ready");
-  });
 
   // ── 5. Background startup tasks (DB migrations, seed, schedulers) ────────
   //    These run AFTER the port is open so Railway never times out.
