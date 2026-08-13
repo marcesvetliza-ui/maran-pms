@@ -4,9 +4,8 @@ import * as Sentry from "@sentry/react";
 import App from "./App";
 import "./index.css";
 
-// Build ID — changes every deploy so CDN caches are busted automatically
-declare const __BUILD_TIME__: string;
-const _buildTime = __BUILD_TIME__;
+import { BUILD_TIME } from "./buildTime"; // changes every deploy → busts CDN cache
+console.debug("[build]", BUILD_TIME);
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
