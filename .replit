@@ -20,7 +20,7 @@ PORT = "5000"
 [deployment]
 deploymentTarget = "autoscale"
 run = ["node", "dist/index.cjs"]
-build = ["sh", "-c", "echo 'Using pre-built dist'"]
+build = ["npm", "run", "build"]
 
 [workflows]
 runButton = "Project"
