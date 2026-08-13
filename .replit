@@ -19,8 +19,8 @@ PORT = "5000"
 
 [deployment]
 deploymentTarget = "vm"
-run = ["node", "dist/index.cjs"]
-build = ["sh", "-c", "rm -rf dist && npm run build"]
+run = ["node", "scripts/prod-start.js"]
+build = ["sh", "-c", "echo 'build runs in run phase via prod-start.js'"]
 
 [workflows]
 runButton = "Project"
