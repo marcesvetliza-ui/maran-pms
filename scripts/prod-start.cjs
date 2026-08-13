@@ -68,8 +68,8 @@ stubServer.on('upgrade', (req, socket, head) => {
 stubServer.listen(5000, '0.0.0.0', () => {
   console.log('[prod-start] Stub server on :5000 — building...');
 
-  // ── Step 1: Build ───────────────────────────────────────────────────────────
-  const build = spawn('npm', ['run', 'build'], { stdio: 'inherit', shell: false });
+  // ── Step 1: Install deps + Build ────────────────────────────────────────────
+  const build = spawn('sh', ['-c', 'npm install && npm run build'], { stdio: 'inherit', shell: false });
 
   build.on('error', (err) => {
     console.error('[prod-start] Failed to start build:', err.message);
