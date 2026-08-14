@@ -78,7 +78,7 @@ export function QuickReservationDialog({
   const [chargeCategory, setChargeCategory] = useState("otros");
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
-  const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"] });
+  const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"], enabled: open });
   const { data: bedTypes } = useQuery<BedType[]>({ queryKey: ["/api/bed-types"] });
 
   useEffect(() => {
