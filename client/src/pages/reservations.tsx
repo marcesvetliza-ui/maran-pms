@@ -447,6 +447,7 @@ export function ReservationFormDialog({
 
   const { data: activePackages } = useQuery<Package[]>({
     queryKey: ["/api/packages/active"],
+    enabled: open,
   });
 
   // Preferencias del huésped seleccionado (solo lectura, para mostrarlo en el form)
