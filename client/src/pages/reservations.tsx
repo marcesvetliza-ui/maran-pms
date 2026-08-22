@@ -445,10 +445,21 @@ export function ReservationFormDialog({
     queryKey: ["/api/bed-types"],
   });
 
-  const { data: activePackages } = useQuery<Package[]>({
+  const {
+    data: activePackages = [],
+    isFetching: isLoadingPackages,
+    isError: packagesLoadFailed,
+    refetch: refetchPackages,
+  } = useQuery<Package[]>({
     queryKey: ["/api/packages/active"],
     enabled: open,
   });
+
+  // This dialog remains mounted after closing. Explicitly refresh packages when it
+  // reopens so a cached empty/error response never hides packages from a new booking.
+  useEffect(() => {
+    if (open) void refetchPackages();
+  }, [open, refetchPackages]);
 
   // Preferencias del huésped seleccionado (solo lectura, para mostrarlo en el form)
   const selectedGuestIdForPrefs = formData.guestId;
@@ -1164,12 +1175,25 @@ export function ReservationFormDialog({
               </div>
             )}
 
-            {activePackages && activePackages.length > 0 && (
-              <div className="grid gap-2">
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between gap-3">
                 <Label>Paquete (opcional)</Label>
-                <Select
-                  value={selectedPackageId}
-                  onValueChange={(val) => {
+                {(isLoadingPackages || packagesLoadFailed) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => void refetchPackages()}
+                    disabled={isLoadingPackages}
+                  >
+                    {isLoadingPackages ? "Actualizando..." : "Reintentar"}
+                  </Button>
+                )}
+              </div>
+              <Select
+                value={selectedPackageId}
+                onValueChange={(val) => {
                     if (val === "__none__") {
                       setSelectedPackageId("");
                       // Reset price to rate plan values (or clear if no rate plan)
@@ -1199,6 +1223,7 @@ export function ReservationFormDialog({
                         // En edición: solo actualiza precio y notas, NO cambia fechas
                         const currentNights = Number(formData.nights) || 1;
                         const totalPrice = parseFloat(effectiveBasePrice);
+                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
                         setFormData(prev => ({
                           ...prev,
                           baseRatePerNight: ratePerNight,
@@ -1253,42 +1278,47 @@ export function ReservationFormDialog({
                       }
                     }
                   }}
-                >
-                  <SelectTrigger data-testid="select-package">
-                    <SelectValue placeholder="Sin paquete" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sin paquete</SelectItem>
-                    {activePackages.filter(pkg => pkg.id).map(pkg => (
-                      <SelectItem key={pkg.id} value={pkg.id}>
-                        {pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedPackageId && (() => {
-                  const pkg = activePackages.find(p => p.id === selectedPackageId);
-                  if (!pkg) return null;
-                  const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === selectedRoomTypeId);
-                  const effectivePrice = roomPrice ? roomPrice.price : pkg.basePrice;
-                  return (
-                    <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2">
-                      <Gift className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs font-semibold text-green-800 dark:text-green-300">{pkg.name}</span>
-                        <span className="text-xs text-green-700 dark:text-green-400 ml-1">· {pkg.nights} noche{pkg.nights !== 1 ? "s" : ""}</span>
-                        {roomPrice && (
-                          <span className="text-xs text-green-600 dark:text-green-500 ml-1">· precio por categoría</span>
-                        )}
-                      </div>
-                      <span className="text-sm font-bold text-green-800 dark:text-green-300 whitespace-nowrap">
-                        ${Number(effectivePrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                      </span>
+              >
+                <SelectTrigger data-testid="select-package">
+                  <SelectValue placeholder={isLoadingPackages ? "Cargando paquetes..." : "Sin paquete"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin paquete</SelectItem>
+                  {activePackages.filter(pkg => pkg.id).map(pkg => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!isLoadingPackages && packagesLoadFailed && (
+                <p className="text-xs text-destructive">No se pudieron cargar los paquetes. Reintentá la consulta.</p>
+              )}
+              {!isLoadingPackages && !packagesLoadFailed && activePackages.length === 0 && (
+                <p className="text-xs text-muted-foreground">No hay paquetes vigentes para la fecha actual.</p>
+              )}
+              {selectedPackageId && (() => {
+                const pkg = activePackages.find(p => p.id === selectedPackageId);
+                if (!pkg) return null;
+                const roomPrice = pkg.roomPrices?.find((rp: any) => rp.roomTypeId === selectedRoomTypeId);
+                const effectivePrice = roomPrice ? roomPrice.price : pkg.basePrice;
+                return (
+                  <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2">
+                    <Gift className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-semibold text-green-800 dark:text-green-300">{pkg.name}</span>
+                      <span className="text-xs text-green-700 dark:text-green-400 ml-1">· {pkg.nights} noche{pkg.nights !== 1 ? "s" : ""}</span>
+                      {roomPrice && (
+                        <span className="text-xs text-green-600 dark:text-green-500 ml-1">· precio por categoría</span>
+                      )}
                     </div>
-                  );
-                })()}
-              </div>
-            )}
+                    <span className="text-sm font-bold text-green-800 dark:text-green-300 whitespace-nowrap">
+                      ${Number(effectivePrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
 
             {(() => {
               const datesInvalid = !!formData.checkInDate && !!formData.checkOutDate && formData.checkOutDate <= formData.checkInDate;

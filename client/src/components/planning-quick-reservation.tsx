@@ -78,7 +78,12 @@ export function QuickReservationDialog({
   const [chargeCategory, setChargeCategory] = useState("otros");
 
   const { data: ratePlans } = useQuery<RatePlan[]>({ queryKey: ["/api/rate-plans"] });
-  const { data: activePackages } = useQuery<Package[]>({ queryKey: ["/api/packages/active"], enabled: open });
+  const {
+    data: activePackages = [],
+    isFetching: isLoadingPackages,
+    isError: packagesLoadFailed,
+    refetch: refetchPackages,
+  } = useQuery<Package[]>({ queryKey: ["/api/packages/active"], enabled: open });
   const { data: bedTypes } = useQuery<BedType[]>({ queryKey: ["/api/bed-types"] });
 
   useEffect(() => {
@@ -89,6 +94,12 @@ export function QuickReservationDialog({
       setBedConfig(reservationData.bedConfig || "");
     }
   }, [reservationData]);
+
+  // The dialog stays mounted while closed, so force a fresh package request on
+  // every opening instead of reusing a recently cached empty response.
+  useEffect(() => {
+    if (open) void refetchPackages();
+  }, [open, refetchPackages]);
 
   useEffect(() => {
     if (!ratePlanId || !ratePlans) return;
@@ -384,10 +395,23 @@ export function QuickReservationDialog({
             </div>
           </div>
 
-          {activePackages && activePackages.length > 0 && (
-            <div className="grid gap-1">
+          <div className="grid gap-1">
+            <div className="flex items-center justify-between gap-3">
               <Label>Paquete (opcional)</Label>
-              <Select value={packageId} onValueChange={(val) => {
+              {(isLoadingPackages || packagesLoadFailed) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => void refetchPackages()}
+                  disabled={isLoadingPackages}
+                >
+                  {isLoadingPackages ? "Actualizando..." : "Reintentar"}
+                </Button>
+              )}
+            </div>
+            <Select value={packageId} onValueChange={(val) => {
                 if (val === "__none__") { setPackageId(""); setRatePlanId(""); setManualRate(""); return; }
                 setPackageId(val); setRatePlanId("");
                 const pkg = activePackages.find(p => p.id === val);
@@ -400,15 +424,20 @@ export function QuickReservationDialog({
                     setCheckOutDate(toArgentinaDateStr(nextDay));
                   }
                 }
-              }}>
-                <SelectTrigger data-testid="select-package"><SelectValue placeholder="Sin paquete" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Sin paquete</SelectItem>
-                  {activePackages.filter(pkg => pkg.id).map(pkg => <SelectItem key={pkg.id} value={pkg.id}>{pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+            }}>
+              <SelectTrigger data-testid="select-package"><SelectValue placeholder={isLoadingPackages ? "Cargando paquetes..." : "Sin paquete"} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Sin paquete</SelectItem>
+                {activePackages.filter(pkg => pkg.id).map(pkg => <SelectItem key={pkg.id} value={pkg.id}>{pkg.name} — ${pkg.basePrice} ({pkg.nights} noche{pkg.nights !== 1 ? "s" : ""})</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {!isLoadingPackages && packagesLoadFailed && (
+              <p className="text-xs text-destructive">No se pudieron cargar los paquetes. Reintentá la consulta.</p>
+            )}
+            {!isLoadingPackages && !packagesLoadFailed && activePackages.length === 0 && (
+              <p className="text-xs text-muted-foreground">No hay paquetes vigentes para la fecha actual.</p>
+            )}
+          </div>
 
           <div className="grid gap-1">
             <Label>

@@ -30,3 +30,4 @@
 - [PrefacturaDialog unified checkout/billing](prefactura-dialog.md) — replaces checkout wizard steps 1-3 and reservations.tsx EmitirFacturaDialog; mode='checkout'|'billing'; folio/pdf endpoint missing (404 on print).
 - [Production build required before deploy](production-build-required.md) — prod uses dist/index.cjs; must run `npm run build` before publishing or source changes have zero effect in production.
 - [MAX(jsonb) bulk-enrich pattern](max-jsonb-bulk-enrich.md) — any enrichXxxBulk that uses MAX(jsonb_build_object(...)) must cast to ::text inside MAX and back to ::jsonb outside; applies to spa, restaurant, and any future bulk-join query.
+- [Reusable dialog query refresh](reusable-dialog-query-refresh.md) — dialog-scoped API data must be explicitly refreshed when reopening a mounted dialog, not merely enabled.
