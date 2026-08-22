@@ -47,10 +47,16 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { PackageWithDetails, RoomType, PackageStatus, PackageItemType } from "@shared/schema";
 
 type RoomPriceRow = { roomTypeId: string; extraAmount: string };
+
+function decimalForApi(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : null;
+}
 
 function PackageStatusBadge({ status }: { status: PackageStatus }) {
   const config: Record<PackageStatus, { label: string; variant: "default" | "secondary" | "destructive" }> = {
@@ -128,8 +134,8 @@ function PackageFormDialog({
         description,
         roomTypeId: null,
         nights,
-        basePrice: fmtMoney(basePrice),
-        discountPercent: discountPercent ? fmtMoney(discountPercent) : null,
+         basePrice: decimalForApi(basePrice) ?? "0.00",
+         discountPercent: decimalForApi(discountPercent),
         validFrom: validFrom || null,
         validUntil: validUntil || null,
         status,
@@ -156,8 +162,8 @@ function PackageFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
-      toast({ title: "Error al crear paquete", variant: "destructive" });
+   onError: (error) => {
+      toast({ title: "Error al crear paquete", description: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -168,8 +174,8 @@ function PackageFormDialog({
         description,
         roomTypeId: null,
         nights,
-        basePrice: fmtMoney(basePrice),
-        discountPercent: discountPercent ? fmtMoney(discountPercent) : null,
+         basePrice: decimalForApi(basePrice) ?? "0.00",
+         discountPercent: decimalForApi(discountPercent),
         validFrom: validFrom || null,
         validUntil: validUntil || null,
         status,
@@ -200,8 +206,8 @@ function PackageFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
-      toast({ title: "Error al actualizar paquete", variant: "destructive" });
+   onError: (error) => {
+      toast({ title: "Error al actualizar paquete", description: parseApiError(error), variant: "destructive" });
     },
   });
 

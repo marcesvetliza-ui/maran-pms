@@ -1,6 +1,20 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 
+function normalizeDecimal(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value.toFixed(2) : null;
+
+  const raw = String(value).trim();
+  // Accept both API decimals (1234.56) and values formatted for Argentina
+  // (1.234,56), since this endpoint is also called by older clients.
+  const normalized = raw.includes(",")
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : null;
+}
+
 export function registerPackagesRoutes(app: Express) {
   app.get("/api/packages", async (req, res) => {
     try {
@@ -43,8 +57,8 @@ export function registerPackagesRoutes(app: Express) {
         description,
         roomTypeId,
         nights: nights || 1,
-        basePrice: String(basePrice),
-        discountPercent: discountPercent ? String(discountPercent) : null,
+        basePrice: normalizeDecimal(basePrice) ?? "0.00",
+        discountPercent: normalizeDecimal(discountPercent),
         validFrom,
         validUntil,
         status: status || "active",
@@ -61,8 +75,12 @@ export function registerPackagesRoutes(app: Express) {
   app.patch("/api/packages/:id", async (req, res) => {
     try {
       const updates = { ...req.body };
-      if (updates.basePrice) updates.basePrice = String(updates.basePrice);
-      if (updates.discountPercent) updates.discountPercent = String(updates.discountPercent);
+      if (updates.basePrice !== undefined) {
+        updates.basePrice = normalizeDecimal(updates.basePrice);
+      }
+      if (updates.discountPercent !== undefined) {
+        updates.discountPercent = normalizeDecimal(updates.discountPercent);
+      }
       const pkg = await storage.updatePackage(req.params.id, updates);
       if (!pkg) return res.status(404).json({ error: "Package not found" });
       res.json(pkg);
@@ -143,11 +161,15 @@ export function registerPackagesRoutes(app: Express) {
       if (!roomTypeId || !price) {
         return res.status(400).json({ error: "roomTypeId and price are required" });
       }
+      const normalizedPrice = normalizeDecimal(price);
+      if (!normalizedPrice) {
+        return res.status(400).json({ error: "price must be a valid number" });
+      }
       const created = await storage.createPackageRoomPrice({
         packageId: req.params.packageId,
         roomTypeId,
-        price: String(parseFloat(price).toFixed(2)),
-        extraAmount: extraAmount != null ? String(parseFloat(extraAmount).toFixed(2)) : "0",
+        price: normalizedPrice,
+        extraAmount: normalizeDecimal(extraAmount) ?? "0.00",
       });
       res.status(201).json(created);
     } catch (error) {
