@@ -1256,6 +1256,7 @@ export function registerExportRoutes(app: Express) {
           const methodLabels: Record<string, string> = {
             transferencia: "Transferencia", cheque: "Cheque", efectivo: "Efectivo",
             compensacion: "Compensación", tarjeta: "Tarjeta de crédito",
+            echeq: "eCheq", varios: "Varios medios",
           };
           const label = methodLabels[mov.payment_method] ?? mov.payment_method;
           doc.font("Helvetica").fontSize(8).fill("#444")

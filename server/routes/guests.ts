@@ -2,8 +2,147 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db, pool } from "../db";
-import { guests, reservations, roomTypes as roomTypesTable } from "../../shared/schema";
+import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
+
+const PAYMENT_TOLERANCE = 0.01;
+
+class AccountPaymentValidationError extends Error {}
+
+function isAccountPaymentValidationError(error: unknown): error is Error {
+  return error instanceof AccountPaymentValidationError || (error as { statusCode?: number } | null)?.statusCode === 400;
+}
+
+function parseAccountMoney(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value !== "string") return Number.NaN;
+
+  const raw = value.trim().replace(/[$\s]/g, "");
+  const comma = raw.lastIndexOf(",");
+  const dot = raw.lastIndexOf(".");
+  let normalized = raw;
+
+  if (comma >= 0 && dot >= 0) {
+    const decimalIndex = Math.max(comma, dot);
+    const decimalSeparator = raw[decimalIndex];
+    normalized = raw
+      .replace(decimalSeparator === "," ? /\./g : /,/g, "")
+      .replace(decimalSeparator, ".");
+  } else if (comma >= 0 || dot >= 0) {
+    const separator = comma >= 0 ? "," : ".";
+    const fraction = raw.split(separator)[1] ?? "";
+    normalized = fraction.length === 3 ? raw.replace(separator, "") : raw.replace(separator, ".");
+  }
+
+  return Number(normalized.replace(/[^\d.-]/g, ""));
+}
+
+type PreparedAccountPayment = {
+  accountingAmount: number;
+  retentions: { concepto: string; monto: number }[] | null;
+  allocations: { cargoId: string; amount: string }[];
+  paymentMethod: string | null;
+  paymentDetails: { method: string; amount: number }[];
+};
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  transferencia: "Transferencia",
+  echeq: "eCheq",
+  cheque: "Cheque",
+  efectivo: "Efectivo",
+  compensacion: "Compensación",
+  tarjeta: "Tarjeta de crédito",
+  otro: "Otro",
+};
+
+function describePaymentMethods(paymentDetails: { method: string; amount: number }[]): string {
+  if (paymentDetails.length <= 1) return "";
+  return ` (${paymentDetails
+    .map(({ method, amount }) => `${PAYMENT_METHOD_LABELS[method] ?? method}: $${amount.toFixed(2)}`)
+    .join(" + ")})`;
+}
+
+/**
+ * Retentions settle a receivable even though they are not cash received.
+ * Their amount is therefore added once to the persisted payment movement.
+ */
+async function prepareAccountPayment(
+  entityType: AccountEntityType,
+  entityId: string,
+  body: any,
+): Promise<PreparedAccountPayment> {
+  const hasPaymentLines = Array.isArray(body.payments) && body.payments.length > 0;
+  const rawPaymentLines = hasPaymentLines
+    ? body.payments
+    : [{ amount: body.amount, method: body.paymentMethod }];
+  const paymentDetails: { method: string; amount: number }[] = rawPaymentLines.map((line: any) => {
+    const amount = parseAccountMoney(line?.amount);
+    const method = String(line?.method ?? line?.paymentMethod ?? "").trim();
+    if (!Number.isFinite(amount) || amount <= 0 || !method) {
+      throw new AccountPaymentValidationError("Hay un medio de pago con datos inválidos");
+    }
+    return { method, amount };
+  });
+  const paymentAmount = paymentDetails.reduce((sum, line) => sum + line.amount, 0);
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    throw new AccountPaymentValidationError("Monto inválido");
+  }
+  if (hasPaymentLines && body.amount !== undefined) {
+    const declaredPaymentAmount = parseAccountMoney(body.amount);
+    if (!Number.isFinite(declaredPaymentAmount) || Math.abs(declaredPaymentAmount - paymentAmount) > PAYMENT_TOLERANCE) {
+      throw new AccountPaymentValidationError("El total de medios de pago no coincide con el importe declarado");
+    }
+  }
+
+  const retentions: { concepto: string; monto: number }[] = Array.isArray(body.retentions)
+    ? body.retentions
+      .filter((row: any) => row?.concepto || row?.monto)
+      .map((row: any) => {
+        const amount = parseAccountMoney(row?.monto);
+        if (!row?.concepto || !Number.isFinite(amount) || amount <= 0) {
+          throw new AccountPaymentValidationError("Hay una retención con datos inválidos");
+        }
+        return { concepto: String(row.concepto), monto: amount };
+      })
+    : [];
+  const accountingAmount = paymentAmount + retentions.reduce((sum, row) => sum + row.monto, 0);
+
+  const rawAllocations = Array.isArray(body.allocations) ? body.allocations : [];
+  const allocations: { cargoId: string; amount: string }[] = [];
+  if (rawAllocations.length > 0) {
+    const pendingCharges = await storage.getPendingCharges(entityType, entityId);
+    const pendingById = new Map(pendingCharges.map((charge: any) => [String(charge.id), Number(charge.saldoPendiente)]));
+    const usedCharges = new Set<string>();
+    let allocationsTotal = 0;
+
+    for (const allocation of rawAllocations) {
+      const cargoId = String(allocation?.cargoId ?? "");
+      const amount = parseAccountMoney(allocation?.amount);
+      const pending = pendingById.get(cargoId);
+      if (!cargoId || usedCharges.has(cargoId) || pending === undefined) {
+        throw new AccountPaymentValidationError("Uno de los comprobantes seleccionados ya no está pendiente");
+      }
+      if (!Number.isFinite(amount) || amount <= 0 || amount > pending + PAYMENT_TOLERANCE) {
+        throw new AccountPaymentValidationError("El importe aplicado supera el saldo pendiente del comprobante");
+      }
+      usedCharges.add(cargoId);
+      allocationsTotal += amount;
+      allocations.push({ cargoId, amount: amount.toFixed(2) });
+    }
+
+    if (Math.abs(allocationsTotal - accountingAmount) > PAYMENT_TOLERANCE) {
+      throw new AccountPaymentValidationError("El total aplicado debe coincidir con los comprobantes seleccionados");
+    }
+  }
+
+  return {
+    accountingAmount,
+    retentions: retentions.length > 0 ? retentions : null,
+    allocations,
+    paymentMethod: paymentDetails.length === 1 ? paymentDetails[0].method : "varios",
+    paymentDetails,
+  };
+}
 
 export function registerGuestsRoutes(app: Express) {
   // Companies
@@ -217,28 +356,29 @@ export function registerGuestsRoutes(app: Express) {
     try {
       const guest = await storage.getGuest(req.params.id);
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
-      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
-      if (!amount || parseFloat(amount) <= 0) {
-        return res.status(400).json({ error: "Monto inválido" });
-      }
+      const { description, reference, date } = req.body;
+      const payment = await prepareAccountPayment("guest", req.params.id, req.body);
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "guest",
         req.params.id,
         {
           date: date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-          description: description || "Pago recibido",
-          amount: (-parseFloat(amount)).toFixed(2),
+          description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
+          amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
-          paymentMethod: paymentMethod || null,
-          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          paymentMethod: payment.paymentMethod,
+          retentions: payment.retentions,
           createdBy: req.body.createdBy || null,
           guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
         },
-        Array.isArray(allocations) ? allocations : []
+        payment.allocations
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
       console.error("Error registering guest payment:", error);
+      if (isAccountPaymentValidationError(error)) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Error registering payment" });
     }
   });
@@ -357,27 +497,28 @@ export function registerGuestsRoutes(app: Express) {
       if (!company) {
         return res.status(404).json({ error: "Empresa no encontrada" });
       }
-      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
-      if (!amount || parseFloat(amount) <= 0) {
-        return res.status(400).json({ error: "Monto inválido" });
-      }
+      const { description, reference, date } = req.body;
+      const payment = await prepareAccountPayment("company", req.params.id, req.body);
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "company",
         req.params.id,
         {
           date: date || new Date().toISOString().split("T")[0],
-          description: description || "Pago recibido",
-          amount: (-parseFloat(amount)).toFixed(2),
+          description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
+          amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
-          paymentMethod: paymentMethod || null,
-          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          paymentMethod: payment.paymentMethod,
+          retentions: payment.retentions,
           createdBy: req.body.createdBy || null,
         },
-        Array.isArray(allocations) ? allocations : []
+        payment.allocations
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
       console.error("Error registering company payment:", error);
+      if (isAccountPaymentValidationError(error)) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Error registering payment" });
     }
   });
@@ -388,27 +529,28 @@ export function registerGuestsRoutes(app: Express) {
       if (!agency) {
         return res.status(404).json({ error: "Agencia no encontrada" });
       }
-      const { amount, description, reference, paymentMethod, date, retentions, allocations } = req.body;
-      if (!amount || parseFloat(amount) <= 0) {
-        return res.status(400).json({ error: "Monto inválido" });
-      }
+      const { description, reference, date } = req.body;
+      const payment = await prepareAccountPayment("agency", req.params.id, req.body);
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "agency",
         req.params.id,
         {
           date: date || new Date().toISOString().split("T")[0],
-          description: description || "Pago recibido",
-          amount: (-parseFloat(amount)).toFixed(2),
+          description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
+          amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
-          paymentMethod: paymentMethod || null,
-          retentions: Array.isArray(retentions) && retentions.length > 0 ? retentions : null,
+          paymentMethod: payment.paymentMethod,
+          retentions: payment.retentions,
           createdBy: req.body.createdBy || null,
         },
-        Array.isArray(allocations) ? allocations : []
+        payment.allocations
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
       console.error("Error registering agency payment:", error);
+      if (isAccountPaymentValidationError(error)) {
+        return res.status(400).json({ error: error.message });
+      }
       res.status(500).json({ error: "Error registering payment" });
     }
   });

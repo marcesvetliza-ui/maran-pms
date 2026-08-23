@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { moneyInputValue, moneyPayload, parseMoneyInput } from "@/lib/money-input";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -91,22 +92,44 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
     }
   }, [open]);
 
-  // When allocations change, auto-fill first row amount with the new total
-  const allocationsTotal = Object.values(selected).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
-  const prevAllocsTotalRef = useRef(0);
-  useEffect(() => {
-    if (allocationsTotal !== prevAllocsTotalRef.current) {
-      prevAllocsTotalRef.current = allocationsTotal;
-      if (allocationsTotal > 0) {
-        setPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: fmtMoney(allocationsTotal) } : r));
-      }
-    }
-  }, [allocationsTotal]);
+  const allocationsTotal = Object.values(selected).reduce((sum, value) => sum + parseMoneyInput(value), 0);
+  const retentionsTotal = retentions.reduce((sum, row) => sum + parseMoneyInput(row.monto), 0);
+  const totalPaymentMethods = paymentRows.reduce((sum, row) => sum + parseMoneyInput(row.amount), 0);
+  const totalApplied = totalPaymentMethods + retentionsTotal;
+  const previousSuggestedCashRef = useRef<number | null>(null);
+  const previousAllocationsTotalRef = useRef(0);
 
-  const retentionsTotal = retentions.reduce((sum, r) => sum + (parseFloat(r.monto) || 0), 0);
-  const totalAmount = paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-  const hasAllocations = allocationsTotal > 0;
-  const cashReceived = totalAmount - retentionsTotal;
+  // Selecting a charge suggests its full balance. This remains editable; a
+  // retention reduces only the cash portion while preserving total applied.
+  useEffect(() => {
+    const suggestedCash = Math.max(0, allocationsTotal - retentionsTotal);
+    setPaymentRows((previousRows) => {
+      if (allocationsTotal <= 0 || previousRows.length === 0) return previousRows;
+      const currentAmount = parseMoneyInput(previousRows[0].amount);
+      const allocationChanged = allocationsTotal !== previousAllocationsTotalRef.current;
+      const canApplySuggestion = allocationChanged
+        || currentAmount === 0
+        || currentAmount === previousSuggestedCashRef.current;
+      if (!canApplySuggestion) return previousRows;
+      return previousRows.map((row, index) =>
+        index === 0 ? { ...row, amount: moneyInputValue(suggestedCash) } : row
+      );
+    });
+    previousAllocationsTotalRef.current = allocationsTotal;
+    previousSuggestedCashRef.current = suggestedCash;
+  }, [allocationsTotal, retentionsTotal]);
+
+  const hasSelectedCharges = Object.keys(selected).length > 0;
+  const selectedChargeErrors = pendingCharges
+    .filter((charge) => charge.id in selected)
+    .map((charge) => {
+      const amount = parseMoneyInput(selected[charge.id]);
+      if (amount <= 0) return `Ingresá un importe para “${charge.description}”.`;
+      if (amount > charge.saldoPendiente + 0.009) return `El importe de “${charge.description}” supera su saldo pendiente.`;
+      return null;
+    })
+    .filter((message): message is string => Boolean(message));
+  const allocationTotalMatchesPayment = !hasSelectedCharges || Math.abs(allocationsTotal - totalApplied) < 0.01;
 
   // Payment row helpers
   const addPaymentRow = () => {
@@ -124,7 +147,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
     setSelected((prev) => {
       const next = { ...prev };
       if (checked) {
-        next[charge.id] = fmtMoney(charge.saldoPendiente);
+        next[charge.id] = moneyInputValue(charge.saldoPendiente);
       } else {
         delete next[charge.id];
       }
@@ -150,43 +173,48 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
 
   const registerPaymentMutation = useMutation({
     mutationFn: async () => {
-      const allocations = Object.entries(selected)
-        .filter(([, amount]) => parseFloat(amount) > 0)
-        .map(([cargoId, amount]) => ({ cargoId, amount: fmtMoney(amount) }));
-
-      const validRetentions = retentions
-        .filter((r) => r.concepto && parseFloat(r.monto) > 0)
-        .map((r) => ({ concepto: r.concepto, monto: fmtMoney(r.monto) }));
-
-      const activeRows = paymentRows.filter(r => (parseFloat(r.amount) || 0) > 0);
-      if (activeRows.length === 0) throw new Error("Ingresá al menos un monto");
-
-      let firstMovementId: number | null = null;
-
-      for (let i = 0; i < activeRows.length; i++) {
-        const row = activeRows[i];
-        const resolvedMethod = row.method === "otro" ? (row.methodOther.trim() || "Otro") : row.method;
-
-        const res = await apiRequest("POST", `/api/${pathSegment}/${entityId}/account/payment`, {
-          amount: fmtMoney(parseFloat(row.amount)),
-          description: paymentDescription + (activeRows.length > 1 ? ` (${PAYMENT_METHODS.find(m => m.value === row.method)?.label || resolvedMethod})` : ""),
-          reference: paymentReference || null,
-          paymentMethod: resolvedMethod,
-          date: paymentDate,
-          // Only the first row carries allocations and retentions
-          allocations: i === 0 ? allocations : [],
-          retentions: i === 0 ? validRetentions : null,
-        });
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body?.error || `Error del servidor (${res.status})`);
-        }
-        const data = await res.json();
-        if (i === 0 && data?.id) firstMovementId = data.id;
+      if (selectedChargeErrors.length > 0) throw new Error(selectedChargeErrors[0]);
+      if (hasSelectedCharges && !allocationTotalMatchesPayment) {
+        throw new Error("El total aplicado debe coincidir con el total de los comprobantes seleccionados.");
       }
 
-      return firstMovementId;
+      const allocations = Object.entries(selected)
+        .filter(([, amount]) => parseMoneyInput(amount) > 0)
+        .map(([cargoId, amount]) => ({ cargoId, amount: moneyPayload(amount) }));
+
+      const validRetentions = retentions
+        .filter((row) => row.concepto && parseMoneyInput(row.monto) > 0)
+        .map((row) => ({ concepto: row.concepto, monto: parseMoneyInput(row.monto) }));
+
+      const activeRows = paymentRows.filter((row) => parseMoneyInput(row.amount) > 0);
+      if (activeRows.length === 0) throw new Error("Ingresá al menos un monto");
+
+      const paymentLines = activeRows.map((row) => ({
+        amount: moneyPayload(row.amount),
+        method: row.method === "otro" ? (row.methodOther.trim() || "Otro") : row.method,
+      }));
+      const resolvedMethods = paymentLines.map((line) =>
+        PAYMENT_METHODS.find((method) => method.value === line.method)?.label || line.method
+      );
+      const res = await apiRequest("POST", `/api/${pathSegment}/${entityId}/account/payment`, {
+        // All payment methods are sent together so the server can persist one
+        // accounting movement atomically with its allocations.
+        amount: totalPaymentMethods.toFixed(2),
+        payments: paymentLines,
+        description: paymentDescription,
+        reference: paymentReference || null,
+        paymentMethod: resolvedMethods.length > 1 ? "varios" : paymentLines[0].method,
+        date: paymentDate,
+        allocations,
+        retentions: validRetentions.length > 0 ? validRetentions : null,
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `Error del servidor (${res.status})`);
+      }
+      const data = await res.json();
+      return data?.id ?? null;
     },
     onSuccess: (firstMovementId) => {
       queryClient.invalidateQueries({ queryKey: [`/api/${pathSegment}`, entityId, "account"] });
@@ -207,7 +235,10 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
     },
   });
 
-  const canSubmit = totalAmount > 0 && !registerPaymentMutation.isPending;
+  const canSubmit = totalPaymentMethods > 0
+    && selectedChargeErrors.length === 0
+    && allocationTotalMatchesPayment
+    && !registerPaymentMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -239,8 +270,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                         <p className="text-xs text-muted-foreground">{charge.date} · Pendiente: ${fmtMoney(charge.saldoPendiente)}</p>
                       </div>
                       <Input
-                        type="number"
-                        step="0.01"
+                         type="text"
+                         inputMode="decimal"
                         className="w-28"
                         disabled={!isChecked}
                         value={selected[charge.id] ?? ""}
@@ -251,9 +282,17 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                   );
                 })}
               </div>
-              {!hasAllocations && (
+               {!hasSelectedCharges && (
                 <p className="text-xs text-muted-foreground mt-1">Sin comprobantes seleccionados, el pago se aplicará como pago a cuenta general.</p>
               )}
+               {selectedChargeErrors.map((message) => (
+                 <p key={message} className="text-xs text-destructive mt-1">{message}</p>
+               ))}
+               {hasSelectedCharges && selectedChargeErrors.length === 0 && !allocationTotalMatchesPayment && (
+                 <p className="text-xs text-destructive mt-1">
+                   Total de comprobantes: ${fmtMoney(allocationsTotal)} · Total aplicado: ${fmtMoney(totalApplied)}
+                 </p>
+               )}
             </div>
           )}
 
@@ -271,10 +310,9 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                   <div className="w-32 shrink-0">
                     <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
+                       type="text"
+                       inputMode="decimal"
+                       placeholder="0,00"
                       value={row.amount}
                       onChange={(e) => updatePaymentRow(idx, "amount", e.target.value)}
                       data-testid={`input-payment-amount-${idx}`}
@@ -337,8 +375,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                       </SelectContent>
                     </Select>
                     <Input
-                      type="number"
-                      step="0.01"
+                       type="text"
+                       inputMode="decimal"
                       placeholder="Monto"
                       value={r.monto}
                       onChange={(e) => updateRetention(i, "monto", e.target.value)}
@@ -354,31 +392,31 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
           </div>
 
           {/* Resumen de totales */}
-          {(totalAmount > 0 || retentionsTotal > 0) && (
+           {(totalPaymentMethods > 0 || retentionsTotal > 0) && (
             <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
-              {paymentRows.filter(r => (parseFloat(r.amount) || 0) > 0).map((row, idx) => (
+               {paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).map((row) => (
                 <div key={row.id} className="flex justify-between">
                   <span className="text-muted-foreground">
                     {PAYMENT_METHODS.find(m => m.value === row.method)?.label || row.methodOther || row.method}
                   </span>
-                  <span className="tabular-nums">${fmtMoney(parseFloat(row.amount) || 0)}</span>
+                   <span className="tabular-nums">${fmtMoney(parseMoneyInput(row.amount))}</span>
                 </div>
               ))}
-              {paymentRows.filter(r => (parseFloat(r.amount) || 0) > 0).length > 1 && (
+               {(paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).length > 1 || retentionsTotal > 0) && (
                 <div className="flex justify-between border-t pt-1">
-                  <span className="text-muted-foreground font-medium">Total</span>
-                  <span className="font-semibold tabular-nums">${fmtMoney(totalAmount)}</span>
+                   <span className="text-muted-foreground font-medium">Medios de pago</span>
+                   <span className="font-semibold tabular-nums">${fmtMoney(totalPaymentMethods)}</span>
                 </div>
               )}
               {retentionsTotal > 0 && (
                 <>
                   <div className="flex justify-between border-t pt-1">
                     <span className="text-muted-foreground">Retenciones</span>
-                    <span className="tabular-nums">-${fmtMoney(retentionsTotal)}</span>
+                     <span className="tabular-nums">+${fmtMoney(retentionsTotal)}</span>
                   </div>
                   <div className="flex justify-between border-t pt-1">
-                    <span className="text-muted-foreground">Efectivo recibido</span>
-                    <span className="font-semibold tabular-nums">${fmtMoney(cashReceived)}</span>
+                     <span className="text-muted-foreground font-medium">Total aplicado a la deuda</span>
+                     <span className="font-semibold tabular-nums">${fmtMoney(totalApplied)}</span>
                   </div>
                 </>
               )}

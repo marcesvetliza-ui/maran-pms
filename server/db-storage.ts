@@ -5388,6 +5388,69 @@ export class DatabaseStorage implements IStorage {
     allocations: { cargoId: string; amount: string }[]
   ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }> {
     return await db.transaction(async (tx) => {
+      const validationError = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+      const paymentAmount = Math.abs(parseFloat(data.amount));
+      const normalizedAllocations = allocations.map((allocation) => ({
+        cargoId: String(allocation.cargoId || ""),
+        amount: parseFloat(allocation.amount),
+      }));
+      const allocationsTotal = normalizedAllocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+        throw validationError("Monto inválido");
+      }
+      if (normalizedAllocations.some((allocation) => !allocation.cargoId || !Number.isFinite(allocation.amount) || allocation.amount <= 0)) {
+        throw validationError("Hay una asignación con datos inválidos");
+      }
+      if (normalizedAllocations.length > 0 && Math.abs(allocationsTotal - paymentAmount) > 0.01) {
+        throw validationError("El total aplicado debe coincidir con los comprobantes seleccionados");
+      }
+
+      if (normalizedAllocations.length > 0) {
+        const cargoIds = Array.from(new Set(normalizedAllocations.map((allocation) => allocation.cargoId)));
+        if (cargoIds.length !== normalizedAllocations.length) {
+          throw validationError("Un comprobante no puede asignarse más de una vez en el mismo pago");
+        }
+        const idsSql = sql.join(cargoIds.map((id) => sql`${id}`), sql`, `);
+
+        // Lock selected cargos before calculating their remaining balance. A
+        // concurrent payment waits here, then sees the first payment's
+        // allocations and is rejected instead of overpaying the cargo.
+        const lockedCargosResult = await tx.execute(sql`
+          SELECT id, amount::numeric AS amount
+          FROM account_movements
+          WHERE id IN (${idsSql})
+            AND entity_type = ${entityType}
+            AND entity_id = ${entityId}
+            AND type = 'cargo'
+          ORDER BY id
+          FOR UPDATE
+        `);
+        const lockedCargos = lockedCargosResult.rows as { id: string; amount: string }[];
+        if (lockedCargos.length !== cargoIds.length) {
+          throw validationError("Uno de los comprobantes seleccionados ya no está pendiente");
+        }
+
+        const allocatedResult = await tx.execute(sql`
+          SELECT cargo_id, COALESCE(SUM(amount::numeric), 0) AS allocated
+          FROM account_movement_allocations
+          WHERE cargo_id IN (${idsSql})
+          GROUP BY cargo_id
+        `);
+        const cargoById = new Map(lockedCargos.map((cargo) => [cargo.id, parseFloat(cargo.amount)]));
+        const allocatedByCargo = new Map(
+          (allocatedResult.rows as { cargo_id: string; allocated: string }[])
+            .map((row) => [row.cargo_id, parseFloat(row.allocated)])
+        );
+
+        for (const allocation of normalizedAllocations) {
+          const remaining = (cargoById.get(allocation.cargoId) ?? 0) - (allocatedByCargo.get(allocation.cargoId) ?? 0);
+          if (allocation.amount > remaining + 0.01) {
+            throw validationError("El importe aplicado supera el saldo pendiente del comprobante");
+          }
+        }
+      }
+
       const [movement] = await tx.insert(accountMovements).values({
         entityType,
         entityId,
@@ -5404,7 +5467,6 @@ export class DatabaseStorage implements IStorage {
 
       const createdAllocations: AccountMovementAllocation[] = [];
       for (const alloc of allocations) {
-        if (!alloc.cargoId || parseFloat(alloc.amount) <= 0) continue;
         const [created] = await tx.insert(accountMovementAllocations).values({
           pagoId: movement.id,
           cargoId: alloc.cargoId,

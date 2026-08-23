@@ -7,11 +7,19 @@ The Cuenta Corriente module (companies, agencies, guests) shares one engine: a s
 
 **Sign convention:** `cargo` movements are positive amount, `pago` movements negative. Pending balance per cargo = `cargo.amount - sum(allocations for that cargoId)`.
 
-**Allocations vs retentions are orthogonal:** a payment's recorded `amount` always equals the full allocated total against selected cargos (i.e. the cargo is fully/partially cancelled by that amount). Retenciones (IIBB, Ganancias, IVA, SUSS, TISHPYS, Otras) are stored as JSON metadata on the movement (`retentions` column) for reporting/receipt purposes only — they do NOT reduce the amount applied to cancel the cargo. Only the "efectivo/transferencia recibido" figure shown to the user (amount − retentions) reflects actual cash received.
+**Allocations vs retentions are distinct but both settle debt:** the payment methods represent cash/transfer value, while retentions (IIBB, Ganancias, IVA, SUSS, TISHPYS, Otras) are also applied to the account balance. The movement's accounting amount is payment methods plus retentions; retentions are additionally stored as JSON metadata on the movement (`retentions`) for reporting/receipt purposes.
 
-**Why:** this matches accounting reality — the invoice is legally cancelled for the full allocated amount even when part of it was withheld as a tax retention by the payer.
+**Why:** the retained amount is withheld from the payer but credited against the receivable, so subtracting it from the movement would leave the debt overstated and make allocation totals inconsistent.
 
 **How to apply:** when adding new payment/allocation UI or backend logic, keep `createPaymentWithAllocations` (in `server/db-storage.ts`, transactional via `db.transaction()`) as the single write path for all 3 entity types — do not duplicate payment logic per entity.
+
+**Multiple methods:** submit all methods of one payment together, then persist one `pago` movement for their summed value plus retentions. Its allocation total must equal that persisted accounting amount exactly; never accept a client-declared total as proof. Put the method breakdown in the movement description and use `paymentMethod="varios"` when applicable.
+
+**Concurrent allocations:** pending-balance validation must run inside the same transaction as payment creation, after locking each selected cargo with `FOR UPDATE`.
+
+**Why:** two requests can both read the same pre-transaction balance; without a row lock and a second balance check, each can allocate the full amount and overpay the cargo.
+
+**How to apply:** keep the lock ordering deterministic, recalculate prior allocations only after the locks are acquired, and reject the complete transaction when an allocation exceeds the remaining balance.
 
 **Receipt PDF:** auto-opens via `window.open` on successful payment (manual download/print only, never auto-emailed). Endpoint is `GET /api/account-movements/:id/receipt-pdf` in `server/exports.ts`; watch for route collisions (see express-route-param-collision.md).
 
