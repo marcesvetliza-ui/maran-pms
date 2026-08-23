@@ -2296,6 +2296,14 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/payments", async (req, res) => {
     try {
+      // Prefactura emits the invoice before recording its payment. Persist the
+      // invoice reference with the payment creation itself instead of relying
+      // on a later best-effort PATCH that could leave an orphaned payment.
+      if (req.body.invoiceData) {
+        req.body.invoiceRef = JSON.stringify(req.body.invoiceData);
+        req.body.invoiceLinkFailed = false;
+        delete req.body.invoiceData;
+      }
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
         if (reservation && isReservationLocked(reservation)) {

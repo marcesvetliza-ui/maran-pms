@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
@@ -75,6 +75,33 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
     result[ids[0]] = total - credited;
   }
   return result;
+}
+
+class FolioInvoiceValidationError extends Error {
+  constructor(message: string, readonly status: 400 | 404 | 409 = 400) {
+    super(message);
+    this.name = "FolioInvoiceValidationError";
+  }
+}
+
+/**
+ * A folio can be open in more than one browser tab. Keep the source validation
+ * and invoice creation in the same reservation-scoped critical section so two
+ * tabs cannot both consume the same charge residual.
+ *
+ * A session advisory lock is intentionally used instead of an in-process
+ * mutex: it coordinates every app instance that shares this PostgreSQL DB.
+ */
+async function withReservationInvoiceLock<T>(reservationId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `folio-invoice:${reservationId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
 }
 
 export function registerBillingRoutes(app: Express) {
@@ -410,27 +437,43 @@ export function registerBillingRoutes(app: Express) {
       if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
         return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
       }
+      const reservationId = reservaId === undefined || reservaId === null
+        ? ""
+        : String(reservaId).trim();
+      const normalizedSourceChargeIds = Array.isArray(sourceChargeIds)
+        ? [...new Set(sourceChargeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0))]
+        : [];
       const sanitizedSourceChargeAmounts = sourceChargeAmounts && typeof sourceChargeAmounts === "object"
         ? Object.fromEntries(
           Object.entries(sourceChargeAmounts)
             .filter(([id, amount]) => typeof id === "string" && Number.isFinite(Number(amount)) && Number(amount) > 0)
             .map(([id, amount]) => [id, Number(amount)])
         )
-        : undefined;
+        : {};
 
-      // A source amount is the amount this invoice consumes from a folio charge.
-      // Validate it server-side so a stale tab cannot invoice the same residual twice.
-      if (reservaId && sanitizedSourceChargeAmounts && Object.keys(sanitizedSourceChargeAmounts).length > 0) {
+      const emitInvoice = async () => {
+        // Every reservation invoice must declare the exact folio sources it
+        // consumes. Without this, an older tab could bypass the residual guard.
+        if (reservationId) {
+          const amountIds = Object.keys(sanitizedSourceChargeAmounts);
+          const hasSameSources = amountIds.length === normalizedSourceChargeIds.length &&
+            amountIds.every((id) => normalizedSourceChargeIds.includes(id));
+          if (!hasSameSources) {
+            throw new FolioInvoiceValidationError(
+              "Las facturas de folio deben incluir el importe de cada cargo seleccionado"
+            );
+          }
+
         const requestedTotal = Object.values(sanitizedSourceChargeAmounts)
           .reduce((sum, amount) => sum + Number(amount), 0);
         const itemsTotal = items.reduce((sum: number, item: any) => sum + (Number(item.subtotal) || 0), 0);
         if (Math.abs(requestedTotal - itemsTotal) > 0.02) {
-          return res.status(400).json({ error: "Los importes de los cargos no coinciden con el total del comprobante" });
+            throw new FolioInvoiceValidationError("Los importes de los cargos no coinciden con el total del comprobante");
         }
 
-        const reservation = await storage.getReservation(String(reservaId));
-        if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
-        const charges = await storage.getCharges(String(reservaId));
+          const reservation = await storage.getReservation(reservationId);
+          if (!reservation) throw new FolioInvoiceValidationError("Reserva no encontrada", 404);
+          const charges = await storage.getCharges(reservationId);
         const savedRoomTotal = parseFloat((reservation as any).totalRoomAmount || "0");
         const accommodationTotal = savedRoomTotal > 0
           ? savedRoomTotal
@@ -444,8 +487,8 @@ export function registerBillingRoutes(app: Express) {
 
         const priorInvoices = await db.execute(sql`
           SELECT source_charge_ids, source_charge_amounts, items, monto_total, monto_acreditado
-          FROM sales_invoices
-          WHERE reserva_id = ${String(reservaId)}
+            FROM sales_invoices
+            WHERE reserva_id = ${reservationId}
             AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
             AND estado IN ('emitida', 'parcial')
         `);
@@ -460,27 +503,37 @@ export function registerBillingRoutes(app: Express) {
           const original = originalAmounts[id];
           const pending = original - (alreadyInvoiced[id] || 0);
           if (!Number.isFinite(original) || original <= 0) {
-            return res.status(400).json({ error: `El cargo seleccionado (${id}) no existe o no es facturable` });
+              throw new FolioInvoiceValidationError(`El cargo seleccionado (${id}) no existe o no es facturable`);
           }
           if (Number(amount) > pending + 0.02) {
-            return res.status(409).json({ error: `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)` });
+              throw new FolioInvoiceValidationError(
+                `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)`,
+                409
+              );
           }
         }
-      }
+        }
+
+        const user = (req as any).user;
+        return emitirFactura({
+          tipoComprobante,
+          cliente,
+          items,
+          reservaId: reservationId || undefined,
+          folioId,
+          operador: user?.fullName || user?.username,
+          puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
+          cashFormaPago: cashFormaPago || undefined,
+          sourceChargeIds: normalizedSourceChargeIds.length > 0 ? normalizedSourceChargeIds : undefined,
+          sourceChargeAmounts: Object.keys(sanitizedSourceChargeAmounts).length > 0 ? sanitizedSourceChargeAmounts : undefined,
+          observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
+        } as NewInvoiceData);
+      };
+
+      const factura = reservationId
+        ? await withReservationInvoiceLock(reservationId, emitInvoice)
+        : await emitInvoice();
       const user = (req as any).user;
-      const factura = await emitirFactura({
-        tipoComprobante,
-        cliente,
-        items,
-        reservaId,
-        folioId,
-        operador: user?.fullName || user?.username,
-        puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
-        cashFormaPago: cashFormaPago || undefined,
-        sourceChargeIds: Array.isArray(sourceChargeIds) ? sourceChargeIds : undefined,
-        sourceChargeAmounts: sanitizedSourceChargeAmounts,
-        observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
-      } as NewInvoiceData);
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
       if (cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
@@ -527,6 +580,9 @@ export function registerBillingRoutes(app: Express) {
 
       res.status(201).json(factura);
     } catch (e: any) {
+      if (e instanceof FolioInvoiceValidationError) {
+        return res.status(e.status).json({ error: e.message });
+      }
       res.status(500).json({ error: e.message });
     }
   });

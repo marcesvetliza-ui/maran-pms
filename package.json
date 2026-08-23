@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.server.config.ts server/tests/folio-invoice-concurrency.test.ts",
     "test:watch": "vitest",
     "lint:dates": "bash script/check-date-patterns.sh",
     "test:dates": "bash script/test-check-date-patterns.sh"

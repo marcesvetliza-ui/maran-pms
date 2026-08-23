@@ -849,37 +849,9 @@ export function PrefacturaDialog({
         return;
       }
 
-      // 1. Register each payment row — collect IDs for invoice linking
-      // Skip rows with zero amounts (happens when balance is already fully covered).
-      const createdPaymentIds: number[] = [];
-      for (const row of selectedBalance > 0.01 ? paymentRows : []) {
-        const netAmount = parseFloat(row.amount) || 0;
-        const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
-        if (netAmount <= 0 && retMonto <= 0) continue; // nothing to register
-        const grossAmount = (netAmount + retMonto).toFixed(2);
-        const notes = retMonto > 0
-          ? JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } })
-          : null;
-
-        const res = await apiRequest("POST", "/api/payments", {
-          reservationId,
-          amount: grossAmount,
-          method: row.method,
-          date: getLocalToday(),
-          reference: null,
-          notes,
-          receiptType,
-          billingTarget,
-          companyId: billingTarget === "company" ? billingEntityId : null,
-          agencyId: billingTarget === "agency" ? billingEntityId : null,
-        });
-        const resBody = await res.json();
-        if (!res.ok) throw new Error(resBody?.error || "Error al registrar pago");
-        if (resBody?.id) createdPaymentIds.push(resBody.id);
-      }
-      if (createdPaymentIds.length > 0) setPaymentRegistered(true);
-
-      // 2. Emit invoice/comprobante
+      // 1. Emit the invoice before creating any payment. A stale browser tab
+      // can be rejected by the server's folio lock; in that case no payment is
+      // persisted and staff can refresh the dialog safely.
       let invoiceData: any = null;
       const invoiceItems = folio
         ? buildInvoiceItems(selectedItems, tipo)
@@ -915,22 +887,47 @@ export function PrefacturaDialog({
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
         invoiceData = invoiceBody;
         setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
-
-        // 2.5 Link each newly-created payment to this invoice (fire-and-forget, non-blocking)
-        const invoiceRef = {
-          id: invoiceData.id,
-          tipoComprobante: invoiceData.tipo_comprobante,
-          puntoVenta: invoiceData.punto_venta,
-          numero: invoiceData.numero,
-          cae: invoiceData.cae,
-          total: invoiceData.monto_total,
-        };
-        for (const payId of createdPaymentIds) {
-          apiRequest("PATCH", `/api/payments/${payId}/invoice`, { invoiceData: invoiceRef }).catch((e) =>
-            console.warn("[PrefacturaDialog] invoice link failed for payment", payId, e)
-          );
-        }
       }
+
+      // 2. Register payments only after the invoice has been accepted. The
+      // invoice reference is persisted during payment creation, so there is no
+      // later best-effort link request that can leave an orphaned payment.
+      const invoiceRef = invoiceData ? {
+        id: invoiceData.id,
+        tipoComprobante: invoiceData.tipoComprobante ?? invoiceData.tipo_comprobante,
+        puntoVenta: invoiceData.puntoVenta ?? invoiceData.punto_venta,
+        numero: invoiceData.numero,
+        cae: invoiceData.cae,
+        total: invoiceData.montoTotal ?? invoiceData.monto_total,
+      } : undefined;
+      let paymentCount = 0;
+      for (const row of selectedBalance > 0.01 ? paymentRows : []) {
+        const netAmount = parseFloat(row.amount) || 0;
+        const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
+        if (netAmount <= 0 && retMonto <= 0) continue;
+        const grossAmount = (netAmount + retMonto).toFixed(2);
+        const notes = retMonto > 0
+          ? JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } })
+          : null;
+
+        const res = await apiRequest("POST", "/api/payments", {
+          reservationId,
+          amount: grossAmount,
+          method: row.method,
+          date: getLocalToday(),
+          reference: null,
+          notes,
+          receiptType,
+          billingTarget,
+          companyId: billingTarget === "company" ? billingEntityId : null,
+          agencyId: billingTarget === "agency" ? billingEntityId : null,
+          invoiceData: invoiceRef,
+        });
+        const resBody = await res.json();
+        if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar el pago");
+        paymentCount++;
+      }
+      if (paymentCount > 0) setPaymentRegistered(true);
 
       // 3. Checkout if applicable
       // Use a local flag so we can gate onCheckoutComplete reliably within this
@@ -1080,6 +1077,7 @@ export function PrefacturaDialog({
   const reservationData = reservation as any;
   const isHistorical = reservationData?.checkOutDate < getLocalToday();
   const isEarlyCheckout = reservationData?.checkOutDate > getLocalToday();
+  const noMovements = !paymentRegistered && !emittedInvoice;
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
@@ -1704,7 +1702,6 @@ export function PrefacturaDialog({
           <div className="space-y-4">
             {/* Success / partial-success / no-movements banner */}
             {(() => {
-              const noMovements = !paymentRegistered && !emittedInvoice;
               const bannerClass = checkoutFailed
                 ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/10"
                 : noMovements
@@ -1728,7 +1725,9 @@ export function PrefacturaDialog({
               const headline = checkoutDone
                 ? "Check-out completado"
                 : checkoutFailed
-                  ? "Cobro e factura registrados — check-out pendiente"
+                  ? noMovements
+                    ? "Check-out pendiente"
+                    : "Cobro e factura registrados — check-out pendiente"
                   : noMovements
                     ? "Sin movimientos pendientes"
                     : "Cobro registrado";
@@ -1762,12 +1761,16 @@ export function PrefacturaDialog({
               );
             })()}
 
-            {/* Checkout-failed warning: payment & invoice are saved, checkout needs manual completion */}
+            {/* Checkout-failed warning: only claim a payment/invoice when they exist. */}
             {checkoutFailed && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/20 px-4 py-3 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <div className="text-sm text-amber-800 dark:text-amber-300 space-y-1">
-                  <p className="font-semibold">El cobro y el comprobante ya fueron registrados correctamente.</p>
+                  <p className="font-semibold">
+                    {noMovements
+                      ? "No se registraron cobros ni comprobantes."
+                      : "El cobro y el comprobante ya fueron registrados correctamente."}
+                  </p>
                   <p>Sin embargo, el check-out no pudo completarse automáticamente. Para liberar la habitación, realizá el check-out manualmente desde el folio de la reserva.</p>
                 </div>
               </div>

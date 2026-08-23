@@ -42,14 +42,8 @@ const { PrefacturaDialog } = await import("./PrefacturaDialog");
 const RESERVATION_ID = "res-co-test-1";
 
 /**
- * A folio with zero balance and zero roomTotal so that:
- *  - No payment row is required (balance = 0 bypasses the amount guard)
- *  - No invoice items are built (roomTotal = 0 + no charges)
- *    → the invoice POST is skipped entirely
- *  - The checkout POST is still attempted (mode=checkout + doCheckout=true)
- *
- * This isolates the test to the checkout-failure path without needing to stub
- * the payment or invoice endpoints.
+ * A folio with one outstanding charge. The test must persist an actual invoice
+ * and linked payment before the checkout request fails.
  */
 const FAKE_FOLIO = {
   reservationCode: "R-001",
@@ -60,21 +54,54 @@ const FAKE_FOLIO = {
   nights: 5,
   roomRate: "0.00",
   roomTotal: 0,
-  charges: [],
-  totalCharges: 0,
+  charges: [{
+    id: "charge-checkout",
+    description: "Cargo para check-out",
+    amount: "100.00",
+    category: "otros",
+    date: "2026-08-01",
+  }],
+  totalCharges: 100,
   payments: [],
   totalPayments: 0,
-  grandTotal: 0,
-  balance: 0,
+  grandTotal: 100,
+  balance: 100,
 };
+
+const CONFLICT_FOLIO = {
+  ...FAKE_FOLIO,
+  roomTotal: 0,
+  charges: [{
+    id: "charge-concurrent",
+    description: "Cargo concurrente",
+    amount: "100.00",
+    category: "otros",
+    date: "2026-08-01",
+  }],
+  totalCharges: 100,
+  grandTotal: 100,
+  balance: 100,
+};
+
+const CONFLICT_RESERVATION = {
+  id: RESERVATION_ID,
+  status: "checked_in",
+  checkOutDate: "2026-08-02",
+  guest: {
+    firstName: "Test",
+    lastName: "Guest",
+    vatCondition: "consumidor_final",
+    documentNumber: "12345678",
+  },
+  room: { roomNumber: "101" },
+} as any;
 
 // ── Fetch mock ────────────────────────────────────────────────────────────────
 
 /**
- * Builds a fetch mock that:
- *  - Returns FAKE_FOLIO for GET …/folio
- *  - Returns 500 for POST …/check-out  (the failure under test)
- *  - Returns empty arrays for all other requests
+ * Builds a fetch mock that emits a successful invoice and payment, then returns
+ * 500 for checkout. This exercises the real recovery state rather than the
+ * zero-movement shortcut.
  */
 function buildFetchMock() {
   return vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
@@ -85,6 +112,34 @@ function buildFetchMock() {
     if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
       return new Response(JSON.stringify(FAKE_FOLIO), {
         status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (strUrl.includes("/api/billing/config")) {
+      return new Response(JSON.stringify({ puntoVenta: 1, arcaAmbiente: "ficticio" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (strUrl.includes("/api/billing/invoices") && method === "POST") {
+      return new Response(JSON.stringify({
+        id: 800,
+        tipoComprobante: "FB",
+        puntoVenta: 1,
+        numero: 800,
+        cae: "CAE-TEST-800",
+        montoTotal: "100.00",
+      }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (strUrl.includes("/api/payments") && method === "POST") {
+      return new Response(JSON.stringify({ id: "payment-checkout-1" }), {
+        status: 201,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -108,6 +163,44 @@ function buildFetchMock() {
   });
 }
 
+/**
+ * Simulates another browser tab winning the reservation-scoped invoice lock.
+ * The test asserts that a 409 from billing happens before any payment POST.
+ */
+function buildInvoiceConflictFetchMock() {
+  const mock = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    const strUrl = url.toString();
+    const method = options?.method?.toUpperCase() ?? "GET";
+
+    if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
+      return new Response(JSON.stringify(CONFLICT_FOLIO), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes("/api/billing/config")) {
+      return new Response(JSON.stringify({ puntoVenta: 1, arcaAmbiente: "ficticio" }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes("/api/billing/invoices") && method === "POST") {
+      return new Response(JSON.stringify({
+        error: "El cargo seleccionado ya no tiene saldo suficiente para facturar ($0.00 disponible)",
+      }), {
+        status: 409, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes("/api/payments") && method === "POST") {
+      return new Response(JSON.stringify({ id: "should-not-exist" }), {
+        status: 201, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify([]), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  });
+  return mock;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Wrapper({ children }: { children: React.ReactNode }) {
@@ -128,6 +221,7 @@ function renderDialog(
         open={true}
         onClose={onClose}
         reservationId={RESERVATION_ID}
+        reservation={CONFLICT_RESERVATION}
         mode="checkout"
         onCheckoutComplete={onCheckoutComplete}
         {...overrides}
@@ -138,11 +232,11 @@ function renderDialog(
 }
 
 /**
- * Uses the direct check-out action for a folio already at zero balance, then
- * waits for the recovery state shown when the check-out request fails.
+ * Emits and pays the outstanding charge, then waits for the recovery state
+ * shown when checkout itself fails.
  */
 async function advanceAndSubmit(user: ReturnType<typeof userEvent.setup>) {
-  const submitBtn = await screen.findByRole("button", { name: /dar check-out/i });
+  const submitBtn = await screen.findByTestId("button-registrar-emitir");
   await user.click(submitBtn);
 
   // Wait for step 3 to appear (success or failure banner in the result card)
@@ -218,5 +312,48 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     await advanceAndSubmit(user);
 
     expect(onCheckoutComplete).not.toHaveBeenCalled();
+  });
+
+  it("creates the payment with the emitted invoice reference before checkout fails", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await advanceAndSubmit(user);
+
+    const paymentCall = fetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/payments") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
+    );
+    expect(paymentCall).toBeDefined();
+    const paymentBody = JSON.parse(String((paymentCall?.[1] as RequestInit).body));
+    expect(paymentBody.invoiceData).toMatchObject({
+      id: 800,
+      tipoComprobante: "FB",
+      puntoVenta: 1,
+      numero: 800,
+      total: "100.00",
+    });
+  });
+
+  it("does not create a payment when invoice emission is rejected with 409", async () => {
+    const conflictFetchMock = buildInvoiceConflictFetchMock();
+    vi.stubGlobal("fetch", conflictFetchMock);
+    const user = userEvent.setup();
+    renderDialog({
+      mode: "billing",
+      reservation: CONFLICT_RESERVATION,
+    });
+
+    const submitButton = await screen.findByTestId("button-registrar-emitir");
+    await waitFor(() => expect(submitButton).toBeEnabled());
+    await user.click(submitButton);
+
+    await screen.findByText(/ya no tiene saldo suficiente para facturar/i);
+
+    const calledPaymentPost = conflictFetchMock.mock.calls.some(([url, options]) =>
+      String(url).includes("/api/payments") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
+    );
+    expect(calledPaymentPost).toBe(false);
   });
 });
