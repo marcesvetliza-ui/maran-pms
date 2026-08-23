@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getAllBillableFolioItems,
+  getEffectiveFolioItemAmounts,
   getInvoicedAmountsByCharge,
   getRemainingChargeAmounts,
   getSelectedFolioBalance,
@@ -89,6 +90,22 @@ describe("PrefacturaDialog selected folio projection", () => {
     expect(getSelectedFolioBalance(restaurantOnly, getAllBillableFolioItems(folio, {}, remaining))).toBe(35.5);
   });
 
+  it("subtracts a partial NC only from its linked charge in a multi-charge invoice", () => {
+    const invoiced = getInvoicedAmountsByCharge([{
+      source_charge_amounts: { accommodation: 100, restaurant: 100 },
+      credit_source_charge_amounts: [{ accommodation: 50 }],
+      monto_total: "200",
+      monto_acreditado: "50",
+    }]);
+
+    expect(invoiced).toEqual({ accommodation: 50, restaurant: 100 });
+    const remaining = getRemainingChargeAmounts([
+      { id: "accommodation", amount: 100, originalAmount: 100, description: "Alojamiento" },
+      { id: "restaurant", amount: 100, originalAmount: 100, description: "Cena" },
+    ], invoiced);
+    expect(remaining).toEqual({ accommodation: 50, restaurant: 0 });
+  });
+
   it("keeps an uninvoiced advance out of the fiscal amount while reducing only collection", () => {
     const advanceFolio = {
       roomTotal: 286000,
@@ -111,6 +128,40 @@ describe("PrefacturaDialog selected folio projection", () => {
 
     expect(invoiceAmount).toBe(181500);
     expect(amountToCollect).toBe(171500);
+  });
+
+  it("projects a credit-note adjustment onto its original charge without changing its history", () => {
+    const adjustedFolio = {
+      roomTotal: 120,
+      roomNumber: "203",
+      nights: 2,
+      charges: [
+        { id: "restaurant", description: "Cena", amount: "100.00", category: "restaurant" },
+        { id: "nc-adjustment", description: "Ajuste por NC NCB 0001-00000001 — Cena [nc:41:restaurant]", amount: "-35.00", category: "adjustment" },
+      ],
+    };
+
+    expect(getEffectiveFolioItemAmounts(adjustedFolio)).toMatchObject({ accommodation: 120, restaurant: 65 });
+    expect(getAllBillableFolioItems(adjustedFolio)).toEqual([
+      expect.objectContaining({ id: "accommodation", amount: 120 }),
+      expect.objectContaining({ id: "restaurant", originalAmount: 100, amount: 65 }),
+    ]);
+  });
+
+  it("supports a total NC after a prior partial NC by exposing only the remaining charge", () => {
+    const adjustedFolio = {
+      roomTotal: 0,
+      roomNumber: "203",
+      nights: 0,
+      charges: [
+        { id: "parking", description: "Cochera", amount: "80.00", category: "parking" },
+        { id: "nc-1", description: "Ajuste por NC NCB 0001-00000001 — Cochera [nc:41:parking]", amount: "-30.00", category: "adjustment" },
+      ],
+    };
+
+    const items = getSelectedFolioItems(new Set(["parking"]), adjustedFolio);
+    expect(items).toEqual([expect.objectContaining({ id: "parking", originalAmount: 80, amount: 50 })]);
+    expect(getSelectedFolioTotal(items)).toBe(50);
   });
 
   it("defaults to an electronic receipt for Consumidor Final", () => {
