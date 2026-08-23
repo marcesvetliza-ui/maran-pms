@@ -39,6 +39,7 @@ export interface NewInvoiceData {
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
   sourceChargeIds?: string[]; // IDs de cargos del folio incluidos en esta factura
+  observaciones?: string;
 }
 
 const TIPOS_CBT_WSFE: Record<string, number> = {
@@ -257,9 +258,12 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     clienteDni: data.cliente.dni || null,
     clienteCondicionIva: data.cliente.condicionIva,
     clienteDomicilio: data.cliente.domicilio || null,
-    ...Object.fromEntries(
-      Object.entries(montos).map(([k, v]) => [k, String(v)])
-    ),
+    montoNeto: String(montos.montoNeto),
+    montoIva21: String(montos.montoIva21),
+    montoIva105: String(montos.montoIva105),
+    montoExento: String(montos.montoExento),
+    montoNoGravado: String(montos.montoNoGravado),
+    montoTotal: String(montos.montoTotal),
     cae,
     caeFechaVto: caeFechaVto ? caeFechaVto.toISOString().split("T")[0] : null,
     modoFicticio,
@@ -273,6 +277,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     operador: data.operador || null,
     cashFormaPago: data.cashFormaPago || null,
     sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
+    observaciones: data.observaciones || null,
   }).returning();
 
   return factura;

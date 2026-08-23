@@ -138,21 +138,11 @@ function renderDialog(
 }
 
 /**
- * Advances the dialog from step 1 → step 2 → submit, then waits for step 3
- * to appear (either the amber warning or the green success banner).
- *
- * Uses a generous timeout because the folio query must resolve before the
- * "Siguiente" button is enabled.
+ * Uses the direct check-out action for a folio already at zero balance, then
+ * waits for the recovery state shown when the check-out request fails.
  */
 async function advanceAndSubmit(user: ReturnType<typeof userEvent.setup>) {
-  // Wait for the "Siguiente — Cobro" button to become enabled (folio loaded)
-  const siguienteBtn = await screen.findByRole("button", {
-    name: /siguiente.*cobro/i,
-  });
-  await user.click(siguienteBtn);
-
-  // Now on step 2 — click the primary submit button
-  const submitBtn = await screen.findByTestId("button-registrar-emitir");
+  const submitBtn = await screen.findByRole("button", { name: /dar check-out/i });
   await user.click(submitBtn);
 
   // Wait for step 3 to appear (success or failure banner in the result card)

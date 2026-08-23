@@ -63,6 +63,95 @@ export interface PrefacturaDialogProps {
   onCheckoutComplete?: () => void;
 }
 
+export interface SelectedFolioItem {
+  id: string;
+  amount: number;
+  description: string;
+}
+
+/**
+ * Single source of truth for the items selected in Prefactura.
+ * Transfer movements are folio adjustments and are never billable.
+ */
+export function getSelectedFolioItems(
+  selectedIds: Set<string>,
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
+  itemDescriptions: Record<string, string> = {},
+): SelectedFolioItem[] {
+  const items: SelectedFolioItem[] = [];
+
+  if (selectedIds.has("accommodation") && folio.roomTotal > 0) {
+    items.push({
+      id: "accommodation",
+      amount: folio.roomTotal,
+      description: itemDescriptions.accommodation ||
+        `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`,
+    });
+  }
+
+  for (const charge of folio.charges || []) {
+    if (charge.category === "transfer_out" || charge.category === "transfer_in") continue;
+    const amount = parseFloat(charge.amount);
+    if (selectedIds.has(String(charge.id)) && Number.isFinite(amount) && amount > 0) {
+      const id = String(charge.id);
+      items.push({
+        id,
+        amount,
+        description: itemDescriptions[id] || charge.description,
+      });
+    }
+  }
+
+  return items;
+}
+
+export function getAllBillableFolioItems(
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
+  itemDescriptions: Record<string, string> = {},
+): SelectedFolioItem[] {
+  const allIds = new Set<string>();
+  if (folio.roomTotal > 0) allIds.add("accommodation");
+  for (const charge of folio.charges || []) {
+    if (charge.category !== "transfer_out" && charge.category !== "transfer_in" &&
+      (parseFloat(charge.amount) || 0) > 0) {
+      allIds.add(String(charge.id));
+    }
+  }
+  return getSelectedFolioItems(allIds, folio, itemDescriptions);
+}
+
+export function getSelectedFolioTotal(items: SelectedFolioItem[]): number {
+  return items.reduce((total, item) => total + item.amount, 0);
+}
+
+/**
+ * Payments belong to the reservation, not to an individual charge. Until a
+ * payment is explicitly linked to an invoice, the folio applies it to billable
+ * items in the same order shown to staff (accommodation, then charges). This
+ * makes a partial selection safe: a payment consumed by an earlier charge
+ * cannot silently make a later selected charge look paid.
+ */
+export function getSelectedFolioBalance(
+  selectedItems: SelectedFolioItem[],
+  allBillableItems: SelectedFolioItem[],
+  payments: Array<{ amount: string | number; status?: string }> = [],
+): number {
+  const selectedIds = new Set(selectedItems.map((item) => item.id));
+  let paymentRemaining = payments
+    .filter((payment) => payment.status !== "anulado")
+    .reduce((total, payment) => total + (parseFloat(String(payment.amount)) || 0), 0);
+  let allocatedToSelection = 0;
+
+  for (const item of allBillableItems) {
+    if (paymentRemaining <= 0) break;
+    const applied = Math.min(item.amount, paymentRemaining);
+    if (selectedIds.has(item.id)) allocatedToSelection += applied;
+    paymentRemaining -= applied;
+  }
+
+  return Math.max(0, getSelectedFolioTotal(selectedItems) - allocatedToSelection);
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -148,14 +237,22 @@ function buildInvoiceItems(
 
 // ─── Auto-suggest tipo from condicionIva / cuit ───────────────────────────────
 
-function suggestTipo(cuit: string, condicionIva: string): string {
+export function suggestTipo(cuit: string, condicionIva: string): string {
   if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") {
     // Factura A requiere CUIT; sin CUIT usamos Factura B como fallback seguro
     return cuit ? "FA" : "FB";
   }
   if (condicionIva === "Monotributista") return "FB";
-  // Consumidor Final sin CUIT → mantener tipo no fiscal (checkout)
-  return cuit ? "FB" : "cierre_habitacion";
+  // The default must be an electronic document even for Consumidor Final.
+  return "FB";
+}
+
+export function isArgentineNationality(nationality?: string | null, nationalityCode?: string | null): boolean {
+  const normalizedNationality = (nationality || "").trim().toLowerCase();
+  const normalizedCode = (nationalityCode || "").trim().toUpperCase();
+  return normalizedCode === "ARG" ||
+    normalizedCode === "AR" ||
+    ["argentina", "argentino", "argentina/a", "argentine"].includes(normalizedNationality);
 }
 
 let rowIdCounter = 0;
@@ -189,9 +286,12 @@ export function PrefacturaDialog({
   const [dni, setDni] = useState("");
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
+  const [documentType, setDocumentType] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [nationalityCode, setNationalityCode] = useState("");
 
   // Step 1: invoice config
-  const [tipo, setTipo] = useState("cierre_habitacion");
+  const [tipo, setTipo] = useState("FB");
   const [puntoVenta, setPuntoVenta] = useState("");
   const [doCheckout, setDoCheckout] = useState(true);
 
@@ -199,6 +299,7 @@ export function PrefacturaDialog({
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" },
   ]);
+  const [invoiceObservations, setInvoiceObservations] = useState("");
 
   // Step 3: result
   const [emittedInvoice, setEmittedInvoice] = useState<any>(null);
@@ -288,6 +389,7 @@ export function PrefacturaDialog({
       setItemDescriptions({});
       setEditingId(null);
       setSplitBalanceChanged(false);
+      setInvoiceObservations("");
       folioInitializedRef.current = false;
     }
   }, [open]);
@@ -309,31 +411,24 @@ export function PrefacturaDialog({
       // ── Initial load ────────────────────────────────────────────────────────
       folioInitializedRef.current = true;
 
-      const allIds = new Set<string>(["accommodation"]);
-      (folio.charges || []).forEach((c: any) => {
-        if (c.category !== "transfer_out" && c.category !== "transfer_in") {
-          allIds.add(String(c.id));
-        }
-      });
+      const allIds = new Set(getAllBillableFolioItems(folio).map(item => item.id));
       setSelectedIds(allIds);
 
-      if (folio.balance > 0.01) {
+      const initialItems = getSelectedFolioItems(allIds, folio);
+      const initialBalance = getSelectedFolioBalance(
+        initialItems,
+        initialItems,
+        folio.payments || [],
+      );
+      if (initialBalance > 0.01) {
         setPaymentRows([{
-          id: newRowId(), amount: String(folio.balance.toFixed(2)), method: "efectivo",
+          id: newRowId(), amount: String(initialBalance.toFixed(2)), method: "efectivo",
           reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "",
         }]);
       }
     } else {
       // ── Re-fetch after NC / ND / reversal ───────────────────────────────────
       // Also re-sync selected items in case new charges appeared or were voided.
-      const allIds = new Set<string>(["accommodation"]);
-      (folio.charges || []).forEach((c: any) => {
-        if (c.category !== "transfer_out" && c.category !== "transfer_in") {
-          allIds.add(String(c.id));
-        }
-      });
-      setSelectedIds(allIds);
-
       // Update payment amount only when there is exactly one payment row so we
       // do not silently discard a custom multi-row split the user already set up.
       // When the user has multiple rows we leave them untouched and instead show
@@ -342,19 +437,18 @@ export function PrefacturaDialog({
         if (prev.length === 1) {
           return [{
             ...prev[0],
-            amount: folio.balance > 0.01 ? String(folio.balance.toFixed(2)) : prev[0].amount,
+            amount: prev[0].amount,
           }];
         }
         // Multiple rows — flag the mismatch but leave amounts intact.
         // Only show the warning when there is actually a balance to re-split;
         // if the balance is now zero (e.g. after a full NC) the warning is misleading.
-        if (folio.balance > 0.01) setSplitBalanceChanged(true);
+        if (prev.some(row => (parseFloat(row.amount) || 0) > 0)) setSplitBalanceChanged(true);
         return prev;
       });
     }
-  // folio?.balance drives both the payment pre-fill and the saldoRestante display;
-  // using it (rather than grandTotal) ensures a balance change from a voided charge
-  // or NC that leaves grandTotal unchanged still triggers a re-sync.
+  // A refetch must never reselect an already invoiced item or overwrite the
+  // selection-specific payment allocation shown to the user.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folio?.balance, open]);
 
@@ -368,10 +462,14 @@ export function PrefacturaDialog({
   // Auto-suggest default POS
   useEffect(() => {
     if (posConfigs.length > 0 && !puntoVenta) {
-      const def = posConfigs.find((p: any) => p.isDefault) || posConfigs[0];
-      if (def) setPuntoVenta(String(def.puntoVenta));
+      const activePos = posConfigs.filter((p: any) => p.activo !== false);
+      const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
+      const defaultPos = configuredPos || activePos[0];
+      if (defaultPos) setPuntoVenta(String(defaultPos.numero));
+    } else if (!puntoVenta && billingConfig?.puntoVenta) {
+      setPuntoVenta(String(billingConfig.puntoVenta));
     }
-  }, [posConfigs]);
+  }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
 
   function fillFromReservation(res: ReservationWithDetails, _source: string) {
     const g = res.guest as any;
@@ -402,6 +500,9 @@ export function PrefacturaDialog({
       setDni(dniVal);
       setCondicionIva(condVal);
       setDomicilio([g.direccion, g.localidad].filter(Boolean).join(", "));
+      setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
+      setNationality(g.nationality || "");
+      setNationalityCode(g.nationalityCode || "");
       setTipo(suggestTipo(cuitVal, condVal));
     }
   }
@@ -419,6 +520,9 @@ export function PrefacturaDialog({
     setDni("");
     setCondicionIva(condVal);
     setDomicilio(dom);
+    setDocumentType("CUIT");
+    setNationality("");
+    setNationalityCode("");
     setTipo(suggestTipo(cuitVal, condVal));
   }
 
@@ -429,7 +533,8 @@ export function PrefacturaDialog({
       fillFromReservation(reservation, "target_change");
     } else {
       setRazonSocial(""); setCuit(""); setDni(""); setCondicionIva("Consumidor Final"); setDomicilio("");
-      setTipo("cierre_habitacion");
+      setDocumentType(""); setNationality(""); setNationalityCode("");
+      setTipo("FB");
     }
   }
 
@@ -467,15 +572,22 @@ export function PrefacturaDialog({
     });
   }
 
-  // Computed totals
-  const totalSelected = (() => {
-    let t = 0;
-    if (folio) {
-      if (selectedIds.has("accommodation")) t += folio.roomTotal;
-      (folio.charges || []).forEach((c: any) => { if (selectedIds.has(String(c.id))) t += parseFloat(c.amount); });
-    }
-    return t;
-  })();
+  // Computed totals. All downstream operations use this same selected-item
+  // projection so changing the fiscal recipient cannot change the amount.
+  const selectedItems = folio
+    ? getSelectedFolioItems(selectedIds, folio, itemDescriptions)
+    : [];
+  const allBillableItems = folio
+    ? getAllBillableFolioItems(folio, itemDescriptions)
+    : [];
+  const totalSelected = getSelectedFolioTotal(selectedItems);
+  const selectedBalance = getSelectedFolioBalance(
+    selectedItems,
+    allBillableItems,
+    folio?.payments || [],
+  );
+  const selectedAlreadyPaid = totalSelected - selectedBalance;
+  const selectedSourceIds = selectedItems.map(item => item.id);
 
   const totalPayments = paymentRows.reduce((acc, r) => {
     const net = parseFloat(r.amount) || 0;
@@ -483,7 +595,7 @@ export function PrefacturaDialog({
     return acc + net + ret;
   }, 0);
 
-  const saldoRestante = (folio?.balance || 0) - totalPayments;
+  const saldoRestante = selectedBalance - totalPayments;
   const isFiscalTipo = !NON_FISCAL.has(tipo);
   const isFacturaA = tipo === "FA" || tipo === "FM"; // Factura A and MiPyme A require a company/agency entity with CUIT
   const facturaANeedsEntity = isFacturaA && billingTarget === "guest";
@@ -517,6 +629,19 @@ export function PrefacturaDialog({
     })
   );
 
+  // An invoice query may resolve after the folio query. Remove its source
+  // charges from the default selection instead of re-offering them on reload.
+  useEffect(() => {
+    if (!open || invoicedChargeIds.size === 0) return;
+    setSelectedIds(previous => {
+      const next = new Set(Array.from(previous).filter(id => !invoicedChargeIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  // emittedInvoices is the stable query result; invoicedChargeIds is rebuilt
+  // on each render and must not itself be used as an effect dependency.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, emittedInvoices]);
+
   // Bug I: restrict "Facturar a" options to what's actually associated with this reservation.
   // If a company is on the reservation → only allow billing to that company.
   // If an agency → only the agency. If neither → only guest.
@@ -529,38 +654,48 @@ export function PrefacturaDialog({
       ? ["agency"]
       : ["guest"];
   const billingTargetLocked = allowedBillingTargets.length === 1;
+  const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
+  const canIssueFacturaT = billingTarget === "guest" &&
+    hasSelectedAccommodation &&
+    !!(nationality || nationalityCode) &&
+    !isArgentineNationality(nationality, nationalityCode);
 
-  // Bug L: filter comprobante types by the client's VAT condition.
-  // NC/ND types were already removed from TIPO_OPTIONS; here we further restrict
-  // based on condicion IVA so users cannot accidentally pick an invalid type.
+  // Comprobante availability is based on the recipient. Factura T is only for a
+  // foreign guest with accommodation in the selected items.
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
-    if (condicionIva === "Responsable Inscripto") return ["FA", "FM", "FT"].includes(opt.value);
-    return ["FB", "FT"].includes(opt.value);
+    if (opt.value === "FT") return canIssueFacturaT;
+    if (condicionIva === "Responsable Inscripto") return ["FA", "FM"].includes(opt.value);
+    return opt.value === "FB";
   });
-  // If current tipo is no longer in filtered list, reset to suggested
-  // (handled reactively so we don't cause extra renders here)
 
-  // Bug R: auto-sync first payment row amount when user changes selected charges.
-  // Previously this happened in the "Siguiente" button click; now that both steps are
-  // on one screen we do it reactively so the payment field always stays in sync.
+  useEffect(() => {
+    if (!filteredTipoOptions.some(option => option.value === tipo)) {
+      setTipo(suggestTipo(cuit, condicionIva));
+    }
+  }, [tipo, cuit, condicionIva, canIssueFacturaT, filteredTipoOptions]);
+
+  // Keep the single payment row aligned with the selected subset. Clear a stale
+  // amount when the user unchecks every item.
   useEffect(() => {
     if (step === 3) return; // don't interfere with result state
-    if (totalSelected > 0.01) {
-      setPaymentRows(prev =>
-        prev.length === 1
-          ? [{ ...prev[0], amount: String(totalSelected.toFixed(2)) }]
-          : prev
-      );
-    }
+    setPaymentRows(prev =>
+      prev.length === 1
+        ? [{ ...prev[0], amount: selectedBalance > 0.01 ? selectedBalance.toFixed(2) : "" }]
+        : prev
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalSelected]);
+  }, [selectedBalance]);
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
   // Gate: warn if user enters less than the full balance before actually submitting
   function handleSubmit() {
-    const balanceOwed = folio?.balance ?? 0;
+    if (totalSelected <= 0.01) {
+      toast({ title: "Seleccioná al menos un cargo para facturar", variant: "destructive" });
+      return;
+    }
+    const balanceOwed = selectedBalance;
     // When the folio is already fully covered (zero or negative balance), skip the
     // "must enter an amount" guard — no new payment is needed.
     if (balanceOwed > 0.01) {
@@ -577,31 +712,35 @@ export function PrefacturaDialog({
   }
 
   async function doSubmit() {
-    const balanceOwed = folio?.balance ?? 0;
+    if (totalSelected <= 0.01 && !alreadyPaidAndInvoiced) {
+      toast({ title: "Seleccioná al menos un cargo para facturar", variant: "destructive" });
+      return;
+    }
+    const balanceOwed = selectedBalance;
     // Same guard: only require amounts when there is an actual outstanding balance.
     if (balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
       return;
     }
-    if (isFacturaA && billingTarget === "guest") {
+    if (!alreadyPaidAndInvoiced && isFacturaA && billingTarget === "guest") {
       toast({ title: "Factura A requiere una empresa o agencia", description: "Cambiá el destinatario a Empresa o Agencia y seleccioná el receptor.", variant: "destructive" });
       return;
     }
     // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
     // razón social a mano. El CUIT se valida más abajo para Factura A.
-    if (billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
+    if (!alreadyPaidAndInvoiced && billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
       toast({ title: "Ingresá la razón social de la empresa o seleccionala del listado", variant: "destructive" });
       return;
     }
-    if (billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
+    if (!alreadyPaidAndInvoiced && billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
       toast({ title: "Ingresá la razón social de la agencia o seleccionala del listado", variant: "destructive" });
       return;
     }
-    if (isFiscalTipo && !razonSocial.trim()) {
+    if (!alreadyPaidAndInvoiced && isFiscalTipo && !razonSocial.trim()) {
       toast({ title: "Ingresá el nombre / razón social", variant: "destructive" });
       return;
     }
-    if (tipo === "FA") {
+    if (!alreadyPaidAndInvoiced && tipo === "FA") {
       const cuitClean = cuit.replace(/-/g, "");
       if (!cuitClean || !/^\d{11}$/.test(cuitClean)) {
         toast({ title: "Factura A requiere CUIT válido (11 dígitos)", variant: "destructive" });
@@ -618,6 +757,7 @@ export function PrefacturaDialog({
       // Guard: if the folio is already fully paid AND has invoices, skip payment+invoice
       // and go straight to checkout. This prevents duplicate invoices.
       if (alreadyPaidAndInvoiced) {
+        let checkoutDidFail = false;
         if (mode === "checkout" && doCheckout) {
           try {
             const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
@@ -634,18 +774,23 @@ export function PrefacturaDialog({
             queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
             onCheckoutComplete?.();
           } catch (coErr: any) {
+            checkoutDidFail = true;
             setCheckoutFailed(true);
           }
         }
-        setEmittedInvoice(null);
-        setStep(3);
+        if (checkoutDidFail) {
+          setEmittedInvoice(null);
+          setStep(3);
+        } else {
+          onClose();
+        }
         return;
       }
 
       // 1. Register each payment row — collect IDs for invoice linking
       // Skip rows with zero amounts (happens when balance is already fully covered).
       const createdPaymentIds: number[] = [];
-      for (const row of paymentRows) {
+      for (const row of selectedBalance > 0.01 ? paymentRows : []) {
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
         if (netAmount <= 0 && retMonto <= 0) continue; // nothing to register
@@ -659,7 +804,7 @@ export function PrefacturaDialog({
           amount: grossAmount,
           method: row.method,
           date: getLocalToday(),
-          reference: row.reference || null,
+          reference: null,
           notes,
           receiptType,
           billingTarget,
@@ -674,7 +819,9 @@ export function PrefacturaDialog({
 
       // 2. Emit invoice/comprobante
       let invoiceData: any = null;
-      const invoiceItems = folio ? buildInvoiceItems(selectedIds, itemDescriptions, folio, tipo) : [];
+      const invoiceItems = folio
+        ? buildInvoiceItems(new Set(selectedSourceIds), itemDescriptions, folio, tipo)
+        : [];
       if (invoiceItems.length > 0) {
         // Si algún row de cobro es "cuenta_corriente" y hay una empresa/agencia seleccionada,
         // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
@@ -693,12 +840,13 @@ export function PrefacturaDialog({
           items: invoiceItems,
           reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
-          sourceChargeIds: Array.from(selectedIds),
+          sourceChargeIds: selectedSourceIds,
           ...(isCcPayment ? {
             cashFormaPago: "cuenta_corriente",
             ccEntityType: billingTarget,
             ccEntityId: billingEntityId,
           } : {}),
+          observaciones: invoiceObservations.trim() || undefined,
         });
         const invoiceBody = await invoiceRes.json();
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
@@ -753,16 +901,69 @@ export function PrefacturaDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
 
-      await refetchFolio();
-      setEmittedInvoice(invoiceData);
-      setStep(3);
-      // Only signal checkout completion to the parent when checkout actually succeeded.
-      // When checkout failed (checkoutSucceeded=false), skip the callback so callers
-      // don't close the dialog or update state as if the room were already released —
-      // staff need to see the amber warning and complete checkout manually.
-      if (mode !== "checkout" || !doCheckout || checkoutSucceeded) {
-        onCheckoutComplete?.();
+      const refreshed = await refetchFolio();
+      if (mode === "checkout" && doCheckout && !checkoutSucceeded) {
+        // Payment and invoice have been saved, but the room must not be treated
+        // as closed until staff resolve the failed checkout.
+        setEmittedInvoice(invoiceData);
+        setStep(3);
+        return;
       }
+
+      if (mode === "checkout" && doCheckout && checkoutSucceeded) {
+        onCheckoutComplete?.();
+        onClose();
+        return;
+      }
+
+      // Keep the user in Prefactura only when a fresh folio still contains
+      // billable, not-yet-invoiced items. Do not reselect this submission's
+      // source IDs and accidentally issue the same charge twice.
+      const freshFolio = refreshed.data;
+      const newlyInvoicedIds = new Set(selectedSourceIds);
+      const nextSelection = new Set<string>();
+      if (freshFolio) {
+        if (freshFolio.roomTotal > 0 &&
+          !newlyInvoicedIds.has("accommodation") &&
+          !invoicedChargeIds.has("accommodation")) {
+          nextSelection.add("accommodation");
+        }
+        for (const charge of freshFolio.charges || []) {
+          const id = String(charge.id);
+          if (charge.category !== "transfer_out" &&
+            charge.category !== "transfer_in" &&
+            parseFloat(charge.amount) > 0 &&
+            !newlyInvoicedIds.has(id) &&
+            !invoicedChargeIds.has(id)) {
+            nextSelection.add(id);
+          }
+        }
+      }
+      if (nextSelection.size > 0) {
+        const nextItems = getSelectedFolioItems(nextSelection, freshFolio!, itemDescriptions);
+        const nextBalance = getSelectedFolioBalance(
+          nextItems,
+          getAllBillableFolioItems(freshFolio!, itemDescriptions),
+          freshFolio!.payments || [],
+        );
+        setSelectedIds(nextSelection);
+        setPaymentRows([{
+          id: newRowId(),
+          amount: nextBalance > 0.01 ? nextBalance.toFixed(2) : "",
+          method: "efectivo",
+          reference: "",
+          retencionEnabled: false,
+          retencionTipo: "iibb",
+          retencionMonto: "",
+        }]);
+        setInvoiceObservations("");
+        setEmittedInvoice(null);
+        setStep(1);
+        return;
+      }
+
+      onCheckoutComplete?.();
+      onClose();
 
     } catch (err: any) {
       setSubmitError(err.message || "Error inesperado");
@@ -782,7 +983,7 @@ export function PrefacturaDialog({
     setCheckoutDone(false);
     setSubmitError(null);
     setPaymentRows([{
-      id: newRowId(), amount: String((folio?.balance || 0).toFixed(2)),
+      id: newRowId(), amount: String(selectedBalance.toFixed(2)),
       method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "",
     }]);
   }
@@ -957,16 +1158,21 @@ export function PrefacturaDialog({
                     <div className="font-bold">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Ya cobrado</div>
-                    <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(folio.totalPayments)}</div>
+                    <div className="text-muted-foreground text-xs">Imputado a la selección</div>
+                    <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(selectedAlreadyPaid)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Saldo pendiente</div>
-                    <div className={`font-bold text-base ${folio.balance > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                      ${fmtMoney(Math.max(0, folio.balance))}
+                    <div className="text-muted-foreground text-xs">Saldo de la selección</div>
+                    <div className={`font-bold text-base ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                      ${fmtMoney(selectedBalance)}
                     </div>
                   </div>
                 </div>
+                {(folio.payments || []).length > 0 && (
+                  <p className="px-4 pb-3 text-xs text-muted-foreground">
+                    Los cobros previos se imputan a los cargos facturables en el orden mostrado.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-6">No se pudo cargar el folio.</p>
@@ -1007,55 +1213,60 @@ export function PrefacturaDialog({
                 {billingTarget === "company" && (
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1 block">Empresa</Label>
-                    <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "company")}>
-                      <SelectTrigger><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
-                      <SelectContent>
-                        {companies.filter((c: any) => c.id).map((c: any) => (
-                          <SelectItem key={c.id} value={String(c.id)}>{c.razonSocial || c.nombreFantasia}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {billingTargetLocked ? (
+                      <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
+                    ) : (
+                      <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "company")}>
+                        <SelectTrigger><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
+                        <SelectContent>
+                          {companies.filter((c: any) => c.id).map((c: any) => (
+                            <SelectItem key={c.id} value={String(c.id)}>{c.razonSocial || c.nombreFantasia}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 )}
                 {billingTarget === "agency" && (
                   <div>
                     <Label className="text-xs text-muted-foreground mb-1 block">Agencia</Label>
-                    <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "agency")}>
-                      <SelectTrigger><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
-                      <SelectContent>
-                        {agencies.filter((a: any) => a.id).map((a: any) => (
-                          <SelectItem key={a.id} value={String(a.id)}>{a.razonSocial || a.nombreFantasia}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {billingTargetLocked ? (
+                      <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
+                    ) : (
+                      <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "agency")}>
+                        <SelectTrigger><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
+                        <SelectContent>
+                          {agencies.filter((a: any) => a.id).map((a: any) => (
+                            <SelectItem key={a.id} value={String(a.id)}>{a.razonSocial || a.nombreFantasia}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Client info (editable) */}
+              {/* Fiscal data is derived from the reservation and stays read-only here. */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Razón social / Nombre</Label>
-                  <Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} placeholder="Nombre o razón social" className="h-8 text-sm" />
+                  <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">CUIT</Label>
-                  <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (f) setTipo(suggestTipo(f, condicionIva)); }} placeholder="XX-XXXXXXXX-X" className="h-8 text-sm" />
+                  <Label className="text-xs text-muted-foreground mb-1 block">{documentType || (cuit ? "CUIT" : "Documento")}</Label>
+                  <Input value={cuit || dni} readOnly placeholder="Sin identificación registrada" className="h-8 text-sm bg-muted" />
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Condición IVA</Label>
-                  <Select value={condicionIva} onValueChange={v => { setCondicionIva(v); setTipo(suggestTipo(cuit, v)); }}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["Responsable Inscripto","Consumidor Final","Monotributista","Exento","No Responsable"].map(c => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input value={condicionIva} readOnly className="h-8 text-sm bg-muted" />
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Domicilio (opcional)</Label>
-                  <Input value={domicilio} onChange={e => setDomicilio(e.target.value)} placeholder="Dirección" className="h-8 text-sm" />
+                  <Label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</Label>
+                  <Input value={nationality || nationalityCode || "No registrada"} readOnly className="h-8 text-sm bg-muted" />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs text-muted-foreground mb-1 block">Domicilio</Label>
+                  <Input value={domicilio || "No registrado"} readOnly className="h-8 text-sm bg-muted" />
                 </div>
               </div>
 
@@ -1079,6 +1290,11 @@ export function PrefacturaDialog({
                   {!isFiscalTipo && (
                     <p className="text-xs text-muted-foreground mt-1">Comprobante interno, sin CAE</p>
                   )}
+                  {!canIssueFacturaT && billingTarget === "guest" && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Factura T solo está disponible para huéspedes extranjeros con alojamiento seleccionado.
+                    </p>
+                  )}
                   {facturaANeedsEntity && (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
                       <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -1091,14 +1307,18 @@ export function PrefacturaDialog({
                   <Select value={puntoVenta} onValueChange={setPuntoVenta}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger>
                     <SelectContent>
-                      {posConfigs.map((p: any) => (
-                        <SelectItem key={p.id} value={String(p.puntoVenta)}>
-                          PV {String(p.puntoVenta).padStart(4, "0")} {p.nombre ? `— ${p.nombre}` : ""}
-                          {p.isDefault ? " (predeterminado)" : ""}
+                      {posConfigs.filter((p: any) => p.activo !== false).map((p: any) => (
+                        <SelectItem key={p.id} value={String(p.numero)}>
+                          PV {String(p.numero).padStart(4, "0")} {p.nombre ? `— ${p.nombre}` : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {puntoVenta && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Se emitirá con PV {puntoVenta.padStart(4, "0")}.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1180,7 +1400,7 @@ export function PrefacturaDialog({
                 size="sm"
                 className="text-orange-700 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
                 onClick={() => setShowBulkTransfer(true)}
-                disabled={folioLoading || !folio}
+                disabled={folioLoading || !folio || totalSelected <= 0.01}
               >
                 <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
               </Button>
@@ -1224,15 +1444,15 @@ export function PrefacturaDialog({
               <div><span className="text-muted-foreground">Tipo: </span>
                 <span className="font-medium">{TIPO_OPTIONS.find(t => t.value === tipo)?.label || tipo}</span>
               </div>
-              <div><span className="text-muted-foreground">Saldo: </span>
-                <span className={`font-bold ${(folio?.balance || 0) > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                  ${fmtMoney(folio?.balance || 0)}
+                <div><span className="text-muted-foreground">Saldo seleccionado: </span>
+                  <span className={`font-bold ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                    ${fmtMoney(selectedBalance)}
                 </span>
               </div>
             </div>
 
             {/* Zero-balance notice: no new payment required */}
-            {(folio?.balance ?? 0) <= 0.01 && (
+            {totalSelected > 0.01 && selectedBalance <= 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
                 <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-green-800 dark:text-green-300">
@@ -1242,7 +1462,7 @@ export function PrefacturaDialog({
             )}
 
             {/* Payment rows — only shown when there is an outstanding balance */}
-            {(folio?.balance ?? 0) > 0.01 && (
+            {selectedBalance > 0.01 && (
             <div>
               <Label className="text-sm font-medium mb-2 block">Formas de cobro</Label>
               <div className="space-y-3">
@@ -1274,13 +1494,9 @@ export function PrefacturaDialog({
                         </Select>
                       </div>
                       <div className="col-span-4">
-                        <Label className="text-xs text-muted-foreground mb-1 block">Referencia / Observaciones</Label>
-                        <Input
-                          value={row.reference}
-                          onChange={e => updateRow(row.id, "reference", e.target.value)}
-                          placeholder="Ej: cheque 1234, obs. interna…"
-                          className="h-8 text-sm"
-                        />
+                        <p className="text-xs text-muted-foreground pb-2">
+                          La referencia se registra una sola vez en el comprobante.
+                        </p>
                       </div>
                       <div className="col-span-1 flex justify-end">
                         {paymentRows.length > 1 && (
@@ -1341,9 +1557,19 @@ export function PrefacturaDialog({
             </div>
             )}
 
+            <div className="space-y-1.5 mt-4">
+              <Label className="text-sm font-medium">Referencia / Observaciones del comprobante</Label>
+              <Input
+                value={invoiceObservations}
+                onChange={e => setInvoiceObservations(e.target.value)}
+                placeholder="Ej: transferencia bancaria, cheque 1234, observación interna…"
+                className="text-sm"
+              />
+            </div>
+
             {/* Split-balance-changed notice — shown when a reversal/NC changed the
                 folio balance after the user already split into multiple rows */}
-            {splitBalanceChanged && paymentRows.length > 1 && (folio?.balance ?? 0) > 0.01 && (
+            {splitBalanceChanged && paymentRows.length > 1 && selectedBalance > 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
                 <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-amber-800 dark:text-amber-300">
@@ -1353,13 +1579,13 @@ export function PrefacturaDialog({
             )}
 
             {/* Running totals — only shown when there is an outstanding balance */}
-            {(folio?.balance ?? 0) > 0.01 && (
+            {selectedBalance > 0.01 && (
             <Card className={saldoRestante > 0.01 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10" : "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10"}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-sm">
                   <div className="space-y-1">
                     <div className="flex gap-6">
-                      <span className="text-muted-foreground">Total a cobrar: <span className="font-medium text-foreground">${fmtMoney(folio?.balance || 0)}</span></span>
+                      <span className="text-muted-foreground">Total a cobrar: <span className="font-medium text-foreground">${fmtMoney(selectedBalance)}</span></span>
                       <span className="text-muted-foreground">Registrado: <span className="font-medium text-green-600">${fmtMoney(totalPayments)}</span></span>
                     </div>
                   </div>
@@ -1384,17 +1610,8 @@ export function PrefacturaDialog({
 
             <DialogFooter className="gap-2 flex-wrap">
               <Button
-                variant="outline"
-                size="sm"
-                className="text-orange-700 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
-                onClick={() => setShowBulkTransfer(true)}
-                disabled={isSubmitting || !folio}
-              >
-                <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
-              </Button>
-              <Button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || totalSelected <= 0.01}
                 data-testid="button-registrar-emitir"
               >
                 {isSubmitting ? (
@@ -1557,6 +1774,8 @@ export function PrefacturaDialog({
         reservationId={reservationId}
         folio={folio ?? null}
         transferRemaining={transferRemaining}
+        selectedChargeIds={selectedSourceIds.filter(id => id !== "accommodation")}
+        includeAccommodation={selectedSourceIds.includes("accommodation")}
         onSuccess={() => {
           setShowBulkTransfer(false);
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
@@ -1577,8 +1796,8 @@ export function PrefacturaDialog({
           </DialogHeader>
           <div className="space-y-3 py-2 text-sm">
             <p>
-              El monto ingresado cubre <strong>${fmtMoney(totalPayments)}</strong> pero el saldo del folio es{" "}
-              <strong className="text-red-600 dark:text-red-400">${fmtMoney(folio?.balance || 0)}</strong>.
+              El monto ingresado cubre <strong>${fmtMoney(totalPayments)}</strong> pero el saldo de los cargos seleccionados es{" "}
+              <strong className="text-red-600 dark:text-red-400">${fmtMoney(selectedBalance)}</strong>.
               Quedarán <strong className="text-red-600 dark:text-red-400">${fmtMoney(saldoRestante)}</strong> sin abonar.
             </p>
             <p className="text-muted-foreground">
@@ -2584,13 +2803,16 @@ export function RevertTransferDialog({
 // ─── BulkTransferDialog sub-component ────────────────────────────────────────
 
 function BulkTransferDialog({
-  open, onClose, reservationId, folio, transferRemaining, onSuccess,
+  open, onClose, reservationId, folio, transferRemaining, selectedChargeIds: initialSelectedChargeIds,
+  includeAccommodation: initialIncludeAccommodation, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   reservationId: string | number;
   folio: PrefacturaFolioData | null;
   transferRemaining?: { accommodation: number; charges: Record<string, number> };
+  selectedChargeIds: string[];
+  includeAccommodation: boolean;
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
@@ -2619,11 +2841,11 @@ function BulkTransferDialog({
   useEffect(() => {
     if (open) {
       setTargetReservationId("");
-      setIncludeAccommodation(false);
-      setSelectedChargeIds(new Set());
+      setIncludeAccommodation(initialIncludeAccommodation);
+      setSelectedChargeIds(new Set(initialSelectedChargeIds));
       setTransferNote("");
     }
-  }, [open]);
+  }, [open, initialIncludeAccommodation, initialSelectedChargeIds]);
 
   const billableCharges = (folio?.charges || []).filter(
     (c: any) => c.category !== "transfer_out" && c.category !== "transfer_in" && parseFloat(c.amount) > 0
@@ -2671,7 +2893,7 @@ function BulkTransferDialog({
             Transferir a otra habitación
           </DialogTitle>
           <DialogDescription>
-            Seleccioná los cargos que querés mover. El folio destino los recibirá para facturar allí.
+            Los cargos ya seleccionados en Prefactura se moverán al folio destino para facturarlos allí.
           </DialogDescription>
         </DialogHeader>
 
@@ -2708,9 +2930,9 @@ function BulkTransferDialog({
             )}
           </div>
 
-          {/* Charges to transfer */}
+          {/* Charges selected in Prefactura */}
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Cargos a transferir</Label>
+            <Label className="text-sm font-medium">Cargos seleccionados para transferir</Label>
             <div className="border rounded-lg divide-y">
               {/* Accommodation */}
               {(folio?.roomTotal ?? 0) > 0 && (() => {
@@ -2723,9 +2945,9 @@ function BulkTransferDialog({
                       id="bulk-pfx-accommodation"
                       className="h-4 w-4 rounded border-gray-300 shrink-0"
                       checked={includeAccommodation}
-                      onChange={e => setIncludeAccommodation(e.target.checked)}
+                      disabled
                     />
-                    <label htmlFor="bulk-pfx-accommodation" className="flex-1 flex justify-between items-center cursor-pointer text-sm gap-2">
+                    <label htmlFor="bulk-pfx-accommodation" className="flex-1 flex justify-between items-center text-sm gap-2">
                       <span className="font-medium">Alojamiento Hab. {folio?.roomNumber} ({folio?.nights} noche{folio?.nights !== 1 ? "s" : ""})</span>
                       <div className="text-right shrink-0">
                         {transferRemaining && accomRemaining < (folio?.roomTotal ?? 0) && (
@@ -2742,21 +2964,6 @@ function BulkTransferDialog({
                 <div className="p-3 text-sm text-muted-foreground text-center">Sin cargos disponibles</div>
               ) : billableCharges.length > 0 ? (
                 <>
-                  {billableCharges.length > 1 && (
-                    <div className="flex items-center gap-3 p-2 bg-muted/30">
-                      <input
-                        type="checkbox"
-                        id="bulk-pfx-all"
-                        className="h-4 w-4 rounded border-gray-300 shrink-0"
-                        checked={selectedChargeIds.size === billableCharges.length}
-                        onChange={e => {
-                          if (e.target.checked) setSelectedChargeIds(new Set(billableCharges.map((c: any) => String(c.id))));
-                          else setSelectedChargeIds(new Set());
-                        }}
-                      />
-                      <label htmlFor="bulk-pfx-all" className="text-xs text-muted-foreground cursor-pointer">Seleccionar todos los consumos</label>
-                    </div>
-                  )}
                   {billableCharges.map((charge: any) => {
                     const remaining = transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount);
                     const alreadyTransferred = remaining <= 0;
@@ -2767,16 +2974,9 @@ function BulkTransferDialog({
                           id={`bulk-pfx-${charge.id}`}
                           className="h-4 w-4 rounded border-gray-300 shrink-0"
                           checked={selectedChargeIds.has(String(charge.id))}
-                          disabled={alreadyTransferred}
-                          onChange={e => {
-                            if (alreadyTransferred) return;
-                            const next = new Set(selectedChargeIds);
-                            if (e.target.checked) next.add(String(charge.id));
-                            else next.delete(String(charge.id));
-                            setSelectedChargeIds(next);
-                          }}
+                          disabled
                         />
-                        <label htmlFor={`bulk-pfx-${charge.id}`} className={`flex-1 flex justify-between items-center ${alreadyTransferred ? "" : "cursor-pointer"} text-sm gap-2`}>
+                        <label htmlFor={`bulk-pfx-${charge.id}`} className="flex-1 flex justify-between items-center text-sm gap-2">
                           <span className="truncate">{charge.description}</span>
                           <div className="text-right shrink-0">
                             {!alreadyTransferred && remaining < parseFloat(charge.amount) && (
