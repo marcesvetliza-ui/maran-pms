@@ -149,17 +149,17 @@ export default function SpaClientsPage() {
     const payload = {
       ...form,
       lastName: form.tipoPersona === "juridica" ? (form.lastName || "-") : form.lastName,
-      cuilCuit: normalizeCuit(form.cuilCuit) || null,
+      cuilCuit: normalizeCuit(form.cuilCuit),
       documentType: form.tipoPersona === "juridica" ? "cuit" : form.documentType,
-      documentNumber: form.documentNumber || null,
-      phone: form.phone || null,
-      email: form.email || null,
-      notes: form.notes || null,
-      vatCondition: form.vatCondition || null,
-      direccion: form.direccion || null,
-      provincia: form.provincia || null,
-      localidad: form.localidad || null,
-      codigoPostal: form.codigoPostal || null,
+      documentNumber: form.documentNumber || "",
+      phone: form.phone || "",
+      email: form.email || "",
+      notes: form.notes || "",
+      vatCondition: form.vatCondition || "",
+      direccion: form.direccion || "",
+      provincia: form.provincia || "",
+      localidad: form.localidad || "",
+      codigoPostal: form.codigoPostal || "",
     };
     if (editingClient) {
       updateMutation.mutate({ id: editingClient.id, data: payload });

@@ -228,13 +228,14 @@ export function registerEmailRoutes(app: Express) {
       if (cfg.provider === "smtp") {
         if (!cfg.smtpUser || !cfg.smtpPass) return res.status(400).json({ error: "SMTP: usuario o contraseña no configurados" });
         const nodemailer = await import("nodemailer");
-        const transporter = nodemailer.default.createTransport({
+        const transportOptions: import("nodemailer/lib/smtp-transport").Options & { family: number } = {
           host: cfg.smtpHost || "smtp.gmail.com",
           port: cfg.smtpPort || 587,
           secure: cfg.smtpSecure ?? false,
           auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
           family: 4, // force IPv4 — Replit production has no IPv6 route
-        });
+        };
+        const transporter = nodemailer.default.createTransport(transportOptions);
         await transporter.sendMail({ from, to, subject, text, html });
       } else {
         if (!cfg.apiKey) return res.status(400).json({ error: "API key de Resend no configurada" });

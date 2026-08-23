@@ -222,8 +222,8 @@ export default function EmailConfigPage() {
               bodyField: "checkoutBody",
               vars: VARS_CHECKOUT,
             },
-          ].map(t => (
-            <TemplateCard key={t.key} {...t} cfg={cfg} onSave={save} />
+          ].map(({ key, ...template }) => (
+            <TemplateCard key={key} {...template} cfg={cfg} onSave={save} />
           ))}
 
           {/* Reminder manual trigger */}

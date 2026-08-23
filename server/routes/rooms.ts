@@ -183,7 +183,7 @@ export function registerRoomsRoutes(app: Express) {
       ]);
 
       const guestMap = new Map(guestList.map(g => [g.id, g]));
-      const prefsByGuest = new Map<string, typeof allPrefs>();
+      const prefsByGuest = new Map<string, Array<typeof guestPreferences.$inferSelect>>();
       for (const p of allPrefs) {
         if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
         prefsByGuest.get(p.guestId)!.push(p);
@@ -224,8 +224,8 @@ export function registerRoomsRoutes(app: Express) {
             checkOut: res.checkOutDate,
             nightsRemaining: daysDiff(today, res.checkOutDate),
             nightsStayed: daysDiff(res.checkInDate, today),
-            adults: res.adults ?? 1,
-            children: res.children ?? 0,
+            adults: res.numberOfGuests ?? 1,
+            children: 0,
             numberOfGuests: res.numberOfGuests ?? 1,
             source: res.source,
             earlyCheckIn: res.earlyCheckIn ?? false,
@@ -419,8 +419,8 @@ export function registerRoomsRoutes(app: Express) {
             checkIn: res.checkInDate,
             checkOut: res.checkOutDate,
             nights: res.nights ?? 1,
-            adults: res.adults ?? 1,
-            children: res.children ?? 0,
+            adults: res.numberOfGuests ?? 1,
+            children: 0,
             numberOfGuests: res.numberOfGuests ?? 1,
             source: res.source,
             reservationStatus: res.status,
@@ -465,7 +465,7 @@ export function registerRoomsRoutes(app: Express) {
         groupReservationIds = new Set(links.map((l: any) => l.reservationId));
       }
 
-      let filtered = rooms.filter(r => r.status !== "blocked");
+      let filtered = rooms.filter(r => r.status !== "oos");
       if (roomTypeId) {
         filtered = filtered.filter(r => r.roomTypeId === roomTypeId);
       }

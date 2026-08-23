@@ -174,7 +174,7 @@ type Reservation = {
   roomId: string;
   status: string;
   companyId?: string | null;
-  guest?: { firstName: string; lastName: string };
+  guest?: { firstName: string; lastName: string; phone?: string | null; email?: string | null };
   room?: { roomNumber: string };
 };
 
@@ -200,7 +200,7 @@ type InventoryItemWithDetails = {
   currentStock: number;
   unit: string;
   costPrice: string;
-  category?: { name: string; area: string };
+  category?: { id: string; name: string; area: string };
 };
 
 const appointmentStatusColors: Record<string, string> = {
@@ -1453,7 +1453,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                             <span className="flex-shrink-0 inline-flex items-center rounded px-1 py-0 text-[9px] font-bold bg-blue-600 text-white leading-tight" title="Factura emitida">F</span>
                                           )}
                                           {appointment.status === "completed" && !appointment.invoiceId && !appointment.ncId && (
-                                            <AlertTriangle className="flex-shrink-0 h-3 w-3 text-amber-500" title="Sin facturar" />
+                                            <span title="Sin facturar"><AlertTriangle className="flex-shrink-0 h-3 w-3 text-amber-500" /></span>
                                           )}
                                         </div>
                                         <div className="text-[10px] truncate opacity-75">

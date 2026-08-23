@@ -3,6 +3,7 @@ import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, webC
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Template interpolation
@@ -184,13 +185,14 @@ async function sendViaSmtp(opts: {
   html: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const transporter = nodemailer.createTransport({
+    const transportOptions: SMTPTransport.Options & { family: number } = {
       host: opts.host,
       port: opts.port,
       secure: opts.secure,
       auth: { user: opts.user, pass: opts.pass },
       family: 4, // force IPv4 — Replit production has no IPv6 route
-    });
+    };
+    const transporter = nodemailer.createTransport(transportOptions);
     await transporter.sendMail({
       from: opts.from,
       to: opts.to,
@@ -325,13 +327,14 @@ export async function sendEmailWithPdfAttachment(opts: {
       return { ok: false, error: "SMTP: usuario o contraseña no configurados" };
     }
     try {
-      const transporter = nodemailer.createTransport({
+      const transportOptions: SMTPTransport.Options & { family: number } = {
         host: cfg.smtpHost || "smtp.gmail.com",
         port: cfg.smtpPort || 587,
         secure: cfg.smtpSecure ?? false,
         auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
         family: 4, // force IPv4 — Replit production has no IPv6 route
-      });
+      };
+      const transporter = nodemailer.createTransport(transportOptions);
       await transporter.sendMail({
         from,
         to: opts.to,

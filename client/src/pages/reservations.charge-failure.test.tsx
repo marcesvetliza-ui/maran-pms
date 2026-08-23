@@ -41,6 +41,7 @@ const RESERVATION_RESPONSE = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 type PendingCharge = { description: string; amount: string; category: string; quantity: number };
+type ChargeRequestBody = { amount: string; reservationId: string };
 
 /**
  * Re-implements the charge-posting loop from ReservationFormDialog.mutationFn
@@ -149,7 +150,7 @@ describe("ReservationFormDialog — charge creation failure path", () => {
 
       await runChargeLoop(charges, RESERVATION_RESPONSE.id, postFn);
 
-      const body = postFn.mock.calls[0][1] as any;
+      const body = (postFn.mock.calls as unknown as [string, ChargeRequestBody][])[0][1];
       expect(body.amount).toBe("600.00"); // 200 × 3
     });
 
@@ -164,7 +165,7 @@ describe("ReservationFormDialog — charge creation failure path", () => {
 
       await runChargeLoop(charges, RESERVATION_RESPONSE.id, postFn);
 
-      const body = postFn.mock.calls[0][1] as any;
+      const body = (postFn.mock.calls as unknown as [string, ChargeRequestBody][])[0][1];
       expect(body.reservationId).toBe(RESERVATION_RESPONSE.id);
     });
   });

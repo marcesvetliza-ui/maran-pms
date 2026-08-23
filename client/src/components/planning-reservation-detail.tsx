@@ -35,6 +35,7 @@ function getStatusBadge(status: ReservationStatus) {
     checked_in:  { label: "Check-in",     variant: "default" },
     checked_out: { label: "Check-out",    variant: "outline" },
     cancelled:   { label: "Cancelada",    variant: "destructive" },
+    no_show:     { label: "No se presentó", variant: "destructive" },
   };
   return config[status] || { label: status, variant: "outline" };
 }

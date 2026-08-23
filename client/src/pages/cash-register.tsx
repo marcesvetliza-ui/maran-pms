@@ -94,7 +94,10 @@ type CashMovement = {
   amount: number;
   movementType: string;
   receiptType?: string;
+  receiptNumber?: string;
   description?: string;
+  proveedor?: string;
+  expenseCategory?: string;
   createdAt: string;
   anulado?: boolean;
   motivoAnulacion?: string;
@@ -104,6 +107,18 @@ type ShiftDetail = {
   shift: CashShift;
   movements: CashMovement[];
   summary: Record<string, { count: number; total: number }>;
+  efectivoSistema?: number;
+  efectivoContado?: number;
+};
+
+const expenseCategoryLabels: Record<string, string> = {
+  servicios: "Servicios",
+  insumos: "Insumos / Materiales",
+  sueldos: "Sueldos / Personal",
+  impuestos: "Impuestos / Tasas",
+  alquileres: "Alquileres",
+  mantenimiento: "Mantenimiento",
+  otro: "Otro",
 };
 
 const PAYMENT_METHOD_MAP: Record<string, string> = {
@@ -254,7 +269,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                       <div key={m.id ?? i} className="flex items-center gap-3 py-1 text-xs border-b border-muted/50 last:border-0">
                         <span className="text-muted-foreground w-11 shrink-0 tabular-nums">{formatTime(m.createdAt)}</span>
                         <span className="flex-1 truncate font-medium">
-                          {(m as any).sourceLabel || (m as any).description || "—"}
+                          {m.sourceLabel || m.description || "—"}
                         </span>
                         <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground line-through" : ""}`}>
                           {m.movementType === "expense" ? "- " : ""}{formatCurrency(Math.abs(parseFloat(String(m.amount))))}
@@ -314,7 +329,7 @@ function printClosingSummary(
       const esIngreso = m.movementType === "income";
       return `<tr style="${esInformational ? "opacity:0.65;font-style:italic;" : ""}">
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${m.description || (m as any).sourceLabel || "-"}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${m.description || m.sourceLabel || "-"}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
           ${esInformational
             ? `<span style="background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:3px;font-size:10px">Solo registro</span>`
@@ -372,10 +387,10 @@ function printClosingSummary(
     </tr></thead>
     <tbody>${anulados.map(m => `<tr style="color:#aaa">
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${formatTime(m.createdAt)}</td>
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${m.description || (m as any).sourceLabel || "-"}</td>
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${m.description || m.sourceLabel || "-"}</td>
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0">${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td>
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right;text-decoration:line-through">${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td>
-      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${(m as any).motivoAnulacion || "-"}</td>
+      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${m.motivoAnulacion || "-"}</td>
     </tr>`).join("")}</tbody>
   </table>
 </div>` : "";
@@ -869,20 +884,17 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                               {m.sourceLabel && m.sourceLabel !== m.description && (
                                 <div><span className="font-medium text-foreground">Referencia:</span> {m.sourceLabel}</div>
                               )}
-                              {(m as any).proveedor && (
-                                <div><span className="font-medium text-foreground">Proveedor:</span> {(m as any).proveedor}</div>
+                              {m.proveedor && (
+                                <div><span className="font-medium text-foreground">Proveedor:</span> {m.proveedor}</div>
                               )}
-                              {(m as any).expenseCategory && (
-                                <div><span className="font-medium text-foreground">Categoría:</span> {{
-                                  servicios: "Servicios", insumos: "Insumos / Materiales", sueldos: "Sueldos / Personal",
-                                  impuestos: "Impuestos / Tasas", alquileres: "Alquileres", mantenimiento: "Mantenimiento", otro: "Otro"
-                                }[(m as any).expenseCategory] || (m as any).expenseCategory}</div>
+                              {m.expenseCategory && (
+                                <div><span className="font-medium text-foreground">Categoría:</span> {expenseCategoryLabels[m.expenseCategory] || m.expenseCategory}</div>
                               )}
-                              {(m as any).receiptType && (
-                                <div><span className="font-medium text-foreground">Comprobante:</span> {(m as any).receiptType}{(m as any).receiptNumber ? ` — ${(m as any).receiptNumber}` : ""}</div>
+                              {m.receiptType && (
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {m.receiptType}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
                               )}
-                              {(m as any).motivoAnulacion && (
-                                <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {(m as any).motivoAnulacion}</div>
+                              {m.motivoAnulacion && (
+                                <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {m.motivoAnulacion}</div>
                               )}
                               <div><span className="font-medium text-foreground">Registrado:</span> {formatDateTime(m.createdAt)}</div>
                             </div>
@@ -1867,7 +1879,12 @@ function HistorialTab() {
 
               <DialogFooter>
                 <Button
-                  onClick={() => printClosingSummary(shiftDetail.shift, shiftDetail.movements)}
+                  onClick={() => printClosingSummary(
+                    shiftDetail.shift,
+                    shiftDetail.movements,
+                    shiftDetail.efectivoSistema ?? 0,
+                    shiftDetail.efectivoContado ?? 0,
+                  )}
                   data-testid={`btn-print-detail-${detailShiftId}`}
                 >
                   <Printer className="h-4 w-4 mr-2" />

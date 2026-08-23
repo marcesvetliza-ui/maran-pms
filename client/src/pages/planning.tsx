@@ -1205,10 +1205,10 @@ export default function PlanningPage() {
                                               <Sunrise className="h-3 w-3 text-orange-400 flex-shrink-0" data-testid="icon-early-checkin" />
                                             )}
                                             {reservation.movedFromRoomNumber && day === reservation.checkIn && (
-                                              <ArrowRightLeft className="h-3 w-3 text-sky-400 flex-shrink-0" title={`Movido desde hab. ${reservation.movedFromRoomNumber}`} />
+                                              <span title={`Movido desde hab. ${reservation.movedFromRoomNumber}`}><ArrowRightLeft className="h-3 w-3 text-sky-400 flex-shrink-0" /></span>
                                             )}
                                             {reservation.isUpgrade && !reservation.movedFromRoomNumber && day === reservation.checkIn && (
-                                              <TrendingUp className="h-3 w-3 text-amber-400 flex-shrink-0" title="Up Grade" />
+                                              <span title="Up Grade"><TrendingUp className="h-3 w-3 text-amber-400 flex-shrink-0" /></span>
                                             )}
                                             {reservation.guestName === "Sin Asignar" || !reservation.guestName
                                               ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"

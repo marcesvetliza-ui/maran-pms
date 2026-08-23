@@ -745,7 +745,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
 
     doc.fillColor("#1a1a1a").fontSize(14).font("Helvetica-Bold")
       .text(event.name, margin, y, { width: codeBoxX - margin - 8 });
-    const nameH = doc.heightOfString(event.name, { width: codeBoxX - margin - 8, fontSize: 14 });
+    const nameH = doc.heightOfString(event.name, { width: codeBoxX - margin - 8 });
 
     // Caja código
     doc.roundedRect(codeBoxX, y - 2, codeBoxW, 42, 5).fillAndStroke("#f8f4ef", ORANGE);

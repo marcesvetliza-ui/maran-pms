@@ -566,7 +566,7 @@ function PreferenceFormDialog({
           </div>
           <div>
             <Label>Prioridad</Label>
-            <Select value={priority} onValueChange={setPriority}>
+            <Select value={priority} onValueChange={(value) => setPriority(value as typeof priority)}>
               <SelectTrigger data-testid="select-priority">
                 <SelectValue />
               </SelectTrigger>
@@ -620,7 +620,7 @@ function PreferencesTab() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: async (prefId: number) => {
+    mutationFn: async (prefId: string) => {
       await apiRequest("PATCH", `/api/guests/${selectedGuest?.id}/preferences/${prefId}/toggle`);
     },
     onSuccess: () => {
@@ -630,7 +630,7 @@ function PreferencesTab() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (prefId: number) => {
+    mutationFn: async (prefId: string) => {
       await apiRequest("DELETE", `/api/guests/${selectedGuest?.id}/preferences/${prefId}`);
     },
     onSuccess: () => {

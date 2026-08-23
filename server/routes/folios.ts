@@ -63,11 +63,11 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
 
     const fmtCurrency = (n: string | number) =>
       `$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    const fmtDate = (iso: string) => {
+    const fmtDate = (iso: string | Date) => {
       try {
         const d = new Date(iso);
         return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      } catch { return iso; }
+      } catch { return String(iso); }
     };
 
     const pageW   = 595;
@@ -472,7 +472,7 @@ export function registerFolioRoutes(app: Express) {
           }
         } else if (entityType === "event") {
           const evt = await storage.getEvent(entityId);
-          if (evt) entityLabel = `${evt.name} (${evt.eventDate ?? ""})`;
+          if (evt) entityLabel = `${evt.name} (${evt.startDate ?? ""})`;
         } else if (entityType === "group") {
           const grp = await storage.getGroup(entityId);
           if (grp) entityLabel = `${grp.name}`;

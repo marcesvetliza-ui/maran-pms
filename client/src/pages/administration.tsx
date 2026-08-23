@@ -903,7 +903,7 @@ export default function AdministrationPage() {
   });
 
   const updateBedTypeMutation = useMutation({
-    mutationFn: async (data: { id: number; code: string; name: string; description: string }) => {
+    mutationFn: async (data: { id: string; code: string; name: string; description: string }) => {
       const { id, ...rest } = data;
       return apiRequest("PATCH", `/api/bed-types/${id}`, rest);
     },
@@ -920,7 +920,7 @@ export default function AdministrationPage() {
   });
 
   const toggleBedTypeMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       return apiRequest("DELETE", `/api/bed-types/${id}`);
     },
     onSuccess: () => {

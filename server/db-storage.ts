@@ -3,6 +3,32 @@ import { randomUUID } from "crypto";
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 }
+
+const giftVoucherAreas = ["alojamiento", "restaurant", "spa", "otro"] as const;
+const giftVoucherStatuses = ["activo", "usado", "vencido", "cancelado"] as const;
+const giftVoucherValueTypes = ["monetario", "descriptivo"] as const;
+
+function parseGiftVoucherArea(value: string): GiftVoucher["area"] {
+  if (giftVoucherAreas.includes(value as GiftVoucher["area"])) {
+    return value as GiftVoucher["area"];
+  }
+  throw new Error(`Área de voucher inválida: ${value}`);
+}
+
+function parseGiftVoucherStatus(value: string): GiftVoucher["status"] {
+  if (giftVoucherStatuses.includes(value as GiftVoucher["status"])) {
+    return value as GiftVoucher["status"];
+  }
+  throw new Error(`Estado de voucher inválido: ${value}`);
+}
+
+function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
+  if (giftVoucherValueTypes.includes(value as GiftVoucher["valueType"])) {
+    return value as GiftVoucher["valueType"];
+  }
+  throw new Error(`Tipo de valor de voucher inválido: ${value}`);
+}
+
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "./db";
 import { IStorage } from "./storage";
@@ -570,7 +596,7 @@ export class DatabaseStorage implements IStorage {
 
     // Status filter at DB level
     if (options?.statuses && options.statuses.length > 0) {
-      conditions.push(inArray(reservations.status, options.statuses));
+      conditions.push(inArray(reservations.status, options.statuses as ReservationStatus[]));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1184,17 +1210,7 @@ export class DatabaseStorage implements IStorage {
       ne(reservations.status, "cancelled")
     );
     
-    const unassignedGroupBlocks: Array<{
-      blockId: string;
-      groupId: string;
-      groupName: string;
-      groupCode: string;
-      roomTypeName: string;
-      quantity: number;
-      assigned: number;
-      checkIn: string;
-      checkOut: string;
-    }> = [];
+    const unassignedGroupBlocks: NonNullable<PlanningData["unassignedGroupBlocks"]> = [];
     
     for (const group of allGroups) {
       if (group.status === "cancelled" || group.status === "finished") continue;
@@ -1683,12 +1699,12 @@ export class DatabaseStorage implements IStorage {
     ]);
 
     // Build lookup maps
-    const chargesMap = new Map<string, typeof allResCharges>();
+    const chargesMap = new Map<string, Charge[]>();
     for (const c of allResCharges) {
       if (!chargesMap.has(c.reservationId!)) chargesMap.set(c.reservationId!, []);
       chargesMap.get(c.reservationId!)!.push(c);
     }
-    const paymentsMap = new Map<string, typeof allResPayments>();
+    const paymentsMap = new Map<string, Payment[]>();
     for (const p of allResPayments) {
       if (!paymentsMap.has(p.reservationId!)) paymentsMap.set(p.reservationId!, []);
       paymentsMap.get(p.reservationId!)!.push(p);
@@ -3819,7 +3835,7 @@ export class DatabaseStorage implements IStorage {
     if (tables.length === 0) return [];
 
     const tableIds = tables.map(t => t.id);
-    const invoiceIds = [...new Set(tables.map(t => t.invoiceId).filter((id): id is string => Boolean(id)))];
+    const invoiceIds = [...new Set(tables.map(t => t.invoiceId).filter((id): id is number => id !== null))];
 
     const [allCharges, allPayments, allInvoices] = await Promise.all([
       db.select().from(eventTableCharges).where(inArray(eventTableCharges.eventTableId, tableIds)),
@@ -4046,7 +4062,7 @@ export class DatabaseStorage implements IStorage {
       if (sysUser) {
         assignedTo = {
           id: sysUser.id,
-          name: [sysUser.firstName, sysUser.lastName].filter(Boolean).join(" ") || sysUser.username,
+          name: sysUser.fullName || sysUser.username,
         };
       } else {
         const staffMember = (await db.select().from(maintenanceStaff).where(eq(maintenanceStaff.id, wo.assignedToId)))[0];
@@ -4120,11 +4136,11 @@ export class DatabaseStorage implements IStorage {
   async checkMaintenanceBlockConflicts(roomId: string, blockFrom: string, blockTo: string) {
     return db.select({
       id: reservations.id,
-      guestName: reservations.guestName,
+      guestName: sql<string>`CONCAT(COALESCE(${guests.firstName}, ''), ' ', COALESCE(${guests.lastName}, ''))`,
       checkInDate: reservations.checkInDate,
       checkOutDate: reservations.checkOutDate,
       status: reservations.status,
-    }).from(reservations).where(
+    }).from(reservations).leftJoin(guests, eq(reservations.guestId, guests.id)).where(
       and(
         eq(reservations.roomId, roomId),
         lt(reservations.checkInDate, blockTo),
@@ -4800,7 +4816,7 @@ export class DatabaseStorage implements IStorage {
       else e.pending++;
       if (t.priority === "urgent" || t.priority === "high") e.urgent++;
 
-      const type = t.type || "other";
+      const type = t.taskType || "other";
       byType.set(type, (byType.get(type) || 0) + 1);
     }
 
@@ -4808,7 +4824,7 @@ export class DatabaseStorage implements IStorage {
       daily: Array.from(byDate.entries()).map(([date, d]) => ({ date, ...d })).sort((a, b) => a.date.localeCompare(b.date)),
       byType: Array.from(byType.entries()).map(([type, count]) => ({ type, count })),
       totalCompleted: allTasks.filter(t => t.status === "completed" || t.status === "inspected").length,
-      totalPending: allTasks.filter(t => t.status === "pending" || t.status === "assigned").length,
+      totalPending: allTasks.filter(t => t.status === "pending" || (t.status as string) === "assigned").length,
     };
   }
 
@@ -5608,12 +5624,12 @@ export class DatabaseStorage implements IStorage {
     const [chargesRow] = await db.select({ total: sql<string>`COALESCE(SUM(amount::numeric), 0)` })
       .from(folioMovements).where(and(
         eq(folioMovements.folioId, folioId),
-        inArray(folioMovements.type, chargeTypes as string[]),
+        inArray(folioMovements.type, chargeTypes),
       ));
     const [paymentsRow] = await db.select({ total: sql<string>`COALESCE(SUM(amount::numeric), 0)` })
       .from(folioMovements).where(and(
         eq(folioMovements.folioId, folioId),
-        inArray(folioMovements.type, paymentTypes as string[]),
+        inArray(folioMovements.type, paymentTypes),
       ));
     const totalCharges = parseFloat(chargesRow?.total ?? "0");
     const totalPayments = parseFloat(paymentsRow?.total ?? "0");
@@ -5834,12 +5850,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createGiftVoucher(data: InsertGiftVoucher): Promise<GiftVoucher> {
-    const [v] = await db.insert(giftVouchers).values(data).returning();
+    const voucher: typeof giftVouchers.$inferInsert = {
+      ...data,
+      area: parseGiftVoucherArea(data.area),
+      status: data.status === undefined ? undefined : parseGiftVoucherStatus(data.status),
+      valueType: data.valueType === undefined ? undefined : parseGiftVoucherValueType(data.valueType),
+    };
+    const [v] = await db.insert(giftVouchers).values(voucher).returning();
     return v;
   }
 
   async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined> {
-    const [v] = await db.update(giftVouchers).set(data).where(eq(giftVouchers.id, id)).returning();
+    const { area, status, valueType, ...voucherData } = data;
+    const voucher: Partial<typeof giftVouchers.$inferInsert> = {
+      ...voucherData,
+      ...(area === undefined ? {} : { area: parseGiftVoucherArea(area) }),
+      ...(status === undefined ? {} : { status: parseGiftVoucherStatus(status) }),
+      ...(valueType === undefined ? {} : { valueType: parseGiftVoucherValueType(valueType) }),
+    };
+    const [v] = await db.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
     return v;
   }
 

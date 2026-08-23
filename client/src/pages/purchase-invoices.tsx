@@ -70,6 +70,10 @@ interface Invoice {
   observaciones?: string;
   supplierId?: number;
   cuentaContableId?: number;
+  montoIva5?: string;
+  montoIva25?: string;
+  montoExento?: string;
+  montoNoGravado?: string;
 }
 
 interface Supplier {
@@ -96,6 +100,10 @@ interface CCItem {
   cuit: string;
   facturasPendientes: number;
   totalSaldo: string;
+  condicionIva?: string;
+  alicuotaIibb?: number;
+  alicuotaGanancias?: number;
+  alicuotaIva?: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -381,6 +389,7 @@ function InvoiceDialog({
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
         centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
+        subtipoRetencion: "",
       });
       setNetoLines(linesFromInvoice(editingInvoice));
       setStep(1);
@@ -1795,7 +1804,7 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
                   </div>
                   <Button
                     size="sm"
-                    onClick={() => onEmitirOP({ id: prov.id, razonSocial: prov.razon_social, cuit: prov.cuit, condicionIva: prov.condicion_iva, saldoPendiente: parseFloat(prov.total_saldo || 0), facturasPendientes: parseInt(prov.facturas_pendientes || 0) })}
+                    onClick={() => onEmitirOP({ id: prov.id, razonSocial: prov.razon_social, cuit: prov.cuit, condicionIva: prov.condicion_iva, totalSaldo: String(prov.total_saldo || 0), facturasPendientes: parseInt(prov.facturas_pendientes || 0) })}
                     data-testid={`btn-emitir-op-${prov.id}`}
                   >
                     <CreditCard className="h-4 w-4 mr-2" />

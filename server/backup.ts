@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import nodemailer from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { emailConfig, backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
@@ -187,13 +188,14 @@ export async function sendBackupByEmail(targetEmail: string, type: string = "man
     throw new Error("SMTP no configurado. Configurá el servidor de correo en Configuración > Emails.");
   }
 
-  const transport = nodemailer.createTransport({
+  const transportOptions: SMTPTransport.Options & { family: number } = {
     host: cfg.smtpHost,
     port: cfg.smtpPort ?? 587,
     secure: cfg.smtpSecure ?? false,
     auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
     family: 4, // force IPv4 — Replit production has no IPv6 route
-  });
+  };
+  const transport = nodemailer.createTransport(transportOptions);
 
   const sqlBuffer = await generateBackupSql();
   const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })

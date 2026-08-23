@@ -12,7 +12,7 @@ import { requireAuth, requireRole, hashPassword } from "./auth";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
-import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne } from "drizzle-orm";
+import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -325,8 +325,8 @@ export async function registerRoutes(
             roomNumber: roomNumberMap.get(r.roomId) ?? "",
             checkIn: r.checkInDate,
             checkOut: r.checkOutDate,
-            adults: r.adults,
-            children: r.children,
+            adults: r.numberOfGuests,
+            children: 0,
             numberOfGuests: r.numberOfGuests,
             guest: {
               id: g?.id ?? null,
@@ -335,7 +335,7 @@ export async function registerRoutes(
               documentType: g?.documentType ?? null,
               documentNumber: g?.documentNumber ?? null,
               nationality: g?.nationality ?? null,
-              dateOfBirth: (g as any)?.fechaNacimiento ?? g?.dateOfBirth ?? null,
+              dateOfBirth: g?.fechaNacimiento ?? null,
               phone: g?.phone ?? null,
               email: g?.email ?? null,
               direccion: g?.direccion ?? null,
@@ -426,7 +426,7 @@ export async function registerRoutes(
           tipoDoc: g?.documentType?.toUpperCase() ?? "",
           nroDoc: g?.documentNumber ?? "",
           nac: g?.nationality ?? "",
-          fecNac: fmtDate((g as any)?.fechaNacimiento ?? g?.dateOfBirth),
+          fecNac: fmtDate(g?.fechaNacimiento),
           domicilio,
           ingreso: fmtDate(r.checkInDate),
           egreso: fmtDate(r.checkOutDate),
@@ -662,7 +662,7 @@ export async function registerRoutes(
         failedLoginCount: 0,
       }).where(eq(systemUsers.id, req.params.id)).returning({ username: systemUsers.username });
       if (!updated) return res.status(404).json({ error: "Usuario no encontrado" });
-      await audit(req, "security_unlock", "auth", `Cuenta desbloqueada: ${updated.username}`);
+      await audit(req, "update", "auth", `Cuenta desbloqueada: ${updated.username}`);
       res.json({ message: `Cuenta ${updated.username} desbloqueada` });
     } catch (error) {
       res.status(500).json({ error: "Error unlocking user" });
@@ -1166,10 +1166,12 @@ export async function registerRoutes(
           try {
             await storage.createHousekeepingTask({
               roomId: room.id,
-              type: "guest_request",
+              taskType: "guest_request",
               status: "pending",
               priority: priority === "urgent" ? "urgent" : "normal",
               notes: `Chatbot: ${message} (${guestName || "Huésped"})`,
+              scheduledDate: getArgentinaToday(),
+              createdAt: new Date(),
             });
           } catch {}
         }
@@ -1273,7 +1275,7 @@ export async function registerRoutes(
       const normalizedCode = code.trim().toUpperCase();
       const normalizedLast = lastName.trim().toLowerCase();
 
-      const [reservation] = await db.execute(sql`
+      const result = await db.execute(sql`
         SELECT r.id, r.reservation_code, r.status, r.check_in_date, r.check_out_date,
                g.last_name as guest_last_name
         FROM reservations r
@@ -1282,6 +1284,7 @@ export async function registerRoutes(
         LIMIT 1
       `);
 
+      const reservation = result.rows[0];
       if (!reservation) {
         return res.status(404).json({ error: "Reserva no encontrada. Verificá el código ingresado." });
       }
@@ -1980,7 +1983,7 @@ export async function registerRoutes(
       if (!closedBy) return res.status(400).json({ error: "closedBy is required" });
       const result = await storage.closeShift(req.params.id, closedBy, parseFloat(efectivoContado) || 0, operadorSiguiente || null, !!enviarAAdministracion, notes, turnoTipo || null);
       await audit(req, "update", "cash",
-        `Turno de caja cerrado — Área: ${result?.area || "recepción"}`,
+        `Turno de caja cerrado — Área: ${result?.shift.area || "recepción"}`,
         { entityType: "cash_shift", entityId: req.params.id }
       );
       res.json(result);
@@ -3228,7 +3231,7 @@ export async function registerRoutes(
 
       const tareasPendientes = tareasHoy.filter(t => t.status === "pending").length;
       const tareasEnProceso = tareasHoy.filter(t => t.status === "in_progress").length;
-      const tareasCompletadas = tareasHoy.filter(t => t.status === "completed" || t.status === "verified").length;
+      const tareasCompletadas = tareasHoy.filter(t => t.status === "completed" || t.status === "inspected").length;
 
       // 7. Incidencias abiertas
       let incidenciasAbiertas = 0;
@@ -3355,10 +3358,10 @@ export async function registerRoutes(
   app.get("/api/incidents", requireAuth, async (req, res) => {
     try {
       const { status, severity, module } = req.query;
-      const conditions = [];
-      if (status && status !== "all") conditions.push(eq(systemIncidents.status, status as string));
-      if (severity && severity !== "all") conditions.push(eq(systemIncidents.severity, severity as string));
-      if (module && module !== "all") conditions.push(eq(systemIncidents.module, module as string));
+      const conditions: SQL[] = [];
+      if (status && status !== "all") conditions.push(eq(systemIncidents.status, status as typeof systemIncidents.status["_"]["data"]));
+      if (severity && severity !== "all") conditions.push(eq(systemIncidents.severity, severity as typeof systemIncidents.severity["_"]["data"]));
+      if (module && module !== "all") conditions.push(eq(systemIncidents.module, module as typeof systemIncidents.module["_"]["data"]));
       const incidents = await db
         .select()
         .from(systemIncidents)

@@ -739,7 +739,7 @@ export function registerSpaRoutes(app: Express) {
   app.get("/api/spa/clients", async (req, res) => {
     try {
       const { search } = req.query;
-      const allGuests = await db.select().from(guests).orderBy(desc(guests.createdAt));
+      const allGuests = await db.select().from(guests).orderBy(desc(guests.fechaAlta));
       if (search) {
         const s = (search as string).toLowerCase();
         return res.json(allGuests.filter((c: any) =>

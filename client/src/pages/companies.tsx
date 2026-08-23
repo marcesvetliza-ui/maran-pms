@@ -37,6 +37,7 @@ const statusLabels: Record<ReservationStatus, { label: string; variant: "default
   checked_in: { label: "Check-in", variant: "default" },
   checked_out: { label: "Finalizada", variant: "outline" },
   cancelled: { label: "Cancelada", variant: "destructive" },
+  no_show: { label: "No se presentó", variant: "destructive" },
 };
 
 function ReservationStatusBadge({ status }: { status: string }) {
@@ -420,7 +421,7 @@ export default function CompaniesPage() {
                     <TableCell>
                       <Badge variant="outline" className="text-xs">
                         {company.condicionIva === "responsable_inscripto" ? "Resp. Inscripto" :
-                         company.condicionIva === "monotributista" ? "Monotributo" :
+                         company.condicionIva === "monotributo" ? "Monotributo" :
                          company.condicionIva === "exento" ? "Exento" :
                          company.condicionIva || "-"}
                       </Badge>
@@ -494,7 +495,7 @@ export default function CompaniesPage() {
                 <FormField control={form.control} name="nombreFantasia" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Nombre Fantasía</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-nombre-fantasia" /></FormControl>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-nombre-fantasia" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -508,7 +509,7 @@ export default function CompaniesPage() {
                 <FormField control={form.control} name="condicionIva" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Condición IVA</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
                       <FormControl>
                         <SelectTrigger data-testid="select-company-iva">
                           <SelectValue />
@@ -516,7 +517,7 @@ export default function CompaniesPage() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="responsable_inscripto">Responsable Inscripto</SelectItem>
-                        <SelectItem value="monotributista">Monotributista</SelectItem>
+                        <SelectItem value="monotributo">Monotributo</SelectItem>
                         <SelectItem value="exento">Exento</SelectItem>
                         <SelectItem value="consumidor_final">Consumidor Final</SelectItem>
                       </SelectContent>
@@ -527,7 +528,7 @@ export default function CompaniesPage() {
                 <FormField control={form.control} name="direccion" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Dirección</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-direccion" /></FormControl>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-direccion" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -542,21 +543,21 @@ export default function CompaniesPage() {
                 <FormField control={form.control} name="codigoPostal" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Código Postal</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-cp" /></FormControl>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-cp" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="telefono" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Teléfono</FormLabel>
-                    <FormControl><Input {...field} data-testid="input-company-telefono" /></FormControl>
+                    <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-telefono" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="email" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Email</FormLabel>
-                    <FormControl><Input {...field} type="email" data-testid="input-company-email" /></FormControl>
+                    <FormControl><Input {...field} value={field.value ?? ""} type="email" data-testid="input-company-email" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -568,21 +569,21 @@ export default function CompaniesPage() {
                   <FormField control={form.control} name="contactName" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Nombre</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-company-contact-name" /></FormControl>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-contact-name" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
                   <FormField control={form.control} name="contactEmail" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Email</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-company-contact-email" /></FormControl>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-contact-email" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
                   <FormField control={form.control} name="contactPhone" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Teléfono</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-company-contact-phone" /></FormControl>
+                      <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-contact-phone" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -602,7 +603,7 @@ export default function CompaniesPage() {
                   <FormField control={form.control} name="paymentTermDays" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Plazo de Pago (días)</FormLabel>
-                      <FormControl><Input {...field} type="number" data-testid="input-company-payment-term" /></FormControl>
+                      <FormControl><Input {...field} value={field.value ?? ""} type="number" data-testid="input-company-payment-term" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -632,7 +633,7 @@ export default function CompaniesPage() {
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Notas</FormLabel>
-                  <FormControl><Input {...field} data-testid="input-company-notes" /></FormControl>
+                  <FormControl><Input {...field} value={field.value ?? ""} data-testid="input-company-notes" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />

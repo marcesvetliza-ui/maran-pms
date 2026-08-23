@@ -666,7 +666,7 @@ export function registerEventsRoutes(app: Express) {
 
       try {
         const evt = await storage.getEvent(req.params.eventId);
-        const label = `Evento ${evt?.name || req.params.eventId} - Mesa ${table.tableName} - Pago ${method}`;
+        const label = `Evento ${evt?.name || req.params.eventId} - Mesa ${table.label || table.tableNumber} - Pago ${method}`;
         await storage.registerCashMovement(
           "events", "event", req.params.eventId, label,
           method, String(amount), "income"

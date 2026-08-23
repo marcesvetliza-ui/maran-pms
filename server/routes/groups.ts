@@ -381,7 +381,7 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       // Solo se puede eliminar un grupo Tentativo sin reservas ni movimientos financieros
-      if (group.status !== "tentativo") {
+      if (group.status !== "tentative") {
         return res.status(400).json({ error: "Solo se pueden eliminar grupos en estado Tentativo. Para cancelar un grupo usá el estado Cancelado." });
       }
       if (group.reservations.length > 0) {
@@ -1867,7 +1867,8 @@ export function registerGroupsRoutes(app: Express) {
               }
               if (badgeText) {
                 const badgeX = 395;
-                const badgeW = Math.min(doc.widthOfString(badgeText, { fontSize: 7 }) + 10, 150);
+                doc.fontSize(7);
+                const badgeW = Math.min(doc.widthOfString(badgeText) + 10, 150);
                 doc.save()
                   .roundedRect(badgeX, y - 1, badgeW, 11, 3)
                   .fillAndStroke("#e8f4fd", "#3b82f6")

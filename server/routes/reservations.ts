@@ -37,6 +37,7 @@ function fmtMoneyPdf(v: any): string {
 function nightCount(checkIn: string, checkOut: string): number {
   return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 }
+const normalizeDate = (date: string) => date;
 
 export function registerReservationsRoutes(app: Express) {
   // ── PDF confirmation download ───────────────────────────────────────────────
@@ -1398,7 +1399,7 @@ export function registerReservationsRoutes(app: Express) {
         await storage.updateRoom(reservation.roomId, { status: "dirty" });
       }
 
-      await audit(req, "cancel", "reservations",
+      await audit(req, "update", "reservations",
         `Anulación: ${reservation.reservationCode} — Motivo: ${req.body.reason || "Sin motivo"}`,
         { entityType: "reservation", entityId: req.params.id }
       );
@@ -1439,7 +1440,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       await storage.updateReservation(req.params.id, { status: "confirmed" });
-      await audit(req, "restore", "reservations",
+      await audit(req, "update", "reservations",
         `Recuperación: ${reservation.reservationCode} — por ${(req as any).user?.username || "sistema"}`,
         { entityType: "reservation", entityId: req.params.id }
       );
@@ -2415,7 +2416,7 @@ export function registerReservationsRoutes(app: Express) {
           "reservation",
           payment.reservationId,
           parseFloat(payment.amount),
-          payment.description || `Pago — ${rawMethod}`,
+          payment.notes || `Pago — ${rawMethod}`,
           rawMethod,
           "payment",
           payment.id,

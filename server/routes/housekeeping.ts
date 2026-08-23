@@ -1,9 +1,9 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { lostFoundItems, reservations } from "@shared/schema";
+import { lostFoundItems, reservations, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
 import { requireAuth } from "../auth";
-import { eq, desc, like, and, or, ilike } from "drizzle-orm";
+import { eq, desc, like, and, or, ilike, type SQL } from "drizzle-orm";
 
 export function registerHousekeepingRoutes(app: Express) {
   // Housekeeping Tasks
@@ -188,17 +188,18 @@ export function registerHousekeepingRoutes(app: Express) {
   app.get("/api/lost-found", requireAuth, async (req, res) => {
     try {
       const { status, category, search } = req.query;
-      const conditions: any[] = [];
-      if (status) conditions.push(eq(lostFoundItems.status, status as string));
-      if (category) conditions.push(eq(lostFoundItems.category, category as string));
+      const conditions: SQL[] = [];
+      if (status) conditions.push(eq(lostFoundItems.status, status as LostFoundStatus));
+      if (category) conditions.push(eq(lostFoundItems.category, category as LostFoundCategory));
       if (search) {
         const q = `%${search}%`;
-        conditions.push(or(
+        const searchCondition = or(
           ilike(lostFoundItems.description, q),
           ilike(lostFoundItems.location, q),
           ilike(lostFoundItems.codigo, q),
           ilike(lostFoundItems.foundBy, q),
-        ));
+        );
+        if (searchCondition) conditions.push(searchCondition);
       }
       const items = conditions.length > 0
         ? await db.select().from(lostFoundItems).where(and(...conditions)).orderBy(desc(lostFoundItems.createdAt))

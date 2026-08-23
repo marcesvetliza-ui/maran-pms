@@ -372,7 +372,7 @@ export async function runNightAudit(options: {
         type: "hospitality_alert" as any,
         title: `Night Audit ${auditDate} — ✓ Completado`,
         message: `${inHouseReservations.length} hab. ocupadas (${foliosConSaldo.length} con saldo). ${arrivalsNextDay.length} llegadas mañana (${arrivalsWithoutPrepago} sin prepago).`,
-        area: "all" as any,
+        targetArea: "all",
         priority: arrivalsWithoutPrepago > 0 ? ("high" as any) : "normal",
         isRead: false,
         createdAt: new Date(),

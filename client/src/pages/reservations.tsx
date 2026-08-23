@@ -107,7 +107,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, Package } from "@shared/schema";
+import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails } from "@shared/schema";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -130,7 +130,7 @@ function parseReservationError(error: any): string {
   return "No se pudo completar la operación. Intente nuevamente.";
 }
 
-const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "web_checkin", "checked_in", "checked_out", "cancelled"];
+const VALID_STATUSES: ReservationStatus[] = ["tentative", "pending", "confirmed", "web_checkin", "checked_in", "checked_out", "cancelled", "no_show"];
 const normalizeStatus = (s: string | null | undefined): ReservationStatus =>
   VALID_STATUSES.includes(s as ReservationStatus) ? (s as ReservationStatus) : "confirmed";
 
@@ -143,6 +143,7 @@ function ReservationStatusBadge({ status }: { status: ReservationStatus }) {
     checked_in:  { label: "Check-in",     variant: "default" },
     checked_out: { label: "Check-out",    variant: "outline" },
     cancelled:   { label: "Cancelada",    variant: "destructive" },
+    no_show:     { label: "No se presentó", variant: "destructive" },
   };
 
   const config = statusConfig[status] || { label: "Sin estado", variant: "outline" as const };
@@ -246,7 +247,7 @@ export function ReservationFormDialog({
   const [isUpgrade, setIsUpgrade] = useState(!!(reservation?.isUpgrade));
   const [adjacentWarning, setAdjacentWarning] = useState<{ type: "early" | "late"; code: string; pendingValue: boolean } | null>(null);
 
-  const [formData, setFormData] = useState<Partial<InsertReservation>>({
+  const [formData, setFormData] = useState<Partial<InsertReservation> & { contactName?: string; contactPhone?: string }>({
     reservationCode: reservation?.reservationCode || "",
     guestId: reservation?.guestId || "",
     companyId: reservation?.companyId || "",
@@ -288,7 +289,11 @@ export function ReservationFormDialog({
     voucherNotes: reservation?.voucherNotes || "",
     isUpgrade: reservation?.isUpgrade || false,
     originalRoomTypeId: reservation?.originalRoomTypeId || "",
-    createdAt: reservation?.createdAt || new Date().toISOString(),
+    createdAt: reservation?.createdAt instanceof Date
+      ? reservation.createdAt
+      : reservation?.createdAt
+        ? new Date(reservation.createdAt)
+        : new Date(),
   });
 
   useEffect(() => {
@@ -339,7 +344,11 @@ export function ReservationFormDialog({
         voucherNotes: reservation?.voucherNotes || "",
         isUpgrade: reservation?.isUpgrade || false,
         originalRoomTypeId: reservation?.originalRoomTypeId || "",
-        createdAt: reservation?.createdAt || new Date().toISOString(),
+        createdAt: reservation?.createdAt instanceof Date
+          ? reservation.createdAt
+          : reservation?.createdAt
+            ? new Date(reservation.createdAt)
+            : new Date(),
       });
       setPendingCharges([]);
       setShowResChargeForm(false);
@@ -450,7 +459,7 @@ export function ReservationFormDialog({
     isFetching: isLoadingPackages,
     isError: packagesLoadFailed,
     refetch: refetchPackages,
-  } = useQuery<Package[]>({
+  } = useQuery<PackageWithDetails[]>({
     queryKey: ["/api/packages/active"],
     enabled: open,
   });

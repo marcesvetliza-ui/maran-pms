@@ -401,6 +401,13 @@ export type ReservationWithDetails = Reservation & {
   ratePlan?: RatePlan;
   charges?: Charge[];
   payments?: Payment[];
+  // Enriched reservation endpoints include these optional presentation fields.
+  groupId?: string;
+  groupName?: string;
+  groupCode?: string;
+  isGroup?: boolean;
+  contactName?: string;
+  contactPhone?: string;
 };
 
 export type RoomWithType = Room & {
@@ -414,11 +421,12 @@ export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null; isUpgrade?: boolean; movedFromRoomNumber?: string | null; color?: string | null; prefSummary?: { hasAllergies: boolean; hasDiet: boolean; count: number } | null; numberOfGuests?: number | null; bedTypeName?: string | null }>;
+  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null; isUpgrade?: boolean; movedFromRoomNumber?: string | null; color?: string | null; prefSummary?: { hasAllergies: boolean; hasDiet: boolean; hasCritical?: boolean; hasSpecialDate?: boolean; hasHigh?: boolean; count: number } | null; numberOfGuests?: number | null; bedTypeName?: string | null }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId
   unassignedGroupBlocks?: Array<{
+    blockId: string;
     groupId: string;
     groupName: string;
     groupCode: string;
@@ -905,7 +913,7 @@ export type EventPlanningData = {
   days: string[];
   occupancy: Record<string, EventPlanningCellStatus[]>;
   events: Record<string, { id: string; name: string; contactName: string; startDate: string; endDate: string; status: EventStatus; eventType: EventType }>;
-  cellEvents: Record<string, Record<string, string>>; // roomId -> date -> eventId
+  cellEvents: Record<string, Record<string, string[]>>; // roomId -> date -> event IDs
 };
 
 // Conversations and Messages for Chat (AI Integrations)

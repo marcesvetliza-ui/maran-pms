@@ -1123,7 +1123,7 @@ function GroupTable({
                   <Pencil className="mr-1 h-4 w-4" />
                   Editar
                 </Button>
-                {group.status === "tentativo" && group.reservations.length === 0 && (
+                {group.status === "tentative" && group.reservations.length === 0 && (
                   <Button
                     variant="ghost"
                     size="sm"

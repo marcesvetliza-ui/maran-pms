@@ -478,7 +478,7 @@ export default function AdminConsultasPage() {
               <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Orden de Pago PDF</CardTitle>
               <CardDescription>
                 La Orden de Pago se descarga desde el módulo{" "}
-                <Button variant="link" className="p-0 h-auto text-sm" onClick={() => navigate("/purchase-invoices")}>
+                <Button variant="ghost" className="p-0 h-auto text-sm" onClick={() => navigate("/purchase-invoices")}>
                   Comprobantes de Compra
                 </Button>{" "}
                 → ficha del proveedor → botón "OP PDF".

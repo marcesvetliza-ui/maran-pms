@@ -227,7 +227,7 @@ export function registerRestaurantRoutes(app: Express) {
         })
         .from(orderItems)
         .leftJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
-        .where(and(eq(orderItems.orderId, order.id), not(inArray(orderItems.status, ["cancelled", "voided"]))));
+        .where(and(eq(orderItems.orderId, order.id), not(inArray(orderItems.status, ["cancelled"]))));
 
       res.json({ ...order, items });
     } catch (error) {
@@ -1558,7 +1558,7 @@ export function registerRestaurantRoutes(app: Express) {
         status:     orderItems.status,
       }).from(orderItems).where(and(
         inArray(orderItems.orderId, orderIds),
-        not(inArray(orderItems.status, ["cancelled", "voided"])),
+        not(inArray(orderItems.status, ["cancelled"])),
       ));
 
       const allMenuItems = await db.select({
@@ -1752,7 +1752,7 @@ export function registerRestaurantRoutes(app: Express) {
         status:     orderItems.status,
       }).from(orderItems).where(and(
         inArray(orderItems.orderId, orderIds),
-        not(inArray(orderItems.status, ["cancelled", "voided"])),
+        not(inArray(orderItems.status, ["cancelled"])),
       ));
 
       // ── 3. Recetas e ingredientes ────────────────────────────────────────────
@@ -1906,7 +1906,7 @@ export function registerRestaurantRoutes(app: Express) {
         status: orderItems.status,
       }).from(orderItems).where(and(
         inArray(orderItems.orderId, orderIds),
-        not(inArray(orderItems.status, ["cancelled", "voided"])),
+        not(inArray(orderItems.status, ["cancelled"])),
       ));
 
       // 3. Todos los menú items (con categoryId)
@@ -2052,7 +2052,7 @@ export function registerRestaurantRoutes(app: Express) {
         quantity:   orderItems.quantity,
       }).from(orderItems).where(and(
         inArray(orderItems.orderId, orderIds),
-        not(inArray(orderItems.status, ["cancelled", "voided"])),
+        not(inArray(orderItems.status, ["cancelled"])),
       ));
 
       // 3. Recetas
@@ -2205,7 +2205,7 @@ export function registerRestaurantRoutes(app: Express) {
         waiterName: order.waiterName,
         receiptType: order.receiptType,
         closedAt: (order as any).closedAt ? String((order as any).closedAt) : null,
-        total: order.total,
+        total: order.total ?? "0",
         items: enrichedItems,
       });
 

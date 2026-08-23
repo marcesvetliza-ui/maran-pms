@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { getArgentinaToday } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -47,6 +47,7 @@ type Movement = {
   amount: string;
   date: string;
   type: string;
+  paymentMethod?: string | null;
 };
 
 type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;

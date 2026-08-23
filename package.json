@@ -54,6 +54,7 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/nodemailer": "^8.0.0",
+    "@types/pdfkit": "^0.17.6",
     "@vitest/ui": "^4.1.10",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",

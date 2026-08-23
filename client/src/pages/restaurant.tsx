@@ -129,6 +129,7 @@ type MenuItem = {
   isActive: string | null;
   allergens: string | null;
   displayOrder: number | null;
+  defaultCourse?: number | null;
   category?: MenuCategory;
 };
 
@@ -179,6 +180,7 @@ type RestaurantOrder = {
 type TableReservation = {
   id: string;
   tableId: string | null;
+  areaId?: string | null;
   guestName: string;
   guestPhone: string | null;
   guestEmail: string | null;
@@ -4748,7 +4750,7 @@ export default function RestaurantPage() {
                               </div>
                               <div className="flex items-center gap-3">
                                 <span className="text-sm text-muted-foreground">x{item.quantity}</span>
-                                <span className="text-sm font-medium">${(parseFloat(item.price || "0") * item.quantity).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                <span className="text-sm font-medium">${(parseFloat(item.unitPrice || "0") * item.quantity).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               </div>
                             </div>
                           ))}
@@ -5537,7 +5539,7 @@ export default function RestaurantPage() {
                             )}
                           </div>
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
-                            setCloseNonFiscalOverride(v as "" | "ticket" | "voucher");
+                            setCloseNonFiscalOverride(v as "__default__" | "ticket" | "voucher");
                             if (v) setCloseSalesCondition("contado");
                           }}>
                             <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
