@@ -7,7 +7,7 @@ import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
   CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
-  Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
+   Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -73,6 +73,7 @@ export interface SelectedFolioItem {
 type InvoiceSource = {
   source_charge_ids?: unknown;
   source_charge_amounts?: unknown;
+  credit_source_charge_amounts?: unknown;
   items?: unknown;
   monto_total?: string | number | null;
   monto_acreditado?: string | number | null;
@@ -99,17 +100,22 @@ export function getInvoicedAmountsByCharge(invoices: InvoiceSource[]): Record<st
   for (const invoice of invoices) {
     const total = parseFloat(String(invoice.monto_total || 0)) || 0;
     const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
-    const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
     const explicit = parseJsonValue(invoice.source_charge_amounts);
+    const creditMaps = parseJsonValue(invoice.credit_source_charge_amounts);
+    const hasPerSourceCredits = Array.isArray(creditMaps);
 
     if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
       for (const [id, value] of Object.entries(explicit as Record<string, unknown>)) {
         const amount = parseFloat(String(value)) || 0;
-        if (amount > 0) amounts[id] = (amounts[id] || 0) + amount * activeRatio;
+        const credit = hasPerSourceCredits
+          ? creditMaps.reduce((sum, map) => sum + (parseFloat(String((map as Record<string, unknown>)?.[id])) || 0), 0)
+          : amount * (total > 0 ? credited / total : 0);
+        if (amount > 0) amounts[id] = (amounts[id] || 0) + Math.max(0, amount - credit);
       }
       continue;
     }
 
+    const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
     const ids = getSourceIds(invoice);
     const invoiceItems = parseJsonValue(invoice.items);
     if (Array.isArray(invoiceItems) && invoiceItems.length === ids.length) {
@@ -137,6 +143,36 @@ export function getRemainingChargeAmounts(
 }
 
 /**
+ * Credit notes retain the original charge and append a tagged negative
+ * adjustment. Project those adjustments back onto their source only for
+ * operational totals, keeping the original amount visible and auditable.
+ */
+export function getEffectiveFolioItemAmounts(
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "charges">,
+): Record<string, number> {
+  const amounts: Record<string, number> = { accommodation: folio.roomTotal };
+  const adjustments: Record<string, number> = {};
+
+  for (const charge of folio.charges || []) {
+    const id = String(charge.id);
+    const amount = parseFloat(String(charge.amount)) || 0;
+    if (charge.category === "adjustment") {
+      const sourceId = String(charge.description || "").match(/\[nc:\d+:([^\]]+)\]/)?.[1];
+      if (sourceId) adjustments[sourceId] = (adjustments[sourceId] || 0) + amount;
+      continue;
+    }
+    if (charge.category !== "transfer_out" && charge.category !== "transfer_in") {
+      amounts[id] = amount;
+    }
+  }
+
+  for (const [sourceId, adjustment] of Object.entries(adjustments)) {
+    amounts[sourceId] = Math.max(0, (amounts[sourceId] || 0) + adjustment);
+  }
+  return amounts;
+}
+
+/**
  * Single source of truth for the items selected in Prefactura.
  * Transfer movements are folio adjustments and are never billable.
  */
@@ -147,8 +183,9 @@ export function getSelectedFolioItems(
   remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const items: SelectedFolioItem[] = [];
+  const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
 
-  const accommodationAmount = remainingAmounts?.accommodation ?? folio.roomTotal;
+  const accommodationAmount = remainingAmounts?.accommodation ?? effectiveAmounts.accommodation;
   if (selectedIds.has("accommodation") && accommodationAmount > 0.01) {
     items.push({
       id: "accommodation",
@@ -160,10 +197,10 @@ export function getSelectedFolioItems(
   }
 
   for (const charge of folio.charges || []) {
-    if (charge.category === "transfer_out" || charge.category === "transfer_in") continue;
+    if (charge.category === "transfer_out" || charge.category === "transfer_in" || charge.category === "adjustment") continue;
     const originalAmount = parseFloat(charge.amount);
     const id = String(charge.id);
-    const amount = remainingAmounts?.[id] ?? originalAmount;
+    const amount = remainingAmounts?.[id] ?? effectiveAmounts[id] ?? originalAmount;
     if (selectedIds.has(id) && Number.isFinite(amount) && amount > 0.01) {
       items.push({
         id,
@@ -183,10 +220,11 @@ export function getAllBillableFolioItems(
   remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const allIds = new Set<string>();
-  if (folio.roomTotal > 0) allIds.add("accommodation");
+  const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
+  if (effectiveAmounts.accommodation > 0) allIds.add("accommodation");
   for (const charge of folio.charges || []) {
-    if (charge.category !== "transfer_out" && charge.category !== "transfer_in" &&
-      (parseFloat(charge.amount) || 0) > 0) {
+    if (charge.category !== "transfer_out" && charge.category !== "transfer_in" && charge.category !== "adjustment" &&
+      (effectiveAmounts[String(charge.id)] ?? 0) > 0) {
       allIds.add(String(charge.id));
     }
   }
@@ -1945,7 +1983,6 @@ export function PrefacturaDialog({
         onClose={() => setNcDialogOpen(false)}
         reservationId={reservationId}
         invoices={emittedInvoices}
-        payments={(folio?.payments || []).filter((p: any) => p.status !== "anulado")}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
@@ -1989,10 +2026,15 @@ interface NcInvoice {
   monto_acreditado: string | null;
   estado: string;
   items: any[] | null;
+  cash_forma_pago?: string | null;
+  source_charge_ids?: unknown;
+  source_charge_amounts?: unknown;
+  credit_source_charge_amounts?: unknown;
 }
 
 interface NcItemRow {
   key: string;
+  sourceId: string;
   descripcion: string;
   subtotal: number;
   amount: string; // editable partial amount
@@ -2000,13 +2042,12 @@ interface NcItemRow {
 }
 
 function NotaCreditoDialog({
-  open, onClose, reservationId, invoices, payments, onSuccess,
+  open, onClose, reservationId, invoices, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   reservationId: string | number;
   invoices: NcInvoice[];
-  payments: any[];
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
@@ -2015,7 +2056,7 @@ function NotaCreditoDialog({
   const [ncItems, setNcItems] = useState<NcItemRow[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emittedNc, setEmittedNc] = useState<any>(null);
-  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
+  const [mappingWarning, setMappingWarning] = useState<string | null>(null);
 
   const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
 
@@ -2026,44 +2067,74 @@ function NotaCreditoDialog({
       setMotivo("");
       setNcItems([]);
       setEmittedNc(null);
-      setSelectedPaymentIds(new Set());
+      setMappingWarning(null);
     }
   }, [open]);
 
   // Build item rows when invoice changes
   useEffect(() => {
-    if (!selectedInvoice) { setNcItems([]); return; }
+    if (!selectedInvoice) { setNcItems([]); setMappingWarning(null); return; }
     const montoTotal = parseFloat(selectedInvoice.monto_total);
     const montoAcreditado = parseFloat(selectedInvoice.monto_acreditado || "0");
-    const saldoPendiente = montoTotal - montoAcreditado;
+    const rawItems = parseJsonValue(selectedInvoice.items);
+    const sourceAmounts = parseJsonValue(selectedInvoice.source_charge_amounts);
+    const sourceIds = getSourceIds(selectedInvoice);
+    const creditMaps = parseJsonValue(selectedInvoice.credit_source_charge_amounts);
 
-    const rawItems: any[] = Array.isArray(selectedInvoice.items) ? selectedInvoice.items : [];
+    if (!Array.isArray(rawItems) || !sourceAmounts || typeof sourceAmounts !== "object" ||
+      Array.isArray(sourceAmounts) || Object.keys(sourceAmounts).length === 0) {
+      setNcItems([]);
+      setMappingWarning("Esta factura no tiene una relación segura entre sus conceptos y los cargos del Folio. No se puede emitir una NC automática.");
+      return;
+    }
 
-    if (rawItems.length === 0) {
-      // Single synthetic item for the full pending amount
-      setNcItems([{
-        key: "total",
-        descripcion: `${selectedInvoice.tipo_comprobante} ${String(selectedInvoice.punto_venta).padStart(4,"0")}-${String(selectedInvoice.numero).padStart(8,"0")}`,
-        subtotal: saldoPendiente,
-        amount: saldoPendiente.toFixed(2),
-        selected: true,
-      }]);
-    } else {
-      // Scale items proportionally if there's already a partial credit
-      const scaleFactor = saldoPendiente / montoTotal;
-      setNcItems(rawItems.map((item: any, idx: number) => {
-        const originalAmount = parseFloat(String(item.subtotal ?? item.precioUnitario ?? 0));
-        const available = Math.max(0, originalAmount * scaleFactor);
-        return {
-          key: String(idx),
-          descripcion: item.descripcion || `Ítem ${idx + 1}`,
+    const previouslyCredited: Record<string, number> = {};
+    if (!Array.isArray(creditMaps) && montoAcreditado > 0.009) {
+      setNcItems([]);
+      setMappingWarning("La factura tiene una Nota de Crédito anterior sin detalle por cargo. Revisá el vínculo original antes de continuar.");
+      return;
+    }
+    for (const map of Array.isArray(creditMaps) ? creditMaps : []) {
+      if (!map || typeof map !== "object" || Array.isArray(map)) {
+        setNcItems([]);
+        setMappingWarning("La factura tiene una Nota de Crédito anterior sin detalle por cargo. Revisá el vínculo original antes de continuar.");
+        return;
+      }
+      for (const [sourceId, amount] of Object.entries(map as Record<string, unknown>)) {
+        previouslyCredited[sourceId] = (previouslyCredited[sourceId] || 0) + (parseFloat(String(amount)) || 0);
+      }
+    }
+    const totalMappedCredits = Object.values(previouslyCredited).reduce((total, amount) => total + amount, 0);
+    if (Math.abs(totalMappedCredits - montoAcreditado) > 0.02) {
+      setNcItems([]);
+      setMappingWarning("El detalle de las NC anteriores no coincide con el total acreditado de esta factura. No se aplicará un ajuste automático.");
+      return;
+    }
+
+    const rows: NcItemRow[] = [];
+    for (const [sourceId, originalValue] of Object.entries(sourceAmounts as Record<string, unknown>)) {
+      const index = sourceIds.indexOf(sourceId);
+      const originalItem = (index >= 0 ? rawItems[index] : sourceIds.length === 1 ? rawItems[0] : null) as any;
+      if (!originalItem) {
+        setNcItems([]);
+        setMappingWarning("No se pudo conservar el concepto fiscal original para uno de los cargos facturados.");
+        return;
+      }
+      const available = Math.max(0, (parseFloat(String(originalValue)) || 0) - (previouslyCredited[sourceId] || 0));
+      if (available > 0.009) {
+        rows.push({
+          key: sourceId,
+          sourceId,
+          descripcion: originalItem.descripcion || `Cargo ${sourceId}`,
           subtotal: available,
           amount: available.toFixed(2),
           selected: true,
-        };
-      }));
+        });
+      }
     }
-  }, [selectedInvoiceId]);
+    setMappingWarning(rows.length === 0 ? "La factura ya no tiene conceptos disponibles para acreditar." : null);
+    setNcItems(rows);
+  }, [selectedInvoiceId, selectedInvoice, invoices]);
 
   function toggleItem(key: string) {
     setNcItems(prev => prev.map(it => it.key === key ? { ...it, selected: !it.selected } : it));
@@ -2081,14 +2152,6 @@ function NotaCreditoDialog({
     ? parseFloat(selectedInvoice.monto_total) - parseFloat(selectedInvoice.monto_acreditado || "0")
     : 0;
 
-  function togglePayment(payId: string) {
-    setSelectedPaymentIds(prev => {
-      const next = new Set(prev);
-      next.has(payId) ? next.delete(payId) : next.add(payId);
-      return next;
-    });
-  }
-
   async function handleSubmit() {
     if (!selectedInvoice) {
       toast({ title: "Seleccioná una factura", variant: "destructive" }); return;
@@ -2102,23 +2165,30 @@ function NotaCreditoDialog({
     if (!motivo.trim()) {
       toast({ title: "Ingresá un motivo para la Nota de Crédito", variant: "destructive" }); return;
     }
+    if (mappingWarning) {
+      toast({ title: mappingWarning, variant: "destructive" }); return;
+    }
+    if (ncItems.some(item => item.selected && ((parseFloat(item.amount) || 0) > item.subtotal + 0.01))) {
+      toast({ title: "Un importe supera el saldo disponible de su concepto", variant: "destructive" }); return;
+    }
 
     setIsSubmitting(true);
     try {
       const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-credito`, {
         motivo: motivo.trim(),
         monto: totalNc,
-        paymentIdsToVoid: Array.from(selectedPaymentIds),
+        items: ncItems
+          .filter(item => item.selected && (parseFloat(item.amount) || 0) > 0)
+          .map(item => ({ sourceId: item.sourceId, amount: parseFloat(item.amount) })),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || body?.message || "Error al emitir NC");
 
       setEmittedNc(body);
       const ncLabel = `${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}`;
-      const voidCount = body.voidedPaymentIds?.length ?? 0;
       toast({
         title: `NC emitida: ${ncLabel}`,
-        description: voidCount > 0 ? `${voidCount} pago${voidCount !== 1 ? "s" : ""} anulado${voidCount !== 1 ? "s" : ""} — saldo del folio restaurado` : undefined,
+        description: "Los pagos se conservaron; el ajuste se registró en el Folio.",
       });
       onSuccess();
 
@@ -2218,6 +2288,17 @@ function NotaCreditoDialog({
                 )}
                 <span>Saldo disponible: <span className="font-bold text-green-700 dark:text-green-400">${fmtMoney(saldoPendienteInvoice)}</span></span>
               </div>
+               <div className="pt-1 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                 <span>Receptor, tipo de comprobante y punto de venta: <strong className="text-foreground">se conservan de la factura original</strong></span>
+                 <span>Forma de cobro: <strong className="text-foreground">{selectedInvoice.cash_forma_pago ? (PAYMENT_METHOD_LABELS[selectedInvoice.cash_forma_pago] || selectedInvoice.cash_forma_pago) : "No informada"}</strong></span>
+               </div>
+            </div>
+          )}
+
+          {mappingWarning && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-300">{mappingWarning}</p>
             </div>
           )}
 
@@ -2267,74 +2348,9 @@ function NotaCreditoDialog({
             </div>
           )}
 
-          {/* Payment void selection — shown when there are active payments on the folio */}
-          {selectedInvoice && payments.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-3 space-y-2">
-              <div className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                <RotateCcw className="h-3 w-3" />
-                Anular cobros para restaurar el saldo del folio (opcional)
-              </div>
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                Seleccioná los pagos que deben anularse. El monto volverá a aparecer como deuda pendiente en el folio.
-              </p>
-              <div className="space-y-1">
-                {payments.map((p: any) => (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-2 cursor-pointer rounded px-2 py-1 hover:bg-amber-100 dark:hover:bg-amber-900/30"
-                  >
-                    <Checkbox
-                      checked={selectedPaymentIds.has(String(p.id))}
-                      onCheckedChange={() => togglePayment(String(p.id))}
-                    />
-                    <span className="text-sm flex-1">
-                      {PAYMENT_METHOD_LABELS[p.method] || p.method}
-                      {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
-                      {p.reference ? <span className="text-xs text-muted-foreground ml-2">({p.reference})</span> : null}
-                      {p.invoiceRef ? (() => {
-                        try {
-                          const ref = JSON.parse(p.invoiceRef);
-                          const label = `${ref.tipo_comprobante ?? ref.tipoComprobante ?? "FAC"} ${String(ref.punto_venta ?? ref.puntoVenta ?? 0).padStart(4,"0")}-${String(ref.numero ?? 0).padStart(8,"0")}`;
-                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium" title="Pago vinculado a esta factura">📄 {label}</span>;
-                        } catch {
-                          // invoiceRef unparseable — try matching by id in loaded invoices list
-                          const inv = invoices.find((i: NcInvoice) => String(i.id) === String(p.invoiceRef));
-                          if (!inv) return null;
-                          const label = `${inv.tipo_comprobante} ${String(inv.punto_venta).padStart(4,"0")}-${String(inv.numero).padStart(8,"0")}`;
-                          return <span className="text-xs text-blue-600 dark:text-blue-400 ml-2 font-medium" title="Pago vinculado a esta factura">📄 {label}</span>;
-                        }
-                      })() : (
-                        <span className="text-xs text-amber-700 dark:text-amber-400 ml-2 font-medium" title="Anticipo libre — no vinculado a ninguna factura">Anticipo</span>
-                      )}
-                    </span>
-                    <span className="text-sm font-medium text-amber-900 dark:text-amber-200">${fmtMoney(p.amount)}</span>
-                  </label>
-                ))}
-              </div>
-              {selectedPaymentIds.size > 0 && (
-                <div className="text-xs text-amber-800 dark:text-amber-300 pt-1 border-t border-amber-200 dark:border-amber-700">
-                  Se anularán {selectedPaymentIds.size} pago{selectedPaymentIds.size !== 1 ? "s" : ""} por un total de{" "}
-                  <strong>
-                    ${fmtMoney(payments.filter((p: any) => selectedPaymentIds.has(String(p.id))).reduce((acc: number, p: any) => acc + parseFloat(p.amount), 0))}
-                  </strong>
-                </div>
-              )}
-              {payments.some((p: any) => selectedPaymentIds.has(String(p.id)) && p.invoiceRef) && (
-                <div className="flex items-start gap-2 rounded-md border border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40 px-3 py-2 mt-1">
-                  <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-blue-800 dark:text-blue-300 font-medium">
-                    Uno o más pagos seleccionados están vinculados a una factura — revisá con administración antes de anular
-                  </p>
-                </div>
-              )}
-              {payments.some((p: any) => selectedPaymentIds.has(String(p.id)) && p.date < getLocalToday()) && (
-                <div className="flex items-start gap-2 rounded-md border border-orange-300 bg-orange-100 dark:border-orange-700 dark:bg-orange-950/40 px-3 py-2 mt-1">
-                  <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-orange-800 dark:text-orange-300 font-medium">
-                    Estás anulando pagos de fechas anteriores — coordiná con administración
-                  </p>
-                </div>
-              )}
+          {selectedInvoice && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
+              Esta operación acredita la factura y ajusta el cargo asociado. Los pagos registrados se conservan; una devolución o anulación de cobro se gestiona por separado.
             </div>
           )}
 
@@ -2364,7 +2380,7 @@ function NotaCreditoDialog({
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !selectedInvoice || totalNc <= 0 || !motivo.trim()}
+            disabled={isSubmitting || !selectedInvoice || !!mappingWarning || totalNc <= 0 || !motivo.trim()}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
             {isSubmitting ? (

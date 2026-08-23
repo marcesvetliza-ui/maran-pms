@@ -886,7 +886,8 @@ export function registerReservationsRoutes(app: Express) {
       const chargesList = await storage.getCharges(req.params.id);
       const paymentsList = await storage.getPayments(req.params.id);
       const totalCharges = chargesList.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-      const totalPayments = paymentsList.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+      const activePayments = paymentsList.filter((p: any) => p.status !== "anulado");
+      const totalPayments = activePayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
       const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
       const roomTotal = savedRoomTotal > 0
         ? savedRoomTotal
@@ -1007,12 +1008,18 @@ export function registerReservationsRoutes(app: Express) {
         SELECT id, tipo_comprobante, punto_venta, numero, fecha_emision,
                cliente_razon_social, cliente_cuit, cliente_condicion_iva,
                monto_total, monto_acreditado, estado, items, cae, modo_ficticio,
-                source_charge_ids, source_charge_amounts
-        FROM sales_invoices
-        WHERE reserva_id = ${req.params.id}
+               source_charge_ids, source_charge_amounts, cash_forma_pago,
+               COALESCE((
+                 SELECT jsonb_agg(nc.source_charge_amounts)
+                 FROM sales_invoices nc
+                 WHERE nc.nota_credito_id = si.id
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+               ), '[]'::jsonb) AS credit_source_charge_amounts
+        FROM sales_invoices si
+        WHERE si.reserva_id = ${req.params.id}
           AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
           AND estado IN ('emitida', 'parcial')
-        ORDER BY created_at DESC
+        ORDER BY si.created_at DESC
       `);
       res.json(rows.rows);
     } catch (e: any) {

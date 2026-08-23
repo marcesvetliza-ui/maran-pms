@@ -3,12 +3,12 @@ import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters, folioMovements } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
-import { storage } from "../db-storage";
+import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
 
 // ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
@@ -51,18 +51,23 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
   };
   const total = parseFloat(String(invoice.monto_total || 0)) || 0;
   const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
-  const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
   const explicit = parseJson(invoice.source_charge_amounts);
+  const creditMaps = parseJson(invoice.credit_source_charge_amounts);
+  const hasPerSourceCredits = Array.isArray(creditMaps);
   const result: Record<string, number> = {};
 
   if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
     for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
       const value = parseFloat(String(amount)) || 0;
-      if (value > 0) result[id] = value * activeRatio;
+      const credit = hasPerSourceCredits
+        ? creditMaps.reduce((sum: number, map: any) => sum + (parseFloat(String(map?.[id])) || 0), 0)
+        : value * (total > 0 ? credited / total : 0);
+      if (value > 0) result[id] = Math.max(0, value - credit);
     }
     return result;
   }
 
+  const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
   const idsValue = parseJson(invoice.source_charge_ids);
   const ids = Array.isArray(idsValue) ? idsValue.map(String) : [];
   const itemsValue = parseJson(invoice.items);
@@ -75,6 +80,11 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
     result[ids[0]] = total - credited;
   }
   return result;
+}
+
+function getNotaCreditoAdjustmentSourceId(description: unknown): string | null {
+  const match = String(description || "").match(/\[nc:\d+:([^\]]+)\]/);
+  return match?.[1] || null;
 }
 
 class FolioInvoiceValidationError extends Error {
@@ -480,17 +490,28 @@ export function registerBillingRoutes(app: Express) {
           : (parseFloat((reservation as any).finalRatePerNight || "0") * ((reservation as any).nights || 0));
         const originalAmounts: Record<string, number> = { accommodation: accommodationTotal };
         for (const charge of charges) {
-          if (charge.category !== "transfer_in" && charge.category !== "transfer_out") {
+          if (charge.category === "adjustment") {
+            const sourceId = getNotaCreditoAdjustmentSourceId(charge.description);
+            if (sourceId) {
+              originalAmounts[sourceId] = (originalAmounts[sourceId] || 0) + (parseFloat(charge.amount) || 0);
+            }
+          } else if (charge.category !== "transfer_in" && charge.category !== "transfer_out") {
             originalAmounts[String(charge.id)] = parseFloat(charge.amount) || 0;
           }
         }
 
         const priorInvoices = await db.execute(sql`
-          SELECT source_charge_ids, source_charge_amounts, items, monto_total, monto_acreditado
-            FROM sales_invoices
-            WHERE reserva_id = ${reservationId}
-            AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
-            AND estado IN ('emitida', 'parcial')
+          SELECT source_charge_ids, source_charge_amounts, items, monto_total, monto_acreditado,
+                 COALESCE((
+                   SELECT jsonb_agg(nc.source_charge_amounts)
+                   FROM sales_invoices nc
+                   WHERE nc.nota_credito_id = si.id
+                     AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                 ), '[]'::jsonb) AS credit_source_charge_amounts
+            FROM sales_invoices si
+            WHERE si.reserva_id = ${reservationId}
+            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+            AND si.estado IN ('emitida', 'parcial')
         `);
         const alreadyInvoiced: Record<string, number> = {};
         for (const invoice of priorInvoices.rows) {
@@ -775,11 +796,25 @@ export function registerBillingRoutes(app: Express) {
 
   // POST /api/billing/invoices/:id/nota-credito
   app.post("/api/billing/invoices/:id/nota-credito", requireAuth, async (req, res) => {
+    let creditLockClient: any = null;
+    let creditLockKey: string | null = null;
     try {
       const id = parseInt(req.params.id);
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
-      const original = row.rows[0] as any;
+      let original = row.rows[0] as any;
+
+      // Serialize every invoice/NC operation for a reservation across app
+      // instances. Re-read after acquiring the lock so a second request sees
+      // any NC emitted by the first one before validating its available amount.
+      if (original.reserva_id) {
+        creditLockClient = await pool.connect();
+        creditLockKey = `folio-invoice:${original.reserva_id}`;
+        await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
+        const lockedRow = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
+        if (!lockedRow.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
+        original = lockedRow.rows[0] as any;
+      }
 
       if (original.estado === "anulada") {
         return res.status(400).json({ error: "La factura ya fue anulada completamente" });
@@ -802,32 +837,168 @@ export function registerBillingRoutes(app: Express) {
       const montoYaAcreditado = parseFloat(original.monto_acreditado || "0");
       const saldoPendiente = montoTotal - montoYaAcreditado;
 
-      const montoParcial = monto !== undefined && monto !== null ? parseFloat(monto) : undefined;
-      const esParcial = montoParcial !== undefined && !isNaN(montoParcial) && montoParcial > 0
-        && montoParcial < saldoPendiente - 0.009;
-
       // Guard: invoice already fully credited
       if (montoYaAcreditado >= montoTotal - 0.009) {
         return res.status(400).json({ error: "La factura ya fue acreditada en su totalidad" });
       }
-
-      // Validate partial amount doesn't exceed pending balance
-      if (montoParcial !== undefined && montoParcial > saldoPendiente + 0.009) {
-        return res.status(400).json({ error: `El monto a acreditar ($${montoParcial.toFixed(2)}) supera el saldo pendiente de la factura ($${saldoPendiente.toFixed(2)})` });
+      if (!String(motivo || "").trim()) {
+        return res.status(400).json({ error: "El motivo de la Nota de Crédito es obligatorio" });
+      }
+      // Una NC fiscal corrige el cargo, no el pago. Rechazamos explícitamente el
+      // contrato anterior para que ninguna llamada residual anule un cobro.
+      if (original.reserva_id && Array.isArray(paymentIdsToVoid) && paymentIdsToVoid.length > 0) {
+        return res.status(400).json({ error: "La Nota de Crédito no anula pagos. Registrá la devolución o anulación en una operación separada." });
       }
 
-      const montoNC = montoParcial ?? saldoPendiente;
+      let sourceChargeAmounts: Record<string, number> = {};
+      let sourceItemById = new Map<string, any>();
+      let ncItems: any[] = [];
+      let montoNC = 0;
+      let esParcial = false;
 
-      const ncItems = esParcial
-        ? [{
-            descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`,
-            cantidad: 1,
-            precioUnitario: montoParcial as number,
-            alicuotaIva: "no_gravado" as const,
-            subtotalNeto: 0,
-            subtotal: montoParcial as number,
-          }]
-        : (items ?? original.items ?? []);
+      if (!original.reserva_id) {
+        // Keep the existing generic NC behavior for Restaurant, SPA and Events.
+        // Reservation invoices use the stricter per-charge contract below.
+        const montoParcial = monto !== undefined && monto !== null ? parseFloat(monto) : undefined;
+        if (montoParcial !== undefined && (!Number.isFinite(montoParcial) || montoParcial <= 0 || montoParcial > saldoPendiente + 0.009)) {
+          return res.status(400).json({ error: "El importe de la Nota de Crédito no es válido" });
+        }
+        montoNC = montoParcial ?? saldoPendiente;
+        esParcial = montoNC < saldoPendiente - 0.009;
+        const originalItems = Array.isArray(original.items) ? original.items : [];
+        ncItems = esParcial
+          ? [{
+              descripcion: `Anulación parcial de comprobante ${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}${motivo ? ` — ${motivo}` : ""}`,
+              cantidad: 1, precioUnitario: montoNC, alicuotaIva: "no_gravado",
+              subtotalNeto: 0, subtotal: montoNC,
+            }]
+          : originalItems;
+      } else {
+      const parseJson = (value: unknown): any => {
+        if (typeof value !== "string") return value;
+        try { return JSON.parse(value); } catch { return null; }
+      };
+      const explicitSourceAmounts = parseJson(original.source_charge_amounts);
+      if (!explicitSourceAmounts || typeof explicitSourceAmounts !== "object" || Array.isArray(explicitSourceAmounts)) {
+        return res.status(409).json({
+          error: "Esta factura histórica no tiene un detalle explícito por cargo. No se puede emitir una NC automática desde el Folio.",
+        });
+      }
+      const sourceAmounts = parseInvoiceSourceAmounts({ ...original, monto_acreditado: "0" });
+      const sourceIds = parseJson(original.source_charge_ids);
+      const normalizedSourceIds = Array.isArray(sourceIds) ? sourceIds.map(String) : [];
+      const originalItems = parseJson(original.items);
+      if (!original.reserva_id || Object.keys(sourceAmounts).length === 0 || !Array.isArray(originalItems)) {
+        return res.status(409).json({
+          error: "Esta factura histórica no tiene una relación segura con sus cargos. No se puede emitir una NC desde el Folio sin revisar el vínculo original.",
+        });
+      }
+
+      const priorCreditsResult = await db.execute(sql`
+        SELECT source_charge_amounts, monto_total
+        FROM sales_invoices
+        WHERE nota_credito_id = ${original.id}
+          AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+      `);
+      const creditedBySource: Record<string, number> = {};
+      let creditedWithNoSourceMap = 0;
+      for (const priorCredit of priorCreditsResult.rows as any[]) {
+        const priorMap = parseJson(priorCredit.source_charge_amounts);
+        if (!priorMap || typeof priorMap !== "object" || Array.isArray(priorMap)) {
+          creditedWithNoSourceMap += parseFloat(String(priorCredit.monto_total || 0)) || 0;
+          continue;
+        }
+        for (const [sourceId, value] of Object.entries(priorMap)) {
+          creditedBySource[sourceId] = (creditedBySource[sourceId] || 0) + (parseFloat(String(value)) || 0);
+        }
+      }
+      if (creditedWithNoSourceMap > 0.009) {
+        return res.status(409).json({
+          error: "La factura tiene Notas de Crédito anteriores sin detalle por cargo. No se puede calcular un nuevo ajuste de Folio con seguridad.",
+        });
+      }
+      const totalMappedCredits = Object.values(creditedBySource).reduce((total, amount) => total + amount, 0);
+      if (Math.abs(totalMappedCredits - montoYaAcreditado) > 0.01) {
+        return res.status(409).json({
+          error: "El detalle por cargo de las Notas de Crédito no coincide con el total acreditado. Revisá el historial antes de continuar.",
+        });
+      }
+
+      // Legacy billing screens can still request a *total* NC without sending
+      // per-charge rows. It is safe only when crediting every remaining source;
+      // a partial NC must be created from the Folio, where the user selects the
+      // exact concept being corrected.
+      const rawRequestedItems = Array.isArray(items)
+        ? items
+        : monto === undefined || monto === null
+          ? Object.entries(sourceAmounts)
+              .filter(([, amount]) => (parseFloat(String(amount)) || 0) > 0)
+              .map(([sourceId, amount]) => ({
+                sourceId,
+                amount: Math.max(0, (parseFloat(String(amount)) || 0) - (creditedBySource[sourceId] || 0)),
+              }))
+          : [];
+      const requestedBySource = new Map<string, number>();
+      for (const item of rawRequestedItems) {
+        const sourceId = typeof item?.sourceId === "string" ? item.sourceId.trim() : "";
+        const amount = parseFloat(String(item?.amount ?? item?.subtotal ?? 0));
+        if (!sourceId || !Number.isFinite(amount) || amount <= 0) {
+          return res.status(400).json({ error: "Seleccioná conceptos válidos y un importe mayor a cero para la NC" });
+        }
+        if (requestedBySource.has(sourceId)) {
+          return res.status(400).json({ error: "Cada cargo sólo puede incluirse una vez en la misma Nota de Crédito" });
+        }
+        requestedBySource.set(sourceId, amount);
+      }
+      if (requestedBySource.size === 0) {
+        return res.status(400).json({ error: "Seleccioná al menos un concepto de la factura original" });
+      }
+
+      sourceItemById = new Map<string, any>();
+      for (const [index, sourceId] of normalizedSourceIds.entries()) {
+        if (!sourceItemById.has(sourceId) && originalItems[index]) sourceItemById.set(sourceId, originalItems[index]);
+      }
+      if (normalizedSourceIds.length === 1 && originalItems[0]) {
+        sourceItemById.set(normalizedSourceIds[0], originalItems[0]);
+      }
+
+      sourceChargeAmounts = {};
+      ncItems = [];
+      montoNC = 0;
+      for (const [sourceId, requestedAmount] of requestedBySource.entries()) {
+        const originalAmount = sourceAmounts[sourceId];
+        const available = (originalAmount ?? 0) - (creditedBySource[sourceId] || 0);
+        const originalItem = sourceItemById.get(sourceId);
+        if (!Number.isFinite(originalAmount) || available <= 0.009 || requestedAmount > available + 0.009) {
+          return res.status(400).json({ error: `El importe solicitado para el cargo seleccionado supera el saldo acreditable (${sourceId}).` });
+        }
+        if (!originalItem) {
+          return res.status(409).json({ error: "No se pudo conservar el concepto fiscal original para uno de los cargos seleccionados." });
+        }
+        const alicuotaIva = ["21", "10.5", "exento", "no_gravado"].includes(String(originalItem.alicuotaIva))
+          ? originalItem.alicuotaIva
+          : "no_gravado";
+        const divisor = alicuotaIva === "21" ? 1.21 : alicuotaIva === "10.5" ? 1.105 : 1;
+        const amount = Number(requestedAmount.toFixed(2));
+        sourceChargeAmounts[sourceId] = amount;
+        montoNC += amount;
+        ncItems.push({
+          descripcion: originalItem.descripcion || `Ajuste de ${sourceId}`,
+          cantidad: 1,
+          precioUnitario: amount,
+          alicuotaIva,
+          subtotalNeto: Number((amount / divisor).toFixed(2)),
+          subtotal: amount,
+        });
+      }
+      if (monto !== undefined && Math.abs((parseFloat(String(monto)) || 0) - montoNC) > 0.01) {
+        return res.status(400).json({ error: "El total de la NC no coincide con los conceptos seleccionados" });
+      }
+      if (montoNC > saldoPendiente + 0.009) {
+        return res.status(400).json({ error: `El monto a acreditar ($${montoNC.toFixed(2)}) supera el saldo pendiente de la factura ($${saldoPendiente.toFixed(2)})` });
+      }
+      esParcial = montoNC < saldoPendiente - 0.009;
+      }
 
       const nc = await emitirFactura({
         tipoComprobante: tipoNC as any,
@@ -842,140 +1013,72 @@ export function registerBillingRoutes(app: Express) {
         facturaOriginalId: original.id,
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
+        reservaId: original.reserva_id || undefined,
+        folioId: original.folio_id || undefined,
+        cashFormaPago: original.cash_forma_pago,
+        sourceChargeIds: original.reserva_id ? Object.keys(sourceChargeAmounts) : undefined,
+        sourceChargeAmounts: original.reserva_id ? sourceChargeAmounts : undefined,
       } as NewInvoiceData);
 
-      // Actualiza monto_acreditado y estado de la factura original.
-      // - NC parcial: suma el monto al acreditado. Si llega al total → anulada; si no → parcial.
-      // - NC total: anula directamente.
-      if (esParcial) {
-        const nuevoAcreditado = montoYaAcreditado + (montoParcial as number);
-        const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
-        await db.execute(sql`
+      // El cargo original nunca se modifica: se registra una corrección negativa
+      // trazable por cada concepto de la NC. Esto permite ver el importe original,
+      // el ajuste fiscal y el importe vigente en el Folio.
+      // Once ARCA has authorized the NC, these local writes must succeed or
+      // fail together: a partially corrected Folio is worse than a visible
+      // pending reconciliation.
+      const nuevoAcreditado = Math.min(montoTotal, montoYaAcreditado + montoNC);
+      const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
           UPDATE sales_invoices
             SET nota_credito_id = ${nc.id},
                 monto_acreditado = ${nuevoAcreditado.toFixed(2)},
                 estado = ${nuevoEstado}
           WHERE id = ${id}
         `);
-      } else {
-        await db.execute(sql`
-          UPDATE sales_invoices
-            SET estado = 'anulada',
-                monto_acreditado = ${montoTotal.toFixed(2)},
-                nota_credito_id = ${nc.id}
-          WHERE id = ${id}
-        `);
-      }
-
-      // Register cash movement (egreso) in the corresponding area
-      try {
-        const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
-        const pvArea = (pvRow.rows[0] as any)?.area || "restaurant";
-        const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
-        if (totalNC > 0) {
-          const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;
-          const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
-          await storage.registerCashMovement(
-            pvArea,
-            "nota_credito",
-            String(nc.id),
-            `${nroNC} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
-            "nc",
-            String(totalNC.toFixed(2)),
-            "outcome",
-            user?.fullName || user?.username,
-            nc.tipoComprobante
-          );
+        if (original.reserva_id) {
+          const today = getArgentinaToday();
+          const adjustments = Object.entries(sourceChargeAmounts).map(([sourceId, amount]) => {
+            const originalItem = sourceItemById.get(sourceId);
+            return {
+              reservationId: String(original.reserva_id),
+              description: `Ajuste por NC ${nc.tipoComprobante} ${String(nc.puntoVenta).padStart(4, "0")}-${String(nc.numero).padStart(8, "0")} — ${originalItem?.descripcion || sourceId} [nc:${nc.id}:${sourceId}]`,
+              amount: String(-amount),
+              date: today,
+              category: "adjustment" as const,
+              createdBy: user?.fullName || user?.username || "Sistema",
+              status: "active",
+            };
+          });
+          if (adjustments.length) await tx.insert(charges).values(adjustments);
         }
-      } catch (cashErr) {
-        console.error("[NC] Error registrando movimiento de caja:", cashErr);
+      });
+
+      // A reservation NC changes the fiscal amount and Folio balance only. It
+      // must not create a cash outflow while its payments remain active.
+      if (!original.reserva_id) {
+        try {
+          const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
+          const pvArea = (pvRow.rows[0] as any)?.area || "restaurant";
+          const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
+          if (totalNC > 0) {
+            const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;
+            const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+            await storage.registerCashMovement(
+              pvArea, "nota_credito", String(nc.id),
+              `${nroNC} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
+              "nc", String(totalNC.toFixed(2)), "outcome",
+              user?.fullName || user?.username, nc.tipoComprobante
+            );
+          }
+        } catch (cashErr) {
+          console.error("[NC] Error registrando movimiento de caja:", cashErr);
+        }
       }
 
-      // Void selected payments to restore the folio balance
+      // A credit note deliberately leaves all payments untouched. Any return of
+      // funds or cancellation of a payment is a separate, explicit operation.
       const voidedPaymentIds: number[] = [];
-      if (Array.isArray(paymentIdsToVoid) && paymentIdsToVoid.length > 0) {
-        const operador = user?.fullName || user?.username || "sistema";
-        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
-        const voidMotivo = `Nota de Crédito ${nroNC}${motivo ? ` — ${motivo}` : ""}`;
-
-        // Determine the reservation ID this invoice belongs to (ownership anchor)
-        const invoiceReservaId = original.reserva_id ? String(original.reserva_id) : null;
-        if (!invoiceReservaId) {
-          console.warn("[nc-void-payment] invoice has no reserva_id — skipping payment voids");
-        }
-
-        // Validate input: each element must be a non-empty string (UUID)
-        const validPaymentIds = paymentIdsToVoid.filter((id: any) => {
-          if (typeof id !== "string" || !id.trim()) {
-            console.warn(`[nc-void-payment] invalid payment ID rejected: ${JSON.stringify(id)}`);
-            return false;
-          }
-          return true;
-        });
-
-        for (const payId of validPaymentIds) {
-          try {
-            const payRow = await db.execute(sql`SELECT * FROM payments WHERE id = ${payId}`);
-            const pay = payRow.rows?.[0] as any;
-            if (!pay || pay.status === "anulado") continue;
-
-            // ── Security: ensure payment belongs to the same reservation ──────
-            if (!invoiceReservaId || String(pay.reservation_id) !== invoiceReservaId) {
-              console.warn(`[nc-void-payment] payment ${payId} does not belong to reservation ${invoiceReservaId} — skipped`);
-              continue;
-            }
-
-            // Mark payment as voided (bypass the "today only" guard since this is a fiscal NC operation)
-            await db.execute(sql`
-              UPDATE payments
-              SET status = 'anulado',
-                  anulado_por = ${operador},
-                  motivo_anulacion = ${voidMotivo},
-                  anulado_at = NOW()
-              WHERE id = ${payId}
-            `);
-            voidedPaymentIds.push(payId);
-
-            // Add folio void adjustment so the balance is restored
-            if (pay.reservation_id) {
-              try {
-                const folioRows = await db.execute(sql`SELECT id FROM folios WHERE entity_type = 'reservation' AND entity_id = ${pay.reservation_id} LIMIT 1`);
-                const folioRec = folioRows.rows?.[0] as any;
-                if (folioRec) {
-                  const methodLabel: Record<string, string> = {
-                    efectivo: "Efectivo", tarjeta_debito: "Tarj. Débito", tarjeta_credito: "Tarj. Crédito",
-                    transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cta. Corriente",
-                  };
-                  await storage.addFolioAdjustment(
-                    folioRec.id, "void", parseFloat(pay.amount),
-                    `Anulación pago ${methodLabel[pay.method] || pay.method} — ${voidMotivo}`,
-                    operador, undefined, voidMotivo
-                  );
-                }
-              } catch (e) { console.error("[nc-void-payment] folio adjustment:", e); }
-
-              // Cash reversal
-              try {
-                const reservation = await storage.getReservation(pay.reservation_id);
-                const cashLabel = reservation
-                  ? [
-                      `Anulación ${reservation.reservationCode}`,
-                      reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
-                      reservation.guest ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}` : null,
-                      pay.method,
-                    ].filter(Boolean).join(" — ")
-                  : `Anulación pago — ${pay.method}`;
-                await storage.registerCashMovement(
-                  "reception", "payment_void", pay.id, cashLabel,
-                  pay.method, String(pay.amount), "expense", operador
-                );
-              } catch (e) { console.error("[nc-void-payment] cash reversal:", e); }
-            }
-          } catch (e) {
-            console.error(`[nc-void-payment] failed for payment ${payId}:`, e);
-          }
-        }
-      }
 
       // Write void movement to restaurant_order folio when the NC reverses a restaurant invoice
       if (original.restaurant_order_id) {
@@ -1203,6 +1306,11 @@ export function registerBillingRoutes(app: Express) {
       res.status(201).json({ ...nc, voidedPaymentIds, voidedFolioMovementIds });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    } finally {
+      if (creditLockClient && creditLockKey) {
+        await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
+        creditLockClient.release();
+      }
     }
   });
 

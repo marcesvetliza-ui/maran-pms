@@ -22,7 +22,7 @@ export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
 ];
 
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "NCA" | "NCB" | "NCT" | "NCM" | "NDA" | "NDB" | "NDT" | "NDM" | "NDC" | NonFiscalTipo;
+  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NDA" | "NDB" | "NDT" | "NDM" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
@@ -43,9 +43,9 @@ export interface NewInvoiceData {
   observaciones?: string;
 }
 
-const TIPOS_CBT_WSFE: Record<string, number> = {
+export const TIPOS_CBT_WSFE: Record<string, number> = {
   FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
-  NCA: 3, NCB: 8, NCT: 197, NCM: 203,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
   NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
 };
 
@@ -58,7 +58,7 @@ function calcularMontos(items: InvoiceItem[], tipo: string) {
 
   // Factura C (monotributista) y Factura T (turismo) no discriminan IVA:
   // todo el importe se considera "no gravado" a los fines de ARCA.
-  if (tipo === "FC" || tipo === "FT") {
+  if (tipo === "FC" || tipo === "FT" || tipo === "NCC" || tipo === "NCT") {
     for (const item of items) montoNoGravado += item.subtotal;
     const montoTotal = round2(montoNoGravado);
     return {
