@@ -44,6 +44,39 @@ async function loadLogoBuffer(logoUrl?: string | null): Promise<Buffer | undefin
   return undefined;
 }
 
+function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
+  const parseJson = (value: unknown) => {
+    if (typeof value !== "string") return value;
+    try { return JSON.parse(value); } catch { return null; }
+  };
+  const total = parseFloat(String(invoice.monto_total || 0)) || 0;
+  const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
+  const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
+  const explicit = parseJson(invoice.source_charge_amounts);
+  const result: Record<string, number> = {};
+
+  if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
+    for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
+      const value = parseFloat(String(amount)) || 0;
+      if (value > 0) result[id] = value * activeRatio;
+    }
+    return result;
+  }
+
+  const idsValue = parseJson(invoice.source_charge_ids);
+  const ids = Array.isArray(idsValue) ? idsValue.map(String) : [];
+  const itemsValue = parseJson(invoice.items);
+  if (Array.isArray(itemsValue) && itemsValue.length === ids.length) {
+    ids.forEach((id, index) => {
+      const value = parseFloat(String(itemsValue[index]?.subtotal ?? itemsValue[index]?.precioUnitario ?? 0)) || 0;
+      if (value > 0) result[id] = value * activeRatio;
+    });
+  } else if (ids.length === 1 && total > 0) {
+    result[ids[0]] = total - credited;
+  }
+  return result;
+}
+
 export function registerBillingRoutes(app: Express) {
 
   // GET /api/billing/config
@@ -370,12 +403,69 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, observaciones } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
       if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
         return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
+      }
+      const sanitizedSourceChargeAmounts = sourceChargeAmounts && typeof sourceChargeAmounts === "object"
+        ? Object.fromEntries(
+          Object.entries(sourceChargeAmounts)
+            .filter(([id, amount]) => typeof id === "string" && Number.isFinite(Number(amount)) && Number(amount) > 0)
+            .map(([id, amount]) => [id, Number(amount)])
+        )
+        : undefined;
+
+      // A source amount is the amount this invoice consumes from a folio charge.
+      // Validate it server-side so a stale tab cannot invoice the same residual twice.
+      if (reservaId && sanitizedSourceChargeAmounts && Object.keys(sanitizedSourceChargeAmounts).length > 0) {
+        const requestedTotal = Object.values(sanitizedSourceChargeAmounts)
+          .reduce((sum, amount) => sum + Number(amount), 0);
+        const itemsTotal = items.reduce((sum: number, item: any) => sum + (Number(item.subtotal) || 0), 0);
+        if (Math.abs(requestedTotal - itemsTotal) > 0.02) {
+          return res.status(400).json({ error: "Los importes de los cargos no coinciden con el total del comprobante" });
+        }
+
+        const reservation = await storage.getReservation(String(reservaId));
+        if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
+        const charges = await storage.getCharges(String(reservaId));
+        const savedRoomTotal = parseFloat((reservation as any).totalRoomAmount || "0");
+        const accommodationTotal = savedRoomTotal > 0
+          ? savedRoomTotal
+          : (parseFloat((reservation as any).finalRatePerNight || "0") * ((reservation as any).nights || 0));
+        const originalAmounts: Record<string, number> = { accommodation: accommodationTotal };
+        for (const charge of charges) {
+          if (charge.category !== "transfer_in" && charge.category !== "transfer_out") {
+            originalAmounts[String(charge.id)] = parseFloat(charge.amount) || 0;
+          }
+        }
+
+        const priorInvoices = await db.execute(sql`
+          SELECT source_charge_ids, source_charge_amounts, items, monto_total, monto_acreditado
+          FROM sales_invoices
+          WHERE reserva_id = ${String(reservaId)}
+            AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+            AND estado IN ('emitida', 'parcial')
+        `);
+        const alreadyInvoiced: Record<string, number> = {};
+        for (const invoice of priorInvoices.rows) {
+          for (const [id, amount] of Object.entries(parseInvoiceSourceAmounts(invoice))) {
+            alreadyInvoiced[id] = (alreadyInvoiced[id] || 0) + amount;
+          }
+        }
+
+        for (const [id, amount] of Object.entries(sanitizedSourceChargeAmounts)) {
+          const original = originalAmounts[id];
+          const pending = original - (alreadyInvoiced[id] || 0);
+          if (!Number.isFinite(original) || original <= 0) {
+            return res.status(400).json({ error: `El cargo seleccionado (${id}) no existe o no es facturable` });
+          }
+          if (Number(amount) > pending + 0.02) {
+            return res.status(409).json({ error: `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)` });
+          }
+        }
       }
       const user = (req as any).user;
       const factura = await emitirFactura({
@@ -388,6 +478,7 @@ export function registerBillingRoutes(app: Express) {
         puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
         cashFormaPago: cashFormaPago || undefined,
         sourceChargeIds: Array.isArray(sourceChargeIds) ? sourceChargeIds : undefined,
+        sourceChargeAmounts: sanitizedSourceChargeAmounts,
         observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
       } as NewInvoiceData);
 

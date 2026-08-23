@@ -1006,7 +1006,7 @@ export function registerReservationsRoutes(app: Express) {
         SELECT id, tipo_comprobante, punto_venta, numero, fecha_emision,
                cliente_razon_social, cliente_cuit, cliente_condicion_iva,
                monto_total, monto_acreditado, estado, items, cae, modo_ficticio,
-               source_charge_ids
+                source_charge_ids, source_charge_amounts
         FROM sales_invoices
         WHERE reserva_id = ${req.params.id}
           AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')

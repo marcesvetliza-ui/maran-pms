@@ -39,6 +39,7 @@ export interface NewInvoiceData {
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
   sourceChargeIds?: string[]; // IDs de cargos del folio incluidos en esta factura
+  sourceChargeAmounts?: Record<string, number>; // importe emitido por cada cargo del folio
   observaciones?: string;
 }
 
@@ -277,6 +278,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     operador: data.operador || null,
     cashFormaPago: data.cashFormaPago || null,
     sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
+    sourceChargeAmounts: data.sourceChargeAmounts ? JSON.stringify(data.sourceChargeAmounts) : null,
     observaciones: data.observaciones || null,
   }).returning();
 

@@ -67,6 +67,73 @@ export interface SelectedFolioItem {
   id: string;
   amount: number;
   description: string;
+  originalAmount: number;
+}
+
+type InvoiceSource = {
+  source_charge_ids?: unknown;
+  source_charge_amounts?: unknown;
+  items?: unknown;
+  monto_total?: string | number | null;
+  monto_acreditado?: string | number | null;
+};
+
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function getSourceIds(invoice: InvoiceSource): string[] {
+  const ids = parseJsonValue(invoice.source_charge_ids);
+  return Array.isArray(ids) ? ids.map(String) : [];
+}
+
+/**
+ * Returns the still-active invoiced amount per source charge. New invoices
+ * persist this mapping explicitly. For invoices issued before the mapping
+ * existed, the saved item order is used as a backwards-compatible fallback.
+ */
+export function getInvoicedAmountsByCharge(invoices: InvoiceSource[]): Record<string, number> {
+  const amounts: Record<string, number> = {};
+
+  for (const invoice of invoices) {
+    const total = parseFloat(String(invoice.monto_total || 0)) || 0;
+    const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
+    const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
+    const explicit = parseJsonValue(invoice.source_charge_amounts);
+
+    if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
+      for (const [id, value] of Object.entries(explicit as Record<string, unknown>)) {
+        const amount = parseFloat(String(value)) || 0;
+        if (amount > 0) amounts[id] = (amounts[id] || 0) + amount * activeRatio;
+      }
+      continue;
+    }
+
+    const ids = getSourceIds(invoice);
+    const invoiceItems = parseJsonValue(invoice.items);
+    if (Array.isArray(invoiceItems) && invoiceItems.length === ids.length) {
+      ids.forEach((id, index) => {
+        const item = invoiceItems[index] as any;
+        const amount = parseFloat(String(item?.subtotal ?? item?.precioUnitario ?? 0)) || 0;
+        if (amount > 0) amounts[id] = (amounts[id] || 0) + amount * activeRatio;
+      });
+    } else if (ids.length === 1 && total > 0) {
+      amounts[ids[0]] = (amounts[ids[0]] || 0) + (total - credited);
+    }
+  }
+
+  return amounts;
+}
+
+export function getRemainingChargeAmounts(
+  allOriginalItems: SelectedFolioItem[],
+  invoicedAmounts: Record<string, number>,
+): Record<string, number> {
+  return Object.fromEntries(allOriginalItems.map((item) => [
+    item.id,
+    Math.max(0, item.amount - (invoicedAmounts[item.id] || 0)),
+  ]));
 }
 
 /**
@@ -77,13 +144,16 @@ export function getSelectedFolioItems(
   selectedIds: Set<string>,
   folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
   itemDescriptions: Record<string, string> = {},
+  remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const items: SelectedFolioItem[] = [];
 
-  if (selectedIds.has("accommodation") && folio.roomTotal > 0) {
+  const accommodationAmount = remainingAmounts?.accommodation ?? folio.roomTotal;
+  if (selectedIds.has("accommodation") && accommodationAmount > 0.01) {
     items.push({
       id: "accommodation",
-      amount: folio.roomTotal,
+      amount: accommodationAmount,
+      originalAmount: folio.roomTotal,
       description: itemDescriptions.accommodation ||
         `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`,
     });
@@ -91,12 +161,14 @@ export function getSelectedFolioItems(
 
   for (const charge of folio.charges || []) {
     if (charge.category === "transfer_out" || charge.category === "transfer_in") continue;
-    const amount = parseFloat(charge.amount);
-    if (selectedIds.has(String(charge.id)) && Number.isFinite(amount) && amount > 0) {
-      const id = String(charge.id);
+    const originalAmount = parseFloat(charge.amount);
+    const id = String(charge.id);
+    const amount = remainingAmounts?.[id] ?? originalAmount;
+    if (selectedIds.has(id) && Number.isFinite(amount) && amount > 0.01) {
       items.push({
         id,
         amount,
+        originalAmount,
         description: itemDescriptions[id] || charge.description,
       });
     }
@@ -108,6 +180,7 @@ export function getSelectedFolioItems(
 export function getAllBillableFolioItems(
   folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
   itemDescriptions: Record<string, string> = {},
+  remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const allIds = new Set<string>();
   if (folio.roomTotal > 0) allIds.add("accommodation");
@@ -117,7 +190,7 @@ export function getAllBillableFolioItems(
       allIds.add(String(charge.id));
     }
   }
-  return getSelectedFolioItems(allIds, folio, itemDescriptions);
+  return getSelectedFolioItems(allIds, folio, itemDescriptions, remainingAmounts);
 }
 
 export function getSelectedFolioTotal(items: SelectedFolioItem[]): number {
@@ -198,12 +271,7 @@ function padNum(n: number | undefined, len: number) {
 
 // ─── Invoice items builder ────────────────────────────────────────────────────
 
-function buildInvoiceItems(
-  selectedIds: Set<string>,
-  itemDescriptions: Record<string, string>,
-  folio: PrefacturaFolioData,
-  tipo: string
-) {
+function buildInvoiceItems(selectedItems: SelectedFolioItem[], tipo: string) {
   const isFiscal = !NON_FISCAL.has(tipo);
   // FC (Monotributista) no discrimina IVA — todo "no gravado"
   // FT (Turismo) tampoco discrimina IVA en el comprobante
@@ -218,21 +286,7 @@ function buildInvoiceItems(
     return { descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: neto, subtotal: base };
   }
 
-  const items: any[] = [];
-  if (selectedIds.has("accommodation") && folio.roomTotal > 0) {
-    const desc = itemDescriptions["accommodation"] ||
-      `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`;
-    items.push(computeItem(desc, folio.roomTotal));
-  }
-  for (const charge of folio.charges || []) {
-    // Never invoice transfer entries — they are folio adjustments, not billable items
-    if (charge.category === "transfer_out" || charge.category === "transfer_in") continue;
-    if (selectedIds.has(String(charge.id))) {
-      const desc = itemDescriptions[String(charge.id)] || charge.description;
-      items.push(computeItem(desc, parseFloat(charge.amount)));
-    }
-  }
-  return items;
+  return selectedItems.map((item) => computeItem(item.description, item.amount));
 }
 
 // ─── Auto-suggest tipo from condicionIva / cuit ───────────────────────────────
@@ -574,17 +628,27 @@ export function PrefacturaDialog({
 
   // Computed totals. All downstream operations use this same selected-item
   // projection so changing the fiscal recipient cannot change the amount.
+  const originalBillableItems = folio
+    ? getAllBillableFolioItems(folio, itemDescriptions)
+    : [];
+  const invoicedAmountsByCharge = getInvoicedAmountsByCharge(emittedInvoices);
+  const remainingAmountsByCharge = getRemainingChargeAmounts(
+    originalBillableItems,
+    invoicedAmountsByCharge,
+  );
   const selectedItems = folio
-    ? getSelectedFolioItems(selectedIds, folio, itemDescriptions)
+    ? getSelectedFolioItems(selectedIds, folio, itemDescriptions, remainingAmountsByCharge)
     : [];
   const allBillableItems = folio
-    ? getAllBillableFolioItems(folio, itemDescriptions)
+    ? getAllBillableFolioItems(folio, itemDescriptions, remainingAmountsByCharge)
     : [];
   const totalSelected = getSelectedFolioTotal(selectedItems);
   const selectedBalance = getSelectedFolioBalance(
     selectedItems,
     allBillableItems,
-    folio?.payments || [],
+    (folio?.payments || []).filter((payment: any) =>
+      !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
+    ),
   );
   const selectedAlreadyPaid = totalSelected - selectedBalance;
   const selectedSourceIds = selectedItems.map(item => item.id);
@@ -619,25 +683,23 @@ export function PrefacturaDialog({
   // without a fiscal invoice should also skip the invoice step and go straight to checkout.
   const alreadyPaidAndInvoiced = (folio?.balance ?? 1) <= 0.01;
 
-  // Charge IDs already included in previously-emitted invoices for this folio
-  const invoicedChargeIds = new Set<string>(
-    emittedInvoices.flatMap((inv: any) => {
-      const ids = inv.source_charge_ids;
-      if (!ids) return [];
-      if (Array.isArray(ids)) return ids as string[];
-      try { return JSON.parse(ids) as string[]; } catch { return []; }
-    })
+  // A source remains selectable after a partial invoice. It is disabled only
+  // when its remaining amount reaches zero.
+  const fullyInvoicedChargeIds = new Set<string>(
+    originalBillableItems
+      .filter((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01)
+      .map((item) => item.id)
   );
 
   // An invoice query may resolve after the folio query. Remove its source
   // charges from the default selection instead of re-offering them on reload.
   useEffect(() => {
-    if (!open || invoicedChargeIds.size === 0) return;
+    if (!open || fullyInvoicedChargeIds.size === 0) return;
     setSelectedIds(previous => {
-      const next = new Set(Array.from(previous).filter(id => !invoicedChargeIds.has(id)));
+      const next = new Set(Array.from(previous).filter(id => !fullyInvoicedChargeIds.has(id)));
       return next.size === previous.size ? previous : next;
     });
-  // emittedInvoices is the stable query result; invoicedChargeIds is rebuilt
+  // emittedInvoices is the stable query result; fullyInvoicedChargeIds is rebuilt
   // on each render and must not itself be used as an effect dependency.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, emittedInvoices]);
@@ -820,7 +882,7 @@ export function PrefacturaDialog({
       // 2. Emit invoice/comprobante
       let invoiceData: any = null;
       const invoiceItems = folio
-        ? buildInvoiceItems(new Set(selectedSourceIds), itemDescriptions, folio, tipo)
+        ? buildInvoiceItems(selectedItems, tipo)
         : [];
       if (invoiceItems.length > 0) {
         // Si algún row de cobro es "cuenta_corriente" y hay una empresa/agencia seleccionada,
@@ -841,6 +903,7 @@ export function PrefacturaDialog({
           reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
           sourceChargeIds: selectedSourceIds,
+          sourceChargeAmounts: Object.fromEntries(selectedItems.map(item => [item.id, item.amount])),
           ...(isCcPayment ? {
             cashFormaPago: "cuenta_corriente",
             ccEntityType: billingTarget,
@@ -925,7 +988,7 @@ export function PrefacturaDialog({
       if (freshFolio) {
         if (freshFolio.roomTotal > 0 &&
           !newlyInvoicedIds.has("accommodation") &&
-          !invoicedChargeIds.has("accommodation")) {
+          !fullyInvoicedChargeIds.has("accommodation")) {
           nextSelection.add("accommodation");
         }
         for (const charge of freshFolio.charges || []) {
@@ -934,17 +997,29 @@ export function PrefacturaDialog({
             charge.category !== "transfer_in" &&
             parseFloat(charge.amount) > 0 &&
             !newlyInvoicedIds.has(id) &&
-            !invoicedChargeIds.has(id)) {
+            !fullyInvoicedChargeIds.has(id)) {
             nextSelection.add(id);
           }
         }
       }
       if (nextSelection.size > 0) {
-        const nextItems = getSelectedFolioItems(nextSelection, freshFolio!, itemDescriptions);
+        const freshOriginalItems = getAllBillableFolioItems(freshFolio!, itemDescriptions);
+        const freshRemainingAmounts = getRemainingChargeAmounts(
+          freshOriginalItems,
+          getInvoicedAmountsByCharge(emittedInvoices),
+        );
+        const nextItems = getSelectedFolioItems(
+          nextSelection,
+          freshFolio!,
+          itemDescriptions,
+          freshRemainingAmounts,
+        );
         const nextBalance = getSelectedFolioBalance(
           nextItems,
-          getAllBillableFolioItems(freshFolio!, itemDescriptions),
-          freshFolio!.payments || [],
+          getAllBillableFolioItems(freshFolio!, itemDescriptions, freshRemainingAmounts),
+          (freshFolio!.payments || []).filter((payment: any) =>
+            !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
+          ),
         );
         setSelectedIds(nextSelection);
         setPaymentRows([{
@@ -1067,7 +1142,7 @@ export function PrefacturaDialog({
                       <TableHead className="w-8"></TableHead>
                       <TableHead>Descripción</TableHead>
                       <TableHead className="w-28 text-right">Total</TableHead>
-                      <TableHead className="w-24 text-right">Ya cobrado</TableHead>
+                      <TableHead className="w-24 text-right">Ya facturado</TableHead>
                       <TableHead className="w-24 text-right">Pendiente</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
@@ -1079,10 +1154,10 @@ export function PrefacturaDialog({
                         id="accommodation"
                         amount={folio.roomTotal}
                         description={itemDescriptions["accommodation"] || `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`}
-                        alreadyPaid={0}
-                        alreadyInvoiced={invoicedChargeIds.has("accommodation")}
+                        alreadyPaid={Math.max(0, folio.roomTotal - (remainingAmountsByCharge.accommodation ?? folio.roomTotal))}
+                        alreadyInvoiced={fullyInvoicedChargeIds.has("accommodation")}
                         selected={selectedIds.has("accommodation")}
-                        onToggle={() => { if (invoicedChargeIds.has("accommodation")) return; setSelectedIds(prev => { const n = new Set(prev); n.has("accommodation") ? n.delete("accommodation") : n.add("accommodation"); return n; }); }}
+                        onToggle={() => { if (fullyInvoicedChargeIds.has("accommodation")) return; setSelectedIds(prev => { const n = new Set(prev); n.has("accommodation") ? n.delete("accommodation") : n.add("accommodation"); return n; }); }}
                         editing={editingId === "accommodation"}
                         editingValue={editingValue}
                         onStartEdit={() => startEdit("accommodation", itemDescriptions["accommodation"] || `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`)}
@@ -1111,10 +1186,10 @@ export function PrefacturaDialog({
                             amount={parseFloat(charge.amount)}
                             description={itemDescriptions[String(charge.id)] || charge.description}
                             date={charge.date}
-                            alreadyPaid={0}
-                            alreadyInvoiced={!isTransfer && invoicedChargeIds.has(String(charge.id))}
+                            alreadyPaid={Math.max(0, parseFloat(charge.amount) - (remainingAmountsByCharge[String(charge.id)] ?? parseFloat(charge.amount)))}
+                            alreadyInvoiced={!isTransfer && fullyInvoicedChargeIds.has(String(charge.id))}
                             selected={!isTransfer && selectedIds.has(String(charge.id))}
-                            onToggle={() => { if (isTransfer || invoicedChargeIds.has(String(charge.id))) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
+                            onToggle={() => { if (isTransfer || fullyInvoicedChargeIds.has(String(charge.id))) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
                             editing={editingId === String(charge.id)}
                             editingValue={editingValue}
                             onStartEdit={() => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description)}
@@ -1154,7 +1229,7 @@ export function PrefacturaDialog({
                 {/* Totals row */}
                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Total cargos seleccionados</div>
+                    <div className="text-muted-foreground text-xs">Pendiente seleccionado</div>
                     <div className="font-bold">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">

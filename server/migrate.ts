@@ -1293,6 +1293,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS source_charge_ids jsonb`)
   );
 
+  await withTimeout("sales_invoices.source_charge_amounts", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS source_charge_amounts jsonb`)
+  );
+
   await withTimeout("sales_invoices.observaciones", T, () =>
     db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS observaciones text`)
   );

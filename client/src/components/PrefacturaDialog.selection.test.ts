@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAllBillableFolioItems,
+  getInvoicedAmountsByCharge,
+  getRemainingChargeAmounts,
   getSelectedFolioBalance,
   getSelectedFolioItems,
   getSelectedFolioTotal,
@@ -44,6 +47,46 @@ describe("PrefacturaDialog selected folio projection", () => {
     const allItems = getSelectedFolioItems(new Set(["accommodation", "restaurant"]), folio);
 
     expect(getSelectedFolioBalance(accommodationOnly, allItems, [{ amount: "50" }])).toBe(70);
+  });
+
+  it("selects and invoices only the residual of a partially invoiced accommodation", () => {
+    const originalItems = getAllBillableFolioItems(folio);
+    const invoiced = getInvoicedAmountsByCharge([{
+      source_charge_amounts: { accommodation: 34 },
+      monto_total: "34.00",
+      monto_acreditado: "0.00",
+    }]);
+    const remaining = getRemainingChargeAmounts(originalItems, invoiced);
+    const accommodationOnly = getSelectedFolioItems(
+      new Set(["accommodation"]),
+      folio,
+      {},
+      remaining,
+    );
+
+    expect(remaining.accommodation).toBe(86);
+    expect(accommodationOnly).toEqual([
+      expect.objectContaining({ id: "accommodation", originalAmount: 120, amount: 86 }),
+    ]);
+    expect(getSelectedFolioTotal(accommodationOnly)).toBe(86);
+  });
+
+  it("does not let an accommodation partial invoice reduce a selected parking charge", () => {
+    const originalItems = getAllBillableFolioItems(folio);
+    const remaining = getRemainingChargeAmounts(
+      originalItems,
+      getInvoicedAmountsByCharge([{
+        source_charge_amounts: { accommodation: 120 },
+        monto_total: "120",
+        monto_acreditado: "0",
+      }]),
+    );
+    const restaurantOnly = getSelectedFolioItems(new Set(["restaurant"]), folio, {}, remaining);
+
+    expect(restaurantOnly).toEqual([
+      expect.objectContaining({ id: "restaurant", amount: 35.5 }),
+    ]);
+    expect(getSelectedFolioBalance(restaurantOnly, getAllBillableFolioItems(folio, {}, remaining))).toBe(35.5);
   });
 
   it("defaults to an electronic receipt for Consumidor Final", () => {
