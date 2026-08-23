@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -421,12 +421,21 @@ export type EmitirFacturaInitialValues = {
   razonSocial?: string;
   cuit?: string;
   dni?: string;
+  documentType?: string;
+  paymentMethod?: string;
   condicionIva?: string;
   domicilio?: string;
   items?: Array<{ descripcion: string; precioUnitario: number }>;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, requiresEmission, paymentId, groupId, lockCondicionIva, hideAddItems, billingEntityType, billingEntityId, compactMode }: {
+type RecipientProfile = {
+  type: "guest" | "company" | "agency";
+  id: string;
+  firstName?: string;
+  lastName?: string;
+};
+
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -434,6 +443,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   onSuccess?: (invoiceData?: any) => void;
   allowedTipos?: Array<string>;
   cashArea?: string;
+  /** Show the payment method without registering another cash movement. */
+  showPaymentMethod?: boolean;
   requiresEmission?: boolean;
   paymentId?: string;
   /** When set, the emitted invoice will be automatically linked to the group folio (for invoices emitted from the Resumen del Grupo without a payment) */
@@ -442,16 +453,22 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   lockCondicionIva?: boolean;
   /** When true, the "Agregar ítem" button and extra item rows are hidden */
   hideAddItems?: boolean;
+  /** When true, the pre-filled item cannot be modified or removed. */
+  lockItems?: boolean;
   /** Pre-set billing entity — its address will be updated if the user changes domicilio */
   billingEntityType?: "company" | "agency";
   /** ID of the pre-set billing entity */
   billingEntityId?: string;
+  /** Reservation profile whose fiscal data was pre-filled. */
+  recipientProfile?: RecipientProfile;
   /**
    * When true, skip the form screen and open directly on the confirmation/summary panel.
    * Use when all data is already pre-filled via initialValues (e.g. from a groups payment dialog).
    * The user can still click "← Editar" to expand the full form.
    */
   compactMode?: boolean;
+  /** Emit directly after validation instead of showing a redundant review step. */
+  skipReview?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -462,6 +479,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
   const [dni, setDni] = useState("");
+  const [guestFirstName, setGuestFirstName] = useState("");
+  const [guestLastName, setGuestLastName] = useState("");
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
@@ -474,11 +493,16 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
+  const [showRecipientChangeWarning, setShowRecipientChangeWarning] = useState(false);
+  const [pendingEntity, setPendingEntity] = useState<any>(null);
+  const [showEntityChangeWarning, setShowEntityChangeWarning] = useState(false);
   const [emitted, setEmitted] = useState(false);
   const [linkPending, setLinkPending] = useState(false);
   const [linkError, setLinkError] = useState(false);
   const [linkRetrying, setLinkRetrying] = useState(false);
   const [emittedInvoiceData, setEmittedInvoiceData] = useState<any>(null);
+  const originalRecipientRef = useRef<Record<string, string>>({});
+  const saveRecipientOnEmitRef = useRef(false);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
@@ -499,9 +523,21 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       if (initialValues.razonSocial !== undefined) setRazonSocial(initialValues.razonSocial);
       if (initialValues.cuit !== undefined) setCuit(initialValues.cuit);
       if (initialValues.dni !== undefined) setDni(initialValues.dni);
+      if (initialValues.paymentMethod) setCashFormaPago(initialValues.paymentMethod);
+      setGuestFirstName(recipientProfile?.firstName || "");
+      setGuestLastName(recipientProfile?.lastName || "");
       const initDom = initialValues.domicilio ?? "";
       if (initialValues.domicilio !== undefined) setDomicilio(initDom);
       originalDomicilioRef.current = initDom;
+      originalRecipientRef.current = {
+        razonSocial: initialValues.razonSocial || "",
+        cuit: initialValues.cuit || "",
+        dni: initialValues.dni || "",
+        condicionIva: initialValues.condicionIva || "Consumidor Final",
+        domicilio: initDom,
+        firstName: recipientProfile?.firstName || "",
+        lastName: recipientProfile?.lastName || "",
+      };
       if (initialValues.condicionIva !== undefined) setCondicionIva(initialValues.condicionIva);
       // Auto-select comprobante type based on cuit + condición IVA
       if (initialValues.cuit) {
@@ -534,7 +570,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialValues]);
 
-  function selectEntity(entity: any) {
+  function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
     const condVal = entity.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
@@ -558,6 +594,19 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setEntitySearch("");
     setShowEntityDropdown(false);
     setFieldErrors({});
+  }
+
+  function selectEntity(entity: any) {
+    const entityType = entity._type === "Agencia" ? "agency" : "company";
+    const isChangingAssociatedRecipient = !!recipientProfile
+      && recipientProfile.type !== "guest"
+      && (recipientProfile.type !== entityType || recipientProfile.id !== entity.id);
+    if (isChangingAssociatedRecipient) {
+      setPendingEntity(entity);
+      setShowEntityChangeWarning(true);
+      return;
+    }
+    applyEntity(entity);
   }
 
   function validateForm(): Record<string, string> {
@@ -654,16 +703,37 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
 
-      // If the user changed the domicilio, silently update the entity's stored address
-      if (selectedEntityInfo && domicilio.trim() !== originalDomicilioRef.current.trim()) {
-        const endpoint = selectedEntityInfo.type === "company"
-          ? `/api/companies/${selectedEntityInfo.id}`
-          : `/api/agencies/${selectedEntityInfo.id}`;
+      // Persist only changes the operator explicitly confirmed. This keeps the
+      // reservation's guest/company/agency profile aligned with the receipt.
+      if (saveRecipientOnEmitRef.current && recipientProfile) {
         try {
-          await apiRequest("PATCH", endpoint, { domicilio: domicilio.trim() });
-          queryClient.invalidateQueries({ queryKey: [selectedEntityInfo.type === "company" ? "/api/companies" : "/api/agencies"] });
+          if (recipientProfile.type === "guest") {
+            await apiRequest("PATCH", `/api/guests/${recipientProfile.id}`, {
+              firstName: guestFirstName.trim(),
+              lastName: guestLastName.trim(),
+              documentNumber: dni.trim(),
+              cuilCuit: cuit.trim(),
+              vatCondition: condicionIva,
+              direccion: domicilio.trim(),
+            });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+          } else {
+            const target = selectedEntityInfo || { type: recipientProfile.type, id: recipientProfile.id };
+            const endpoint = target.type === "company"
+              ? `/api/companies/${target.id}`
+              : `/api/agencies/${target.id}`;
+            await apiRequest("PATCH", endpoint, {
+              razonSocial: razonSocial.trim(),
+              cuilCuit: cuit.trim(),
+              condicionIva,
+              domicilio: domicilio.trim(),
+            });
+            queryClient.invalidateQueries({ queryKey: [target.type === "company" ? "/api/companies" : "/api/agencies"] });
+          }
         } catch {
-          // Non-critical — ignore silently
+          toast({ title: "Factura emitida", description: "No se pudieron actualizar los datos de la ficha.", variant: "destructive" });
+        } finally {
+          saveRecipientOnEmitRef.current = false;
         }
       }
 
@@ -672,6 +742,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         setEmittedInvoiceData(data);
         setLinkPending(true);
         try {
+          if (showPaymentMethod) {
+            const paymentUpdate = await apiRequest("PATCH", `/api/payments/${paymentId}`, { method: cashFormaPago });
+            if (!paymentUpdate.ok) throw new Error("No se pudo actualizar la forma de pago");
+          }
           const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: data });
           setLinkPending(false);
           if (linkRes.ok) {
@@ -720,10 +794,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
   function resetForm() {
     setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
+    setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
     setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
+    setShowRecipientChangeWarning(false); setPendingEntity(null); setShowEntityChangeWarning(false);
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
   }
@@ -778,26 +854,50 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     }
   }
 
+  function recipientHasChanges() {
+    if (!recipientProfile) return false;
+    const original = originalRecipientRef.current;
+    return original.razonSocial !== razonSocial
+      || original.cuit !== cuit
+      || original.dni !== dni
+      || original.condicionIva !== condicionIva
+      || original.domicilio !== domicilio
+      || (recipientProfile.type === "guest"
+        && (original.firstName !== guestFirstName || original.lastName !== guestLastName));
+  }
+
+  function continueAfterValidation(saveRecipientProfile = false) {
+    if (skipReview) handleConfirmEmit(saveRecipientProfile);
+    else setShowConfirm(true);
+  }
+
   function handleSubmit() {
     const errs = validateForm();
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;
-    setShowConfirm(true);
+    if (recipientHasChanges()) {
+      setShowRecipientChangeWarning(true);
+      return;
+    }
+    continueAfterValidation();
   }
 
-  function handleConfirmEmit() {
+  function handleConfirmEmit(saveRecipientProfile = false) {
     setShowConfirm(false);
+    saveRecipientOnEmitRef.current = saveRecipientProfile;
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
       items,
       puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
-      ...(cashArea
+      ...((cashArea || showPaymentMethod)
         ? {
-            cashArea,
+            ...(cashArea ? { cashArea } : {}),
             cashFormaPago,
-            cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
-            ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+            ...(cashArea ? {
+              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
+              ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+            } : {}),
           }
         : {}),
     });
@@ -806,7 +906,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   return (
     <>
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{linkPending ? (groupId ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
 
         {linkPending ? (
@@ -921,7 +1021,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               <div className="flex justify-between font-bold text-sm pt-1">
                 <span>TOTAL:</span><span>${fPeso(totalPreview)}</span>
               </div>
-              {cashArea && (
+              {(cashArea || showPaymentMethod) && (
                 <div className="text-xs text-muted-foreground pt-1 border-t">
                   Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}
                 </div>
@@ -934,7 +1034,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowConfirm(false)}>← Editar</Button>
-              <Button onClick={handleConfirmEmit} disabled={mutation.isPending} data-testid="btn-confirmar-emitir">
+              <Button onClick={() => handleConfirmEmit(recipientHasChanges())} disabled={mutation.isPending} data-testid="btn-confirmar-emitir">
                 {mutation.isPending ? "Emitiendo..." : "Confirmar y emitir PDF"}
               </Button>
             </DialogFooter>
@@ -986,7 +1086,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           )}
         </div>
 
-        {cashArea && (
+        {(cashArea || showPaymentMethod) && (
           <div className="space-y-1">
             <Label>Forma de pago</Label>
             <Select value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
@@ -1000,7 +1100,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
               </SelectContent>
             </Select>
-            {cashFormaPago === "cuenta_corriente" && (
+            {cashArea && cashFormaPago === "cuenta_corriente" && (
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <Select value={ccEntityType} onValueChange={v => { setCcEntityType(v as "company" | "agency"); setCcEntityId(""); }}>
                   <SelectTrigger data-testid="select-cc-entity-type"><SelectValue /></SelectTrigger>
@@ -1085,7 +1185,14 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
-              <Input value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
+              {recipientProfile?.type === "guest" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input value={guestLastName} onChange={e => { const value = e.target.value; setGuestLastName(value); setRazonSocial(`${value} ${guestFirstName}`.trim()); }} placeholder="Apellido" data-testid="input-guest-last-name" />
+                  <Input value={guestFirstName} onChange={e => { const value = e.target.value; setGuestFirstName(value); setRazonSocial(`${guestLastName} ${value}`.trim()); }} placeholder="Nombre" data-testid="input-guest-first-name" />
+                </div>
+              ) : (
+                <Input value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
+              )}
               {fieldErrors.razonSocial && <p className="text-xs text-red-500">{fieldErrors.razonSocial}</p>}
             </div>
             {isFA ? (
@@ -1093,9 +1200,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 <Label className="text-xs">CUIT *</Label>
                 <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
                 {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
+                {initialValues?.documentType && dni && <p className="text-[11px] text-muted-foreground">{initialValues.documentType}: {dni}</p>}
               </div>
             ) : (
-              <div className="space-y-1"><Label className="text-xs">DNI (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
+              <div className="space-y-1"><Label className="text-xs">{initialValues?.documentType || "DNI"} (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
             )}
             <div className="space-y-1">
               <Label className="text-xs">Condición IVA</Label>
@@ -1128,7 +1236,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
-            {!hideAddItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+             {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
@@ -1137,13 +1245,13 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
-                    <Input value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
+                     <Input disabled={lockItems} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
                   </div>
-                  <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
+                   <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input disabled={lockItems} type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs">P. Unit.</Label>
-                    <Input type="number" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
+                     <Input disabled={lockItems} type="number" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`precio_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`precio_${idx}`]}</p>}
                   </div>
                   <div className="col-span-2 space-y-1">
@@ -1151,7 +1259,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                     {isFC ? (
                       <div className="h-9 flex items-center text-xs text-muted-foreground border rounded-md px-2 bg-muted/30">Sin IVA</div>
                     ) : (
-                      <Select value={item.alicuotaIva} onValueChange={v => updateItem(idx, "alicuotaIva", v)}>
+                       <Select disabled={lockItems} value={item.alicuotaIva} onValueChange={v => updateItem(idx, "alicuotaIva", v)}>
                         <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="21">21%</SelectItem>
@@ -1171,7 +1279,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                       ? `Total (sin IVA): $${fPeso(item.subtotal)}`
                       : `Total con IVA: $${fPeso(item.subtotal)} (neto: $${fPeso(item.subtotalNeto)})`}
                   </span>
-                  {items.length > 1 && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
+                   {!lockItems && items.length > 1 && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
                 </div>
               </div>
             ))}
@@ -1195,7 +1303,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || faNeedsCuit} data-testid="btn-emitir-confirmar">
-            Revisar →
+            {skipReview ? "Emitir comprobante" : "Revisar →"}
           </Button>
         </DialogFooter>
         </>
@@ -1220,6 +1328,38 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           </Button>
           <Button variant="destructive" onClick={() => { setShowCloseWarning(false); onClose(); resetForm(); }}>
             Cerrar sin comprobante
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={showRecipientChangeWarning} onOpenChange={o => { if (!o) setShowRecipientChangeWarning(false); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Guardar cambios fiscales en la ficha</DialogTitle>
+          <DialogDescription>
+            Los datos del receptor cambiaron. Si continuás, se emitirán en el comprobante y también se guardarán en su ficha para futuras facturas.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowRecipientChangeWarning(false)}>Seguir editando</Button>
+          <Button onClick={() => { setShowRecipientChangeWarning(false); continueAfterValidation(true); }}>
+            Guardar y emitir
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={showEntityChangeWarning} onOpenChange={o => { if (!o) setShowEntityChangeWarning(false); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>¿Cambiar el receptor asociado?</DialogTitle>
+          <DialogDescription>
+            La reserva ya tiene una empresa o agencia asociada. Confirmá el cambio antes de usar otro receptor en este comprobante.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { setPendingEntity(null); setShowEntityChangeWarning(false); }}>Cancelar</Button>
+          <Button onClick={() => { if (pendingEntity) applyEntity(pendingEntity); setPendingEntity(null); setShowEntityChangeWarning(false); }}>
+            Cambiar receptor
           </Button>
         </DialogFooter>
       </DialogContent>

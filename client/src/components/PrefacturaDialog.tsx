@@ -647,11 +647,24 @@ export function PrefacturaDialog({
     selectedItems,
     allBillableItems,
     (folio?.payments || []).filter((payment: any) =>
-      !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
+      payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
     ),
   );
   const selectedAlreadyPaid = totalSelected - selectedBalance;
   const selectedSourceIds = selectedItems.map(item => item.id);
+  // Payments are cash received, not a fiscal discount. Once an invoice is
+  // emitted for the selected residual, link the fully applied advances to it
+  // so they stop appearing as "paid without invoice" on the folio.
+  let remainingAdvanceToLink = selectedAlreadyPaid;
+  const selectedAdvancePaymentIds = (folio?.payments || [])
+    .filter((payment: any) => payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed)
+    .filter((payment: any) => {
+      const amount = parseFloat(payment.amount || "0");
+      if (amount <= 0.01 || amount > remainingAdvanceToLink + 0.01) return false;
+      remainingAdvanceToLink -= amount;
+      return true;
+    })
+    .map((payment: any) => payment.id as string);
 
   const totalPayments = paymentRows.reduce((acc, r) => {
     const net = parseFloat(r.amount) || 0;
@@ -677,11 +690,11 @@ export function PrefacturaDialog({
     }
   }
 
-  // True when the folio is already fully paid (balance ≤ 0).
-  // In this state no new invoice should be created — only check-out if requested.
-  // We no longer require emittedInvoices.length > 0: a folio fully paid by cash
-  // without a fiscal invoice should also skip the invoice step and go straight to checkout.
-  const alreadyPaidAndInvoiced = (folio?.balance ?? 1) <= 0.01;
+  // Cash settlement does not mean fiscal settlement: a fully paid folio with
+  // an unbilled advance must still allow an invoice. Only block a new invoice
+  // when every billable source has no amount left to invoice.
+  const alreadyPaidAndInvoiced = originalBillableItems.length > 0
+    && originalBillableItems.every((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01);
 
   // A source remains selectable after a partial invoice. It is disabled only
   // when its remaining amount reaches zero.
@@ -887,6 +900,20 @@ export function PrefacturaDialog({
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
         invoiceData = invoiceBody;
         setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
+
+        // Apply prior advances only after the fiscal document exists. A failed
+        // link is persisted for manual retry, never silently discarded.
+        for (const paymentId of selectedAdvancePaymentIds) {
+          const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
+          if (!linkRes.ok) {
+            await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData }).catch(() => undefined);
+            toast({
+              title: "Factura emitida con vínculo pendiente",
+              description: "Un anticipo previo no pudo vincularse automáticamente. Quedó marcado para reintento.",
+              variant: "destructive",
+            });
+          }
+        }
       }
 
       // 2. Register payments only after the invoice has been accepted. The
@@ -1227,15 +1254,15 @@ export function PrefacturaDialog({
                 {/* Totals row */}
                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Pendiente seleccionado</div>
+                    <div className="text-muted-foreground text-xs">Pendiente de facturación</div>
                     <div className="font-bold">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Imputado a la selección</div>
+                    <div className="text-muted-foreground text-xs">Anticipos aplicados al cobro</div>
                     <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(selectedAlreadyPaid)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Saldo de la selección</div>
+                    <div className="text-muted-foreground text-xs">Pendiente de cobro</div>
                     <div className={`font-bold text-base ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
                       ${fmtMoney(selectedBalance)}
                     </div>
@@ -1243,7 +1270,7 @@ export function PrefacturaDialog({
                 </div>
                 {(folio.payments || []).length > 0 && (
                   <p className="px-4 pb-3 text-xs text-muted-foreground">
-                    Los cobros previos se imputan a los cargos facturables en el orden mostrado.
+                    Los anticipos reducen solamente el cobro. El importe a facturar se calcula con el saldo fiscal pendiente de cada cargo.
                   </p>
                 )}
               </div>

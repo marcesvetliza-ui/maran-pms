@@ -89,6 +89,30 @@ describe("PrefacturaDialog selected folio projection", () => {
     expect(getSelectedFolioBalance(restaurantOnly, getAllBillableFolioItems(folio, {}, remaining))).toBe(35.5);
   });
 
+  it("keeps an uninvoiced advance out of the fiscal amount while reducing only collection", () => {
+    const advanceFolio = {
+      roomTotal: 286000,
+      roomNumber: "203",
+      nights: 2,
+      charges: [{ id: "restaurant", description: "Consumos", amount: "7500", category: "restaurant" }],
+    };
+    const originalItems = getAllBillableFolioItems(advanceFolio);
+    const remaining = getRemainingChargeAmounts(
+      originalItems,
+      getInvoicedAmountsByCharge([{
+        source_charge_amounts: { accommodation: 112000 },
+        monto_total: "112000",
+        monto_acreditado: "0",
+      }]),
+    );
+    const selected = getSelectedFolioItems(new Set(["accommodation", "restaurant"]), advanceFolio, {}, remaining);
+    const invoiceAmount = getSelectedFolioTotal(selected);
+    const amountToCollect = getSelectedFolioBalance(selected, getAllBillableFolioItems(advanceFolio, {}, remaining), [{ amount: "10000" }]);
+
+    expect(invoiceAmount).toBe(181500);
+    expect(amountToCollect).toBe(171500);
+  });
+
   it("defaults to an electronic receipt for Consumidor Final", () => {
     expect(suggestTipo("", "Consumidor Final")).toBe("FB");
     expect(suggestTipo("30-12345678-9", "Responsable Inscripto")).toBe("FA");

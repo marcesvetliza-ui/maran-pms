@@ -2730,6 +2730,14 @@ function ReservationDetailDialog({
   const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
+  const totalInvoiced = (folioInvoices || [])
+    .filter((invoice: any) => ["emitida", "parcial"].includes(invoice.estado || "emitida"))
+    .reduce((sum: number, invoice: any) => sum + parseFloat(invoice.montoTotal ?? invoice.monto_total ?? "0"), 0);
+  const paidPendingInvoice = (payments || [])
+    .filter((payment: any) => payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref)
+    .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount || "0"), 0);
+  const pendingCollection = Math.max(0, totalToPay - totalPayments);
+  const pendingBilling = Math.max(0, totalToPay - totalInvoiced);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2738,6 +2746,12 @@ function ReservationDetailDialog({
           <DialogTitle className="flex items-center gap-2">
             <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
           </DialogTitle>
+          {(reservation as any).company && (
+            <p className="text-xs text-muted-foreground">Empresa asociada: <span className="font-medium text-foreground">{(reservation as any).company.razonSocial || (reservation as any).company.nombreFantasia}</span></p>
+          )}
+          {!(reservation as any).company && (reservation as any).agency && (
+            <p className="text-xs text-muted-foreground">Agencia asociada: <span className="font-medium text-foreground">{(reservation as any).agency.razonSocial || (reservation as any).agency.nombreFantasia}</span></p>
+          )}
           <DialogDescription>
             Detalle de la reservación
           </DialogDescription>
@@ -3998,10 +4012,22 @@ function ReservationDetailDialog({
               {invoicingPaymentId && (() => {
                 const p = payments?.find((x: any) => x.id === invoicingPaymentId);
                 const g = reservation.guest;
+                const guestFiscal: any = g;
+                const company = (reservation as any).company;
+                const agency = (reservation as any).agency;
+                const associatedRecipient = company
+                  ? { type: "company" as const, id: company.id, razonSocial: company.razonSocial || company.nombreFantasia || "", cuit: company.cuilCuit || "", condicionIva: company.condicionIva || "Consumidor Final", domicilio: company.domicilio || company.direccion || "" }
+                  : agency
+                    ? { type: "agency" as const, id: agency.id, razonSocial: agency.razonSocial || agency.nombreFantasia || "", cuit: agency.cuilCuit || "", condicionIva: agency.condicionIva || "Consumidor Final", domicilio: agency.domicilio || agency.direccion || "" }
+                    : null;
                 const advanceInitial: EmitirFacturaInitialValues = {
-                  razonSocial: g ? `${g.lastName} ${g.firstName}` : "",
-                  cuit: g?.cuit || undefined,
+                  razonSocial: associatedRecipient?.razonSocial || (g ? `${g.lastName} ${g.firstName}` : ""),
+                  cuit: associatedRecipient?.cuit || guestFiscal?.cuit || guestFiscal?.cuilCuit || undefined,
                   dni: g?.documentNumber || undefined,
+                  documentType: g?.documentType || "DNI",
+                  paymentMethod: p?.method || "efectivo",
+                  condicionIva: associatedRecipient?.condicionIva || guestFiscal?.vatCondition || guestFiscal?.condicionIva || "Consumidor Final",
+                  domicilio: associatedRecipient?.domicilio || guestFiscal?.direccion || guestFiscal?.domicilio || "",
                   items: p ? [{ descripcion: `Anticipo — Reserva ${reservation.reservationCode}`, precioUnitario: parseFloat(p.amount) }] : [],
                 };
                 return (
@@ -4022,6 +4048,17 @@ function ReservationDetailDialog({
                         config={billingConfig}
                         initialValues={advanceInitial}
                         paymentId={invoicingPaymentId || undefined}
+                        showPaymentMethod
+                        hideAddItems
+                        lockItems
+                        skipReview
+                        billingEntityType={associatedRecipient?.type}
+                        billingEntityId={associatedRecipient?.id}
+                        recipientProfile={associatedRecipient
+                          ? { type: associatedRecipient.type, id: associatedRecipient.id }
+                          : g?.id
+                            ? { type: "guest", id: g.id, firstName: g.firstName, lastName: g.lastName }
+                            : undefined}
                         onSuccess={() => {
                           refetchPayments();
                           setInvoicingPaymentId(null);
@@ -4034,9 +4071,11 @@ function ReservationDetailDialog({
                 );
               })()}
 
-              <div className="flex justify-between p-3 border-t text-sm font-medium">
-                <span>Total Pagado</span>
-                <span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 border-t text-sm">
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Facturado</span><span>${fmtMoney(totalInvoiced)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pagado</span><span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pagado sin facturar</span><span className="text-amber-600">${fmtMoney(paidPendingInvoice)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pendiente de cobro</span><span className="text-destructive">${fmtMoney(pendingCollection)}</span></div>
               </div>
             </div>
 
@@ -4073,12 +4112,16 @@ function ReservationDetailDialog({
                   <span className="text-green-600">-${fmtMoney(totalPayments)}</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg">
-                  <span>SALDO PENDIENTE</span>
-                  <span className={balance > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
-                    ${fmtMoney(balance)}
+                  <span>PENDIENTE DE COBRO</span>
+                  <span className={pendingCollection > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
+                    ${fmtMoney(pendingCollection)}
                   </span>
                 </div>
-                {balance > 0.01 && !showAddPayment && !isLocked && (
+                <div className="flex justify-between font-semibold text-sm mt-2 text-blue-700 dark:text-blue-300">
+                  <span>PENDIENTE DE FACTURACIÓN</span>
+                  <span>${fmtMoney(pendingBilling)}</span>
+                </div>
+                {pendingBilling > 0.01 && !showAddPayment && !isLocked && (
                   <div className="flex flex-col gap-2 mt-2">
                     <Button
                       size="sm"
@@ -4100,7 +4143,7 @@ function ReservationDetailDialog({
                     </Button>
                   </div>
                 )}
-                {balance <= 0.01 && !isLocked && (
+                {pendingBilling <= 0.01 && !isLocked && (
                   <Button
                     size="sm"
                     variant="outline"
