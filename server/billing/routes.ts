@@ -1,4 +1,212 @@
-ype, value: forge.pki.oids.data },
+import type { Express } from "express";
+import fs from "fs";
+import path from "path";
+import { db, pool } from "../db";
+import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
+import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
+import { getBillingConfig, updateBillingConfig } from "./billingConfig";
+import { emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
+import { requireAuth, requireRole } from "../auth";
+import { storage, getArgentinaToday } from "../db-storage";
+import { assetPath } from "../utils/assetPath";
+
+// ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
+let _logoCache: Buffer | null | undefined = undefined; // undefined = no intentado
+
+async function loadLogoBuffer(logoUrl?: string | null): Promise<Buffer | undefined> {
+  // Prioridad: logo_url configurado → logo local del hotel
+  if (logoUrl) {
+    // Soporte para base64 data URI (subido desde la UI)
+    if (logoUrl.startsWith("data:image/")) {
+      try {
+        const base64 = logoUrl.split(",")[1];
+        if (base64) return Buffer.from(base64, "base64");
+      } catch { /* fall through */ }
+    }
+    // URL pública
+    try {
+      const res = await fetch(logoUrl);
+      if (res.ok) return Buffer.from(await res.arrayBuffer());
+    } catch { /* fall through */ }
+  }
+  // Logo local del hotel (fallback)
+  if (_logoCache !== null) {
+    if (_logoCache !== undefined) return _logoCache;
+    try {
+      const localPath = assetPath("hotel-logo.png");
+      _logoCache = fs.readFileSync(localPath);
+      return _logoCache;
+    } catch {
+      _logoCache = null; // mark as unavailable
+    }
+  }
+  return undefined;
+}
+
+function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
+  const parseJson = (value: unknown) => {
+    if (typeof value !== "string") return value;
+    try { return JSON.parse(value); } catch { return null; }
+  };
+  const total = parseFloat(String(invoice.monto_total || 0)) || 0;
+  const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
+  const explicit = parseJson(invoice.source_charge_amounts);
+  const creditMaps = parseJson(invoice.credit_source_charge_amounts);
+  const hasPerSourceCredits = Array.isArray(creditMaps);
+  const result: Record<string, number> = {};
+
+  if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
+    for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
+      const value = parseFloat(String(amount)) || 0;
+      const credit = hasPerSourceCredits
+        ? creditMaps.reduce((sum: number, map: any) => sum + (parseFloat(String(map?.[id])) || 0), 0)
+        : value * (total > 0 ? credited / total : 0);
+      if (value > 0) result[id] = Math.max(0, value - credit);
+    }
+    return result;
+  }
+
+  const activeRatio = total > 0 ? Math.max(0, total - credited) / total : 1;
+  const idsValue = parseJson(invoice.source_charge_ids);
+  const ids = Array.isArray(idsValue) ? idsValue.map(String) : [];
+  const itemsValue = parseJson(invoice.items);
+  if (Array.isArray(itemsValue) && itemsValue.length === ids.length) {
+    ids.forEach((id, index) => {
+      const value = parseFloat(String(itemsValue[index]?.subtotal ?? itemsValue[index]?.precioUnitario ?? 0)) || 0;
+      if (value > 0) result[id] = value * activeRatio;
+    });
+  } else if (ids.length === 1 && total > 0) {
+    result[ids[0]] = total - credited;
+  }
+  return result;
+}
+
+function getNotaCreditoAdjustmentSourceId(description: unknown): string | null {
+  const match = String(description || "").match(/\[nc:\d+:([^\]]+)\]/);
+  return match?.[1] || null;
+}
+
+class FolioInvoiceValidationError extends Error {
+  constructor(message: string, readonly status: 400 | 404 | 409 = 400) {
+    super(message);
+    this.name = "FolioInvoiceValidationError";
+  }
+}
+
+/**
+ * A folio can be open in more than one browser tab. Keep the source validation
+ * and invoice creation in the same reservation-scoped critical section so two
+ * tabs cannot both consume the same charge residual.
+ *
+ * A session advisory lock is intentionally used instead of an in-process
+ * mutex: it coordinates every app instance that shares this PostgreSQL DB.
+ */
+async function withReservationInvoiceLock<T>(reservationId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `folio-invoice:${reservationId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
+}
+
+export function registerBillingRoutes(app: Express) {
+
+  // GET /api/billing/config
+  app.get("/api/billing/config", requireAuth, async (req, res) => {
+    try {
+      const config = await getBillingConfig();
+      // Never expose certificates over the API
+      const { arcaCert, arcaKey, ...safe } = config as any;
+      res.json({ ...safe, hasArcaCert: !!arcaCert, hasArcaKey: !!arcaKey });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/billing/config
+  app.patch("/api/billing/config", requireAuth, async (req, res) => {
+    try {
+      const allowed = [
+        "modoArca", "arcaAmbiente", "cuit", "razonSocial", "domicilioComercial", "localidad",
+        "provincia", "cp", "condicionIva", "inicioActividades",
+        "puntoVenta", "puntoVentaHomolog", "tipoPuntoVenta", "arcaCuit", "logoUrl",
+        "arcaCert", "arcaKey", "iibb", "telefono",
+      ];
+      const data: any = {};
+      for (const k of allowed) {
+        if (req.body[k] !== undefined) data[k] = req.body[k];
+      }
+      const updated = await updateBillingConfig(data);
+      const { arcaCert, arcaKey, ...safe } = updated as any;
+      res.json({ ...safe, hasArcaCert: !!arcaCert, hasArcaKey: !!arcaKey });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/billing/config/logo — sube logo del emisor como base64 data URI
+  app.post("/api/billing/config/logo", requireAuth, async (req, res) => {
+    try {
+      const { imageData } = req.body;
+      if (!imageData || !String(imageData).startsWith("data:image/")) {
+        return res.status(400).json({ error: "Imagen inválida. Debe ser una imagen PNG o JPG." });
+      }
+      // Limit ~3MB base64 (~2.25MB image)
+      if (String(imageData).length > 4_500_000) {
+        return res.status(400).json({ error: "Imagen demasiado grande (máximo ~3 MB)." });
+      }
+      // Invalidate local logo cache so the new logo is used immediately
+      _logoCache = undefined;
+      await updateBillingConfig({ logoUrl: imageData });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/billing/config/logo — elimina logo personalizado y vuelve al predeterminado
+  app.delete("/api/billing/config/logo", requireAuth, async (req, res) => {
+    try {
+      _logoCache = undefined;
+      await updateBillingConfig({ logoUrl: null });
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/billing/debug-wsaa — devuelve respuesta CRUDA de WSAA (debug temporal)
+  app.get("/api/billing/debug-wsaa", requireAuth, async (req, res) => {
+    try {
+      const config = await getBillingConfig();
+      if (!config.arcaCert || !config.arcaKey) return res.json({ error: "Sin cert/key" });
+
+      const forge = (await import("node-forge")).default;
+      const certPem = config.arcaCert;
+      const keyPem  = config.arcaKey;
+
+      const now = new Date();
+      const exp = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+      const toAR = (d: Date) => {
+        const local = new Date(d.getTime() + -3 * 60 * 60 * 1000);
+        return local.toISOString().slice(0, 19) + "-03:00";
+      };
+      const uniqueId = Math.floor(now.getTime() / 1000);
+      const tra = `<?xml version="1.0" encoding="UTF-8"?>\n<loginTicketRequest version="1.0">\n  <header>\n    <uniqueId>${uniqueId}</uniqueId>\n    <generationTime>${toAR(now)}</generationTime>\n    <expirationTime>${toAR(exp)}</expirationTime>\n  </header>\n  <service>wsfe</service>\n</loginTicketRequest>`;
+
+      const cert = forge.pki.certificateFromPem(certPem);
+      const privateKey = forge.pki.privateKeyFromPem(keyPem);
+      const p7 = (forge.pkcs7 as any).createSignedData();
+      p7.content = forge.util.createBuffer(tra, "utf8");
+      p7.addCertificate(cert);
+      p7.addSigner({ key: privateKey, certificate: cert, digestAlgorithm: forge.pki.oids.sha256,
+        authenticatedAttributes: [
+          { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
           { type: forge.pki.oids.messageDigest },
           { type: forge.pki.oids.signingTime, value: new Date() },
         ] });
