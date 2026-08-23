@@ -21,6 +21,10 @@ The Cuenta Corriente module (companies, agencies, guests) shares one engine: a s
 
 **How to apply:** keep the lock ordering deterministic, recalculate prior allocations only after the locks are acquired, and reject the complete transaction when an allocation exceeds the remaining balance.
 
+**Post-emission navigation:** after “Registrar y emitir”, remain in Prefactura when there are still charges pending to invoice; return to the reservation Folio when no pending charges remain.
+
+**Why:** this avoids an unnecessary result screen while keeping the user in the billing flow when more charges still need to be issued.
+
 **Receipt PDF:** auto-opens via `window.open` on successful payment (manual download/print only, never auto-emailed). Endpoint is `GET /api/account-movements/:id/receipt-pdf` in `server/exports.ts`; watch for route collisions (see express-route-param-collision.md).
 
 **Sandbox note:** `npm run db:push` hangs on the interactive TUI in this sandbox (no TTY) — use direct `psql "$DATABASE_URL"` DDL matching Drizzle's snake_case naming for schema changes when this happens.
