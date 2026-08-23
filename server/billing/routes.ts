@@ -415,6 +415,12 @@ export function registerBillingRoutes(app: Express) {
       const id = parseInt(req.params.id);
       const row = await db.execute(sql`
         SELECT si.*,
+               COALESCE((
+                 SELECT jsonb_agg(nc.source_charge_amounts)
+                 FROM sales_invoices nc
+                 WHERE nc.nota_credito_id = si.id
+                   AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+               ), '[]'::jsonb) AS credit_source_charge_amounts,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
                orig.punto_venta      AS original_punto_venta,

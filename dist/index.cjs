@@ -2558,6 +2558,12 @@ PREGUNTAS FRECUENTES
         RETURNING id
       `);a.json({deleted:i.rows.length})}catch(n){a.status(500).json({error:n.message})}}),r.get("/api/billing/invoices/:id",F,async(t,a)=>{try{let n=parseInt(t.params.id),o=await p.execute(h`
         SELECT si.*,
+               COALESCE((
+                 SELECT jsonb_agg(nc.source_charge_amounts)
+                 FROM sales_invoices nc
+                 WHERE nc.nota_credito_id = si.id
+                   AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+               ), '[]'::jsonb) AS credit_source_charge_amounts,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
                orig.punto_venta      AS original_punto_venta,
