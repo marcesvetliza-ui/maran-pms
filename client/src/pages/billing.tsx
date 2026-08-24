@@ -1638,9 +1638,9 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
-        <div className="space-y-3 py-2">
+      <DialogContent className="max-w-md max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4"><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-3">
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
             <div className="font-medium">Factura original:</div>
             <div className="text-muted-foreground text-xs">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)} — {invoice.cliente_razon_social}</div>
@@ -1742,7 +1742,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
           </div>
           <div className="space-y-1"><Label>Motivo *</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || montoInvalido} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
             {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNC}`}
