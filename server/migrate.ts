@@ -360,14 +360,6 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`)
   );
 
-  await withTimeout("guests.document_number_unique", T, () =>
-    db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS guests_document_number_unique
-      ON guests (BTRIM(document_number))
-      WHERE document_number IS NOT NULL AND BTRIM(document_number) <> ''
-    `)
-  );
-
   await withTimeout("reservation_waitlist.create", T, () =>
     db.execute(sql`
       CREATE TABLE IF NOT EXISTS reservation_waitlist (
