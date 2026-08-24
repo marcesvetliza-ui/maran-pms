@@ -91,6 +91,7 @@ function AmbienteBadge({ ambiente }: { ambiente: AmbienteMode | undefined }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("facturas");
   const [showResPicker, setShowResPicker] = useState(false);
   const [resPickerSearch, setResPickerSearch] = useState("");
@@ -143,6 +144,35 @@ export default function BillingPage() {
   const { data: invoices = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", qp],
     queryFn: () => fetch(`/api/billing/invoices?${qp}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: pendingCreditNotes = [] } = useQuery<any[]>({
+    queryKey: ["/api/billing/credit-note-reconciliations/pending"],
+    queryFn: async () => {
+      const response = await fetch("/api/billing/credit-note-reconciliations/pending", { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudieron cargar las conciliaciones pendientes");
+      return response.json();
+    },
+  });
+
+  const reconcileCreditNoteMutation = useMutation({
+    mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
+    onSuccess: async (response: Response) => {
+      const data = await response.json();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
+      ]);
+      toast({
+        title: "NC conciliada",
+        description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
+      });
+    },
+    onError: (error: any) => toast({
+      title: "La NC sigue pendiente",
+      description: parseApiError(error),
+      variant: "destructive",
+    }),
   });
 
   const { data: config } = useQuery<any>({ queryKey: ["/api/billing/config"] });
@@ -236,6 +266,46 @@ export default function BillingPage() {
               </Button>
             </div>
 
+            {(pendingCreditNotes as any[]).length > 0 && (
+              <Card className="mb-4 border-amber-300 bg-amber-50/60 dark:bg-amber-950/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2 text-amber-900 dark:text-amber-100">
+                    <AlertTriangle className="w-4 h-4" />
+                    Conciliaciones fiscales pendientes ({(pendingCreditNotes as any[]).length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(pendingCreditNotes as any[]).map((nc: any) => (
+                    <div key={nc.id} className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between rounded-md border border-amber-200 bg-background/70 p-2.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-medium">
+                          {TIPO_LABELS[nc.tipo_comprobante]?.nombre || nc.tipo_comprobante} {padNum(nc.punto_venta, 4)}-{padNum(nc.numero, 8)}
+                          <span className="font-normal text-muted-foreground"> · Reserva #{nc.reserva_id}</span>
+                        </div>
+                        <div className="text-muted-foreground mt-0.5">
+                          Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
+                        </div>
+                        {nc.reconciliation_error && (
+                          <div className="text-amber-800 dark:text-amber-200 mt-1">{nc.reconciliation_error}</div>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-100"
+                        onClick={() => reconcileCreditNoteMutation.mutate(Number(nc.id))}
+                        disabled={reconcileCreditNoteMutation.isPending}
+                        data-testid={`btn-reconcile-credit-note-${nc.id}`}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 mr-1 ${reconcileCreditNoteMutation.isPending ? "animate-spin" : ""}`} />
+                        Reintentar y conciliar
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardContent className="p-0">
                 {isLoading ? (
@@ -292,7 +362,14 @@ export default function BillingPage() {
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
                               <td className="px-3 py-2">
-                                {f.estado === "emitida" || f.estado === "parcial" ? (
+                                {f.reconciliation_status === "pendiente" ? (
+                                  <div>
+                                    <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
+                                      <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
+                                    </Badge>
+                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">No emitir otra NC</div>
+                                  </div>
+                                ) : f.estado === "emitida" || f.estado === "parcial" ? (
                                   <Badge variant="outline" className="text-xs text-green-700 border-green-400 bg-green-50 dark:bg-green-950/20"><CheckCircle2 className="w-3 h-3 mr-1" />Emitida</Badge>
                                 ) : (
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>

@@ -11,6 +11,8 @@ import { requireAuth, requireRole } from "../auth";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
 
+const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
+
 // ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
 let _logoCache: Buffer | null | undefined = undefined; // undefined = no intentado
 
@@ -85,6 +87,176 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
 function getNotaCreditoAdjustmentSourceId(description: unknown): string | null {
   const match = String(description || "").match(/\[nc:\d+:([^\]]+)\]/);
   return match?.[1] || null;
+}
+
+function parseStoredJson(value: unknown): any {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
+  return invoice?.[snakeCase] ?? invoice?.[camelCase];
+}
+
+function getCreditSourceAmounts(invoice: any): Record<string, number> | null {
+  const value = parseStoredJson(invoiceValue(invoice, "source_charge_amounts", "sourceChargeAmounts"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const amounts: Record<string, number> = {};
+  for (const [sourceId, amount] of Object.entries(value)) {
+    const numeric = Number(amount);
+    if (!sourceId || !Number.isFinite(numeric) || numeric <= 0) return null;
+    amounts[String(sourceId)] = Number(numeric.toFixed(2));
+  }
+  return Object.keys(amounts).length ? amounts : null;
+}
+
+function getOriginalItemBySource(original: any): Map<string, any> {
+  const sourceIds = parseStoredJson(invoiceValue(original, "source_charge_ids", "sourceChargeIds"));
+  const items = parseStoredJson(original.items);
+  const result = new Map<string, any>();
+  if (Array.isArray(sourceIds) && Array.isArray(items)) {
+    sourceIds.forEach((sourceId, index) => {
+      if (typeof sourceId === "string" && items[index]) result.set(sourceId, items[index]);
+    });
+  }
+  return result;
+}
+
+/**
+ * The external CAE has already been stored when this runs. Keep every local
+ * effect in one transaction, with an idempotent per-source marker for the
+ * charge adjustment, so it can safely be resumed after a process failure.
+ */
+async function reconcileReservationCreditNote(
+  original: any,
+  nc: any,
+  user: any,
+): Promise<any> {
+  if (invoiceValue(nc, "reconciliation_status", "reconciliationStatus") === "conciliada") {
+    return nc;
+  }
+  if (invoiceValue(nc, "estado", "estado") !== "emitida") {
+    throw new Error("La Nota de Crédito todavía no fue autorizada y no puede conciliarse");
+  }
+
+  const sourceChargeAmounts = getCreditSourceAmounts(nc);
+  if (!sourceChargeAmounts) {
+    throw new Error("La NC pendiente no tiene un detalle válido por cargo para corregir el Folio");
+  }
+  const sourceItemById = getOriginalItemBySource(original);
+  const originalTotal = Number(invoiceValue(original, "monto_total", "montoTotal") || 0);
+  const alreadyCredited = Number(invoiceValue(original, "monto_acreditado", "montoAcreditado") || 0);
+  const ncTotal = Number(invoiceValue(nc, "monto_total", "montoTotal") || 0);
+  const mappedTotal = Object.values(sourceChargeAmounts).reduce((sum, amount) => sum + amount, 0);
+  const originalReservationId = String(invoiceValue(original, "reserva_id", "reservaId") || "");
+  const ncId = Number(invoiceValue(nc, "id", "id"));
+
+  if (
+    !originalReservationId ||
+    !Number.isFinite(ncId) ||
+    !Number.isFinite(originalTotal) ||
+    !Number.isFinite(ncTotal) ||
+    Math.abs(mappedTotal - ncTotal) > 0.01
+  ) {
+    throw new Error("La NC pendiente no coincide con la factura original; requiere revisión administrativa");
+  }
+
+  const newCredited = Math.min(originalTotal, alreadyCredited + ncTotal);
+  const newState = newCredited >= originalTotal - 0.009 ? "anulada" : "parcial";
+  const today = getArgentinaToday();
+  const operator = user?.fullName || user?.username || "Sistema";
+  const ncType = String(invoiceValue(nc, "tipo_comprobante", "tipoComprobante"));
+  const ncPoint = Number(invoiceValue(nc, "punto_venta", "puntoVenta"));
+  const ncNumber = Number(invoiceValue(nc, "numero", "numero"));
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      UPDATE sales_invoices
+      SET nota_credito_id = ${ncId},
+          monto_acreditado = ${newCredited.toFixed(2)},
+          estado = ${newState}
+      WHERE id = ${Number(invoiceValue(original, "id", "id"))}
+    `);
+
+    for (const [sourceId, amount] of Object.entries(sourceChargeAmounts)) {
+      const marker = `[nc:${ncId}:${sourceId}]`;
+      const originalItem = sourceItemById.get(sourceId);
+      await tx.execute(sql`
+        INSERT INTO charges (
+          reservation_id, description, amount, date, category, created_by, status
+        )
+        SELECT
+          ${originalReservationId},
+          ${`Ajuste por NC ${ncType} ${String(ncPoint).padStart(4, "0")}-${String(ncNumber).padStart(8, "0")} — ${originalItem?.descripcion || sourceId} ${marker}`},
+          ${String(-amount)},
+          ${today},
+          'adjustment',
+          ${operator},
+          'active'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM charges
+          WHERE reservation_id = ${originalReservationId}
+            AND description LIKE ${`%${marker}%`}
+        )
+      `);
+    }
+
+    await tx.execute(sql`
+      UPDATE sales_invoices
+      SET reconciliation_status = 'conciliada',
+          reconciliation_error = NULL,
+          reconciliation_updated_at = now()
+      WHERE id = ${ncId}
+    `);
+  });
+
+  return {
+    ...nc,
+    reconciliation_status: "conciliada",
+    reconciliationStatus: "conciliada",
+  };
+}
+
+async function resumeReservationCreditNote(
+  original: any,
+  pendingNc: any,
+  user: any,
+): Promise<any> {
+  let nc = pendingNc;
+  if (invoiceValue(nc, "reconciliation_status", "reconciliationStatus") !== "pendiente") {
+    return nc;
+  }
+
+  if (invoiceValue(nc, "estado", "estado") === "autorizacion_pendiente") {
+    const items = parseStoredJson(nc.items);
+    const sourceChargeAmounts = getCreditSourceAmounts(nc);
+    if (!Array.isArray(items) || !sourceChargeAmounts) {
+      throw new Error("La NC pendiente no tiene datos suficientes para reintentar su autorización");
+    }
+    nc = await emitirFactura({
+      tipoComprobante: invoiceValue(nc, "tipo_comprobante", "tipoComprobante"),
+      cliente: {
+        razonSocial: invoiceValue(original, "cliente_razon_social", "clienteRazonSocial"),
+        cuit: invoiceValue(original, "cliente_cuit", "clienteCuit") || undefined,
+        dni: invoiceValue(original, "cliente_dni", "clienteDni") || undefined,
+        condicionIva: invoiceValue(original, "cliente_condicion_iva", "clienteCondicionIva"),
+        domicilio: invoiceValue(original, "cliente_domicilio", "clienteDomicilio") || undefined,
+      },
+      items,
+      facturaOriginalId: Number(invoiceValue(original, "id", "id")),
+      operador: user?.fullName || user?.username,
+      puntoVentaOverride: Number(invoiceValue(nc, "punto_venta", "puntoVenta")),
+      reservaId: String(invoiceValue(original, "reserva_id", "reservaId")),
+      folioId: invoiceValue(original, "folio_id", "folioId") || undefined,
+      cashFormaPago: invoiceValue(nc, "cash_forma_pago", "cashFormaPago") || undefined,
+      sourceChargeIds: Object.keys(sourceChargeAmounts),
+      sourceChargeAmounts,
+      recoverableCreditNote: true,
+      recoveryInvoiceId: Number(invoiceValue(nc, "id", "id")),
+    } as NewInvoiceData);
+  }
+
+  return reconcileReservationCreditNote(original, nc, user);
 }
 
 class FolioInvoiceValidationError extends Error {
@@ -361,6 +533,109 @@ export function registerBillingRoutes(app: Express) {
       res.json(rows.rows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Pending reservation NCs are intentionally visible outside date filters:
+  // an authorized fiscal correction must be actionable until its Folio
+  // adjustment has been committed.
+  app.get("/api/billing/credit-note-reconciliations/pending", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT
+          nc.*,
+          orig.tipo_comprobante AS original_tipo_comprobante,
+          orig.punto_venta AS original_punto_venta,
+          orig.numero AS original_numero,
+          orig.monto_total AS original_monto_total,
+          orig.cliente_razon_social AS original_cliente_razon_social
+        FROM sales_invoices nc
+        JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
+        WHERE nc.reserva_id IS NOT NULL
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.reconciliation_status = 'pendiente'
+        ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
+        LIMIT 100
+      `);
+      res.json(rows.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "No se pudieron cargar las conciliaciones pendientes" });
+    }
+  });
+
+  // Explicit recovery action for a pending reservation NC. It never creates a
+  // new invoice: it resumes the persisted authorization number, then applies
+  // the pending invoice/Folio transaction.
+  app.post("/api/billing/credit-notes/:id/reconcile", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (req, res) => {
+    try {
+      const ncId = Number(req.params.id);
+      if (!Number.isInteger(ncId) || ncId <= 0) {
+        return res.status(400).json({ error: "Identificador de Nota de Crédito inválido" });
+      }
+
+      const initial = await db.execute(sql`
+        SELECT nc.id, nc.nota_credito_id AS original_invoice_id
+        FROM sales_invoices nc
+        JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
+        WHERE nc.id = ${ncId}
+          AND nc.reserva_id IS NOT NULL
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+        LIMIT 1
+      `);
+      if (!initial.rows.length) {
+        return res.status(404).json({ error: "No se encontró una NC de reserva pendiente" });
+      }
+
+      // Query aliases avoid accidental field shadowing in the joined row.
+      const initialNc = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${ncId} LIMIT 1`);
+      const initialOriginal = await db.execute(sql`
+        SELECT * FROM sales_invoices
+        WHERE id = ${Number((initial.rows[0] as any).original_invoice_id)}
+        LIMIT 1
+      `);
+      const nc = initialNc.rows[0] as any;
+      const original = initialOriginal.rows[0] as any;
+      if (!nc || !original || !original.reserva_id) {
+        return res.status(404).json({ error: "No se encontró la factura original de la NC" });
+      }
+      if (nc.reconciliation_status === "conciliada") {
+        return res.json({ ...nc, reconciliationStatus: "conciliada", alreadyReconciled: true });
+      }
+      if (nc.reconciliation_status !== "pendiente") {
+        return res.status(409).json({ error: "La NC no está disponible para conciliación automática" });
+      }
+
+      const result = await withReservationInvoiceLock(String(original.reserva_id), async () => {
+        const lockedNc = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${ncId} LIMIT 1`);
+        const lockedOriginal = await db.execute(sql`
+          SELECT * FROM sales_invoices
+          WHERE id = ${Number((lockedNc.rows[0] as any)?.nota_credito_id)}
+          LIMIT 1
+        `);
+        const currentNc = lockedNc.rows[0] as any;
+        const currentOriginal = lockedOriginal.rows[0] as any;
+        if (!currentNc || !currentOriginal) throw new Error("La factura vinculada ya no está disponible");
+        return resumeReservationCreditNote(currentOriginal, currentNc, (req as any).user);
+      });
+
+      res.json({ ...result, reconciliationRecovered: true });
+    } catch (error: any) {
+      const message = String(error?.message || "No se pudo conciliar la Nota de Crédito");
+      const ncId = Number(req.params.id);
+      if (Number.isInteger(ncId) && ncId > 0) {
+        await db.execute(sql`
+          UPDATE sales_invoices
+          SET reconciliation_error = ${message},
+              reconciliation_updated_at = now()
+          WHERE id = ${ncId}
+            AND reconciliation_status = 'pendiente'
+        `).catch(() => undefined);
+      }
+      res.status(409).json({
+        error: `La NC sigue pendiente. No se emitió una segunda Nota de Crédito: ${message}`,
+        pendingCreditNoteId: ncId,
+        reconciliationStatus: "pendiente",
+      });
     }
   });
 
@@ -801,7 +1076,7 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // POST /api/billing/invoices/:id/nota-credito
-  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, async (req, res) => {
+  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (req, res) => {
     let creditLockClient: any = null;
     let creditLockKey: string | null = null;
     try {
@@ -854,6 +1129,45 @@ export function registerBillingRoutes(app: Express) {
       // contrato anterior para que ninguna llamada residual anule un cobro.
       if (original.reserva_id && Array.isArray(paymentIdsToVoid) && paymentIdsToVoid.length > 0) {
         return res.status(400).json({ error: "La Nota de Crédito no anula pagos. Registrá la devolución o anulación en una operación separada." });
+      }
+
+      // A reservation can have only one unresolved fiscal correction at a time.
+      // Retrying the action resumes that same NC (and its original number) rather
+      // than sending another authorization request to ARCA.
+      if (original.reserva_id) {
+        const pendingResult = await db.execute(sql`
+          SELECT *
+          FROM sales_invoices
+          WHERE nota_credito_id = ${id}
+            AND reserva_id = ${String(original.reserva_id)}
+            AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+            AND reconciliation_status = 'pendiente'
+          ORDER BY id DESC
+          LIMIT 1
+        `);
+        const pendingNc = pendingResult.rows[0] as any;
+        if (pendingNc) {
+          try {
+            const reconciled = await resumeReservationCreditNote(original, pendingNc, user);
+            return res.status(200).json({
+              ...reconciled,
+              reconciliationRecovered: true,
+            });
+          } catch (error: any) {
+            const message = String(error?.message || "No se pudo completar la conciliación de la NC pendiente");
+            await db.execute(sql`
+              UPDATE sales_invoices
+              SET reconciliation_error = ${message},
+                  reconciliation_updated_at = now()
+              WHERE id = ${Number(pendingNc.id)}
+            `).catch(() => undefined);
+            return res.status(409).json({
+              error: `Hay una Nota de Crédito pendiente de conciliación. No se emitió una segunda NC: ${message}`,
+              pendingCreditNoteId: Number(pendingNc.id),
+              reconciliationStatus: "pendiente",
+            });
+          }
+        }
       }
 
       let sourceChargeAmounts: Record<string, number> = {};
@@ -1024,14 +1338,34 @@ export function registerBillingRoutes(app: Express) {
         cashFormaPago: original.cash_forma_pago,
         sourceChargeIds: original.reserva_id ? Object.keys(sourceChargeAmounts) : undefined,
         sourceChargeAmounts: original.reserva_id ? sourceChargeAmounts : undefined,
+        recoverableCreditNote: Boolean(original.reserva_id),
       } as NewInvoiceData);
 
       // El cargo original nunca se modifica: se registra una corrección negativa
       // trazable por cada concepto de la NC. Esto permite ver el importe original,
       // el ajuste fiscal y el importe vigente en el Folio.
-      // Once ARCA has authorized the NC, these local writes must succeed or
-      // fail together: a partially corrected Folio is worse than a visible
-      // pending reconciliation.
+      // A reservation NC is stored before ARCA authorization, then these local
+      // writes succeed or fail as one recoverable reconciliation.
+      if (original.reserva_id) {
+        try {
+          const reconciled = await reconcileReservationCreditNote(original, nc, user);
+          return res.status(201).json(reconciled);
+        } catch (error: any) {
+          const message = String(error?.message || "No se pudo conciliar la NC con el Folio");
+          await db.execute(sql`
+            UPDATE sales_invoices
+            SET reconciliation_error = ${message},
+                reconciliation_updated_at = now()
+            WHERE id = ${Number((nc as any).id)}
+          `).catch(() => undefined);
+          return res.status(409).json({
+            error: `La Nota de Crédito fue autorizada, pero quedó pendiente de conciliación. No emitas otra: ${message}`,
+            pendingCreditNoteId: Number((nc as any).id),
+            reconciliationStatus: "pendiente",
+          });
+        }
+      }
+
       const nuevoAcreditado = Math.min(montoTotal, montoYaAcreditado + montoNC);
       const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
       await db.transaction(async (tx) => {
@@ -1042,22 +1376,6 @@ export function registerBillingRoutes(app: Express) {
                 estado = ${nuevoEstado}
           WHERE id = ${id}
         `);
-        if (original.reserva_id) {
-          const today = getArgentinaToday();
-          const adjustments = Object.entries(sourceChargeAmounts).map(([sourceId, amount]) => {
-            const originalItem = sourceItemById.get(sourceId);
-            return {
-              reservationId: String(original.reserva_id),
-              description: `Ajuste por NC ${nc.tipoComprobante} ${String(nc.puntoVenta).padStart(4, "0")}-${String(nc.numero).padStart(8, "0")} — ${originalItem?.descripcion || sourceId} [nc:${nc.id}:${sourceId}]`,
-              amount: String(-amount),
-              date: today,
-              category: "adjustment" as const,
-              createdBy: user?.fullName || user?.username || "Sistema",
-              status: "active",
-            };
-          });
-          if (adjustments.length) await tx.insert(charges).values(adjustments);
-        }
       });
 
       // A reservation NC changes the fiscal amount and Folio balance only. It

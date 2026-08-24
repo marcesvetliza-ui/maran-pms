@@ -830,6 +830,26 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
   );
 
+  // Credit notes for reservation folios are persisted before ARCA authorization.
+  // The reconciliation fields make a post-authorization Folio correction
+  // recoverable instead of allowing a second fiscal NC on retry.
+  await withTimeout("sales_invoices.nc_reconciliation_status", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_status text`)
+  );
+  await withTimeout("sales_invoices.nc_reconciliation_error", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_error text`)
+  );
+  await withTimeout("sales_invoices.nc_reconciliation_updated_at", T, () =>
+    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_updated_at timestamp`)
+  );
+  await withTimeout("sales_invoices.nc_reconciliation_pending_idx", T, () =>
+    db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_sales_invoices_nc_reconciliation_pending
+      ON sales_invoices (nota_credito_id, reconciliation_status)
+      WHERE reconciliation_status = 'pendiente'
+    `)
+  );
+
   await withTimeout("reservations.checked_out_at", T, () =>
     db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS checked_out_at timestamp`)
   );

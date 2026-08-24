@@ -1,7 +1,11 @@
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
 
-const TIPOS_CBT: Record<string, number> = { FA: 1, FB: 6, FC: 11, NCA: 3, NCB: 8, NCC: 13, NDA: 2, NDB: 7, NDC: 12 };
+const TIPOS_CBT: Record<string, number> = {
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
+  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202,
+};
 
 export interface FECAERequest {
   tipo: string;
@@ -24,6 +28,15 @@ export interface FECAERequest {
 export interface FECAEResult {
   cae: string;
   caeFechaVto: Date;
+}
+
+export interface FECompConsulta {
+  tipo: string;
+  puntoVenta: number;
+  numero: number;
+  cuitEmisor: string;
+  token: string;
+  sign: string;
 }
 
 async function soapPost(url: string, action: string, body: string): Promise<string> {
@@ -58,6 +71,55 @@ function buildIvaBlock(neto21: number, iva21: number, neto105: number, iva105: n
   }
   if (!parts.length) return "";
   return `<ar:Iva>${parts.join("")}</ar:Iva>`;
+}
+
+function parseCaeResult(response: string): FECAEResult | null {
+  const caeM = response.match(/<CAE>([^<]+)<\/CAE>/);
+  if (!caeM) return null;
+  const vtoM = response.match(/<CAEFchVto>([^<]+)<\/CAEFchVto>/);
+  const vtoStr = vtoM ? vtoM[1] : "";
+  return {
+    cae: caeM[1],
+    caeFechaVto: vtoStr
+      ? new Date(`${vtoStr.slice(0, 4)}-${vtoStr.slice(4, 6)}-${vtoStr.slice(6, 8)}T12:00:00-03:00`)
+      : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+  };
+}
+
+/**
+ * Consults the exact voucher number before retrying an interrupted
+ * authorization. Returning null means ARCA explicitly reported no authorized
+ * voucher; any ambiguous response throws so the system never risks a duplicate.
+ */
+export async function feCompConsultar(
+  req: FECompConsulta,
+  ambiente: "homologacion" | "produccion"
+): Promise<FECAEResult | null> {
+  const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
+  const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
+  const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
+  const envelope =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
+    `<soapenv:Body><ar:FECompConsultar>` +
+    `<ar:Auth><ar:Token>${req.token}</ar:Token><ar:Sign>${req.sign}</ar:Sign><ar:Cuit>${cuitLimpio}</ar:Cuit></ar:Auth>` +
+    `<ar:FeCompConsReq><ar:CbteTipo>${cbteTipo}</ar:CbteTipo><ar:PtoVta>${req.puntoVenta}</ar:PtoVta><ar:CbteNro>${req.numero}</ar:CbteNro></ar:FeCompConsReq>` +
+    `</ar:FECompConsultar></soapenv:Body></soapenv:Envelope>`;
+  const response = await soapPost(url, "FECompConsultar", envelope);
+  const faultM = response.match(/<faultstring>([^<]+)<\/faultstring>/);
+  if (faultM) throw new Error(`WSFEV1 Fault al consultar comprobante: ${faultM[1]}`);
+
+  const existing = parseCaeResult(response);
+  if (existing) return existing;
+
+  // ARCA reports R / code 602 when the requested voucher does not exist.
+  // Do not treat an unrecognized answer as "not found": it is safer to leave
+  // the local NC pending for review than to risk authorizing it twice.
+  const errorCodeM = response.match(/<Code>([^<]+)<\/Code>/);
+  if (errorCodeM?.[1] === "602") return null;
+
+  const errorM = response.match(/<Msg>([^<]+)<\/Msg>/);
+  throw new Error(`ARCA no devolvió un estado verificable para la NC pendiente${errorM ? `: ${errorM[1]}` : ""}`);
 }
 
 export async function feCAESolicitar(
@@ -118,17 +180,10 @@ export async function feCAESolicitar(
     throw new Error(`ARCA rechazó el comprobante: ${errM ? errM[1] : "error desconocido"}`);
   }
 
-  const caeM = resp.match(/<CAE>([^<]+)<\/CAE>/);
-  const vtoM = resp.match(/<CAEFchVto>([^<]+)<\/CAEFchVto>/);
-  if (!caeM) {
+  const result = parseCaeResult(resp);
+  if (!result) {
     const errM = resp.match(/<Msg>([^<]+)<\/Msg>/);
     throw new Error(`CAE no recibido de ARCA${errM ? ": " + errM[1] : ""}`);
   }
-
-  const vtoStr = vtoM ? vtoM[1] : "";
-  const caeFechaVto = vtoStr
-    ? new Date(`${vtoStr.slice(0, 4)}-${vtoStr.slice(4, 6)}-${vtoStr.slice(6, 8)}T12:00:00-03:00`)
-    : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
-
-  return { cae: caeM[1], caeFechaVto };
+  return result;
 }
