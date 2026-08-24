@@ -28,6 +28,7 @@ import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPd
 import { audit } from "./audit";
 import { registerGuestsRoutes } from "./routes/guests";
 import { registerReservationsRoutes } from "./routes/reservations";
+import { registerReservationWaitlistRoutes } from "./routes/reservationWaitlist";
 import { registerGroupsRoutes } from "./routes/groups";
 import { registerHousekeepingRoutes } from "./routes/housekeeping";
 import { registerRestaurantRoutes } from "./routes/restaurant";
@@ -3430,6 +3431,7 @@ export async function registerRoutes(
   registerGiftVouchersRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);
+  registerReservationWaitlistRoutes(app);
   registerGroupsRoutes(app);
   registerHousekeepingRoutes(app);
   registerRestaurantRoutes(app);

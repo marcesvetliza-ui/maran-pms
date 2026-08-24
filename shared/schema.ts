@@ -266,6 +266,23 @@ export const insertReservationSchema = createInsertSchema(reservations).omit({ i
 export type InsertReservation = z.infer<typeof insertReservationSchema>;
 export type Reservation = typeof reservations.$inferSelect;
 
+// Reservation wait list (consultas sin huésped ni reserva confirmada)
+export const reservationWaitlist = pgTable("reservation_waitlist", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  checkInDate: date("check_in_date").notNull(),
+  checkOutDate: date("check_out_date").notNull(),
+  phone: text("phone"),
+  numberOfGuests: integer("number_of_guests").notNull().default(1),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertReservationWaitlistSchema = createInsertSchema(reservationWaitlist).omit({ id: true, createdAt: true });
+export type InsertReservationWaitlist = z.infer<typeof insertReservationWaitlistSchema>;
+export type ReservationWaitlist = typeof reservationWaitlist.$inferSelect;
+
 // Charges (Cargos/Folio)
 export type ChargeCategory = "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment" | "payment" | "transfer_out" | "transfer_in";
 

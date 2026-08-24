@@ -368,6 +368,30 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("reservation_waitlist.create", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS reservation_waitlist (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        first_name text NOT NULL,
+        last_name text NOT NULL,
+        check_in_date date NOT NULL,
+        check_out_date date NOT NULL,
+        phone text,
+        number_of_guests integer NOT NULL DEFAULT 1,
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT reservation_waitlist_dates_valid CHECK (check_out_date > check_in_date),
+        CONSTRAINT reservation_waitlist_guests_valid CHECK (number_of_guests > 0)
+      )
+    `)
+  );
+  await withTimeout("reservation_waitlist.check_in_idx", T, () =>
+    db.execute(sql`
+      CREATE INDEX IF NOT EXISTS reservation_waitlist_check_in_idx
+      ON reservation_waitlist (check_in_date, created_at)
+    `)
+  );
+
   await withTimeout("rooms.is_virtual", T, () =>
     db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_virtual boolean DEFAULT false`)
   );
