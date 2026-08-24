@@ -33,3 +33,4 @@
 - [Reusable dialog query refresh](reusable-dialog-query-refresh.md) — dialog-scoped API data must be explicitly refreshed when reopening a mounted dialog, not merely enabled.
 - [Workspace uploads and Git commits](workspace-uploads-git.md) — user attachments land in attached_assets; stage explicit source/build paths, not git add -A.
 - [Credit notes and Folio adjustments](credit-notes-folio-adjustments.md) — reservation NCs correct charges with tagged negative adjustments; payments and cash refunds remain separate operations.
+- [GitHub push authentication](github-push-auth.md) — personal push-token secrets are currently rejected; use the connected GitHub OAuth API and never force divergent main.
