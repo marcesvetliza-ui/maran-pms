@@ -587,7 +587,10 @@ export function PrefacturaDialog({
   // When reservation loads: auto-fill client data
   useEffect(() => {
     if (!reservation || !open) return;
-    fillFromReservation(reservation, "init");
+    // A linked company/agency is an available billing target, not the forced
+    // recipient. Start from the guest so reception can explicitly choose the
+    // linked entity when needed.
+    fillFromReservation(reservation, "init", "guest");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservation?.id, open]);
 
@@ -603,12 +606,37 @@ export function PrefacturaDialog({
     }
   }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
 
-  function fillFromReservation(res: ReservationWithDetails, _source: string) {
+  function fillFromReservation(
+    res: ReservationWithDetails,
+    _source: string,
+    preferredTarget?: "guest" | "company" | "agency",
+  ) {
     const g = res.guest as any;
     const comp = res.company as any;
     const ag = res.agency as any;
 
-    if (comp) {
+    if (preferredTarget === "guest" && g) {
+      const isJuridica = g.tipoPersona === "juridica";
+      const name = isJuridica ? (g.firstName || "") : [g.lastName, g.firstName].filter(Boolean).join(" ");
+      const rawCuit = cleanIdentifier(g.cuilCuit).replace(/\D/g, "").slice(0, 11);
+      const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
+        ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
+        : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
+      const dniVal = !rawCuit ? cleanIdentifier(g.documentNumber) : "";
+      const condVal = normalizeVatCondition(g.vatCondition);
+      setBillingTarget("guest");
+      setBillingEntityId("");
+      setRazonSocial(name);
+      setCuit(cuitVal);
+      setDni(dniVal);
+      setCondicionIva(condVal);
+      setDomicilio([g.direccion, g.localidad].filter(Boolean).join(", "));
+      setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
+      setNationality(g.nationality || "");
+      setNationalityCode(g.nationalityCode || "");
+      setSaleCondition(g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+      setTipo(suggestTipo(cuitVal, condVal));
+    } else if (comp) {
       setBillingTarget("company");
       setBillingEntityId(String(comp.id || res.companyId || ""));
       applyEntity(comp, "company");
@@ -664,7 +692,7 @@ export function PrefacturaDialog({
     setBillingTarget(target);
     setBillingEntityId("");
     if (target === "guest" && reservation) {
-      fillFromReservation(reservation, "target_change");
+      fillFromReservation(reservation, "target_change", "guest");
     } else {
       setRazonSocial(""); setCuit(""); setDni(""); setCondicionIva("Consumidor Final"); setDomicilio("");
       setDocumentType(""); setNationality(""); setNationalityCode("");
@@ -1401,7 +1429,10 @@ export function PrefacturaDialog({
                     onValueChange={(v) => handleBillingTargetChange(v as any)}
                     disabled={billingTargetLocked}
                   >
-                    <SelectTrigger title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}>
+                    <SelectTrigger
+                      data-testid="select-billing-target"
+                      title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1430,7 +1461,7 @@ export function PrefacturaDialog({
                       <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
                     ) : (
                       <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "company")}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
+                        <SelectTrigger data-testid="select-billing-company"><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
                         <SelectContent>
                           {companies.filter((c: any) => c.id).map((c: any) => (
                             <SelectItem key={c.id} value={String(c.id)}>{c.razonSocial || c.nombreFantasia}</SelectItem>
@@ -1447,7 +1478,7 @@ export function PrefacturaDialog({
                       <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
                     ) : (
                       <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "agency")}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
+                        <SelectTrigger data-testid="select-billing-agency"><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
                         <SelectContent>
                           {agencies.filter((a: any) => a.id).map((a: any) => (
                             <SelectItem key={a.id} value={String(a.id)}>{a.razonSocial || a.nombreFantasia}</SelectItem>
@@ -1488,7 +1519,7 @@ export function PrefacturaDialog({
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Tipo de comprobante</Label>
                   <Select value={tipo} onValueChange={setTipo}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {filteredTipoOptions.map(opt => (
                         <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -1540,7 +1571,7 @@ export function PrefacturaDialog({
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Condición de venta</Label>
                 <Select value={saleCondition} onValueChange={(value) => setSaleCondition(value as SaleCondition)}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem>
                     <SelectItem value="cuenta_corriente" disabled={billingTarget === "guest" || !billingEntityId}>
