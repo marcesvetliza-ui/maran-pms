@@ -88,7 +88,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { Guest, InsertGuest, ReservationWithDetails, ReservationStatus, GuestPreference, Company, Country } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
@@ -283,23 +283,13 @@ export function GuestFormDialog({
       onSuccess(createdId, fullName);
       onOpenChange(false);
     },
-    onError: async (error: any) => {
-      // 409 = duplicate document number — show which existing guest was found
-      try {
-        const body = await error?.response?.json?.();
-        if (body?.error === "duplicate" && body?.existing) {
-          const ex = body.existing;
-          toast({
-            title: "Huésped ya registrado",
-            description: `${ex.lastName} ${ex.firstName} ya existe con ese documento. Buscalo en la lista y editalo si necesitás actualizar sus datos.`,
-            variant: "destructive",
-          });
-          return;
-        }
-      } catch (_) { /* ignore parse errors */ }
+    onError: (error: any) => {
+      const message = parseApiError(error);
+      const isDuplicate = message.toLowerCase().includes("documento") &&
+        message.toLowerCase().includes("asociado");
       toast({
-        title: "Error",
-        description: "No se pudo guardar el huésped. Intente nuevamente.",
+        title: isDuplicate ? "Huésped no registrado" : "No se pudo guardar el huésped",
+        description: isDuplicate ? message : "No se pudo guardar el huésped. Intentá nuevamente.",
         variant: "destructive",
       });
     },
