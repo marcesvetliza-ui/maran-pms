@@ -13,6 +13,46 @@ function isAccountPaymentValidationError(error: unknown): error is Error {
   return error instanceof AccountPaymentValidationError || (error as { statusCode?: number } | null)?.statusCode === 400;
 }
 
+function normalizeGuestDocumentNumber(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
+}
+
+async function findGuestByDocumentNumber(documentNumber: string, excludeId?: string) {
+  const conditions = [
+    sql`BTRIM(${guests.documentNumber}) = ${documentNumber}`,
+    ...(excludeId ? [sql`${guests.id} <> ${excludeId}`] : []),
+  ];
+  const [existing] = await db
+    .select({
+      id: guests.id,
+      firstName: guests.firstName,
+      lastName: guests.lastName,
+      documentType: guests.documentType,
+      documentNumber: guests.documentNumber,
+    })
+    .from(guests)
+    .where(and(...conditions))
+    .limit(1);
+  return existing;
+}
+
+function sendDuplicateGuestResponse(
+  res: Parameters<Parameters<Express["post"]>[1]>[1],
+  documentNumber: string,
+  existing?: { firstName: string; lastName: string; documentType: string | null; documentNumber: string | null },
+) {
+  const identity = existing ? ` (${existing.lastName}, ${existing.firstName})` : "";
+  return res.status(409).json({
+    error: `No se puede registrar el huésped: el documento ${documentNumber} ya está asociado a otro huésped${identity}.`,
+    code: "DUPLICATE_DOCUMENT",
+    existing,
+  });
+}
+
 function parseAccountMoney(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : Number.NaN;
   if (typeof value !== "string") return Number.NaN;
@@ -710,37 +750,49 @@ export function registerGuestsRoutes(app: Express) {
 
   app.post("/api/guests", async (req, res) => {
     try {
-      const { documentNumber, documentType } = req.body;
+      const documentNumber = normalizeGuestDocumentNumber(req.body.documentNumber);
       // If a document number is provided, check for an existing guest to avoid duplicates.
-      if (documentNumber?.trim()) {
-        const [existing] = await db
-          .select()
-          .from(guests)
-          .where(eq(guests.documentNumber, documentNumber.trim()))
-          .limit(1);
+      if (documentNumber) {
+        const existing = await findGuestByDocumentNumber(documentNumber);
         if (existing) {
-          return res.status(409).json({
-            error: "duplicate",
-            message: `Ya existe un huésped con ese número de documento (${documentType || "DOC"}: ${documentNumber}).`,
-            existing,
-          });
+          return sendDuplicateGuestResponse(res, documentNumber, existing);
         }
       }
-      const guest = await storage.createGuest(req.body);
+      const guest = await storage.createGuest({
+        ...req.body,
+        ...(documentNumber ? { documentNumber } : {}),
+      });
       res.status(201).json(guest);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        const documentNumber = normalizeGuestDocumentNumber(req.body.documentNumber);
+        const existing = documentNumber ? await findGuestByDocumentNumber(documentNumber) : undefined;
+        return sendDuplicateGuestResponse(res, documentNumber || "informado", existing);
+      }
       res.status(500).json({ error: "Error creating guest" });
     }
   });
 
   app.patch("/api/guests/:id", async (req, res) => {
     try {
+      const documentNumber = req.body.documentNumber === undefined
+        ? ""
+        : normalizeGuestDocumentNumber(req.body.documentNumber);
+      if (documentNumber) {
+        const existing = await findGuestByDocumentNumber(documentNumber, req.params.id);
+        if (existing) return sendDuplicateGuestResponse(res, documentNumber, existing);
+      }
       const guest = await storage.updateGuest(req.params.id, req.body);
       if (!guest) {
         return res.status(404).json({ error: "Guest not found" });
       }
       res.json(guest);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        const documentNumber = normalizeGuestDocumentNumber(req.body.documentNumber);
+        const existing = documentNumber ? await findGuestByDocumentNumber(documentNumber, req.params.id) : undefined;
+        return sendDuplicateGuestResponse(res, documentNumber || "informado", existing);
+      }
       res.status(500).json({ error: "Error updating guest" });
     }
   });

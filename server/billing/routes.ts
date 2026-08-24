@@ -721,7 +721,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -741,6 +741,26 @@ export function registerBillingRoutes(app: Express) {
             .map(([id, amount]) => [id, Number(amount)])
         )
         : {};
+      const normalizeVat = (value: unknown) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      const vatCondition = normalizeVat(cliente?.condicionIva);
+      const cuitDigits = String(cliente?.cuit || "").replace(/\D/g, "");
+      const isForeignGuest = !!folioContext &&
+        folioContext.billingTarget === "guest" &&
+        !!(String(folioContext.nationalityCode || "").trim() || String(folioContext.nationality || "").trim()) &&
+        !["arg", "ar", "200"].includes(String(folioContext.nationalityCode || "").trim().toLowerCase()) &&
+        !["argentina", "argentino", "argentina/a", "argentine"].includes(String(folioContext.nationality || "").trim().toLowerCase());
+
+      if (tipoComprobante === "FA" || tipoComprobante === "FM") {
+        if (!["responsable_inscripto", "monotributista"].includes(vatCondition) || cuitDigits.length !== 11) {
+          return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto o Monotributista" });
+        }
+      }
+      if (tipoComprobante === "FB" && !["exento", "consumidor_final"].includes(vatCondition)) {
+        return res.status(400).json({ error: "Factura B corresponde a receptores Exentos o Consumidor Final" });
+      }
+      if (tipoComprobante === "FT" && (!isForeignGuest || !folioContext?.hasAccommodation)) {
+        return res.status(400).json({ error: "Factura T solo puede emitirse a un huésped extranjero por alojamiento" });
+      }
 
       const emitInvoice = async () => {
         // Every reservation invoice must declare the exact folio sources it

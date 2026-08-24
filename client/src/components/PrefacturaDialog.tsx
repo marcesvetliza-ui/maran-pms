@@ -6,7 +6,7 @@ import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
 import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
-  CircleCheck, AlertCircle, Loader2, Percent, Building2, User,
+  CircleCheck, AlertCircle, Loader2, Building2, User,
    Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -53,6 +53,8 @@ interface PaymentRow {
   retencionTipo: "iibb" | "ganancias";
   retencionMonto: string;
 }
+
+type SaleCondition = "contado" | "cuenta_corriente";
 
 export interface PrefacturaDialogProps {
   open: boolean;
@@ -303,6 +305,41 @@ const VAT_MAP: Record<string, string> = {
   no_categorizado: "No Categorizado (Extranjero)",
 };
 
+const SALE_CONDITION_LABELS: Record<SaleCondition, string> = {
+  contado: "Contado",
+  cuenta_corriente: "Cuenta Corriente",
+};
+
+function normalizeVatCondition(value?: string | null): string {
+  const normalized = (value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return VAT_MAP[normalized] || value?.trim() || "Consumidor Final";
+}
+
+function cleanIdentifier(value?: string | null): string {
+  const cleaned = (value || "").trim();
+  return /^0+$/.test(cleaned.replace(/\D/g, "")) ? "" : cleaned;
+}
+
+/**
+ * A partial collection must generate a partial fiscal document as well.  Keep
+ * the allocation deterministic (folio order) and persist the exact source
+ * amounts that make up the emitted amount.
+ */
+export function projectItemsToInvoiceAmount(
+  selectedItems: SelectedFolioItem[],
+  requestedAmount: number,
+): SelectedFolioItem[] {
+  let remaining = Math.max(0, requestedAmount);
+  const projected: SelectedFolioItem[] = [];
+  for (const item of selectedItems) {
+    if (remaining <= 0.009) break;
+    const amount = Math.min(item.amount, remaining);
+    if (amount > 0.009) projected.push({ ...item, amount: Number(amount.toFixed(2)) });
+    remaining -= amount;
+  }
+  return projected;
+}
+
 function padNum(n: number | undefined, len: number) {
   return String(n ?? 0).padStart(len, "0");
 }
@@ -330,12 +367,12 @@ function buildInvoiceItems(selectedItems: SelectedFolioItem[], tipo: string) {
 // ─── Auto-suggest tipo from condicionIva / cuit ───────────────────────────────
 
 export function suggestTipo(cuit: string, condicionIva: string): string {
-  if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") {
-    // Factura A requiere CUIT; sin CUIT usamos Factura B como fallback seguro
-    return cuit ? "FA" : "FB";
+  if (condicionIva === "Responsable Inscripto" || condicionIva === "Monotributista") {
+    // The receiver's fiscal condition determines the document; the UI then
+    // clearly asks for the CUIT that is mandatory for A.
+    return "FA";
   }
-  if (condicionIva === "Monotributista") return "FB";
-  // The default must be an electronic document even for Consumidor Final.
+  // Exento y consumidor final se documentan con B.
   return "FB";
 }
 
@@ -344,6 +381,7 @@ export function isArgentineNationality(nationality?: string | null, nationalityC
   const normalizedCode = (nationalityCode || "").trim().toUpperCase();
   return normalizedCode === "ARG" ||
     normalizedCode === "AR" ||
+    normalizedCode === "200" ||
     ["argentina", "argentino", "argentina/a", "argentine"].includes(normalizedNationality);
 }
 
@@ -385,6 +423,7 @@ export function PrefacturaDialog({
   // Step 1: invoice config
   const [tipo, setTipo] = useState("FB");
   const [puntoVenta, setPuntoVenta] = useState("");
+  const [saleCondition, setSaleCondition] = useState<SaleCondition>("contado");
   const [doCheckout, setDoCheckout] = useState(true);
 
   // Step 2: payments
@@ -482,6 +521,7 @@ export function PrefacturaDialog({
       setEditingId(null);
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
+      setSaleCondition("contado");
       folioInitializedRef.current = false;
     }
   }, [open]);
@@ -547,7 +587,10 @@ export function PrefacturaDialog({
   // When reservation loads: auto-fill client data
   useEffect(() => {
     if (!reservation || !open) return;
-    fillFromReservation(reservation, "init");
+    // A linked company/agency is an available billing target, not the forced
+    // recipient. Start from the guest so reception can explicitly choose the
+    // linked entity when needed.
+    fillFromReservation(reservation, "init", "guest");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservation?.id, open]);
 
@@ -563,12 +606,37 @@ export function PrefacturaDialog({
     }
   }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
 
-  function fillFromReservation(res: ReservationWithDetails, _source: string) {
+  function fillFromReservation(
+    res: ReservationWithDetails,
+    _source: string,
+    preferredTarget?: "guest" | "company" | "agency",
+  ) {
     const g = res.guest as any;
     const comp = res.company as any;
     const ag = res.agency as any;
 
-    if (comp) {
+    if (preferredTarget === "guest" && g) {
+      const isJuridica = g.tipoPersona === "juridica";
+      const name = isJuridica ? (g.firstName || "") : [g.lastName, g.firstName].filter(Boolean).join(" ");
+      const rawCuit = cleanIdentifier(g.cuilCuit).replace(/\D/g, "").slice(0, 11);
+      const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
+        ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
+        : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
+      const dniVal = !rawCuit ? cleanIdentifier(g.documentNumber) : "";
+      const condVal = normalizeVatCondition(g.vatCondition);
+      setBillingTarget("guest");
+      setBillingEntityId("");
+      setRazonSocial(name);
+      setCuit(cuitVal);
+      setDni(dniVal);
+      setCondicionIva(condVal);
+      setDomicilio([g.direccion, g.localidad].filter(Boolean).join(", "));
+      setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
+      setNationality(g.nationality || "");
+      setNationalityCode(g.nationalityCode || "");
+      setSaleCondition(g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+      setTipo(suggestTipo(cuitVal, condVal));
+    } else if (comp) {
       setBillingTarget("company");
       setBillingEntityId(String(comp.id || res.companyId || ""));
       applyEntity(comp, "company");
@@ -581,12 +649,12 @@ export function PrefacturaDialog({
       setBillingEntityId("");
       const isJuridica = g.tipoPersona === "juridica";
       const name = isJuridica ? (g.firstName || "") : [g.lastName, g.firstName].filter(Boolean).join(" ");
-      const rawCuit = (g.cuilCuit || "").replace(/\D/g, "").slice(0, 11);
+      const rawCuit = cleanIdentifier(g.cuilCuit).replace(/\D/g, "").slice(0, 11);
       const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
         ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
         : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
-      const dniVal = !rawCuit && g.documentNumber ? g.documentNumber : "";
-      const condVal = VAT_MAP[g.vatCondition || "consumidor_final"] || "Consumidor Final";
+      const dniVal = !rawCuit ? cleanIdentifier(g.documentNumber) : "";
+      const condVal = normalizeVatCondition(g.vatCondition);
       setRazonSocial(name);
       setCuit(cuitVal);
       setDni(dniVal);
@@ -595,17 +663,18 @@ export function PrefacturaDialog({
       setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
       setNationality(g.nationality || "");
       setNationalityCode(g.nationalityCode || "");
+      setSaleCondition(g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
       setTipo(suggestTipo(cuitVal, condVal));
     }
   }
 
   function applyEntity(e: any, type: "company" | "agency") {
     const rs = e.razonSocial || e.nombreFantasia || "";
-    const rawCuit = (e.cuilCuit || "").replace(/\D/g, "").slice(0, 11);
+    const rawCuit = cleanIdentifier(e.cuilCuit).replace(/\D/g, "").slice(0, 11);
     const cuitVal = rawCuit.length <= 2 ? rawCuit : rawCuit.length <= 10
       ? `${rawCuit.slice(0,2)}-${rawCuit.slice(2)}`
       : `${rawCuit.slice(0,2)}-${rawCuit.slice(2,10)}-${rawCuit[10]}`;
-    const condVal = e.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    const condVal = normalizeVatCondition(e.condicionIva || (cuitVal ? "responsable_inscripto" : "consumidor_final"));
     const dom = e.domicilio || e.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
@@ -615,6 +684,7 @@ export function PrefacturaDialog({
     setDocumentType("CUIT");
     setNationality("");
     setNationalityCode("");
+    setSaleCondition(e.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
     setTipo(suggestTipo(cuitVal, condVal));
   }
 
@@ -622,7 +692,7 @@ export function PrefacturaDialog({
     setBillingTarget(target);
     setBillingEntityId("");
     if (target === "guest" && reservation) {
-      fillFromReservation(reservation, "target_change");
+      fillFromReservation(reservation, "target_change", "guest");
     } else {
       setRazonSocial(""); setCuit(""); setDni(""); setCondicionIva("Consumidor Final"); setDomicilio("");
       setDocumentType(""); setNationality(""); setNationalityCode("");
@@ -650,10 +720,18 @@ export function PrefacturaDialog({
     if (field === "amount") setSplitBalanceChanged(false);
   }
   function addRow() {
-    setPaymentRows(prev => [...prev, {
-      id: newRowId(), amount: "", method: "efectivo", reference: "",
+    setPaymentRows(prev => {
+      const nextMethod = (Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[])
+        .find(method => !prev.some(row => row.method === method));
+      if (!nextMethod) {
+        toast({ title: "Ya se agregaron todas las formas de cobro disponibles", variant: "destructive" });
+        return prev;
+      }
+      return [...prev, {
+      id: newRowId(), amount: "", method: nextMethod, reference: "",
       retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "",
-    }]);
+      }];
+    });
   }
   function removeRow(id: string) {
     setPaymentRows(prev => {
@@ -711,9 +789,15 @@ export function PrefacturaDialog({
   }, 0);
 
   const saldoRestante = selectedBalance - totalPayments;
+  const invoiceAmount = saleCondition === "cuenta_corriente"
+    ? totalSelected
+    : Math.min(totalSelected, selectedAlreadyPaid + totalPayments);
+  const invoiceItemsToEmit = projectItemsToInvoiceAmount(selectedItems, invoiceAmount);
+  const invoiceSourceAmounts = Object.fromEntries(invoiceItemsToEmit.map(item => [item.id, item.amount]));
+  const invoiceSourceIds = invoiceItemsToEmit.map(item => item.id);
   const isFiscalTipo = !NON_FISCAL.has(tipo);
-  const isFacturaA = tipo === "FA" || tipo === "FM"; // Factura A and MiPyme A require a company/agency entity with CUIT
-  const facturaANeedsEntity = isFacturaA && billingTarget === "guest";
+  const isFacturaA = tipo === "FA" || tipo === "FM";
+  const facturaANeedsCuit = isFacturaA && cuit.replace(/\D/g, "").length !== 11;
   const ambiente: string = billingConfig?.arcaAmbiente ?? "ficticio";
 
   // Description editing helpers
@@ -755,18 +839,16 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, emittedInvoices]);
 
-  // Bug I: restrict "Facturar a" options to what's actually associated with this reservation.
-  // If a company is on the reservation → only allow billing to that company.
-  // If an agency → only the agency. If neither → only guest.
-  // This prevents accidentally assigning invoices to an unrelated entity.
+  // A linked company/agency is a billing option, never a forced recipient:
+  // reception must still be able to issue the stay to the guest.
   const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id);
   const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id);
   const allowedBillingTargets: Array<"guest" | "company" | "agency"> = hasReservationCompany
-    ? ["company"]
+    ? ["guest", "company"]
     : hasReservationAgency
-      ? ["agency"]
+      ? ["guest", "agency"]
       : ["guest"];
-  const billingTargetLocked = allowedBillingTargets.length === 1;
+  const billingTargetLocked = false;
   const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
   const canIssueFacturaT = billingTarget === "guest" &&
     hasSelectedAccommodation &&
@@ -778,7 +860,7 @@ export function PrefacturaDialog({
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
     if (opt.value === "FT") return canIssueFacturaT;
-    if (condicionIva === "Responsable Inscripto") return ["FA", "FM"].includes(opt.value);
+    if (["Responsable Inscripto", "Monotributista"].includes(condicionIva)) return ["FA", "FM"].includes(opt.value);
     return opt.value === "FB";
   });
 
@@ -811,7 +893,7 @@ export function PrefacturaDialog({
     const balanceOwed = selectedBalance;
     // When the folio is already fully covered (zero or negative balance), skip the
     // "must enter an amount" guard — no new payment is needed.
-    if (balanceOwed > 0.01) {
+    if (saleCondition === "contado" && balanceOwed > 0.01) {
       if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
         toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
         return;
@@ -831,12 +913,21 @@ export function PrefacturaDialog({
     }
     const balanceOwed = selectedBalance;
     // Same guard: only require amounts when there is an actual outstanding balance.
-    if (balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
+    if (saleCondition === "contado" && balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
       return;
     }
-    if (!alreadyPaidAndInvoiced && isFacturaA && billingTarget === "guest") {
-      toast({ title: "Factura A requiere una empresa o agencia", description: "Cambiá el destinatario a Empresa o Agencia y seleccioná el receptor.", variant: "destructive" });
+    if (!alreadyPaidAndInvoiced && facturaANeedsCuit) {
+      toast({ title: "Factura A requiere CUIT válido (11 dígitos)", variant: "destructive" });
+      return;
+    }
+    if (!alreadyPaidAndInvoiced && saleCondition === "cuenta_corriente" &&
+      ((billingTarget !== "company" && billingTarget !== "agency") || !billingEntityId)) {
+      toast({
+        title: "Cuenta Corriente requiere una empresa o agencia",
+        description: "Seleccioná una entidad receptora antes de emitir el comprobante.",
+        variant: "destructive",
+      });
       return;
     }
     // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
@@ -853,14 +944,6 @@ export function PrefacturaDialog({
       toast({ title: "Ingresá el nombre / razón social", variant: "destructive" });
       return;
     }
-    if (!alreadyPaidAndInvoiced && tipo === "FA") {
-      const cuitClean = cuit.replace(/-/g, "");
-      if (!cuitClean || !/^\d{11}$/.test(cuitClean)) {
-        toast({ title: "Factura A requiere CUIT válido (11 dígitos)", variant: "destructive" });
-        return;
-      }
-    }
-
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -905,13 +988,13 @@ export function PrefacturaDialog({
       // persisted and staff can refresh the dialog safely.
       let invoiceData: any = null;
       const invoiceItems = folio
-        ? buildInvoiceItems(selectedItems, tipo)
+        ? buildInvoiceItems(invoiceItemsToEmit, tipo)
         : [];
       if (invoiceItems.length > 0) {
         // Si algún row de cobro es "cuenta_corriente" y hay una empresa/agencia seleccionada,
         // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
-        const ccRow = paymentRows.find(r => r.method === "cuenta_corriente" && (parseFloat(r.amount) || 0) > 0);
-        const isCcPayment = !!ccRow && (billingTarget === "company" || billingTarget === "agency") && !!billingEntityId;
+        const isCcPayment = saleCondition === "cuenta_corriente" &&
+          (billingTarget === "company" || billingTarget === "agency") && !!billingEntityId;
 
         const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
           tipoComprobante: tipo,
@@ -925,8 +1008,14 @@ export function PrefacturaDialog({
           items: invoiceItems,
           reservaId: reservationId ? String(reservationId) : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
-          sourceChargeIds: selectedSourceIds,
-          sourceChargeAmounts: Object.fromEntries(selectedItems.map(item => [item.id, item.amount])),
+          sourceChargeIds: invoiceSourceIds,
+          sourceChargeAmounts: invoiceSourceAmounts,
+          folioContext: {
+            billingTarget,
+            nationality,
+            nationalityCode,
+            hasAccommodation: hasSelectedAccommodation,
+          },
           ...(isCcPayment ? {
             cashFormaPago: "cuenta_corriente",
             ccEntityType: billingTarget,
@@ -966,7 +1055,7 @@ export function PrefacturaDialog({
         total: invoiceData.montoTotal ?? invoiceData.monto_total,
       } : undefined;
       let paymentCount = 0;
-      for (const row of selectedBalance > 0.01 ? paymentRows : []) {
+      for (const row of saleCondition === "contado" && selectedBalance > 0.01 ? paymentRows : []) {
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
         if (netAmount <= 0 && retMonto <= 0) continue;
@@ -1025,8 +1114,12 @@ export function PrefacturaDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId)] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
 
       const refreshed = await refetchFolio();
+      const [refreshedInvoices] = await Promise.all([refetchEmittedInvoices(), refetchTransferRemaining()]);
       if (mode === "checkout" && doCheckout && !checkoutSucceeded) {
         // Payment and invoice have been saved, but the room must not be treated
         // as closed until staff resolve the failed checkout.
@@ -1045,12 +1138,11 @@ export function PrefacturaDialog({
       // billable, not-yet-invoiced items. Do not reselect this submission's
       // source IDs and accidentally issue the same charge twice.
       const freshFolio = refreshed.data;
-      const newlyInvoicedIds = new Set(selectedSourceIds);
       const nextSelection = new Set<string>();
+      const freshInvoicedAmounts = getInvoicedAmountsByCharge(refreshedInvoices.data || []);
       if (freshFolio) {
         if (freshFolio.roomTotal > 0 &&
-          !newlyInvoicedIds.has("accommodation") &&
-          !fullyInvoicedChargeIds.has("accommodation")) {
+          (freshFolio.roomTotal - (freshInvoicedAmounts.accommodation || 0)) > 0.01) {
           nextSelection.add("accommodation");
         }
         for (const charge of freshFolio.charges || []) {
@@ -1058,8 +1150,7 @@ export function PrefacturaDialog({
           if (charge.category !== "transfer_out" &&
             charge.category !== "transfer_in" &&
             parseFloat(charge.amount) > 0 &&
-            !newlyInvoicedIds.has(id) &&
-            !fullyInvoicedChargeIds.has(id)) {
+            (parseFloat(charge.amount) - (freshInvoicedAmounts[id] || 0)) > 0.01) {
             nextSelection.add(id);
           }
         }
@@ -1068,7 +1159,7 @@ export function PrefacturaDialog({
         const freshOriginalItems = getAllBillableFolioItems(freshFolio!, itemDescriptions);
         const freshRemainingAmounts = getRemainingChargeAmounts(
           freshOriginalItems,
-          getInvoicedAmountsByCharge(emittedInvoices),
+           freshInvoicedAmounts,
         );
         const nextItems = getSelectedFolioItems(
           nextSelection,
@@ -1312,6 +1403,17 @@ export function PrefacturaDialog({
                     Los anticipos reducen solamente el cobro. El importe a facturar se calcula con el saldo fiscal pendiente de cada cargo.
                   </p>
                 )}
+                <div className="border-t px-4 py-2 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedIds(new Set(allBillableItems.map(item => item.id)))}
+                    disabled={allBillableItems.length === 0}
+                  >
+                    Seleccionar todos los cargos elegibles
+                  </Button>
+                </div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-6">No se pudo cargar el folio.</p>
@@ -1327,7 +1429,10 @@ export function PrefacturaDialog({
                     onValueChange={(v) => handleBillingTargetChange(v as any)}
                     disabled={billingTargetLocked}
                   >
-                    <SelectTrigger title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}>
+                    <SelectTrigger
+                      data-testid="select-billing-target"
+                      title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1342,11 +1447,11 @@ export function PrefacturaDialog({
                       )}
                     </SelectContent>
                   </Select>
-                  {billingTargetLocked && hasReservationCompany && (
-                    <p className="text-xs text-muted-foreground mt-1">Reserva con empresa asociada</p>
+                   {hasReservationCompany && (
+                     <p className="text-xs text-muted-foreground mt-1">La empresa asociada también puede ser receptora</p>
                   )}
-                  {billingTargetLocked && hasReservationAgency && (
-                    <p className="text-xs text-muted-foreground mt-1">Reserva con agencia asociada</p>
+                   {hasReservationAgency && (
+                     <p className="text-xs text-muted-foreground mt-1">La agencia asociada también puede ser receptora</p>
                   )}
                 </div>
                 {billingTarget === "company" && (
@@ -1356,7 +1461,7 @@ export function PrefacturaDialog({
                       <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
                     ) : (
                       <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "company")}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
+                        <SelectTrigger data-testid="select-billing-company"><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
                         <SelectContent>
                           {companies.filter((c: any) => c.id).map((c: any) => (
                             <SelectItem key={c.id} value={String(c.id)}>{c.razonSocial || c.nombreFantasia}</SelectItem>
@@ -1373,7 +1478,7 @@ export function PrefacturaDialog({
                       <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
                     ) : (
                       <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "agency")}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
+                        <SelectTrigger data-testid="select-billing-agency"><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
                         <SelectContent>
                           {agencies.filter((a: any) => a.id).map((a: any) => (
                             <SelectItem key={a.id} value={String(a.id)}>{a.razonSocial || a.nombreFantasia}</SelectItem>
@@ -1393,7 +1498,7 @@ export function PrefacturaDialog({
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">{documentType || (cuit ? "CUIT" : "Documento")}</Label>
-                  <Input value={cuit || dni} readOnly placeholder="Sin identificación registrada" className="h-8 text-sm bg-muted" />
+                  <Input value={cleanIdentifier(cuit) || cleanIdentifier(dni)} readOnly placeholder="Sin identificación registrada" className="h-8 text-sm bg-muted" />
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Condición IVA</Label>
@@ -1414,7 +1519,7 @@ export function PrefacturaDialog({
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">Tipo de comprobante</Label>
                   <Select value={tipo} onValueChange={setTipo}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {filteredTipoOptions.map(opt => (
                         <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -1434,10 +1539,10 @@ export function PrefacturaDialog({
                       Factura T solo está disponible para huéspedes extranjeros con alojamiento seleccionado.
                     </p>
                   )}
-                  {facturaANeedsEntity && (
+                   {facturaANeedsCuit && (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
                       <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                      <span>Factura A requiere facturar a una <strong>empresa</strong> o <strong>agencia</strong>. Cambiá el destinatario arriba y seleccioná el receptor para poder continuar.</span>
+                       <span>Factura A requiere un <strong>CUIT válido de 11 dígitos</strong> y condición fiscal compatible.</span>
                     </div>
                   )}
                 </div>
@@ -1459,6 +1564,24 @@ export function PrefacturaDialog({
                     </p>
                   )}
                 </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Condición de venta</Label>
+                <Select value={saleCondition} onValueChange={(value) => setSaleCondition(value as SaleCondition)}>
+                  <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem>
+                    <SelectItem value="cuenta_corriente" disabled={billingTarget === "guest" || !billingEntityId}>
+                      {SALE_CONDITION_LABELS.cuenta_corriente}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {saleCondition === "cuenta_corriente" && (
+                  <p className="text-xs text-muted-foreground mt-1">El total se registra como cargo a la cuenta de la entidad; no genera un cobro de caja.</p>
+                )}
               </div>
             </div>
 
@@ -1583,7 +1706,7 @@ export function PrefacturaDialog({
               <div><span className="text-muted-foreground">Tipo: </span>
                 <span className="font-medium">{TIPO_OPTIONS.find(t => t.value === tipo)?.label || tipo}</span>
               </div>
-                <div><span className="text-muted-foreground">Saldo seleccionado: </span>
+                <div><span className="text-muted-foreground">A cobrar ahora: </span>
                   <span className={`font-bold ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
                     ${fmtMoney(selectedBalance)}
                 </span>
@@ -1601,7 +1724,7 @@ export function PrefacturaDialog({
             )}
 
             {/* Payment rows — only shown when there is an outstanding balance */}
-            {selectedBalance > 0.01 && (
+            {saleCondition === "contado" && selectedBalance > 0.01 && (
             <div>
               <Label className="text-sm font-medium mb-2 block">Formas de cobro</Label>
               <div className="space-y-3">
@@ -1627,7 +1750,9 @@ export function PrefacturaDialog({
                           <SelectTrigger className="h-8 text-sm" data-testid={`select-payment-method-${idx}`}><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {Object.entries(PAYMENT_METHOD_LABELS).map(([v, l]) => (
-                              <SelectItem key={v} value={v}>{l}</SelectItem>
+                              <SelectItem key={v} value={v} disabled={paymentRows.some(other => other.id !== row.id && other.method === v)}>
+                                {l}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
@@ -1653,12 +1778,12 @@ export function PrefacturaDialog({
                         className="h-6 px-2 text-xs text-muted-foreground"
                         onClick={() => updateRow(row.id, "retencionEnabled", true)}
                       >
-                        <Percent className="h-3 w-3 mr-1" />Agregar retención impositiva
+                        Agregar retención impositiva
                       </Button>
                     ) : (
                       <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center gap-1"><Percent className="h-3 w-3" />Retención impositiva</span>
+                          <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
                           <Button type="button" variant="ghost" size="sm" className="h-5 w-5 p-0 text-amber-700" onClick={() => { updateRow(row.id, "retencionEnabled", false); updateRow(row.id, "retencionMonto", ""); }}>
                             <X className="h-3 w-3" />
                           </Button>
@@ -1718,7 +1843,7 @@ export function PrefacturaDialog({
             )}
 
             {/* Running totals — only shown when there is an outstanding balance */}
-            {selectedBalance > 0.01 && (
+            {saleCondition === "contado" && selectedBalance > 0.01 && (
             <Card className={saldoRestante > 0.01 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10" : "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10"}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between text-sm">
@@ -1946,8 +2071,8 @@ export function PrefacturaDialog({
               Quedarán <strong className="text-red-600 dark:text-red-400">${fmtMoney(saldoRestante)}</strong> sin abonar.
             </p>
             <p className="text-muted-foreground">
-              Si continuás, se emitirá el comprobante fiscal por el total de los cargos seleccionados
-              y se registrará el pago parcial. El saldo restante quedará pendiente en el folio.
+               Si continuás, se emitirá el comprobante fiscal por <strong>${fmtMoney(invoiceAmount)}</strong>,
+               únicamente por la parte cubierta. El saldo restante quedará pendiente en el folio para una facturación posterior.
             </p>
             <p className="font-medium">¿Querés continuar igual?</p>
           </div>
