@@ -51,6 +51,7 @@ vi.mock("@shared/schema", () => ({
 // It must return a Buffer so the HTTP response doesn't crash.
 const mockGenerarFacturaPDF = vi.fn().mockResolvedValue(Buffer.from("PDF"));
 const mockGenerarVoucherPDF  = vi.fn().mockResolvedValue(Buffer.from("VPDF"));
+const mockGetBillingConfig = vi.fn();
 
 vi.mock("../billing/invoicePdf", () => ({
   generarFacturaPDF:         (...args: any[]) => mockGenerarFacturaPDF(...args),
@@ -60,15 +61,7 @@ vi.mock("../billing/invoicePdf", () => ({
 // billingConfig — provide a minimal config so generarFacturaPDF (the mock) has
 // something to receive; the actual content doesn't matter here.
 vi.mock("../billing/billingConfig", () => ({
-  getBillingConfig: vi.fn().mockResolvedValue({
-    razonSocial: "Hotel Test",
-    cuit: "20-12345678-1",
-    iibb: "",
-    inicioActividades: "2020-01-01",
-    condicionIva: "Responsable Inscripto",
-    domicilioComercial: "Calle Falsa 123",
-    arcaAmbiente: "ficticio",
-  }),
+  getBillingConfig: (...args: any[]) => mockGetBillingConfig(...args),
   updateBillingConfig: vi.fn(),
 }));
 
@@ -198,6 +191,15 @@ describe("ND/NC guard — generarFacturaPDF must not receive notaCreditoInfo for
     vi.resetAllMocks();
     // Restore default implementations that every test relies on.
     mockGenerarFacturaPDF.mockResolvedValue(Buffer.from("PDF"));
+    mockGetBillingConfig.mockResolvedValue({
+      razonSocial: "Hotel Test",
+      cuit: "20-12345678-1",
+      iibb: "",
+      inicioActividades: "2020-01-01",
+      condicionIva: "Responsable Inscripto",
+      domicilioComercial: "Calle Falsa 123",
+      arcaAmbiente: "ficticio",
+    });
     const ctx = await startApp();
     baseUrl = ctx.baseUrl;
     close = ctx.close;
