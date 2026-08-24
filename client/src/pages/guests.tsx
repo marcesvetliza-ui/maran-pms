@@ -265,6 +265,10 @@ export function GuestFormDialog({
         Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
       );
       if (isEditing) {
+        // Empty fiscal identifiers are intentional edits, not missing fields.
+        // Sending null lets the API clear legacy placeholder values such as "0".
+        if (!data.cuilCuit?.trim()) payload.cuilCuit = null;
+        if (!data.documentNumber?.trim()) payload.documentNumber = null;
         await apiRequest("PATCH", `/api/guests/${guest.id}`, payload);
         return null;
       }

@@ -15,13 +15,18 @@ description: New unified dialog component replacing both the checkout wizard (st
 1. **Check-out page** (`check-out.tsx`): `startCheckout(reservation)` now sets `prefacturaOpen=true` instead of `wizardStep=1`. The old 3-step wizard block is dead code but still compiles.
 2. **Reservations page** (`reservations.tsx` ~line 5034): Replaced `showFacturar && (() => { ... EmitirFacturaDialog ...})()` block with `<PrefacturaDialog open={showFacturar} mode="billing" ... />`.
 
-## API flow on submit
-1. `POST /api/payments` for each payment row (one call per row)
-2. `POST /api/billing/invoices` with `reservaId`, no `cashArea` (AFIP record only)
-3. `POST /api/reservations/:id/check-out` if mode='checkout' && doCheckout=true
+## Billing safety rules
+- Emit the folio invoice before persisting new payment rows. The server's reservation lock can then reject a stale invoice without leaving an orphan payment.
+- A partial collection must emit a partial invoice: both document items and `sourceChargeAmounts` are projected to the amount actually covered (including prior advances), never to the full selected charge.
+- Fiscal recipient rules are shared by UI and server: Responsable Inscripto/Monotributo use A with a valid CUIT; Exento/Consumidor Final use B; T is only for a foreign guest with accommodation selected.
+- `cuenta_corriente` is a sale condition, not a substitute label for a fiscal document or cash payment method. It requires an associated company/agency and creates the account charge without a reception cash payment.
+
+**Why:** The folio can be open in multiple terminals and can contain advances, partial charges, or linked entities. Treating the selected charge total as an automatic invoice total creates irreconcilable folio balances and duplicate exposure.
+
+**How to apply:** When changing Prefactura's amounts, calculate one deterministic per-source allocation and send that same allocation to the invoice API. Keep the API validation aligned with the selector rules; never rely on the client alone.
 
 ## Invoice types supported
-FA, FB, FC, NCA, NCB, cierre_habitacion, ticket. FT/MiPyME need backend changes (not yet).
+FA, FB, FT, FM and the corresponding NC/ND flows; non-fiscal `cierre_habitacion`.
 
 ## Known deferred items
 - `GET /api/reservations/:id/folio/pdf` endpoint does not exist yet — "Imprimir resumen" button will 404
