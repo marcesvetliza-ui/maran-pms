@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues } from "./billing";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
+import { ReservationWaitlistDialog } from "@/components/ReservationWaitlistDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { Button } from "@/components/ui/button";
@@ -107,7 +108,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
-import type { ReservationWithDetails, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails } from "@shared/schema";
+import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails } from "@shared/schema";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -172,12 +173,20 @@ export function ReservationFormDialog({
   roomTypes: RoomType[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: (reservation?: ReservationWithDetails) => void;
   onError?: () => void;
   defaultValues?: {
     roomId?: string;
     roomTypeId?: string;
     checkInDate?: string;
+    checkOutDate?: string;
+    numberOfGuests?: number;
+    notes?: string | null;
+    guest?: {
+      firstName: string;
+      lastName: string;
+      phone?: string | null;
+    };
   };
 }) {
   const { toast } = useToast();
@@ -257,7 +266,7 @@ export function ReservationFormDialog({
     ratePlanId: (reservation?.specialRateReason && !reservation?.ratePlanId) ? "__special__" : (reservation?.ratePlanId || ""),
     specialRateReason: reservation?.specialRateReason || "",
     checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
-    checkOutDate: reservation?.checkOutDate || (() => {
+    checkOutDate: reservation?.checkOutDate || defaultValues?.checkOutDate || (() => {
       if (defaultValues?.checkInDate) {
         const d = new Date(defaultValues.checkInDate + "T12:00:00");
         d.setDate(d.getDate() + 1);
@@ -265,8 +274,15 @@ export function ReservationFormDialog({
       }
       return tomorrow;
     })(),
-    nights: reservation?.nights || 1,
-    numberOfGuests: reservation?.numberOfGuests || 1,
+    nights: reservation?.nights || (
+      defaultValues?.checkInDate && defaultValues?.checkOutDate
+        ? Math.max(1, Math.round(
+            (new Date(`${defaultValues.checkOutDate}T12:00:00`).getTime() - new Date(`${defaultValues.checkInDate}T12:00:00`).getTime())
+            / (1000 * 60 * 60 * 24)
+          ))
+        : 1
+    ),
+    numberOfGuests: reservation?.numberOfGuests || defaultValues?.numberOfGuests || 1,
     status: reservation ? normalizeStatus(reservation.status) : "confirmed",
     source: reservation?.source || "directo",
     discountType: reservation?.discountType || "none",
@@ -282,7 +298,7 @@ export function ReservationFormDialog({
     lateCheckOut: reservation?.lateCheckOut || false,
     lateCheckOutTime: reservation?.lateCheckOutTime || "",
     lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
-    notes: reservation?.notes || "",
+    notes: reservation?.notes || defaultValues?.notes || "",
     contactName: reservation?.contactName || "",
     contactPhone: reservation?.contactPhone || "",
     voucherCode: reservation?.voucherCode || "",
@@ -312,7 +328,7 @@ export function ReservationFormDialog({
         ratePlanId: (reservation?.specialRateReason && !reservation?.ratePlanId) ? "__special__" : (reservation?.ratePlanId || ""),
         specialRateReason: reservation?.specialRateReason || "",
         checkInDate: reservation?.checkInDate || defaultValues?.checkInDate || today,
-        checkOutDate: reservation?.checkOutDate || (() => {
+        checkOutDate: reservation?.checkOutDate || defaultValues?.checkOutDate || (() => {
           if (defaultValues?.checkInDate) {
             const d = new Date(defaultValues.checkInDate + "T12:00:00");
             d.setDate(d.getDate() + 1);
@@ -320,8 +336,15 @@ export function ReservationFormDialog({
           }
           return tomorrow;
         })(),
-        nights: reservation?.nights || 1,
-        numberOfGuests: reservation?.numberOfGuests || 1,
+        nights: reservation?.nights || (
+          defaultValues?.checkInDate && defaultValues?.checkOutDate
+            ? Math.max(1, Math.round(
+                (new Date(`${defaultValues.checkOutDate}T12:00:00`).getTime() - new Date(`${defaultValues.checkInDate}T12:00:00`).getTime())
+                / (1000 * 60 * 60 * 24)
+              ))
+            : 1
+        ),
+        numberOfGuests: reservation?.numberOfGuests || defaultValues?.numberOfGuests || 1,
         status: reservation ? normalizeStatus(reservation.status) : "confirmed",
         source: reservation?.source || "directo",
         discountType: reservation?.discountType || "none",
@@ -337,7 +360,7 @@ export function ReservationFormDialog({
         lateCheckOut: reservation?.lateCheckOut || false,
         lateCheckOutTime: reservation?.lateCheckOutTime || "",
         lateCheckOutCharge: reservation?.lateCheckOutCharge || "",
-        notes: reservation?.notes || "",
+        notes: reservation?.notes || defaultValues?.notes || "",
         contactName: reservation?.contactName || "",
         contactPhone: reservation?.contactPhone || "",
         voucherCode: reservation?.voucherCode || "",
@@ -362,7 +385,19 @@ export function ReservationFormDialog({
       setShowCompanionForm(false);
       setNewCompForm(emptyCompanion);
     }
-  }, [open, reservation?.id, defaultValues?.roomId, defaultValues?.roomTypeId, defaultValues?.checkInDate]);
+  }, [
+    open,
+    reservation?.id,
+    defaultValues?.roomId,
+    defaultValues?.roomTypeId,
+    defaultValues?.checkInDate,
+    defaultValues?.checkOutDate,
+    defaultValues?.numberOfGuests,
+    defaultValues?.notes,
+    defaultValues?.guest?.firstName,
+    defaultValues?.guest?.lastName,
+    defaultValues?.guest?.phone,
+  ]);
 
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
@@ -751,7 +786,7 @@ export function ReservationFormDialog({
           description: `La reserva ha sido ${isEditing ? "actualizada" : "creada"} exitosamente.`,
         });
       }
-      onSuccess();
+      onSuccess(data);
       onOpenChange(false);
     },
     onError: (error: any) => {
@@ -881,6 +916,7 @@ export function ReservationFormDialog({
           <div className="grid gap-4 py-4">
             <GuestSelector
               selectedGuest={selectedGuest}
+              initialCreateGuest={defaultValues?.guest}
               onSelect={(guest) => {
                 setSelectedGuest(guest);
                 setFormData((prev) => ({ ...prev, guestId: guest.id }));
@@ -892,6 +928,12 @@ export function ReservationFormDialog({
               }}
               cardClassName={sectionCardClass(!!selectedGuest, !isEditing)}
             />
+            {defaultValues?.guest && !isEditing && (
+              <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+                Datos de la lista de espera: <strong>{defaultValues.guest.firstName} {defaultValues.guest.lastName}</strong>.
+                Podés buscar un huésped existente o elegir “Crear nuevo”; no se creó ninguno todavía.
+              </p>
+            )}
 
             {/* Preferencias del huésped — visible en el form al seleccionar */}
             {(() => {
@@ -5127,6 +5169,8 @@ export default function ReservationsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showHistory, setShowHistory] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [waitlistEntryToConvert, setWaitlistEntryToConvert] = useState<ReservationWaitlist | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [detailReturnTo, setDetailReturnTo] = useState<string | null>(null);
   const detailReturnToRef = useRef<string | null>(null);
@@ -5425,7 +5469,15 @@ export default function ReservationsPage() {
   };
 
   const handleNewReservation = () => {
+    setWaitlistEntryToConvert(null);
     setSelectedReservation(undefined);
+    setDialogOpen(true);
+  };
+
+  const handleConvertWaitlistEntry = (entry: ReservationWaitlist) => {
+    setWaitlistEntryToConvert(entry);
+    setSelectedReservation(undefined);
+    setWaitlistOpen(false);
     setDialogOpen(true);
   };
 
@@ -5445,6 +5497,10 @@ export default function ReservationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <EmitirComprobanteButton area="recepcion" />
+          <Button variant="outline" onClick={() => setWaitlistOpen(true)} data-testid="button-reservation-waitlist">
+            <Clock className="mr-2 h-4 w-4" />
+            Lista de Espera
+          </Button>
           <Button onClick={handleNewReservation} data-testid="button-new-reservation">
             <Plus className="mr-2 h-4 w-4" />
             Nueva Reserva
@@ -6112,14 +6168,44 @@ export default function ReservationsPage() {
 
       {/* Reservation Form Dialog */}
       <ReservationFormDialog
-        key={selectedReservation?.id ?? "new"}
+        key={selectedReservation?.id ?? `new-${waitlistEntryToConvert?.id ?? "direct"}`}
         reservation={selectedReservation}
         guests={guests || []}
         rooms={rooms || []}
         roomTypes={roomTypes || []}
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setWaitlistEntryToConvert(null);
+        }}
+        defaultValues={waitlistEntryToConvert ? {
+          checkInDate: waitlistEntryToConvert.checkInDate,
+          checkOutDate: waitlistEntryToConvert.checkOutDate,
+          numberOfGuests: waitlistEntryToConvert.numberOfGuests,
+          notes: waitlistEntryToConvert.notes,
+          guest: {
+            firstName: waitlistEntryToConvert.firstName,
+            lastName: waitlistEntryToConvert.lastName,
+            phone: waitlistEntryToConvert.phone,
+          },
+        } : undefined}
         onSuccess={() => {
+          const convertedWaitlistEntry = waitlistEntryToConvert;
+          if (convertedWaitlistEntry && !selectedReservation) {
+            setWaitlistEntryToConvert(null);
+            apiRequest("DELETE", `/api/reservation-waitlist/${convertedWaitlistEntry.id}`)
+              .then(() => {
+                queryClient.invalidateQueries({ queryKey: ["/api/reservation-waitlist"] });
+                toast({ title: "Consulta convertida", description: "La consulta se quitó de la lista de espera." });
+              })
+              .catch(() => {
+                toast({
+                  title: "Reserva creada",
+                  description: "La reserva fue creada, pero la consulta sigue en la lista de espera. Podés eliminarla manualmente.",
+                  variant: "destructive",
+                });
+              });
+          }
           const editingId = selectedReservation?.id;
           const savedReturnTo = editReturnTo;
           setEditReturnTo(null);
@@ -6140,6 +6226,12 @@ export default function ReservationsPage() {
             setSelectedReservation(undefined);
           }
         }}
+      />
+
+      <ReservationWaitlistDialog
+        open={waitlistOpen}
+        onOpenChange={setWaitlistOpen}
+        onConvert={handleConvertWaitlistEntry}
       />
 
       {/* Reservation Detail Dialog */}

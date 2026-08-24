@@ -69,19 +69,20 @@ interface GuestSelectorProps {
   selectedGuest?: Guest | null;
   onClear?: () => void;
   cardClassName?: string;
+  initialCreateGuest?: Partial<InsertGuest>;
 }
 
-export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, cardClassName }: GuestSelectorProps) {
+export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, cardClassName, initialCreateGuest }: GuestSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const [newGuest, setNewGuest] = useState({
     tipoPersona: "fisica" as "fisica" | "juridica",
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
+    firstName: initialCreateGuest?.firstName || "",
+    lastName: initialCreateGuest?.lastName || "",
+    email: initialCreateGuest?.email || "",
+    phone: initialCreateGuest?.phone || "",
     documentType: "dni" as string,
     documentNumber: "",
     nationality: "Argentina",
