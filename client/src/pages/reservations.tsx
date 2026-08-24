@@ -2149,6 +2149,7 @@ function ReservationDetailDialog({
   currentUserRole?: string;
 }) {
   const { toast } = useToast();
+  const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
@@ -2186,6 +2187,19 @@ function ReservationDetailDialog({
     setUninvoicedWarningAction(null);
     setShowUninvoicedWarning(false);
   }, [reservation.id]);
+
+  // The detail dialog remains mounted while payments refresh. Reset each tab's
+  // scroll position whenever the user opens another reservation so an old,
+  // mid-page position never makes the folio look cut off.
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      dialogContentRef.current
+        ?.querySelectorAll<HTMLElement>("[data-reservation-tab-scroll]")
+        .forEach((panel) => { panel.scrollTop = 0; });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, reservation.id]);
 
   const openCheckoutWizard = () => {
     setShowFacturarMode("checkout");
@@ -2792,8 +2806,11 @@ function ReservationDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
-        <DialogHeader>
+      <DialogContent
+        ref={dialogContentRef}
+        className="w-[95vw] max-w-[680px] max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0"
+      >
+        <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
             <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
           </DialogTitle>
@@ -2828,8 +2845,8 @@ function ReservationDetailDialog({
           </div>
         )}
 
-        <Tabs defaultValue="datos" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+        <Tabs defaultValue="datos" className="flex min-h-0 flex-1 flex-col">
+          <TabsList className="grid shrink-0 mx-6 mt-4 grid-cols-3">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
             <TabsTrigger value="historial" data-testid="tab-historial" className="flex items-center gap-1">
@@ -2839,7 +2856,11 @@ function ReservationDetailDialog({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="datos" className="space-y-4 mt-4">
+          <TabsContent
+            value="datos"
+            data-reservation-tab-scroll
+            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4"
+          >
             {!editingGuest ? (
               <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-lg">
@@ -3336,7 +3357,11 @@ function ReservationDetailDialog({
             )}
           </TabsContent>
 
-          <TabsContent value="folio" className="space-y-4 mt-4">
+          <TabsContent
+            value="folio"
+            data-reservation-tab-scroll
+            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4"
+          >
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Plan Tarifario</p>
@@ -4364,7 +4389,11 @@ function ReservationDetailDialog({
             })()}
           </TabsContent>
 
-          <TabsContent value="historial" className="mt-4">
+          <TabsContent
+            value="historial"
+            data-reservation-tab-scroll
+            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4"
+          >
             {changelog.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground gap-2">
                 <History className="h-8 w-8 opacity-30" />
@@ -4397,7 +4426,7 @@ function ReservationDetailDialog({
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2 sm:justify-between">
           <div className="flex gap-2 flex-wrap">
             <Button
               variant="outline"

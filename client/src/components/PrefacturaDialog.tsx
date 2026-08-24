@@ -1146,8 +1146,8 @@ export function PrefacturaDialog({
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[92dvh] flex flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
             {step < 3 && <><FileText className="h-5 w-5" />Prefactura</>}
             {step === 3 && <><CircleCheck className="h-5 w-5 text-green-600" />Resultado</>}
@@ -1161,8 +1161,9 @@ export function PrefacturaDialog({
 
 
 
-        {/* ── Prefactura (cargos + cobro en una sola pantalla) ────────────── */}
-        {step < 3 && (
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          {/* ── Prefactura (cargos + cobro en una sola pantalla) ──────────── */}
+          {step < 3 && (
           <div className="space-y-4">
             {/* Alerts for checkout mode */}
             {mode === "checkout" && reservation && (reservation as any).status !== "checked_in" && (
@@ -1763,7 +1764,7 @@ export function PrefacturaDialog({
         )}
 
         {/* ── STEP 3: Resultado ──────────────────────────────────────────────── */}
-        {step === 3 && (
+          {step === 3 && (
           <div className="space-y-4">
             {/* Success / partial-success / no-movements banner */}
             {(() => {
@@ -1893,7 +1894,8 @@ export function PrefacturaDialog({
               <Button onClick={onClose}>Cerrar</Button>
             </DialogFooter>
           </div>
-        )}
+          )}
+        </div>
       </DialogContent>
 
       {/* Transfer charge sub-dialog (single charge) */}
@@ -2204,24 +2206,26 @@ function NotaCreditoDialog({
   if (emittedNc) {
     return (
       <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-md max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+          <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
             <DialogTitle className="flex items-center gap-2">
               <CircleCheck className="h-5 w-5 text-green-600" />
               Nota de Crédito emitida
             </DialogTitle>
           </DialogHeader>
-          <Card className="border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10">
-            <CardContent className="p-4 space-y-1 text-sm">
-              <div className="font-bold text-green-700 dark:text-green-400">
-                {emittedNc.tipoComprobante ?? emittedNc.tipo_comprobante}{" "}
-                {String(emittedNc.puntoVenta ?? emittedNc.punto_venta ?? 0).padStart(4,"0")}-{String(emittedNc.numero ?? 0).padStart(8,"0")}
-              </div>
-              <div className="text-muted-foreground">Monto: <span className="font-medium text-foreground">${fmtMoney(emittedNc.montoTotal ?? emittedNc.monto_total)}</span></div>
-              {emittedNc.cae && <div className="text-muted-foreground">CAE: <span className="font-mono text-xs">{emittedNc.cae}</span></div>}
-            </CardContent>
-          </Card>
-          <DialogFooter className="gap-2">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <Card className="border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10">
+              <CardContent className="p-4 space-y-1 text-sm">
+                <div className="font-bold text-green-700 dark:text-green-400">
+                  {emittedNc.tipoComprobante ?? emittedNc.tipo_comprobante}{" "}
+                  {String(emittedNc.puntoVenta ?? emittedNc.punto_venta ?? 0).padStart(4,"0")}-{String(emittedNc.numero ?? 0).padStart(8,"0")}
+                </div>
+                <div className="text-muted-foreground">Monto: <span className="font-medium text-foreground">${fmtMoney(emittedNc.montoTotal ?? emittedNc.monto_total)}</span></div>
+                {emittedNc.cae && <div className="text-muted-foreground">CAE: <span className="font-mono text-xs">{emittedNc.cae}</span></div>}
+              </CardContent>
+            </Card>
+          </div>
+          <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">
             <Button
               variant="outline" size="sm"
               onClick={() => window.open(`/api/billing/invoices/${emittedNc.id}/pdf`, "_blank")}
@@ -2237,15 +2241,15 @@ function NotaCreditoDialog({
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o && !isSubmitting) onClose(); }}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
+      <DialogContent className="max-w-xl max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
             <MinusCircle className="h-5 w-5 text-amber-600" />
             Emitir Nota de Crédito
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {/* Invoice selector */}
           {/* Bug N: always show invoice selector — ensures user knows which invoice is being credited */}
           {invoices.length > 1 && (
@@ -2376,7 +2380,7 @@ function NotaCreditoDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
