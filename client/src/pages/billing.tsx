@@ -91,6 +91,7 @@ function AmbienteBadge({ ambiente }: { ambiente: AmbienteMode | undefined }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function BillingPage() {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("facturas");
   const [showResPicker, setShowResPicker] = useState(false);
   const [resPickerSearch, setResPickerSearch] = useState("");
@@ -143,6 +144,35 @@ export default function BillingPage() {
   const { data: invoices = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", qp],
     queryFn: () => fetch(`/api/billing/invoices?${qp}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: pendingCreditNotes = [] } = useQuery<any[]>({
+    queryKey: ["/api/billing/credit-note-reconciliations/pending"],
+    queryFn: async () => {
+      const response = await fetch("/api/billing/credit-note-reconciliations/pending", { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudieron cargar las conciliaciones pendientes");
+      return response.json();
+    },
+  });
+
+  const reconcileCreditNoteMutation = useMutation({
+    mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
+    onSuccess: async (response: Response) => {
+      const data = await response.json();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
+      ]);
+      toast({
+        title: "NC conciliada",
+        description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
+      });
+    },
+    onError: (error: any) => toast({
+      title: "La NC sigue pendiente",
+      description: parseApiError(error),
+      variant: "destructive",
+    }),
   });
 
   const { data: config } = useQuery<any>({ queryKey: ["/api/billing/config"] });
@@ -236,6 +266,46 @@ export default function BillingPage() {
               </Button>
             </div>
 
+            {(pendingCreditNotes as any[]).length > 0 && (
+              <Card className="mb-4 border-amber-300 bg-amber-50/60 dark:bg-amber-950/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2 text-amber-900 dark:text-amber-100">
+                    <AlertTriangle className="w-4 h-4" />
+                    Conciliaciones fiscales pendientes ({(pendingCreditNotes as any[]).length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(pendingCreditNotes as any[]).map((nc: any) => (
+                    <div key={nc.id} className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between rounded-md border border-amber-200 bg-background/70 p-2.5 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-medium">
+                          {TIPO_LABELS[nc.tipo_comprobante]?.nombre || nc.tipo_comprobante} {padNum(nc.punto_venta, 4)}-{padNum(nc.numero, 8)}
+                          <span className="font-normal text-muted-foreground"> · Reserva #{nc.reserva_id}</span>
+                        </div>
+                        <div className="text-muted-foreground mt-0.5">
+                          Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
+                        </div>
+                        {nc.reconciliation_error && (
+                          <div className="text-amber-800 dark:text-amber-200 mt-1">{nc.reconciliation_error}</div>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-100"
+                        onClick={() => reconcileCreditNoteMutation.mutate(Number(nc.id))}
+                        disabled={reconcileCreditNoteMutation.isPending}
+                        data-testid={`btn-reconcile-credit-note-${nc.id}`}
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 mr-1 ${reconcileCreditNoteMutation.isPending ? "animate-spin" : ""}`} />
+                        Reintentar y conciliar
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardContent className="p-0">
                 {isLoading ? (
@@ -292,25 +362,32 @@ export default function BillingPage() {
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
                               <td className="px-3 py-2">
-                                {f.estado === "emitida" ? (
+                                {f.reconciliation_status === "pendiente" ? (
+                                  <div>
+                                    <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
+                                      <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
+                                    </Badge>
+                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">No emitir otra NC</div>
+                                  </div>
+                                ) : f.estado === "emitida" || f.estado === "parcial" ? (
                                   <Badge variant="outline" className="text-xs text-green-700 border-green-400 bg-green-50 dark:bg-green-950/20"><CheckCircle2 className="w-3 h-3 mr-1" />Emitida</Badge>
                                 ) : (
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>
                                 )}
+                                {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex gap-1 justify-end">
                                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
-                                  {f.estado === "emitida" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                  {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className={`h-7 w-7 p-0 ${f.nota_credito_id != null ? "text-muted-foreground opacity-50" : "text-orange-600 hover:text-orange-700"}`}
-                                      onClick={() => { if (f.nota_credito_id == null) setShowNC(f.id); }}
-                                      title={f.nota_credito_id != null ? "Ya existe una NC en curso para este comprobante" : "Emitir Nota de Crédito"}
-                                      disabled={f.nota_credito_id != null}
+                                      className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700"
+                                      onClick={() => setShowNC(f.id)}
+                                      title={f.estado === "parcial" ? "Emitir otra Nota de Crédito sobre el saldo pendiente" : "Emitir Nota de Crédito"}
                                       data-testid={`btn-nc-${f.id}`}
                                     >
                                       <XCircle className="w-3.5 h-3.5" />
@@ -1370,6 +1447,20 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
 // ─── Nota de Crédito Dialog ────────────────────────────────────────────────────
 
+type AdminNcChargeRow = {
+  sourceId: string;
+  description: string;
+  originalAmount: number;
+  availableAmount: number;
+  amount: string;
+  selected: boolean;
+};
+
+function parseAdminNcJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
 export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId: number; onClose: () => void; onSuccess?: (ncData: any) => void }) {
   const { toast } = useToast();
   const { data: invoice } = useQuery<any>({
@@ -1380,6 +1471,102 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   const [motivo, setMotivo] = useState("");
   const [modoParcial, setModoParcial] = useState(false);
   const [montoParcial, setMontoParcial] = useState("");
+  const [ncItems, setNcItems] = useState<AdminNcChargeRow[]>([]);
+  const [mappingWarning, setMappingWarning] = useState<string | null>(null);
+
+  const isReservationInvoice = Boolean(invoice?.reserva_id);
+
+  useEffect(() => {
+    if (!invoice || !isReservationInvoice) {
+      setNcItems([]);
+      setMappingWarning(null);
+      return;
+    }
+
+    const rawItems = parseAdminNcJson(invoice.items);
+    const sourceIdsValue = parseAdminNcJson(invoice.source_charge_ids);
+    const sourceAmountsValue = parseAdminNcJson(invoice.source_charge_amounts);
+    const creditMapsValue = parseAdminNcJson(invoice.credit_source_charge_amounts);
+    const sourceIds = Array.isArray(sourceIdsValue) ? sourceIdsValue.map(String) : [];
+    const sourceAmounts = sourceAmountsValue && typeof sourceAmountsValue === "object" && !Array.isArray(sourceAmountsValue)
+      ? sourceAmountsValue as Record<string, unknown>
+      : null;
+    const creditMaps = Array.isArray(creditMapsValue) ? creditMapsValue : [];
+    const montoAcreditado = parseFloat(String(invoice.monto_acreditado || "0")) || 0;
+
+    if (!Array.isArray(rawItems) || !sourceAmounts || sourceIds.length === 0) {
+      setNcItems([]);
+      setMappingWarning("Esta factura de reserva no tiene un detalle seguro por cargo. Emití la NC desde el Folio para revisar el vínculo original.");
+      return;
+    }
+
+    const originalAmountsBySource: Record<string, number> = {};
+    for (const [sourceId, rawAmount] of Object.entries(sourceAmounts)) {
+      const amount = Number(rawAmount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setNcItems([]);
+        setMappingWarning("Esta factura tiene un importe histórico inválido por cargo. Revisá el Folio antes de emitir una corrección.");
+        return;
+      }
+      originalAmountsBySource[sourceId] = amount;
+    }
+
+    const creditedBySource: Record<string, number> = {};
+    for (const creditMap of creditMaps) {
+      if (!creditMap || typeof creditMap !== "object" || Array.isArray(creditMap)) {
+        setNcItems([]);
+        setMappingWarning("Esta factura tiene una NC anterior sin detalle por cargo. Revisá el Folio antes de emitir una nueva corrección.");
+        return;
+      }
+      for (const [sourceId, amount] of Object.entries(creditMap as Record<string, unknown>)) {
+        const creditAmount = Number(amount);
+        if (!Object.prototype.hasOwnProperty.call(originalAmountsBySource, sourceId) ||
+          !Number.isFinite(creditAmount) ||
+          creditAmount <= 0 ||
+          (creditedBySource[sourceId] || 0) + creditAmount > originalAmountsBySource[sourceId] + 0.01) {
+          setNcItems([]);
+          setMappingWarning("Esta factura tiene una NC anterior con cargos o importes inconsistentes. Revisá el Folio antes de emitir una nueva corrección.");
+          return;
+        }
+        creditedBySource[sourceId] = (creditedBySource[sourceId] || 0) + creditAmount;
+      }
+    }
+    const totalMappedCredits = Object.values(creditedBySource).reduce((sum, amount) => sum + amount, 0);
+    if (Math.abs(totalMappedCredits - montoAcreditado) > 0.01) {
+      setNcItems([]);
+      setMappingWarning("El detalle por cargo de las NC anteriores no coincide con el total acreditado. Revisá el Folio antes de continuar.");
+      return;
+    }
+
+    const rows: AdminNcChargeRow[] = [];
+    for (const [sourceId, rawAmount] of Object.entries(sourceAmounts)) {
+      const originalAmount = originalAmountsBySource[sourceId];
+      const itemIndex = sourceIds.indexOf(sourceId);
+      const item = itemIndex >= 0 ? rawItems[itemIndex] as any : null;
+      const credited = creditedBySource[sourceId] || 0;
+      const availableAmount = Math.max(0, originalAmount - credited);
+
+      if (originalAmount <= 0 || !item) {
+        setNcItems([]);
+        setMappingWarning("No se pudo conservar el concepto fiscal original de uno de los cargos. Revisá el Folio antes de emitir la NC.");
+        return;
+      }
+      if (availableAmount <= 0.009) continue;
+      rows.push({
+        sourceId,
+        description: item.descripcion || `Cargo ${sourceId}`,
+        originalAmount,
+        availableAmount,
+        amount: availableAmount.toFixed(2),
+        selected: false,
+      });
+    }
+
+    setNcItems(rows);
+    setMappingWarning(rows.length > 0
+      ? null
+      : "La factura de reserva ya no tiene cargos disponibles para acreditar.");
+  }, [invoice, isReservationInvoice]);
 
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, body),
@@ -1396,8 +1583,9 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   if (!invoice) return null;
 
-  // Guard: if an active NC already exists for this invoice, block the dialog entirely
-  if (invoice.nota_credito_id != null && invoice.estado !== "anulada") {
+  // A partial NC leaves the original invoice in estado=parcial, so it is
+  // intentionally possible to open this dialog again for the remaining balance.
+  if (invoice.estado === "anulada") {
     return (
       <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
         <DialogContent className="max-w-md">
@@ -1416,12 +1604,36 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A" };
   const tipoNCLabel = tipoNC[invoice.tipo_comprobante] ?? "Nota de Crédito B";
   const totalOriginal = parseFloat(invoice.monto_total) || 0;
-  const montoNC = modoParcial ? parseFloat(montoParcial) || 0 : totalOriginal;
-  const montoInvalido = modoParcial && (!montoParcial || montoNC <= 0 || montoNC > totalOriginal);
+  const saldoPendiente = Math.max(0, totalOriginal - (parseFloat(invoice.monto_acreditado || "0") || 0));
+  const totalNcByCharge = ncItems
+    .filter(item => item.selected)
+    .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+  const montoNC = isReservationInvoice
+    ? totalNcByCharge
+    : modoParcial ? parseFloat(montoParcial) || 0 : saldoPendiente;
+  const montoInvalido = isReservationInvoice
+    ? Boolean(mappingWarning) ||
+      montoNC <= 0 ||
+      montoNC > saldoPendiente + 0.01 ||
+      ncItems.some(item => item.selected && ((parseFloat(item.amount) || 0) <= 0 || (parseFloat(item.amount) || 0) > item.availableAmount + 0.01))
+    : modoParcial && (!montoParcial || montoNC <= 0 || montoNC > saldoPendiente + 0.01);
 
   function handleSubmit() {
     if (montoInvalido) return;
-    mutation.mutate({ motivo, monto: modoParcial ? montoNC : undefined });
+    if (!motivo.trim()) {
+      toast({ title: "Ingresá un motivo para la Nota de Crédito", variant: "destructive" });
+      return;
+    }
+    mutation.mutate({
+      motivo: motivo.trim(),
+      ...(isReservationInvoice
+        ? {
+            items: ncItems
+              .filter(item => item.selected && (parseFloat(item.amount) || 0) > 0)
+              .map(item => ({ sourceId: item.sourceId, amount: parseFloat(item.amount) })),
+          }
+        : { monto: modoParcial ? montoNC : undefined }),
+    });
   }
 
   return (
@@ -1432,25 +1644,103 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
             <div className="font-medium">Factura original:</div>
             <div className="text-muted-foreground text-xs">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)} — {invoice.cliente_razon_social}</div>
-            <div className="text-muted-foreground text-xs">Total: ${fPeso(invoice.monto_total)}</div>
+            <div className="text-muted-foreground text-xs">Total: ${fPeso(invoice.monto_total)} · Saldo pendiente: ${fPeso(saldoPendiente)}</div>
+            {isReservationInvoice && <div className="text-xs text-muted-foreground">Reserva #{invoice.reserva_id}</div>}
           </div>
-          <div className="flex items-center gap-2">
-            <input type="checkbox" id="nc-parcial" checked={modoParcial} onChange={e => { setModoParcial(e.target.checked); if (!e.target.checked) setMontoParcial(""); }} data-testid="checkbox-nc-parcial" />
-            <Label htmlFor="nc-parcial" className="cursor-pointer">Nota de crédito parcial</Label>
-          </div>
-          {modoParcial ? (
-            <div className="space-y-1">
-              <Label className="text-xs">Monto a acreditar *</Label>
-              <Input type="number" min="0" max={totalOriginal} step="0.01" value={montoParcial} onChange={e => setMontoParcial(e.target.value)} placeholder="0.00" data-testid="input-monto-parcial" />
-              {montoInvalido && <p className="text-xs text-red-600">Ingrese un monto válido entre $0 y ${fPeso(totalOriginal)}</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className="rounded border bg-muted/20 p-2">
+              <div className="text-muted-foreground">Receptor heredado</div>
+              <div className="font-medium truncate">{invoice.cliente_razon_social || "—"}</div>
+              <div className="text-muted-foreground">{invoice.cliente_cuit || invoice.cliente_dni || invoice.cliente_condicion_iva || "—"}</div>
             </div>
-          ) : null}
-          <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
-            {modoParcial
-              ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
-              : `Se emitirá una ${tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
+            <div className="rounded border bg-muted/20 p-2">
+              <div className="text-muted-foreground">Punto de venta</div>
+              <div className="font-medium">{padNum(invoice.punto_venta, 4)}</div>
+              <div className="text-muted-foreground">Heredado y bloqueado</div>
+            </div>
+            <div className="rounded border bg-muted/20 p-2">
+              <div className="text-muted-foreground">Forma de pago</div>
+              <div className="font-medium">{invoice.cash_forma_pago || "No informada"}</div>
+              <div className="text-muted-foreground">Heredada y bloqueada</div>
+            </div>
           </div>
-          <div className="space-y-1"><Label>Motivo (opcional)</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
+          {isReservationInvoice ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Conceptos a acreditar *</Label>
+                <span className="text-xs text-muted-foreground">Seleccioná el cargo exacto; podés ajustar el importe.</span>
+              </div>
+              {mappingWarning ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-xs text-amber-800 dark:text-amber-200 space-y-2">
+                  <p>{mappingWarning}</p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => window.open(`/reservations?view=${invoice.reserva_id}`, "_blank", "noopener,noreferrer")}
+                    data-testid="btn-nc-open-folio"
+                  >
+                    Abrir reserva y revisar Folio
+                  </Button>
+                </div>
+              ) : (
+                <div className="rounded-md border divide-y max-h-48 overflow-y-auto">
+                  {ncItems.map(item => (
+                    <div key={item.sourceId} className="flex items-center gap-2 p-2.5">
+                      <input
+                        type="checkbox"
+                        checked={item.selected}
+                        onChange={() => setNcItems(prev => prev.map(row => row.sourceId === item.sourceId ? { ...row, selected: !row.selected } : row))}
+                        data-testid={`checkbox-nc-cargo-${item.sourceId}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm truncate">{item.description}</div>
+                        <div className="text-[11px] text-muted-foreground">Disponible: ${fPeso(item.availableAmount)}</div>
+                      </div>
+                      <Input
+                        className="w-28 h-8 text-right"
+                        type="number"
+                        min="0"
+                        max={item.availableAmount}
+                        step="0.01"
+                        value={item.amount}
+                        disabled={!item.selected}
+                        onChange={e => setNcItems(prev => prev.map(row => row.sourceId === item.sourceId ? { ...row, amount: e.target.value } : row))}
+                        data-testid={`input-nc-cargo-${item.sourceId}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-between text-sm font-medium">
+                <span>Total seleccionado</span>
+                <span>${fPeso(montoNC)}</span>
+              </div>
+              {montoInvalido && !mappingWarning && <p className="text-xs text-red-600">Seleccioná al menos un cargo e ingresá importes válidos dentro del saldo disponible.</p>}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="nc-parcial" checked={modoParcial} onChange={e => { setModoParcial(e.target.checked); if (!e.target.checked) setMontoParcial(""); }} data-testid="checkbox-nc-parcial" />
+                <Label htmlFor="nc-parcial" className="cursor-pointer">Nota de crédito parcial</Label>
+              </div>
+              {modoParcial ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">Monto a acreditar *</Label>
+                  <Input type="number" min="0" max={saldoPendiente} step="0.01" value={montoParcial} onChange={e => setMontoParcial(e.target.value)} placeholder="0.00" data-testid="input-monto-parcial" />
+                  {montoInvalido && <p className="text-xs text-red-600">Ingrese un monto válido entre $0 y ${fPeso(saldoPendiente)}</p>}
+                </div>
+              ) : null}
+            </>
+          )}
+          <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
+            {isReservationInvoice
+              ? `Se emitirá una ${tipoNC} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
+              : modoParcial
+                ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
+                : `Se emitirá una ${tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
+          </div>
+          <div className="space-y-1"><Label>Motivo *</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>

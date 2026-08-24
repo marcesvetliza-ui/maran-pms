@@ -41,6 +41,12 @@ export interface NewInvoiceData {
   sourceChargeIds?: string[]; // IDs de cargos del folio incluidos en esta factura
   sourceChargeAmounts?: Record<string, number>; // importe emitido por cada cargo del folio
   observaciones?: string;
+  /**
+   * Used only by reservation credit notes. A local draft is persisted before
+   * requesting the CAE, so an authorization can always be reconciled later.
+   */
+  recoverableCreditNote?: boolean;
+  recoveryInvoiceId?: number;
 }
 
 export const TIPOS_CBT_WSFE: Record<string, number> = {
@@ -171,6 +177,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
+  const recoverableCreditNote = Boolean(data.recoverableCreditNote || data.recoveryInvoiceId);
 
   const puntoVenta =
     data.puntoVentaOverride ??
@@ -180,17 +187,77 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
 
   const montos = calcularMontos(data.items, data.tipoComprobante);
 
-  let cae: string | null;
-  let caeFechaVto: Date | null;
-  let modoFicticio: boolean;
-  let numero: number;
+  let cae: string | null = null;
+  let caeFechaVto: Date | null = null;
+  let modoFicticio = false;
+  let numero = 0;
+  let pendingInvoice: typeof salesInvoices.$inferSelect | undefined;
+
+  const insertPendingInvoice = async () => {
+    const [draft] = await db.insert(salesInvoices).values({
+      tipoComprobante: data.tipoComprobante,
+      puntoVenta,
+      numero,
+      fechaEmision: getArgentinaToday(),
+      clienteRazonSocial: data.cliente.razonSocial,
+      clienteCuit: data.cliente.cuit || null,
+      clienteDni: data.cliente.dni || null,
+      clienteCondicionIva: data.cliente.condicionIva,
+      clienteDomicilio: data.cliente.domicilio || null,
+      montoNeto: String(montos.montoNeto),
+      montoIva21: String(montos.montoIva21),
+      montoIva105: String(montos.montoIva105),
+      montoExento: String(montos.montoExento),
+      montoNoGravado: String(montos.montoNoGravado),
+      montoTotal: String(montos.montoTotal),
+      cae: null,
+      caeFechaVto: null,
+      modoFicticio,
+      estado: "autorizacion_pendiente",
+      reservaId: data.reservaId || null,
+      restaurantOrderId: data.restaurantOrderId || null,
+      folioId: data.folioId || null,
+      notaCreditoId: data.facturaOriginalId || null,
+      concepto: "2",
+      items: data.items as any,
+      operador: data.operador || null,
+      cashFormaPago: data.cashFormaPago || null,
+      sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
+      sourceChargeAmounts: data.sourceChargeAmounts ? JSON.stringify(data.sourceChargeAmounts) : null,
+      observaciones: data.observaciones || null,
+      reconciliationStatus: "pendiente",
+      reconciliationUpdatedAt: new Date(),
+    }).returning();
+    pendingInvoice = draft;
+    return draft;
+  };
+
+  if (data.recoveryInvoiceId) {
+    const existing = await db.execute(sql`
+      SELECT * FROM sales_invoices
+      WHERE id = ${data.recoveryInvoiceId}
+        AND estado = 'autorizacion_pendiente'
+        AND reconciliation_status = 'pendiente'
+      LIMIT 1
+    `);
+    if (!existing.rows.length) {
+      throw new Error("La NC pendiente ya no está disponible para reintentar su autorización");
+    }
+    const draft = existing.rows[0] as any;
+    numero = Number(draft.numero);
+    if (Number(draft.punto_venta) !== puntoVenta) {
+      throw new Error("La NC pendiente tiene un punto de venta distinto al de la factura original");
+    }
+    pendingInvoice = {
+      ...draft,
+      id: Number(draft.id),
+    } as typeof salesInvoices.$inferSelect;
+  }
 
   if (esNoFiscal) {
     // Comprobantes no fiscales (Ticket, Vouchers, Cierres): nunca llaman a ARCA,
     // solo llevan una numeración local propia por tipo + punto de venta.
-    numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
-    cae = null;
-    caeFechaVto = null;
+    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
     modoFicticio = false;
   } else if (ambiente === "homologacion" || ambiente === "produccion") {
     // En producción/homologación: obtener token primero para poder
@@ -208,46 +275,92 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       : "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 
     // Número sincronizado con AFIP (evita desfasaje por uso previo de modo ficticio)
-    numero = await getNextInvoiceNumberFromAfip(
-      data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl
-    );
+    if (!pendingInvoice) {
+      numero = await getNextInvoiceNumberFromAfip(
+        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl
+      );
+    }
 
-    const { feCAESolicitar } = await import("./wsfevClient");
+    // The draft must exist before the outbound ARCA call. If the process stops
+    // after ARCA authorizes it, the original invoice, its exact charge mapping
+    // and a resolvable pending NC are already stored locally.
+    if (recoverableCreditNote && !pendingInvoice) {
+      await insertPendingInvoice();
+    }
+
     const now = new Date();
     const fecha =
       `${now.getFullYear()}` +
       `${String(now.getMonth() + 1).padStart(2, "0")}` +
       `${String(now.getDate()).padStart(2, "0")}`;
 
-    const resultado = await feCAESolicitar(
-      {
-        tipo: data.tipoComprobante,
-        puntoVenta,
-        numero,
-        cuitEmisor: cuitAuth,
-        token,
-        sign,
-        ...montos,
-        clienteCuit: data.cliente.cuit,
-        clienteCondicionIva: data.cliente.condicionIva,
-        fecha,
-      },
-      ambiente as "homologacion" | "produccion"
-    );
-
-    cae = resultado.cae;
-    caeFechaVto = resultado.caeFechaVto;
+    try {
+      const { feCAESolicitar, feCompConsultar } = await import("./wsfevClient");
+      // A pending draft may have been authorized just before a network/process
+      // failure. Query ARCA by its already persisted number first; only an
+      // explicit "not found" allows a new authorization request.
+      const recovered = data.recoveryInvoiceId
+        ? await feCompConsultar(
+            { tipo: data.tipoComprobante, puntoVenta, numero, cuitEmisor: cuitAuth, token, sign },
+            ambiente as "homologacion" | "produccion"
+          )
+        : null;
+      const resultado = recovered ?? await feCAESolicitar(
+          {
+            tipo: data.tipoComprobante,
+            puntoVenta,
+            numero,
+            cuitEmisor: cuitAuth,
+            token,
+            sign,
+            ...montos,
+            clienteCuit: data.cliente.cuit,
+            clienteCondicionIva: data.cliente.condicionIva,
+            fecha,
+          },
+          ambiente as "homologacion" | "produccion"
+        );
+      cae = resultado.cae;
+      caeFechaVto = resultado.caeFechaVto;
+    } catch (error: any) {
+      if (pendingInvoice) {
+        await db.execute(sql`
+          UPDATE sales_invoices
+          SET reconciliation_error = ${String(error?.message || "No se pudo confirmar la autorización ARCA")},
+              reconciliation_updated_at = now()
+          WHERE id = ${pendingInvoice.id}
+        `);
+      }
+      throw error;
+    }
     modoFicticio = false;
   } else {
     // Modo ficticio: usa contador local, CAE simulado
-    numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
+    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
+    modoFicticio = true;
+    if (recoverableCreditNote && !pendingInvoice) {
+      await insertPendingInvoice();
+    }
     const fake = generateFakeCAE();
     cae = fake.cae;
     caeFechaVto = fake.vencimiento;
-    modoFicticio = true;
   }
 
   const today = getArgentinaToday();
+  if (pendingInvoice) {
+    const result = await db.execute(sql`
+      UPDATE sales_invoices
+      SET cae = ${cae},
+          cae_fecha_vto = ${caeFechaVto ? caeFechaVto.toISOString().split("T")[0] : null},
+          modo_ficticio = ${modoFicticio},
+          estado = 'emitida',
+          reconciliation_error = NULL,
+          reconciliation_updated_at = now()
+      WHERE id = ${pendingInvoice.id}
+      RETURNING *
+    `);
+    return result.rows[0] as typeof salesInvoices.$inferSelect;
+  }
 
   const [factura] = await db.insert(salesInvoices).values({
     tipoComprobante: data.tipoComprobante,

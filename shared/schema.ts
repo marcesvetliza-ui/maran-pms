@@ -2353,6 +2353,12 @@ export const salesInvoices = pgTable("sales_invoices", {
   sourceChargeIds: jsonb("source_charge_ids"), // IDs de cargos del folio incluidos en esta factura
   sourceChargeAmounts: jsonb("source_charge_amounts"), // importe facturado por cada cargo del folio
   observaciones: text("observaciones"),
+  // Las NC de reserva se crean antes de pedir el CAE. Estos campos conservan
+  // el estado de la compensación posterior contra la factura y el Folio para
+  // que un reinicio no permita emitir una segunda NC.
+  reconciliationStatus: text("reconciliation_status"),
+  reconciliationError: text("reconciliation_error"),
+  reconciliationUpdatedAt: timestamp("reconciliation_updated_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
