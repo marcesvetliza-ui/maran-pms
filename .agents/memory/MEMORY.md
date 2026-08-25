@@ -34,3 +34,6 @@
 - [Workspace uploads and Git commits](workspace-uploads-git.md) — user attachments land in attached_assets; stage explicit source/build paths, not git add -A.
 - [Credit notes and Folio adjustments](credit-notes-folio-adjustments.md) — reservation NCs correct charges with tagged negative adjustments; payments and cash refunds remain separate operations.
 - [GitHub push authentication](github-push-auth.md) — personal push-token secrets are currently rejected; use the connected GitHub OAuth API and never force divergent main.
+- [Guest document uniqueness](guest-document-uniqueness.md) — validate legacy production data before adding a normalized document-number unique index in development.
+- [Resend domain verification](resend-domain-verification.md) — sending requires SPF/MX on the `send` subdomain and a `from` address under the verified domain.
+- [Confirmation PDF details](confirmation-pdf-details.md) — keep package/extras in a compact full-width block separate from general terms; total is room plus active charges.

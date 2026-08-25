@@ -34,6 +34,11 @@ function fmtMoneyPdf(v: any): string {
   const n = parseFloat(String(v ?? 0));
   return `$ ${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
 }
+function extractPackageName(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const match = notes.match(/\[?\s*Paquete\s*:\s*([^\]\n]+?)\s*\]?/i);
+  return match?.[1]?.trim() || null;
+}
 function nightCount(checkIn: string, checkOut: string): number {
   return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 }
@@ -2819,6 +2824,13 @@ async function handleConfirmationPdf(req: any, res: any) {
     const nights = nightCount(reservation.checkInDate, reservation.checkOutDate);
     const totalAlojamiento = parseFloat(reservation.totalRoomAmount || "0");
     const ratePerNight = parseFloat(String(reservation.finalRatePerNight || 0));
+    const packageName = extractPackageName(reservation.notes);
+    const activeCharges = await storage.getCharges(reservation.id);
+    const totalAdicionales = activeCharges.reduce((sum, charge) => sum + parseFloat(String(charge.amount || 0)), 0);
+    const totalReserva = totalAlojamiento + totalAdicionales;
+    const additionalDetails = activeCharges
+      .map(charge => `${charge.description} — ${fmtMoneyPdf(charge.amount)}`)
+      .join("  ·  ");
 
     const doc = new PDFDocument({ margin: 0, size: "A4" });
     const filename = `Confirmacion-${reservation.reservationCode || reservation.id}.pdf`;
@@ -2978,6 +2990,54 @@ async function handleConfirmationPdf(req: any, res: any) {
     }
 
     y += boxH + 12;
+
+    // ── RESERVATION DETAILS / EXTRAS ────────────────────────────────────────
+    // Keep reservation-specific information separate from the general terms.
+    // The two-column layout keeps this block short even when the reservation
+    // has several extras, helping the confirmation remain on one page.
+    if (packageName || activeCharges.length > 0) {
+      const detailLeft = [
+        packageName ? `Paquete: ${packageName}` : null,
+        additionalDetails ? `Adicionales: ${additionalDetails}` : null,
+      ].filter(Boolean).join("\n");
+      const detailsLeftW = contentW * 0.62;
+      const detailTextH = doc.heightOfString(detailLeft, { width: detailsLeftW - 24 });
+      const detailBodyH = Math.max(44, detailTextH + 14);
+      const detailHeaderH = 20;
+      const detailBoxH = detailHeaderH + detailBodyH;
+
+      doc.roundedRect(margin, y, contentW, detailBoxH, 6)
+        .fillAndStroke("#f5f8fb", "#dfe5eb");
+      doc.roundedRect(margin, y, contentW, detailHeaderH, 6).fill("#eaf0f6");
+      doc.rect(margin, y + 10, contentW, 10).fill("#eaf0f6");
+      doc.fillColor(NAVY).fontSize(7.5).font("Helvetica-Bold")
+        .text("DETALLE DE LA RESERVA", margin + 12, y + 7, { characterSpacing: 1.2 });
+
+      const detailsY = y + detailHeaderH + 7;
+      if (detailLeft) {
+        doc.fillColor("#444444").fontSize(8.5).font("Helvetica")
+          .text(detailLeft, margin + 12, detailsY, { width: detailsLeftW - 24, lineGap: 2 });
+      }
+
+      const totalsX = margin + detailsLeftW;
+      const totalsW = contentW - detailsLeftW;
+      doc.fillColor("#666666").fontSize(7.5).font("Helvetica")
+        .text("Total alojamiento", totalsX, detailsY, { width: totalsW - 12 });
+      doc.fillColor("#444444").fontSize(8).font("Helvetica-Bold")
+        .text(fmtMoneyPdf(totalAlojamiento), totalsX, detailsY, { width: totalsW - 12, align: "right" });
+      doc.fillColor("#666666").fontSize(7.5).font("Helvetica")
+        .text("Total adicionales", totalsX, detailsY + 12, { width: totalsW - 12 });
+      doc.fillColor("#444444").fontSize(8).font("Helvetica-Bold")
+        .text(fmtMoneyPdf(totalAdicionales), totalsX, detailsY + 12, { width: totalsW - 12, align: "right" });
+      doc.moveTo(totalsX, detailsY + 25).lineTo(margin + contentW - 12, detailsY + 25)
+        .strokeColor("#d5dde5").lineWidth(0.5).stroke();
+      doc.fillColor(NAVY).fontSize(8.5).font("Helvetica-Bold")
+        .text("TOTAL A PAGAR", totalsX, detailsY + 29, { width: totalsW - 12 });
+      doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold")
+        .text(fmtMoneyPdf(totalReserva), totalsX, detailsY + 28, { width: totalsW - 12, align: "right" });
+
+      y += detailBoxH + 10;
+    }
 
     // ── TÉRMINOS Y CONDICIONES ────────────────────────────────────────────
     const DEFAULT_TERMINOS = [
