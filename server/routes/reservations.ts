@@ -36,7 +36,7 @@ function fmtMoneyPdf(v: any): string {
 }
 function extractPackageName(notes: string | null | undefined): string | null {
   if (!notes) return null;
-  const match = notes.match(/\[?\s*Paquete\s*:\s*([^\]\n]+?)\s*\]?/i);
+  const match = notes.match(/\[?\s*Paquete\s*:\s*([^\]\n]+?)(?:\]|$)/i);
   return match?.[1]?.trim() || null;
 }
 function nightCount(checkIn: string, checkOut: string): number {
@@ -3059,10 +3059,15 @@ async function handleConfirmationPdf(req: any, res: any) {
       // fallback to default
     }
 
-    // Pre-calculate T&C body height
+    // Pre-calculate T&C body height using the same font, width and numbered
+    // text that will be rendered below. This keeps the border tight around
+    // the terms instead of extending into the greeting area.
+    const termTextWidth = contentW - 28;
+    doc.font("Helvetica").fontSize(8);
     let tcBodyH = 10;
-    for (const t of terminos) {
-      tcBodyH += doc.heightOfString(t, { width: contentW - 30 }) + 6;
+    for (const [i, t] of terminos.entries()) {
+      const termLine = `${i + 1}.  ${t}`;
+      tcBodyH += doc.heightOfString(termLine, { width: termTextWidth }) + 6;
     }
     const tcH = 22 + tcBodyH + 8;
 
@@ -3076,9 +3081,10 @@ async function handleConfirmationPdf(req: any, res: any) {
 
     let ty = y + 26;
     terminos.forEach((t, i) => {
+      const termLine = `${i + 1}.  ${t}`;
       doc.fillColor("#333333").fontSize(8).font("Helvetica")
-        .text(`${i + 1}.  ${t}`, margin + 14, ty, { width: contentW - 28 });
-      ty += doc.heightOfString(t, { width: contentW - 28 }) + 6;
+        .text(termLine, margin + 14, ty, { width: termTextWidth });
+      ty += doc.heightOfString(termLine, { width: termTextWidth }) + 6;
     });
     y = ty + 14;
 
