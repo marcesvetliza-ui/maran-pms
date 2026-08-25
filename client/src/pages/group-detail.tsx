@@ -103,6 +103,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import type { 
   GroupWithDetails, 
   GroupStatus, 
@@ -426,6 +427,8 @@ type AssignRow = {
   originalRoomId: string;
   firstName: string;
   lastName: string;
+  guestId: string | null;
+  guestMode: "search" | "new";
 };
 
 function AssignBlockDialog({
@@ -474,6 +477,8 @@ function AssignBlockDialog({
       originalRoomId: res.roomId || "",
       firstName: "",
       lastName: "",
+      guestId: null,
+      guestMode: "search" as const,
     })),
     ...Array.from({ length: emptyCount }, () => ({
       reservationId: null,
@@ -481,36 +486,10 @@ function AssignBlockDialog({
       originalRoomId: "",
       firstName: "",
       lastName: "",
+      guestId: null,
+      guestMode: "search" as const,
     })),
   ]);
-
-  const [duplicateWarnings, setDuplicateWarnings] = useState<Record<number, string | null>>({});
-
-  // Debounced duplicate-guest check: when firstName+lastName are both ≥2 chars, search guests
-  useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    rows.forEach((row, idx) => {
-      const q = `${row.firstName.trim()} ${row.lastName.trim()}`.trim();
-      if (row.firstName.trim().length >= 2 && row.lastName.trim().length >= 2) {
-        const t = setTimeout(async () => {
-          try {
-            const res = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
-            if (!res.ok) return;
-            const results: any[] = await res.json();
-            const match = results.find(g =>
-              g.firstName?.toLowerCase() === row.firstName.trim().toLowerCase() &&
-              g.lastName?.toLowerCase() === row.lastName.trim().toLowerCase()
-            );
-            setDuplicateWarnings(prev => ({ ...prev, [idx]: match ? `${match.lastName} ${match.firstName}` : null }));
-          } catch {}
-        }, 400);
-        timers.push(t);
-      } else {
-        setDuplicateWarnings(prev => ({ ...prev, [idx]: null }));
-      }
-    });
-    return () => timers.forEach(clearTimeout);
-  }, [rows.map(r => `${r.firstName}|${r.lastName}`).join(",")]);
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId, group.id],
@@ -542,7 +521,7 @@ function AssignBlockDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAssignAll = async () => {
-    const validRows = rows.filter(r => r.roomId && r.firstName.trim());
+    const validRows = rows.filter(r => r.roomId && (r.guestId || r.firstName.trim()));
     if (validRows.length === 0) {
       toast({
         title: "Completá al menos un nombre de pasajero",
@@ -561,6 +540,7 @@ function AssignBlockDialog({
       try {
         if (row.reservationId) {
           await apiRequest("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
+            guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
@@ -568,6 +548,7 @@ function AssignBlockDialog({
         } else {
           await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
+            guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             ratePlanId: block.ratePlanId,
@@ -648,24 +629,26 @@ function AssignBlockDialog({
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
+              <div className="grid grid-cols-[1.3fr_2fr_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
                 <span>Habitación</span>
-                <span>Nombre</span>
-                <span>Apellido</span>
+                <span>Huésped</span>
                 <span></span>
               </div>
               {rows.map((row, index) => {
                 const roomOptions = getRoomOptions(row);
                 const otherChosenRoomIds = allChosenRoomIds.filter((id, i) => i !== index);
+                const updateRow = (changes: Partial<AssignRow>) => {
+                  const updated = [...rows];
+                  updated[index] = { ...updated[index], ...changes };
+                  setRows(updated);
+                };
                 return (
                   <div key={row.reservationId ?? `new-${index}`} className="flex flex-col gap-0.5">
-                    <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
+                    <div className="grid grid-cols-[1.3fr_2fr_auto] gap-2 items-start">
                     <Select
                       value={row.roomId}
                       onValueChange={(value) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], roomId: value };
-                        setRows(updated);
+                        updateRow({ roomId: value });
                       }}
                     >
                       <SelectTrigger data-testid={`select-room-${index}`}>
@@ -688,31 +671,73 @@ function AssignBlockDialog({
                       </SelectContent>
                     </Select>
 
-                    <Input
-                      placeholder="Nombre"
-                      value={row.firstName}
-                      name={`passenger-firstname-${index}`}
-                      autoComplete="off"
-                      onChange={(e) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], firstName: e.target.value };
-                        setRows(updated);
-                      }}
-                      data-testid={`input-firstname-${index}`}
-                    />
-
-                    <Input
-                      placeholder="Apellido"
-                      value={row.lastName}
-                      name={`passenger-lastname-${index}`}
-                      autoComplete="off"
-                      onChange={(e) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], lastName: e.target.value };
-                        setRows(updated);
-                      }}
-                      data-testid={`input-lastname-${index}`}
-                    />
+                    <div className="min-w-0">
+                      {row.guestMode === "new" ? (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">Nuevo huésped</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-1.5 text-xs"
+                              onClick={() => updateRow({ guestMode: "search", firstName: "", lastName: "", guestId: null })}
+                              data-testid={`button-search-guest-${index}`}
+                            >
+                              <Search className="h-3 w-3 mr-1" />
+                              Buscar existente
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              placeholder="Nombre"
+                              value={row.firstName}
+                              name={`passenger-firstname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ firstName: e.target.value })}
+                              data-testid={`input-firstname-${index}`}
+                            />
+                            <Input
+                              placeholder="Apellido"
+                              value={row.lastName}
+                              name={`passenger-lastname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ lastName: e.target.value })}
+                              data-testid={`input-lastname-${index}`}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <GuestSearchCombobox
+                          label=""
+                          selectedGuestId={row.guestId}
+                          selectedGuestName={row.guestId ? `${row.lastName} ${row.firstName}`.trim() : null}
+                          placeholder="Buscar nombre, apellido o documento..."
+                          onGuestSelect={(guest) => updateRow({
+                            guestId: guest.id,
+                            firstName: guest.firstName,
+                            lastName: guest.lastName || "",
+                            guestMode: "search",
+                          })}
+                          onClear={() => updateRow({
+                            guestId: null,
+                            firstName: "",
+                            lastName: "",
+                            guestMode: "search",
+                          })}
+                          onCreateNew={(prefillName) => {
+                            const parts = (prefillName || "").trim().split(/\s+/).filter(Boolean);
+                            updateRow({
+                              guestId: null,
+                              guestMode: "new",
+                              firstName: parts[0] || "",
+                              lastName: parts.slice(1).join(" "),
+                            });
+                          }}
+                          data-testid={`guest-selector-${index}`}
+                        />
+                      )}
+                    </div>
 
                     <Button
                       variant="ghost"
@@ -725,12 +750,6 @@ function AssignBlockDialog({
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
-                  {duplicateWarnings[index] && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1 px-1">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Ya existe un huésped con este nombre: <strong>{duplicateWarnings[index]}</strong>
-                    </p>
-                  )}
                   </div>
                 );
               })}
@@ -742,7 +761,7 @@ function AssignBlockDialog({
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setRows([...rows, { reservationId: null, roomId: "", originalRoomId: "", firstName: "", lastName: "" }])}
+                  onClick={() => setRows([...rows, { reservationId: null, roomId: "", originalRoomId: "", firstName: "", lastName: "", guestId: null, guestMode: "search" }])}
                   data-testid="button-add-assignment-row"
                 >
                   <Plus className="h-3 w-3 mr-1" />
@@ -758,13 +777,13 @@ function AssignBlockDialog({
           {!allDone && rows.length > 0 && (
             <Button
               onClick={handleAssignAll}
-              disabled={isSubmitting || rows.every(r => !r.firstName.trim())}
+              disabled={isSubmitting || rows.every(r => !r.guestId && !r.firstName.trim())}
               data-testid="button-confirm-assign-all"
             >
               {isSubmitting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</>
               ) : (
-                `Guardar ${rows.filter(r => r.firstName.trim()).length} pasajero(s)`
+                `Guardar ${rows.filter(r => r.guestId || r.firstName.trim()).length} pasajero(s)`
               )}
             </Button>
           )}

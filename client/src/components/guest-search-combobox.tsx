@@ -35,7 +35,7 @@ export function GuestSearchCombobox({
   onGuestSelect,
   onClear,
   onCreateNew,
-  placeholder = "Buscar por nombre, teléfono o email...",
+  placeholder = "Buscar por nombre, apellido o documento...",
   "data-testid": testId = "guest-search-combobox",
 }: GuestSearchComboboxProps) {
   const { toast } = useToast();
@@ -189,8 +189,10 @@ export function GuestSearchCombobox({
                   data-testid={`${testId}-result-${g.id}`}
                 >
                   <span className="font-medium">{g.firstName} {g.lastName || ""}</span>
-                  {(g.phone || g.email) && (
-                    <span className="text-xs text-muted-foreground">{[g.phone, g.email].filter(Boolean).join(" · ")}</span>
+                  {(g.documentNumber || g.phone || g.email) && (
+                    <span className="text-xs text-muted-foreground">
+                      {[g.documentNumber && `DNI ${g.documentNumber}`, g.phone, g.email].filter(Boolean).join(" · ")}
+                    </span>
                   )}
                 </button>
               ))

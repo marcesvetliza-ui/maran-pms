@@ -388,6 +388,7 @@ export interface IStorage {
       checkOutDate?: string;
       agreedRate?: string;
       ratePlanId?: string | null;
+      guestId?: string | null;
     }
   ): Promise<Reservation | undefined>;
 

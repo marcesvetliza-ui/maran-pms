@@ -1575,6 +1575,7 @@ export class DatabaseStorage implements IStorage {
       checkOutDate?: string;
       agreedRate?: string;
       ratePlanId?: string | null;
+      guestId?: string | null;
     }
   ): Promise<Reservation | undefined> {
     const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
@@ -1582,11 +1583,6 @@ export class DatabaseStorage implements IStorage {
 
     const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
     if (!room) return undefined;
-
-    // Always create a fresh guest per reservation — never reuse by name.
-    // Reusing a guest by name-match means two rooms share the same guestId;
-    // subsequent edits to one room appear to "replicate" to the other.
-    const guest = await this.createGuest({ firstName: guestFirstName, lastName: guestLastName });
 
     const blocks = await this.getGroupBlocks(groupId);
     const matchingBlock = blocks.find(b => b.roomTypeId === room.roomTypeId);
@@ -1604,6 +1600,17 @@ export class DatabaseStorage implements IStorage {
     const hasConflict = await this.checkOverbooking(roomId, checkInDate, checkOutDate, undefined);
     if (hasConflict) {
       throw new Error(`La habitación ${room.roomNumber} ya tiene una reserva en esas fechas`);
+    }
+
+    let guest: Guest | undefined;
+    if (options?.guestId) {
+      guest = await this.getGuest(options.guestId);
+      if (!guest || guest.codigo?.startsWith("GROUP-")) {
+        throw new Error("El huésped seleccionado no es válido");
+      }
+    } else {
+      // A new guest is created only when the caller explicitly omits guestId.
+      guest = await this.createGuest({ firstName: guestFirstName, lastName: guestLastName });
     }
 
     const reservation = await this.createReservation({

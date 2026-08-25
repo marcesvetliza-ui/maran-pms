@@ -567,14 +567,14 @@ export function registerGroupsRoutes(app: Express) {
   // Assign real guest to a pre-blocked (placeholder) reservation, optionally changing room
   app.patch("/api/groups/:groupId/placeholder-reservations/:reservationId", async (req, res) => {
     try {
-      const { guestFirstName, guestLastName, roomId } = req.body;
+      const { guestId, guestFirstName, guestLastName, roomId } = req.body;
       const { groupId, reservationId } = req.params;
 
-      if (!guestFirstName?.trim()) {
+      if (!guestId && !guestFirstName?.trim()) {
         return res.status(400).json({ error: "El nombre del pasajero es requerido" });
       }
 
-      const firstName = guestFirstName.trim();
+      const firstName = (guestFirstName || "").trim();
       const lastName = (guestLastName || "").trim();
 
       // Verify the reservation exists and belongs to this group
@@ -593,36 +593,21 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Reserva no encontrada en este grupo" });
       }
 
-      // Always create a fresh guest per reservation — never reuse by name.
-      // Reusing a guest by name-match means two rooms share the same guestId;
-      // subsequent edits to one room appear to "replicate" to the other.
-      const [newGuest] = await db.insert(guestsTable).values({
-        firstName,
-        lastName,
-        segment: "LEISURE",
-        sexo: "no_especifica",
-      } as any).returning();
-
-      if (!newGuest?.id) throw new Error("No se pudo crear el registro del huésped");
-
-      const guestName = `${lastName} ${firstName}`.trim();
-
       // Handle optional room change
       let oldRoomId: string | null = null;
       let newRoomId: string | null = null;
-      const reservationUpdates: Record<string, any> = {
-        guestId: newGuest.id,
-        guestName,
-      };
+      const reservationUpdates: Record<string, any> = {};
+      const [currentRes] = await db
+        .select()
+        .from(reservationsTable)
+        .where(eq(reservationsTable.id, reservationId))
+        .limit(1);
+      if (!currentRes) {
+        return res.status(404).json({ error: "Reserva no encontrada" });
+      }
 
       if (roomId) {
-        const [currentRes] = await db
-          .select()
-          .from(reservationsTable)
-          .where(eq(reservationsTable.id, reservationId))
-          .limit(1);
-
-        if (currentRes && roomId !== currentRes.roomId) {
+        if (roomId !== currentRes.roomId) {
           const hasConflict = await storage.checkOverbooking(roomId, currentRes.checkInDate, currentRes.checkOutDate, reservationId);
           if (hasConflict) {
             return res.status(400).json({ error: "La habitación ya tiene una reserva en esas fechas" });
@@ -636,6 +621,32 @@ export function registerGroupsRoutes(app: Express) {
         }
       }
 
+      let assignedGuest;
+      if (guestId) {
+        [assignedGuest] = await db
+          .select()
+          .from(guestsTable)
+          .where(eq(guestsTable.id, guestId))
+          .limit(1);
+        if (!assignedGuest || assignedGuest.codigo?.startsWith("GROUP-")) {
+          return res.status(400).json({ error: "El huésped seleccionado no es válido" });
+        }
+      } else {
+        [assignedGuest] = await db.insert(guestsTable).values({
+          firstName,
+          lastName,
+          segment: "LEISURE",
+          sexo: "no_especifica",
+        } as any).returning();
+      }
+      if (!assignedGuest?.id) throw new Error("No se pudo crear el registro del huésped");
+
+      const guestName = `${assignedGuest.lastName || ""} ${assignedGuest.firstName || ""}`.trim();
+      Object.assign(reservationUpdates, {
+        guestId: assignedGuest.id,
+        guestName,
+      });
+
       // Direct DB update — bypass storage layer to avoid silent failures
       const [updated] = await db
         .update(reservationsTable)
@@ -648,7 +659,7 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(500).json({ error: "No se pudo actualizar la reserva" });
       }
 
-      console.log(`[passenger-assign] OK: reserva ${reservationId} → guest ${newGuest.id} "${guestName}"`);
+      console.log(`[passenger-assign] OK: reserva ${reservationId} → guest ${assignedGuest.id} "${guestName}"`);
 
       // Apply room status changes only after the reservation update succeeds
       if (newRoomId) {
@@ -666,8 +677,8 @@ export function registerGroupsRoutes(app: Express) {
   // Group Room Assignment
   app.post("/api/groups/:groupId/assign-room", async (req, res) => {
     try {
-      const { roomId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
-      if (!roomId || !guestFirstName) {
+      const { roomId, guestId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
+      if (!roomId || (!guestId && !guestFirstName)) {
         return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
 
@@ -691,13 +702,14 @@ export function registerGroupsRoutes(app: Express) {
       const reservation = await storage.assignRoomToGroup(
         req.params.groupId,
         roomId,
-        guestFirstName,
-        guestLastName,
+        guestFirstName || "",
+        guestLastName || "",
         {
           checkInDate: checkInDate || undefined,
           checkOutDate: checkOutDate || undefined,
           agreedRate: agreedRate ? String(agreedRate) : undefined,
           ratePlanId: ratePlanId !== undefined ? ratePlanId : undefined,
+          guestId: guestId || undefined,
         }
       );
       if (!reservation) {
