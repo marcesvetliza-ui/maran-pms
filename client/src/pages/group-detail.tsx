@@ -431,7 +431,7 @@ type AssignRow = {
   guestMode: "search" | "new";
 };
 
-function AssignBlockDialog({
+export function AssignBlockDialog({
   group,
   block,
   open,
@@ -638,9 +638,9 @@ function AssignBlockDialog({
                 const roomOptions = getRoomOptions(row);
                 const otherChosenRoomIds = allChosenRoomIds.filter((id, i) => i !== index);
                 const updateRow = (changes: Partial<AssignRow>) => {
-                  const updated = [...rows];
-                  updated[index] = { ...updated[index], ...changes };
-                  setRows(updated);
+                  setRows((currentRows) => currentRows.map((currentRow, rowIndex) =>
+                    rowIndex === index ? { ...currentRow, ...changes } : currentRow
+                  ));
                 };
                 return (
                   <div key={row.reservationId ?? `new-${index}`} className="flex flex-col gap-0.5">
@@ -743,7 +743,7 @@ function AssignBlockDialog({
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => setRows(rows.filter((_, i) => i !== index))}
+                      onClick={() => setRows((currentRows) => currentRows.filter((_, i) => i !== index))}
                       title="Quitar fila"
                       data-testid={`button-remove-row-${index}`}
                     >
