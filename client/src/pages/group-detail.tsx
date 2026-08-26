@@ -1432,33 +1432,34 @@ export default function GroupDetailPage() {
       .filter(r => r.status !== "cancelled")
       .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""));
 
-    const rows = sortedReservations.map((res, idx) => {
+    const groups = sortedReservations.map((res, idx) => {
       const companions: any[] = (res as any).companions || [];
       const lateCheckout = (res as any).lateCheckOut;
       const lateCheckoutTime = (res as any).lateCheckOutTime;
+      const isLastRowOfGroup = companions.length === 0;
       const mainRow = `
-      <tr>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};text-align:center;">${idx + 1}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-weight:bold;">${res.room?.roomNumber || "-"}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${getBedLabel(res)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${res.guest?.codigo?.startsWith("GROUP-") ? ((res as any).guestName || "") : ((res.guest?.lastName || "") + " " + (res.guest?.firstName || "")).trim() || ((res as any).guestName || "")}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${fmtDate(res.checkInDate)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};">${lateCheckout ? `${fmtDate(res.checkOutDate)} <span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : fmtDate(res.checkOutDate)}</td>
-        <td style="padding:6px 8px;border-bottom:${companions.length > 0 ? 'none' : '1px solid #ddd'};font-size:11px;max-width:120px;">${res.notes || ""}</td>
+      <tr class="room-row${idx % 2 === 1 ? ' alt' : ''}">
+        <td class="c-idx${isLastRowOfGroup ? '' : ' no-border'}">${idx + 1}</td>
+        <td class="c-room${isLastRowOfGroup ? '' : ' no-border'}">${res.room?.roomNumber || "-"}</td>
+        <td class="c-bed${isLastRowOfGroup ? '' : ' no-border'}">${getBedLabel(res)}</td>
+        <td class="c-guest${isLastRowOfGroup ? '' : ' no-border'}">${res.guest?.codigo?.startsWith("GROUP-") ? ((res as any).guestName || "") : ((res.guest?.lastName || "") + " " + (res.guest?.firstName || "")).trim() || ((res as any).guestName || "")}</td>
+        <td class="c-doc${isLastRowOfGroup ? '' : ' no-border'}">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
+        <td class="c-date${isLastRowOfGroup ? '' : ' no-border'}">${fmtDate(res.checkInDate)}</td>
+        <td class="c-date${isLastRowOfGroup ? '' : ' no-border'}">${fmtDate(res.checkOutDate)}${lateCheckout ? `<br/><span class="badge-late">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : ""}</td>
+        <td class="c-notes${isLastRowOfGroup ? '' : ' no-border'}">${res.notes || ""}</td>
       </tr>`;
-      const companionRows = companions.map((c: any) => `
-      <tr style="background:#f9f9f9;">
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;color:#666;">↳ Hab. ${res.room?.roomNumber || "-"}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;color:#888;">Acompañante</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.lastName || ""} ${c.firstName || ""}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;"></td>
-        <td style="padding:4px 8px;border-bottom:1px solid #ddd;font-size:11px;">${c.notes || ""}</td>
+      const companionRows = companions.map((c: any, cIdx: number) => `
+      <tr class="companion-row${idx % 2 === 1 ? ' alt' : ''}${cIdx === companions.length - 1 ? ' last-companion' : ''}">
+        <td class="c-idx no-border"></td>
+        <td class="c-room no-border companion-label">&#8627;</td>
+        <td class="c-bed no-border companion-label">Acomp.</td>
+        <td class="c-guest no-border">${c.lastName || ""} ${c.firstName || ""}</td>
+        <td class="c-doc no-border">${c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}</td>
+        <td class="c-date no-border"></td>
+        <td class="c-date no-border"></td>
+        <td class="c-notes no-border">${c.notes || ""}</td>
       </tr>`).join("");
-      return mainRow + companionRows;
+      return `<tbody class="room-group">${mainRow}${companionRows}</tbody>`;
     }).join("");
 
     const html = `<!DOCTYPE html>
@@ -1466,30 +1467,65 @@ export default function GroupDetailPage() {
 <head>
   <title>Rooming List - ${group.name}</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 24px; color: #222; }
-    h1 { margin: 0 0 2px 0; font-size: 20px; }
-    h2 { margin: 0 0 16px 0; font-size: 15px; font-weight: normal; color: #555; }
-    .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 12px; }
-    .info-row { display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 13px; }
-    .info-block { }
-    .info-block p { margin: 2px 0; }
-    .info-label { color: #777; font-size: 11px; text-transform: uppercase; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th { background: #f5f5f5; padding: 8px; text-align: left; border-bottom: 2px solid #333; font-size: 11px; text-transform: uppercase; }
-    .footer { text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 10px; color: #999; }
-    @media print { body { padding: 12px; } }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 28px; color: #1a1a1a; }
+    h1 { margin: 0 0 2px 0; font-size: 20px; letter-spacing: 0.3px; }
+    h2 { margin: 0; font-size: 14px; font-weight: normal; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; border-bottom: 2px solid #222; padding-bottom: 10px; }
+    .info-panel { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; padding: 12px 16px; background: #f7f7f8; border: 1px solid #e2e2e2; border-radius: 6px; font-size: 12px; }
+    .info-block p { margin: 2px 0; line-height: 1.4; }
+    .info-label { color: #777; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .info-block.right { text-align: right; }
+
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
+    colgroup .col-idx { width: 24px; }
+    colgroup .col-room { width: 46px; }
+    colgroup .col-bed { width: 88px; }
+    colgroup .col-guest { width: auto; }
+    colgroup .col-doc { width: 104px; }
+    colgroup .col-date { width: 82px; }
+    colgroup .col-notes { width: 108px; }
+
+    thead { display: table-header-group; }
+    th { background: #222; color: #fff; padding: 7px 6px; text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.2px; white-space: nowrap; }
+    th.center, td.c-idx { text-align: center; }
+
+    tbody.room-group { break-inside: avoid; page-break-inside: avoid; }
+    td { padding: 6px 8px; vertical-align: top; word-wrap: break-word; border-bottom: 1px solid #ddd; }
+    td.no-border { border-bottom: none; }
+    td.c-date { white-space: nowrap; }
+    tr.room-row.alt, tr.companion-row.alt { background: #fafafa; }
+    tr.room-row td.c-room { font-weight: bold; }
+    tr.companion-row td { color: #555; }
+    tr.companion-row.last-companion td { border-bottom: 1px solid #ddd; }
+    .companion-label { color: #999; font-size: 10.5px; font-style: italic; }
+    .badge-late { display: inline-block; background: #fef3c7; color: #92400e; font-size: 9px; font-weight: bold; padding: 1px 5px; border-radius: 3px; margin-top: 2px; }
+
+    .event-box { background: #f9f7ff; border: 1px solid #d4c8f0; border-radius: 6px; padding: 10px 16px; margin-bottom: 14px; font-size: 12px; }
+    .notes-box { background: #fffbea; border: 1px solid #e6d87a; border-radius: 6px; padding: 10px 16px; margin-bottom: 14px; font-size: 12px; }
+    .footer { text-align: center; margin-top: 20px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 9.5px; color: #999; }
+
+    @media print {
+      body { padding: 10mm; }
+      @page { margin: 12mm; }
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>Maran Suites & Towers</h1>
-    <h2>Rooming List</h2>
+    <div>
+      <h1>Maran Suites &amp; Towers</h1>
+      <h2>Rooming List</h2>
+    </div>
+    <div style="text-align:right;font-size:11px;color:#777;">
+      Generado el ${new Date().toLocaleString("es-AR")}
+    </div>
   </div>
-  <div class="info-row">
+  <div class="info-panel">
     <div class="info-block">
       <p class="info-label">Grupo</p>
       <p><strong>${group.name}</strong></p>
-      <p style="font-family:monospace;font-size:12px;">${group.groupCode}</p>
+      <p style="font-family:monospace;">${group.groupCode}</p>
     </div>
     <div class="info-block">
       <p class="info-label">Contacto</p>
@@ -1497,7 +1533,7 @@ export default function GroupDetailPage() {
       <p>${group.contactPhone || ""}</p>
       <p>${group.contactEmail || ""}</p>
     </div>
-    <div class="info-block" style="text-align:right;">
+    <div class="info-block right">
       <p class="info-label">Fechas</p>
       <p>Check-in: <strong>${fmtDate(group.checkInDate)}</strong></p>
       <p>Check-out: <strong>${fmtDate(group.checkOutDate)}</strong></p>
@@ -1505,7 +1541,7 @@ export default function GroupDetailPage() {
     </div>
   </div>
   ${group.eventDate ? `
-  <div style="background:#f9f7ff;border:1px solid #d4c8f0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
+  <div class="event-box">
     <p class="info-label" style="margin:0 0 6px 0;">Evento</p>
     <div style="display:flex;gap:32px;">
       <div><strong>Fecha:</strong> ${fmtDate(group.eventDate)}</div>
@@ -1515,15 +1551,19 @@ export default function GroupDetailPage() {
   </div>
   ` : ""}
   ${group.notes ? `
-  <div style="background:#fffbea;border:1px solid #e6d87a;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;">
+  <div class="notes-box">
     <p class="info-label" style="margin:0 0 6px 0;">Notas de la estadía</p>
     <p style="margin:0;white-space:pre-wrap;">${group.notes}</p>
   </div>
   ` : ""}
   <table>
+    <colgroup>
+      <col class="col-idx" /><col class="col-room" /><col class="col-bed" /><col class="col-guest" />
+      <col class="col-doc" /><col class="col-date" /><col class="col-date" /><col class="col-notes" />
+    </colgroup>
     <thead>
       <tr>
-        <th>#</th>
+        <th class="center">#</th>
         <th>Hab.</th>
         <th>Camaje</th>
         <th>Hu&eacute;sped</th>
@@ -1533,10 +1573,10 @@ export default function GroupDetailPage() {
         <th>Notas</th>
       </tr>
     </thead>
-    <tbody>${rows}</tbody>
+    ${groups}
   </table>
   <div class="footer">
-    Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites &amp; Towers
+    Maran Suites &amp; Towers &mdash; Documento interno de uso operativo
   </div>
   <script>window.onload = function() { window.print(); };<\/script>
 </body>
@@ -1655,15 +1695,6 @@ export default function GroupDetailPage() {
           >
             <FileText className="mr-2 h-4 w-4" />
             {isLoadingInvoice ? "Cargando..." : "Resumen del Grupo"}
-          </Button>
-          
-          <Button
-            variant="outline"
-            onClick={() => setShowRoomingListDialog(true)}
-            data-testid="button-rooming-list"
-          >
-            <Printer className="mr-2 h-4 w-4" />
-            Imprimir Rooming List
           </Button>
         </div>
       </div>
@@ -2134,6 +2165,34 @@ export default function GroupDetailPage() {
                 </CardContent>
               </Card>
 
+              {/* ── Consultas (siempre visible, independiente de la config. de Folio Maestro) ── */}
+              <div className="flex justify-end">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" data-testid="button-folio-pdf">
+                      <FileDown className="h-4 w-4 mr-1" />
+                      Consultas
+                      <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {masterFolio.config !== "none" && (
+                      <DropdownMenuItem onClick={() => {
+                        const a = document.createElement("a");
+                        a.href = `/api/groups/${groupId}/master-folio/pdf`;
+                        a.download = `folio-maestro-${group?.name || groupId}.pdf`;
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                      }}>
+                        <FileDown className="h-4 w-4 mr-2" />Folio Maestro PDF
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => setShowRoomingListDialog(true)}>
+                      <Printer className="h-4 w-4 mr-2" />Rooming List
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
               {/* ══════════════════════════════════════════════════ */}
               {/* FOLIO MAESTRO — solo cuando config !== "none"      */}
               {/* ══════════════════════════════════════════════════ */}
@@ -2152,29 +2211,6 @@ export default function GroupDetailPage() {
                         <CardDescription>Lo que paga el organizador del grupo</CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
-                        {/* Bug 12: PDF dropdown consolidating all print options */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" data-testid="button-folio-pdf">
-                              <FileDown className="h-4 w-4 mr-1" />
-                              Consultas
-                              <ChevronDown className="h-3.5 w-3.5 ml-1" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => {
-                              const a = document.createElement("a");
-                              a.href = `/api/groups/${groupId}/master-folio/pdf`;
-                              a.download = `folio-maestro-${group?.name || groupId}.pdf`;
-                              document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                            }}>
-                              <FileDown className="h-4 w-4 mr-2" />Folio Maestro PDF
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setShowRoomingListDialog(true)}>
-                              <Printer className="h-4 w-4 mr-2" />Rooming List
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                         <Button
                           size="sm"
                           onClick={() => {
