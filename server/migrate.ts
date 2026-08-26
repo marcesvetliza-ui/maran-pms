@@ -18,6 +18,160 @@ async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): 
   }
 }
 
+export const FINANCIAL_SCHEMA_REQUIREMENTS = {
+  columns: {
+    account_movements: [
+      "id",
+      "entity_type",
+      "entity_id",
+      "date",
+      "type",
+      "description",
+      "amount",
+      "payment_method",
+      "group_payment_id",
+    ],
+    account_movement_allocations: ["id", "pago_id", "cargo_id", "amount"],
+    group_payments: [
+      "id",
+      "group_id",
+      "amount",
+      "method",
+      "date",
+      "reference",
+      "distribution",
+      "distribution_detail",
+      "payment_method_detail",
+      "destination",
+      "receiver_details",
+      "invoice_ref",
+    ],
+    payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
+  },
+  indexes: {
+    account_movements: [
+      "idx_account_movements_entity",
+      "account_movements_group_payment_id_idx",
+    ],
+    account_movement_allocations: [
+      "idx_account_movement_allocations_cargo",
+      "idx_account_movement_allocations_pago",
+    ],
+    group_payments: ["group_payments_group_id_idx"],
+    payments: ["payments_group_payment_id_idx"],
+  },
+} as const;
+
+export type FinancialSchemaStatus = {
+  ready: boolean;
+  checking?: boolean;
+  missingColumns: string[];
+  missingIndexes: string[];
+};
+
+let financialSchemaStatus: FinancialSchemaStatus | null = null;
+
+const financialSchemaErrorMessage = (status: FinancialSchemaStatus) => {
+  if (status.checking) {
+    return "El esquema financiero se está verificando. Espere a que termine el inicio antes de registrar cobros.";
+  }
+  const missing = [
+    ...status.missingColumns.map((item) => `columna ${item}`),
+    ...status.missingIndexes.map((item) => `índice ${item}`),
+  ];
+  return [
+    "El esquema financiero no está actualizado.",
+    `Faltan: ${missing.join(", ")}.`,
+    "Ejecute las migraciones y reinicie el servidor antes de habilitar cobros.",
+  ].join(" ");
+};
+
+/** Marks financial mutations as unavailable while startup migrations are running. */
+export function beginFinancialSchemaCheck() {
+  financialSchemaStatus = {
+    ready: false,
+    checking: true,
+    missingColumns: [],
+    missingIndexes: [],
+  };
+}
+
+export function getFinancialSchemaStatus(): FinancialSchemaStatus | null {
+  return financialSchemaStatus;
+}
+
+/**
+ * Protects financial mutations from running against an old production schema.
+ * Tests that register routes in isolation do not call beginFinancialSchemaCheck,
+ * so they can continue to provide their own storage/database setup.
+ */
+export function assertFinancialSchemaReady() {
+  if (financialSchemaStatus && !financialSchemaStatus.ready) {
+    const error = Object.assign(new Error(financialSchemaErrorMessage(financialSchemaStatus)), {
+      statusCode: 503,
+      code: "FINANCIAL_SCHEMA_NOT_READY",
+    });
+    throw error;
+  }
+}
+
+/**
+ * Verifies the live PostgreSQL catalog rather than trusting that an incremental
+ * migration returned successfully. Individual migration steps intentionally
+ * have timeouts, so this is the final gate that detects a skipped/blocked DDL.
+ */
+export async function verifyFinancialSchema(): Promise<FinancialSchemaStatus> {
+  const tableNames = Object.keys(FINANCIAL_SCHEMA_REQUIREMENTS.columns);
+  const columnRows = await db.execute(sql`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name IN (${sql.join(tableNames.map((tableName) => sql`${tableName}`), sql`, `)})
+  `);
+  const indexRows = await db.execute(sql`
+    SELECT tablename, indexname
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename IN (${sql.join(tableNames.map((tableName) => sql`${tableName}`), sql`, `)})
+  `);
+
+  const availableColumns = new Set(
+    (columnRows.rows as Array<{ table_name: string; column_name: string }>)
+      .map((row) => `${row.table_name}.${row.column_name}`),
+  );
+  const availableIndexes = new Set(
+    (indexRows.rows as Array<{ tablename: string; indexname: string }>)
+      .map((row) => `${row.tablename}.${row.indexname}`),
+  );
+
+  const missingColumns = Object.entries(FINANCIAL_SCHEMA_REQUIREMENTS.columns)
+    .flatMap(([tableName, columns]) =>
+      columns
+        .filter((columnName) => !availableColumns.has(`${tableName}.${columnName}`))
+        .map((columnName) => `${tableName}.${columnName}`),
+    );
+  const missingIndexes = Object.entries(FINANCIAL_SCHEMA_REQUIREMENTS.indexes)
+    .flatMap(([tableName, indexes]) =>
+      indexes
+        .filter((indexName) => !availableIndexes.has(`${tableName}.${indexName}`))
+        .map((indexName) => `${tableName}.${indexName}`),
+    );
+
+  financialSchemaStatus = {
+    ready: missingColumns.length === 0 && missingIndexes.length === 0,
+    missingColumns,
+    missingIndexes,
+  };
+
+  if (financialSchemaStatus.ready) {
+    logger.info("Esquema financiero verificado: cobros maestros y Cuenta Corriente habilitados.");
+  } else {
+    logger.error(`[startup] ${financialSchemaErrorMessage(financialSchemaStatus)}`);
+  }
+
+  return financialSchemaStatus;
+}
+
 export async function runMigrations() {
   // In production Railway uses PgBouncer (connection pooling). Drizzle's migrate()
   // issues DDL commands (CREATE SCHEMA, advisory locks) that are incompatible with
@@ -853,6 +1007,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("account_movements.payment_method", T, () =>
     db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
   );
+  await withTimeout("account_movement_allocations.idx_pago", T, () =>
+    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movement_allocations_pago ON account_movement_allocations(pago_id)`)
+  );
 
   // Credit notes for reservation folios are persisted before ARCA authorization.
   // The reconciliation fields make a post-authorization Folio correction
@@ -1388,6 +1545,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ON account_movements (group_payment_id);
     `)
   );
+  await withTimeout("group_payments.group_id_idx", T, () =>
+    db.execute(sql`CREATE INDEX IF NOT EXISTS group_payments_group_id_idx ON group_payments(group_id)`)
+  );
+  await withTimeout("payments.group_payment_id_idx", T, () =>
+    db.execute(sql`CREATE INDEX IF NOT EXISTS payments_group_payment_id_idx ON payments(group_payment_id)`)
+  );
 
   // invoice_nc_ref on group_payments: JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
   await withTimeout("group_payments.invoice_nc_ref", T, () =>
@@ -1632,6 +1795,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       )
     `)
   );
+
+  const financialSchema = await verifyFinancialSchema();
+  if (!financialSchema.ready) {
+    throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
+      code: "FINANCIAL_SCHEMA_NOT_READY",
+    });
+  }
 
   logger.info("Migraciones incrementales completadas.");
 }

@@ -144,6 +144,8 @@ app.use((req, res, next) => {
 (async () => {
   // ── 1. Register API routes ───────────────────────────────────────────────
   //    Port is already open (listen called at top of file). Just register routes.
+  const { beginFinancialSchemaCheck, runMigrations } = await import("./migrate");
+  beginFinancialSchemaCheck();
   await registerRoutes(httpServer, app);
 
   // ── 2. Global error handler ──────────────────────────────────────────────
@@ -190,8 +192,15 @@ app.use((req, res, next) => {
       }
     }
 
-    const { runMigrations } = await import("./migrate");
-    await runMigrations();
+    try {
+      await runMigrations();
+    } catch (err: any) {
+      logger.error(
+        "[startup] Cobros maestros y Cuenta Corriente deshabilitados por un esquema incompleto.",
+        err,
+      );
+      return;
+    }
 
     const { seedDatabase, refreshRealData } = await import("./seed");
     await mig("seedDatabase", seedDatabase);

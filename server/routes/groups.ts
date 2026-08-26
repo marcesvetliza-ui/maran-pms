@@ -8,6 +8,7 @@ import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
 import { assertGroupPaymentInvoiceScope, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
+import { assertFinancialSchemaReady } from "../migrate";
 
 function distributeCents(
   totalCents: number,
@@ -1241,6 +1242,7 @@ export function registerGroupsRoutes(app: Express) {
 
   app.post("/api/groups/:groupId/payment/v2", requireAuth, async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const { amount, method, date, reference, distribution, distributionDetail, notes } = req.body;
       if (!amount || !method) {
         return res.status(400).json({ error: "amount y method son requeridos" });
@@ -1486,6 +1488,7 @@ export function registerGroupsRoutes(app: Express) {
   // POST master payment — pays the master folio, distributes to individual rooms
   app.post("/api/groups/:groupId/master-payment", requireAuth, async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
 
@@ -1610,6 +1613,7 @@ export function registerGroupsRoutes(app: Express) {
   // ─── DELETE NON-INVOICED MASTER FOLIO PAYMENT ────────────────────────────────
   app.delete("/api/groups/:groupId/master-payments/:paymentId", requireAuth, async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const { groupId, paymentId } = req.params;
       const gp = await db.transaction(async (tx) => {
         const [payment] = await tx.select()

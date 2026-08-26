@@ -11,6 +11,7 @@ import { requireAuth, requireRole } from "../auth";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
 import { assertGroupInvoiceAllocation, assertGroupPaymentInvoiceEligibility } from "./groupInvoiceScope";
+import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 
@@ -742,6 +743,7 @@ export function registerBillingRoutes(app: Express) {
       if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
         return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
       }
+      if (cashFormaPago === "cuenta_corriente") assertFinancialSchemaReady();
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
@@ -911,23 +913,19 @@ export function registerBillingRoutes(app: Express) {
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
       if (cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        try {
-          const total = parseFloat(String((factura as any).montoTotal || "0"));
-          if (total > 0) {
-            const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
-            await storage.createAccountMovement({
-              entityType: ccEntityType,
-              entityId: ccEntityId,
-              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-              type: "cargo",
-              description: cashLabelBody || nroFac,
-              amount: String(total.toFixed(2)),
-              reference: nroFac,
-              createdBy: user?.id || null,
-            } as any);
-          }
-        } catch (ccErr) {
-          console.error("[Billing] Error registrando movimiento de Cuenta Corriente:", ccErr);
+        const total = parseFloat(String((factura as any).montoTotal || "0"));
+        if (total > 0) {
+          const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
+          await storage.createAccountMovement({
+            entityType: ccEntityType,
+            entityId: ccEntityId,
+            date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+            type: "cargo",
+            description: cashLabelBody || nroFac,
+            amount: String(total.toFixed(2)),
+            reference: nroFac,
+            createdBy: user?.id || null,
+          } as any);
         }
       } else if (cashArea && cashFormaPago) {
         // Registrar movimiento de caja si se especificó un área
@@ -954,8 +952,9 @@ export function registerBillingRoutes(app: Express) {
 
       res.status(201).json(factura);
     } catch (e: any) {
-      if (e instanceof FolioInvoiceValidationError || Number(e?.status) >= 400) {
-        return res.status(e.status || 400).json({ error: e.message });
+      const status = e?.statusCode || e?.status;
+      if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
+        return res.status(status || 400).json({ error: e.message });
       }
       res.status(500).json({ error: e.message });
     }

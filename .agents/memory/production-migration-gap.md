@@ -9,3 +9,10 @@ description: Why a table/column can exist in dev but not in the real Railway pro
 **Why:** A table or column added via the schema (`shared/schema.ts`) and even present in the baseline `migrations/0000_*.sql` file can still be completely missing in production if it was never *also* added as an idempotent statement in the incremental block. This caused `account_movements` / `account_movement_allocations` to not exist on Railway at all, even though the code, the deploy, and the dev DB all looked correct — the API endpoint threw "relation does not exist" (500), and since the frontend query didn't check `res.ok`, it silently rendered as a $0.00 balance instead of an error.
 
 **How to apply:** Whenever you add or change a table/column in `shared/schema.ts`, ALSO add a matching idempotent `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ADD COLUMN IF NOT EXISTS` to the incremental block at the bottom of `server/migrate.ts`. Never assume "it's in the migrations folder" is enough — that folder is dev-only in this project. Also: any query that silently swallows a fetch error (`res.json()` without checking `res.ok`) can mask a production-only 500 as a plausible-looking zero/empty value — always surface fetch errors in the UI instead of defaulting silently.
+
+## Financial schema readiness
+For master-payment and Cuenta Corriente changes, verify the live PostgreSQL catalog after incremental migrations and keep financial mutations unavailable until the check passes.
+
+**Why:** The incremental DDL steps are intentionally best-effort and time-bounded so a database lock cannot prevent startup. A timed-out or skipped statement would otherwise leave the server accepting a collection, allocation, or reversal that references a missing column or index.
+
+**How to apply:** Treat a successfully started server as insufficient proof that financial migrations completed. Confirm the live database catalog after startup, identify the missing object in operational logs, and prevent money-changing endpoints from proceeding until the current schema is confirmed.

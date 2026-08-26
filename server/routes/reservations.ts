@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { assetPath } from "../utils/assetPath";
 import { storage, getArgentinaToday } from "../db-storage";
+import { assertFinancialSchemaReady } from "../migrate";
 import { db } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
@@ -2309,6 +2310,7 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/payments", async (req, res) => {
     try {
+      if (req.body.method === "cuenta_corriente") assertFinancialSchemaReady();
       // Prefactura emits the invoice before recording its payment. Persist the
       // invoice reference with the payment creation itself instead of relying
       // on a later best-effort PATCH that could leave an orphaned payment.
@@ -2443,7 +2445,9 @@ export function registerReservationsRoutes(app: Express) {
       );
       res.status(201).json(payment);
     } catch (error) {
-      res.status(500).json({ error: "Error creating payment" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error creating payment",
+      });
     }
   });
 

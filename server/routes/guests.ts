@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
+import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
@@ -394,6 +395,7 @@ export function registerGuestsRoutes(app: Express) {
 
   app.post("/api/guests/:id/account/payment", async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const guest = await storage.getGuest(req.params.id);
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
       const { description, reference, date } = req.body;
@@ -419,7 +421,9 @@ export function registerGuestsRoutes(app: Express) {
       if (isAccountPaymentValidationError(error)) {
         return res.status(400).json({ error: error.message });
       }
-      res.status(500).json({ error: "Error registering payment" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error registering payment",
+      });
     }
   });
 
@@ -533,6 +537,7 @@ export function registerGuestsRoutes(app: Express) {
 
   app.post("/api/companies/:id/account/payment", async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const company = await storage.getCompany(req.params.id);
       if (!company) {
         return res.status(404).json({ error: "Empresa no encontrada" });
@@ -559,12 +564,15 @@ export function registerGuestsRoutes(app: Express) {
       if (isAccountPaymentValidationError(error)) {
         return res.status(400).json({ error: error.message });
       }
-      res.status(500).json({ error: "Error registering payment" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error registering payment",
+      });
     }
   });
 
   app.post("/api/agencies/:id/account/payment", async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const agency = await storage.getAgency(req.params.id);
       if (!agency) {
         return res.status(404).json({ error: "Agencia no encontrada" });
@@ -591,7 +599,9 @@ export function registerGuestsRoutes(app: Express) {
       if (isAccountPaymentValidationError(error)) {
         return res.status(400).json({ error: error.message });
       }
-      res.status(500).json({ error: "Error registering payment" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error registering payment",
+      });
     }
   });
 

@@ -151,6 +151,7 @@ import {
   inventoryCounts,
   inventoryCountItems,
 } from "@shared/schema";
+import { assertFinancialSchemaReady } from "./migrate";
 
 export class DatabaseStorage implements IStorage {
 
@@ -1687,6 +1688,7 @@ export class DatabaseStorage implements IStorage {
     billingEntityId?: string | null;
     receiverDetails?: Record<string, string | undefined> | null;
   }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }> {
+    assertFinancialSchemaReady();
     const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
     const cents = (value: number | string) => Math.round((parseFloat(String(value)) || 0) * 100);
     const splitAcrossCapacities = (total: number, capacities: number[]) => {
@@ -5682,6 +5684,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement> {
+    assertFinancialSchemaReady();
     const [created] = await db.insert(accountMovements).values(data as any).returning();
     return created;
   }
@@ -5726,6 +5729,7 @@ export class DatabaseStorage implements IStorage {
     data: { date: string; description: string; amount: string; reference: string | null; paymentMethod?: string | null; retentions: AccountRetention[] | null; createdBy: string | null; guestName?: string | null },
     allocations: { cargoId: string; amount: string }[]
   ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }> {
+    assertFinancialSchemaReady();
     return await db.transaction(async (tx) => {
       const validationError = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
       const paymentAmount = Math.abs(parseFloat(data.amount));

@@ -7,6 +7,7 @@ import { restaurantOrders, orderItems, menuItems, menuCategories, recipes, recip
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
+import { assertFinancialSchemaReady } from "../migrate";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -330,6 +331,7 @@ export function registerRestaurantRoutes(app: Express) {
       const hasRoomChargeSplits = Array.isArray(paymentSplits) && paymentSplits.some((s: any) => s.method === "cuenta_habitacion");
       const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || effectivePrimaryMethod === "cuenta_habitacion" || hasRoomChargeSplits;
       const effectivePaymentMethod = isRoomCharge && effectivePrimaryMethod === "cuenta_habitacion" ? "room_charge" : effectivePrimaryMethod;
+      if (effectivePrimaryMethod === "cuenta_corriente") assertFinancialSchemaReady();
 
       let finalTotal = parseFloat(order.total || "0");
       let discountAmount = 0;
@@ -464,20 +466,16 @@ export function registerRestaurantRoutes(app: Express) {
 
       // Si es cuenta corriente y hay entidad especificada, crear movimiento CC
       if (effectivePrimaryMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        try {
-          const today = new Date().toISOString().split("T")[0];
-          const label = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
-          await storage.createAccountMovement({
-            entityType: ccEntityType as "company" | "agency",
-            entityId: ccEntityId,
-            date: today,
-            type: "cargo",
-            description: label,
-            amount: String(finalTotal.toFixed(2)),
-          });
-        } catch (e) {
-          console.error("Error creando movimiento CC para restaurant:", e);
-        }
+        const today = new Date().toISOString().split("T")[0];
+        const label = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
+        await storage.createAccountMovement({
+          entityType: ccEntityType as "company" | "agency",
+          entityId: ccEntityId,
+          date: today,
+          type: "cargo",
+          description: label,
+          amount: String(finalTotal.toFixed(2)),
+        });
       }
 
       // Mark reservation advances as applied to this order
@@ -635,7 +633,9 @@ export function registerRestaurantRoutes(app: Express) {
         return res.json({ ...updatedOrder, invoiceId, cfGuestId });
       }
     } catch (error) {
-      res.status(500).json({ error: "Error closing order" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error closing order",
+      });
     }
   });
 
@@ -1038,6 +1038,7 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(400).json({ error: "Seleccioná al menos un ítem" });
       }
       if (!method) return res.status(400).json({ error: "Método de pago requerido" });
+      if (method === "cuenta_corriente") assertFinancialSchemaReady();
 
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Orden no encontrada" });
@@ -1079,20 +1080,16 @@ export function registerRestaurantRoutes(app: Express) {
 
       // If CC: account movement
       if (method === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        try {
-          await storage.createAccountMovement({
-            entityType: ccEntityType,
-            entityId: ccEntityId,
-            date: new Date().toISOString().split("T")[0],
-            type: "cargo",
-            description: `Restaurante — Pedido ${order.orderNumber} (pago parcial)`,
-            amount,
-            reference: `Orden: ${order.orderNumber}`,
-            createdBy: (req as any).user?.id || null,
-          } as any);
-        } catch (e) {
-          console.error("[pay-items] CC movement:", e);
-        }
+        await storage.createAccountMovement({
+          entityType: ccEntityType,
+          entityId: ccEntityId,
+          date: new Date().toISOString().split("T")[0],
+          type: "cargo",
+          description: `Restaurante — Pedido ${order.orderNumber} (pago parcial)`,
+          amount,
+          reference: `Orden: ${order.orderNumber}`,
+          createdBy: (req as any).user?.id || null,
+        } as any);
       }
 
       // If room charge
@@ -1173,7 +1170,9 @@ export function registerRestaurantRoutes(app: Express) {
       res.json({ allPaid, invoiceId, amount, remainingTotal: newTotal.toFixed(2) });
     } catch (error) {
       console.error("[pay-items] Error:", error);
-      res.status(500).json({ error: "Error al procesar pago por ítems" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error al procesar pago por ítems",
+      });
     }
   });
 

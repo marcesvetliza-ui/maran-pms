@@ -3,6 +3,7 @@ import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { verifyFinancialSchema } from "../migrate";
 
 /**
  * This suite intentionally does not mock db-storage or db. It exercises the
@@ -294,6 +295,15 @@ runIfDatabaseIsConfigured("PostgreSQL real: master payment reversal vs current-a
   beforeAll(async () => {
     if (!testPool) return;
     ({ storage } = await import("../db-storage"));
+    const financialSchema = await verifyFinancialSchema();
+    expect(
+      financialSchema,
+      "La base de datos debe tener todas las columnas e índices requeridos por cobros maestros y Cuenta Corriente.",
+    ).toMatchObject({
+      ready: true,
+      missingColumns: [],
+      missingIndexes: [],
+    });
     const requiredColumns = await testPool.query<{ table_name: string; column_name: string }>(
       `SELECT table_name, column_name
        FROM information_schema.columns
@@ -345,6 +355,15 @@ runIfDatabaseIsConfigured("PostgreSQL real: master payment reversal vs current-a
     await testPool?.end();
     const { pool } = await import("../db");
     await pool.end();
+  });
+
+  it("has every required column and index for master payments and Cuenta Corriente", async () => {
+    const financialSchema = await verifyFinancialSchema();
+    expect(financialSchema).toEqual({
+      ready: true,
+      missingColumns: [],
+      missingIndexes: [],
+    });
   });
 
   it("keeps the ledger consistent when allocation is queued behind reversal", async () => {
