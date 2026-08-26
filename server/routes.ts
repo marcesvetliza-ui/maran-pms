@@ -2796,13 +2796,17 @@ export async function registerRoutes(
       // ─────────────────────────────────────────────────────────────────────
 
       // Calcular montoTotal
+      // Las retenciones cargadas en el comprobante son retenciones que nos hicieron a nosotros
+      // (p.ej. en una Liquidación de Tarjetas), no retenciones que nosotros aplicamos a un
+      // proveedor — por lo tanto suman al total del comprobante. La retención solo resta al
+      // momento de generar la Orden de Pago, que es cuando el hotel efectivamente la aplica.
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
         n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
         n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
         n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
-        n("retencionIva") - n("retencionSuss");
+        n("percepcionGanancias") + n("retencionIibb") + n("retencionGanancias") +
+        n("retencionIva") + n("retencionSuss");
 
       // Estado según condición de pago
       const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
@@ -2925,13 +2929,14 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes o de contado" });
       }
       const body = req.body;
+      // Ídem creación: la retención suma en el comprobante, solo resta en la Orden de Pago.
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
         n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
         n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
         n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
-        n("retencionIva") - n("retencionSuss");
+        n("percepcionGanancias") + n("retencionIibb") + n("retencionGanancias") +
+        n("retencionIva") + n("retencionSuss");
       const result = await db.execute(sql`
         UPDATE purchase_invoices SET
           monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},

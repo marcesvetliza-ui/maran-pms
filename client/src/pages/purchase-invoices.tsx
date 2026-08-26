@@ -465,13 +465,17 @@ function InvoiceDialog({
     }
   };
 
+  // Las retenciones cargadas en un comprobante son retenciones que nos hicieron a nosotros
+  // (no que nosotros aplicamos), por lo tanto suman al total del comprobante, no restan.
+  // La retención solo resta al momento de generar la Orden de Pago (ahí sí es una retención
+  // que el hotel aplica al proveedor).
   const total = useMemo(() => {
     return (
       $n(form.montoNeto) + $n(form.montoIva21) + $n(form.montoIva105) + $n(form.montoIva27) +
       $n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoExento) + $n(form.montoNoGravado) +
       $n(form.impuestosInternos) + $n(form.ley25413) + $n(form.percepcionIibb) +
-      $n(form.percepcionIva) + $n(form.percepcionGanancias) -
-      $n(form.retencionIibb) - $n(form.retencionGanancias) - $n(form.retencionIva) - $n(form.retencionSuss)
+      $n(form.percepcionIva) + $n(form.percepcionGanancias) +
+      $n(form.retencionIibb) + $n(form.retencionGanancias) + $n(form.retencionIva) + $n(form.retencionSuss)
     );
   }, [form]);
 
