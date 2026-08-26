@@ -2223,25 +2223,25 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              {(inv.estado === "pendiente" || (inv.estado === "pagado" && inv.condicionPago === "contado")) && (
+                                <Button
+                                  variant="ghost" size="icon"
+                                  onClick={() => setEditingInvoice(inv)}
+                                  title="Editar"
+                                  data-testid={`btn-edit-invoice-${inv.id}`}
+                                >
+                                  <Pencil className="h-4 w-4 text-muted-foreground" />
+                                </Button>
+                              )}
                               {inv.estado === "pendiente" && (
-                                <>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    onClick={() => setEditingInvoice(inv)}
-                                    title="Editar"
-                                    data-testid={`btn-edit-invoice-${inv.id}`}
-                                  >
-                                    <Pencil className="h-4 w-4 text-muted-foreground" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    onClick={() => setAnularId(inv.id)}
-                                    title="Anular"
-                                    data-testid={`btn-anular-invoice-${inv.id}`}
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
-                                </>
+                                <Button
+                                  variant="ghost" size="icon"
+                                  onClick={() => setAnularId(inv.id)}
+                                  title="Anular"
+                                  data-testid={`btn-anular-invoice-${inv.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
                               )}
                             </div>
                           </TableCell>

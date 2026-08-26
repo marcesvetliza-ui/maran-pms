@@ -2914,10 +2914,15 @@ export async function registerRoutes(
   app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const existing = await db.execute(sql`SELECT estado FROM purchase_invoices WHERE id = ${id}`);
+      const existing = await db.execute(sql`SELECT estado, condicion_pago FROM purchase_invoices WHERE id = ${id}`);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
-      if ((existing.rows[0] as any).estado !== "pendiente") {
-        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
+      const existingRow = existing.rows[0] as any;
+      // Editables: comprobantes pendientes (cuenta corriente sin pagar) o de contado
+      // (que quedan "pagado" al cargarse, sin OP asociada). Los pagados vía OP quedan bloqueados
+      // porque ya están reconciliados con una Orden de Pago y su asiento contable.
+      const editable = existingRow.estado === "pendiente" || (existingRow.estado === "pagado" && existingRow.condicion_pago === "contado");
+      if (!editable) {
+        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes o de contado" });
       }
       const body = req.body;
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
