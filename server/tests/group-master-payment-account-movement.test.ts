@@ -27,7 +27,23 @@ const state: LedgerState = {
   nextId: 0,
 };
 
-let executeCount = 0;
+let cargoLocked = false;
+let releaseCargoLock: (() => void) | null = null;
+
+async function acquireCargoLock() {
+  while (cargoLocked) {
+    await new Promise<void>((resolve) => {
+      releaseCargoLock = resolve;
+    });
+  }
+  cargoLocked = true;
+}
+
+function releaseLock() {
+  cargoLocked = false;
+  releaseCargoLock?.();
+  releaseCargoLock = null;
+}
 
 function nextId(prefix: string) {
   state.nextId += 1;
@@ -43,24 +59,52 @@ function queryResult(rows: any[]) {
 }
 
 function makeTransaction() {
-  let selectCount = 0;
+  let transactionExecuteCount = 0;
+  let ownsCargoLock = false;
   let deleteCount = 0;
 
   return {
     execute: async () => {
-      executeCount += 1;
-      if (executeCount === 1) return { rows: [{ id: GROUP_ID }] };
+      transactionExecuteCount += 1;
+
+      if (transactionExecuteCount === 1) {
+        if (!state.groupPayment) return { rows: [{ id: GROUP_ID }] };
+
+        // Both the allocation and reversal paths use this same simulated
+        // row lock. The reversal is distinguished from the group-payment
+        // balance query by the fact that a group payment already exists.
+        await acquireCargoLock();
+        ownsCargoLock = true;
+        return {
+          rows: state.accountMovements
+            .filter((movement) => movement.type === "cargo")
+            .map(({ id, amount }) => ({ id, amount })),
+        };
+      }
+
+      if (!state.groupPayment) {
+        return {
+          rows: [{
+            accommodation: "0",
+            group_charges: "10.01",
+            extras: "0",
+            master_parent_paid: "0",
+            direct_all_paid: "0",
+            direct_accommodation_paid: "0",
+            config: "accommodation",
+          }],
+        };
+      }
 
       return {
-        rows: [{
-          accommodation: "0",
-          group_charges: "10.01",
-          extras: "0",
-          master_parent_paid: "0",
-          direct_all_paid: "0",
-          direct_accommodation_paid: "0",
-          config: "accommodation",
-        }],
+        rows: state.accountMovementAllocations.length > 0
+          ? [{
+              cargo_id: state.accountMovementAllocations[0].cargoId,
+              allocated: state.accountMovementAllocations
+                .reduce((sum, allocation) => sum + Number(allocation.amount), 0)
+                .toFixed(2),
+            }]
+          : [],
       };
     },
     insert: (_table: unknown) => ({
@@ -98,16 +142,15 @@ function makeTransaction() {
       },
     }),
     select: () => ({
-      from: (_table: unknown) => ({
+      from: (table: unknown) => ({
         where: () => {
-          selectCount += 1;
-          if (selectCount === 1) {
+          if (table === groupPayments) {
             return queryResult(state.groupPayment ? [state.groupPayment] : []);
           }
-          if (selectCount === 2) {
+          if (table === accountMovements) {
             return queryResult(state.accountMovements.filter((movement) => movement.groupPaymentId));
           }
-          if (selectCount === 3) {
+          if (table === accountMovementAllocations) {
             return queryResult(state.accountMovementAllocations);
           }
           return queryResult([]);
@@ -126,13 +169,18 @@ function makeTransaction() {
         }
       },
     }),
+    ownsCargoLock: () => ownsCargoLock,
   };
 }
 
 const fakeDb = {
   transaction: async (callback: (tx: ReturnType<typeof makeTransaction>) => Promise<unknown>) => {
-    executeCount = 0;
-    return callback(makeTransaction());
+    const transaction = makeTransaction();
+    try {
+      return await callback(transaction);
+    } finally {
+      if (transaction.ownsCargoLock()) releaseLock();
+    }
   },
 };
 
@@ -207,6 +255,8 @@ describe("group master payment and current-account reversal", () => {
     state.accountMovementAllocations = [];
     state.payments = [];
     state.nextId = 0;
+    cargoLocked = false;
+    releaseCargoLock = null;
   });
 
   it("keeps mixed master receipts and current-account cargos in sync when reversing", async () => {
@@ -259,6 +309,55 @@ describe("group master payment and current-account reversal", () => {
       expect(state.accountMovements).toEqual([cargo]);
     } finally {
       appWithAppliedCargo.close();
+    }
+  });
+
+  it("serializes a concurrent current-account allocation and reversal", async () => {
+    const groupPayment = await recordMixedMasterPayment();
+    const cargo = state.accountMovements[0];
+    const app = await startApp();
+
+    try {
+      const { storage } = await import("../db-storage");
+      const allocationResult = storage.createPaymentWithAllocations(
+        "company",
+        COMPANY_ID,
+        {
+          date: "2026-08-26",
+          description: "Imputación concurrente",
+          amount: "-4.01",
+          reference: null,
+          paymentMethod: "transferencia",
+          retentions: null,
+          createdBy: null,
+        },
+        [{ cargoId: cargo.id, amount: "4.01" }],
+      );
+      const reversalResult = deleteMasterPayment(app.baseUrl, groupPayment.id);
+      const [allocation, reversal] = await Promise.allSettled([allocationResult, reversalResult]);
+
+      const allocationSucceeded = allocation.status === "fulfilled";
+      const reversalSucceeded =
+        reversal.status === "fulfilled" && reversal.value.status === 200;
+      expect(Number(allocationSucceeded) + Number(reversalSucceeded)).toBe(1);
+
+      if (reversalSucceeded) {
+        expect(allocation.status).toBe("rejected");
+        expect(state.groupPayment).toBeNull();
+        expect(state.accountMovements).toEqual([]);
+        expect(state.accountMovementAllocations).toEqual([]);
+      } else {
+        expect(allocation.status).toBe("fulfilled");
+        expect(reversal).toMatchObject({
+          status: "fulfilled",
+          value: { status: 409 },
+        });
+        expect(state.groupPayment).toMatchObject({ id: groupPayment.id });
+        expect(state.accountMovements).toEqual([cargo]);
+        expect(state.accountMovementAllocations).toHaveLength(1);
+      }
+    } finally {
+      app.close();
     }
   });
 });

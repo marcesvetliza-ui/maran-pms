@@ -1564,10 +1564,21 @@ export function registerGroupsRoutes(app: Express) {
           throw Object.assign(new Error("No se puede eliminar un pago con factura electrónica emitida. Emita una Nota de Crédito en su lugar."), { statusCode: 400 });
         }
 
-        const ccCargos = await tx.select({ id: accountMovementsTable.id })
-          .from(accountMovementsTable)
-          .where(eq(accountMovementsTable.groupPaymentId, paymentId));
-        const cargoIds = ccCargos.map((cargo) => cargo.id);
+        // Serialize this reversal with Cuenta Corriente allocations. The
+        // allocation path locks the cargo rows before checking their balance;
+        // the reversal must acquire those same locks before looking for
+        // allocations or deleting the cargos. Whichever transaction gets the
+        // lock first therefore leaves the other with a safe, consistent
+        // outcome.
+        const lockedCargos = await tx.execute(sql`
+          SELECT id
+          FROM account_movements
+          WHERE group_payment_id = ${paymentId}
+            AND type = 'cargo'
+          ORDER BY id
+          FOR UPDATE
+        `);
+        const cargoIds = (lockedCargos.rows as Array<{ id: string }>).map((cargo) => cargo.id);
         if (cargoIds.length > 0) {
           const [settledCargo] = await tx.select({ id: accountMovementAllocations.id })
             .from(accountMovementAllocations)
