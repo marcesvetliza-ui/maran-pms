@@ -2664,6 +2664,7 @@ export default function GroupDetailPage() {
                                           return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4, "0")}-${String(ref.numero ?? "").padStart(8, "0")}`;
                                         } catch { return null; }
                                       })();
+                                      const retLabel = p.retention?.tipo === "iibb" ? "Ret. IIBB" : p.retention?.tipo === "ganancias" ? "Ret. Ganancias" : p.retention?.tipo ? `Ret. ${p.retention.tipo}` : null;
                                       return (
                                         <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
                                           <div className="flex items-center gap-2 flex-wrap">
@@ -2672,6 +2673,11 @@ export default function GroupDetailPage() {
                                             {invoiceBadge && (
                                               <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-xs font-mono">
                                                 {invoiceBadge}
+                                              </Badge>
+                                            )}
+                                            {retLabel && p.retention && (
+                                              <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400" data-testid={`badge-retention-${p.id}`}>
+                                                {retLabel}: ${p.retention.monto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                                               </Badge>
                                             )}
                                           </div>
@@ -2992,12 +2998,23 @@ export default function GroupDetailPage() {
                       {res.payments.length > 0 && (
                         <div className="pl-4 border-l-2 border-green-500 space-y-1">
                           <p className="text-muted-foreground">Pagos:</p>
-                          {res.payments.map((p: any, i: number) => (
-                            <div key={i} className="flex justify-between text-green-600">
-                              <span>{p.method} {p.reference && `(${p.reference})`}</span>
-                              <span>-${fmtMoney(p.amount)}</span>
-                            </div>
-                          ))}
+                          {res.payments.map((p: any, i: number) => {
+                            const retLabel = p.retention?.tipo === "iibb" ? "Ret. IIBB" : p.retention?.tipo === "ganancias" ? "Ret. Ganancias" : p.retention?.tipo ? `Ret. ${p.retention.tipo}` : null;
+                            return (
+                              <div key={i}>
+                                <div className="flex justify-between text-green-600">
+                                  <span>{p.method} {p.reference && `(${p.reference})`}</span>
+                                  <span>-${fmtMoney(p.amount)}</span>
+                                </div>
+                                {retLabel && p.retention && (
+                                  <div className="flex justify-between text-amber-600 text-xs pl-2">
+                                    <span>↳ {retLabel}</span>
+                                    <span>${fmtMoney(p.retention.monto)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                           <div className="flex justify-between font-medium text-green-600">
                             <span>Total pagos</span>
                             <span>-${fmtMoney(res.paymentsTotal)}</span>

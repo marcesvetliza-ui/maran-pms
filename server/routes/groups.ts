@@ -10,6 +10,23 @@ import PDFDocument from "pdfkit";
 import { assertGroupPaymentInvoiceScope, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
 import { assertFinancialSchemaReady } from "../migrate";
 
+// A retención (IIBB/Ganancias) withheld by the payer is persisted on the
+// room-level payment's notes as { retencion: { tipo, monto, neto } } — the
+// same shape the single-reservation billing flow writes. Every group view
+// that lists individual payments must parse and surface it, or the withheld
+// amount stays invisible outside the database.
+function parsePaymentRetention(notes: unknown): { tipo: string; monto: number } | null {
+  if (!notes) return null;
+  try {
+    const parsed = typeof notes === "string" ? JSON.parse(notes) : notes;
+    const ret = (parsed as any)?.retencion;
+    if (!ret || !Number(ret.monto)) return null;
+    return { tipo: String(ret.tipo || ""), monto: Number(ret.monto) || 0 };
+  } catch {
+    return null;
+  }
+}
+
 function distributeCents(
   totalCents: number,
   entries: Array<{ id: string; weight: number }>
@@ -874,6 +891,7 @@ export function registerGroupsRoutes(app: Express) {
             amount: parseFloat(p.amount),
             date: p.date,
             reference: p.reference,
+            retention: parsePaymentRetention(p.notes),
           })),
           paymentsTotal: line.paymentsTotal,
           balance: totalCost - line.paymentsTotal,
@@ -1475,6 +1493,7 @@ export function registerGroupsRoutes(app: Express) {
             method: p.method,
             invoiceRef: p.invoiceRef ?? null,
             date: p.date,
+            retention: parsePaymentRetention(p.notes),
           })),
           // balance that remains on the individual folio
           individualBalance: config === "accommodation"
@@ -1877,6 +1896,7 @@ export function registerGroupsRoutes(app: Express) {
           invoiceRef: (p as any).invoiceRef ?? null,
           date: p.date || null,
           status: (p as any).status || null,
+          retention: parsePaymentRetention((p as any).notes),
         }));
         roomRows.push({
           guestName: line.guestName || "Sin asignar",
@@ -1898,6 +1918,8 @@ export function registerGroupsRoutes(app: Express) {
       const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
       const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
+      const masterRetentionsTotal = roomRows.reduce((sum: number, row: any) =>
+        sum + row.individualPayments.reduce((s: number, p: any) => s + (p.retention?.monto || 0), 0), 0);
 
       // Generate PDF
       const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -2048,6 +2070,17 @@ export function registerGroupsRoutes(app: Express) {
               .text(`$${pmt.amount.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
             doc.fillColor("#000000");
             y += 12;
+
+            // Retención (IIBB/Ganancias) withheld by the payer on this payment
+            if (pmt.retention && pmt.retention.monto > 0) {
+              if (y > 740) { doc.addPage(); y = 40; }
+              const retLabel = pmt.retention.tipo === "iibb" ? "Ret. IIBB" : pmt.retention.tipo === "ganancias" ? "Ret. Ganancias" : `Ret. ${pmt.retention.tipo}`;
+              doc.fontSize(7.2).font("Helvetica-Oblique").fillColor("#b45309")
+                .text(`    ↳ ${retLabel}`, 90, y, { width: 300 })
+                .text(`$${pmt.retention.monto.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });
+              doc.fillColor("#000000");
+              y += 11;
+            }
           }
           y += 2;
         } else {
@@ -2113,6 +2146,7 @@ export function registerGroupsRoutes(app: Express) {
         ...(groupChargesTotal > 0 ? [["Cargos grupales", `$${groupChargesTotal.toLocaleString("es-AR")}`]] : []),
         ["TOTAL DETALLE DE CUENTA", `$${masterTotal.toLocaleString("es-AR")}`],
         ["Pagado", `$${masterPaid.toLocaleString("es-AR")}`],
+        ...(masterRetentionsTotal > 0 ? [["Retenciones (IIBB/Ganancias)", `$${masterRetentionsTotal.toLocaleString("es-AR")}`]] : []),
         ...(voidMovementsTotal > 0 ? [["Anulaciones (NC)", `$${voidMovementsTotal.toLocaleString("es-AR")}`]] : []),
         ["SALDO PENDIENTE", `$${masterBalance.toLocaleString("es-AR")}`],
       ];

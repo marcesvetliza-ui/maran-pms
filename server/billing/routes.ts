@@ -1103,6 +1103,30 @@ export function registerBillingRoutes(app: Express) {
             retenciones = { iibb: retIibb, ganancias: retGanancias, iva: retIva };
           }
         } catch { /* non-fatal — guest data is optional */ }
+      } else if (factura.group_id && factura.group_payment_id) {
+        // Group invoices carry no reserva_id, so the retención withheld by
+        // the payer must be read from the room-level payments allocated
+        // under this invoice's group payment (same { retencion } shape).
+        try {
+          const pmtRows = await db.execute(
+            sql`SELECT notes FROM payments WHERE group_payment_id = ${factura.group_payment_id}`
+          );
+          let retIibb = 0, retGanancias = 0, retIva = 0;
+          for (const p of pmtRows.rows as any[]) {
+            if (!p.notes) continue;
+            try {
+              const parsed = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes;
+              const ret = parsed?.retencion;
+              if (!ret || !ret.monto) continue;
+              if (ret.tipo === "iibb")           retIibb      += Number(ret.monto) || 0;
+              else if (ret.tipo === "ganancias") retGanancias += Number(ret.monto) || 0;
+              else if (ret.tipo === "iva")       retIva       += Number(ret.monto) || 0;
+            } catch { /* unparseable notes — skip */ }
+          }
+          if (retIibb + retGanancias + retIva > 0) {
+            retenciones = { iibb: retIibb, ganancias: retGanancias, iva: retIva };
+          }
+        } catch { /* non-fatal — retención display is optional */ }
       }
 
       const logoBuffer = await loadLogoBuffer((config as any).logoUrl);
