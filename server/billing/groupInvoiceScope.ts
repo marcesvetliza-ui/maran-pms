@@ -69,7 +69,10 @@ export function parseGroupInvoiceSourceAmounts(invoice: any): Record<string, num
     const amount = cents(rawAmount);
     if (amount <= 0) continue;
     const credit = hasExplicitCredits
-      ? creditMaps.reduce((sum: number, map: any) => sum + cents(map?.[id]), 0)
+      // jsonb_agg() collects each NC's raw column value; older rows may have
+      // been stored double-JSON-encoded (a jsonb scalar string instead of an
+      // object), so each entry needs its own parseJson pass before indexing.
+      ? creditMaps.reduce((sum: number, rawMap: any) => sum + cents(parseJson(rawMap)?.[id]), 0)
       : Math.round(amount * (total > 0 ? credited / total : 0));
     const active = Math.max(0, amount - credit);
     if (active > 0) result[String(id)] = money(active);

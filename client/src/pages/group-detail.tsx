@@ -1815,6 +1815,36 @@ export default function GroupDetailPage() {
         </Card>
       </div>
 
+      {groupInvoiceSnapshot?.totals && Number(groupInvoiceSnapshot.totals.eligible) > 0 && (
+        <Card className="border-violet-200 dark:border-violet-800">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <Receipt className="h-4 w-4" />
+                <span>Estado de facturación del grupo</span>
+              </div>
+              <div className="flex flex-wrap gap-6 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Elegible</p>
+                  <p className="font-semibold" data-testid="text-billing-status-eligible">${fmtMoney(groupInvoiceSnapshot.totals.eligible)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Ya facturado</p>
+                  <p className="font-semibold text-orange-600" data-testid="text-billing-status-invoiced">${fmtMoney(groupInvoiceSnapshot.totals.invoiced)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Disponible</p>
+                  <p className="font-semibold text-emerald-600" data-testid="text-billing-status-available">${fmtMoney(groupInvoiceSnapshot.totals.available)}</p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={loadInvoice} disabled={isLoadingInvoice} data-testid="button-billing-status-details">
+                Ver detalle
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {group.notes && (
         <Card>
           <CardContent className="pt-4">

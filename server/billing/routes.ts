@@ -64,7 +64,9 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
     for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
       const value = parseFloat(String(amount)) || 0;
       const credit = hasPerSourceCredits
-        ? creditMaps.reduce((sum: number, map: any) => sum + (parseFloat(String(map?.[id])) || 0), 0)
+        // Older rows may have been stored double-JSON-encoded (a jsonb scalar
+        // string instead of an object); parse each aggregated entry defensively.
+        ? creditMaps.reduce((sum: number, rawMap: any) => sum + (parseFloat(String(parseJson(rawMap)?.[id])) || 0), 0)
         : value * (total > 0 ? credited / total : 0);
       if (value > 0) result[id] = Math.max(0, value - credit);
     }

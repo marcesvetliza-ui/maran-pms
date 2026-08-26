@@ -237,8 +237,12 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       items: data.items as any,
       operador: data.operador || null,
       cashFormaPago: data.cashFormaPago || null,
-      sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
-      sourceChargeAmounts: data.sourceChargeAmounts ? JSON.stringify(data.sourceChargeAmounts) : null,
+      // These are jsonb columns — drizzle-orm serializes them itself. Do NOT
+      // JSON.stringify here: doing so stores a jsonb scalar string instead of
+      // a jsonb object/array, which silently breaks any SQL-side jsonb_agg()
+      // over this column (e.g. the group invoice snapshot's credit rollup).
+      sourceChargeIds: data.sourceChargeIds ?? null,
+      sourceChargeAmounts: data.sourceChargeAmounts ?? null,
       observaciones: data.observaciones || null,
       reconciliationStatus: "pendiente",
       reconciliationUpdatedAt: new Date(),
@@ -407,8 +411,10 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     items: data.items as any,
     operador: data.operador || null,
     cashFormaPago: data.cashFormaPago || null,
-    sourceChargeIds: data.sourceChargeIds ? JSON.stringify(data.sourceChargeIds) : null,
-    sourceChargeAmounts: data.sourceChargeAmounts ? JSON.stringify(data.sourceChargeAmounts) : null,
+    // See the comment on the other insert above: jsonb columns must receive
+    // the raw object/array, not a pre-stringified value.
+    sourceChargeIds: data.sourceChargeIds ?? null,
+    sourceChargeAmounts: data.sourceChargeAmounts ?? null,
     observaciones: data.observaciones || null,
   }).returning();
 

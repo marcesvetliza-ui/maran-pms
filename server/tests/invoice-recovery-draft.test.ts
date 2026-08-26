@@ -71,7 +71,11 @@ describe("recoverable reservation credit-note emission", () => {
       estado: "autorizacion_pendiente",
       reconciliationStatus: "pendiente",
       notaCreditoId: 12,
-      sourceChargeAmounts: JSON.stringify({ "charge-1": 100 }),
+      // jsonb columns must receive the raw object — drizzle-orm serializes it
+      // itself. Pre-stringifying here previously stored a double-encoded
+      // jsonb scalar string, which silently broke jsonb_agg() rollups (e.g.
+      // the group invoice snapshot's credit computation).
+      sourceChargeAmounts: { "charge-1": 100 },
     });
     expect(invoice).toMatchObject({ id: 44, estado: "emitida" });
   });
