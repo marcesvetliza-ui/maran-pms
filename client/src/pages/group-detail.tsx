@@ -810,12 +810,18 @@ export default function GroupDetailPage() {
   const [showCheckInConfirm, setShowCheckInConfirm] = useState(false);
   const [showCheckOutConfirm, setShowCheckOutConfirm] = useState(false);
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
-  const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string}>>([{method: "cash", amount: "", reference: ""}]);
+  const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
+  const [groupPaymentEmitirComprobante, setGroupPaymentEmitirComprobante] = useState(false);
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
+  const [groupPaymentDestino, setGroupPaymentDestino] = useState<"distribute" | "master">("distribute");
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
+  // Receptor: huésped / empresa / agencia — fiscal data locked once selected
+  const [groupPaymentReceptorType, setGroupPaymentReceptorType] = useState<"guest" | "company" | "agency">("company");
+  const [groupPaymentReceptorLocked, setGroupPaymentReceptorLocked] = useState(false);
+  const [groupPaymentGuestId, setGroupPaymentGuestId] = useState<string | null>(null);
   // POS-style receptor fields for Pago Grupal
   const [groupPaymentEntitySearch, setGroupPaymentEntitySearch] = useState("");
   const [groupPaymentShowEntityDropdown, setGroupPaymentShowEntityDropdown] = useState(false);
@@ -1134,20 +1140,39 @@ export default function GroupDetailPage() {
       if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a") {
         throw new Error("Ingresá al menos un monto");
       }
+      const rowsPayload = (validRows.length > 0 ? validRows : [{ method: groupPaymentRows[0].method, amount: "0", reference: "" }])
+        .map((r) => ({
+          method: r.method,
+          amount: r.amount,
+          reference: r.reference || undefined,
+          retention: r.retencionEnabled && r.retencionTipo && parseFloat(r.retencionMonto || "0") > 0
+            ? { tipo: r.retencionTipo, monto: parseFloat(r.retencionMonto || "0") }
+            : undefined,
+        }));
+      const receiverDetails = {
+        razonSocial: groupPaymentRazonSocial || undefined,
+        cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
+        dni: groupPaymentDni || undefined,
+        condicionIva: groupPaymentCondicionIva || undefined,
+        domicilio: groupPaymentDomicilio || undefined,
+      };
+      if (groupPaymentDestino === "master") {
+        return apiRequest("POST", `/api/groups/${groupId}/master-payment`, {
+          paymentRows: rowsPayload,
+          receiptType: groupPaymentReceiptType === "sin_comprobante" ? "none" : groupPaymentReceiptType,
+          billingEntityType: groupPaymentCcEntityType,
+          billingEntityId: groupPaymentCcEntityId || undefined,
+          receiverDetails,
+        });
+      }
       return apiRequest("POST", `/api/groups/${groupId}/payment`, {
-        paymentRows: validRows.length > 0 ? validRows : [{ method: groupPaymentRows[0].method, amount: "0", reference: "" }],
+        paymentRows: rowsPayload,
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
         closeAllRooms: groupPaymentCloseAll,
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
-        receiverDetails: {
-          razonSocial: groupPaymentRazonSocial || undefined,
-          cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
-          dni: groupPaymentDni || undefined,
-          condicionIva: groupPaymentCondicionIva || undefined,
-          domicilio: groupPaymentDomicilio || undefined,
-        },
+        receiverDetails,
       });
     },
     onSuccess: async (res) => {
@@ -1163,12 +1188,18 @@ export default function GroupDetailPage() {
       const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
       const needsVoucher = groupPaymentReceiptType === "cierre_habitacion";
       const needsTicket = groupPaymentReceiptType === "ticket";
+      const isMaster = groupPaymentDestino === "master";
 
       if (needsFactura || needsVoucher) {
         // Close the payment dialog and open the invoice dialog with the payment ID
         setShowGroupPaymentDialog(false);
-        setPendingGroupPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
-        setShowGroupFacturaDialog(true);
+        if (isMaster) {
+          setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
+          setShowMasterFacturaDialog(true);
+        } else {
+          setPendingGroupPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
+          setShowGroupFacturaDialog(true);
+        }
         return;
       }
 
@@ -1191,16 +1222,21 @@ export default function GroupDetailPage() {
           });
         }
       } else {
-        toast({ title: "Pago grupal registrado exitosamente" });
+        toast({ title: isMaster ? "Pago al Folio Maestro registrado exitosamente" : "Pago grupal registrado exitosamente" });
       }
       setShowGroupPaymentDialog(false);
       setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
       setGroupPaymentReceiptType("sin_comprobante");
+      setGroupPaymentEmitirComprobante(false);
       setGroupPaymentDistribution("equal");
       setGroupPaymentCloseAll(false);
+      setGroupPaymentDestino("distribute");
       setGroupPaymentCcEntityType("company");
       setGroupPaymentCcEntityId("");
       setGroupInvoiceDistribution("none");
+      setGroupPaymentReceptorType("company");
+      setGroupPaymentReceptorLocked(false);
+      setGroupPaymentGuestId(null);
       setGroupPaymentEntitySearch("");
       setGroupPaymentRazonSocial("");
       setGroupPaymentCuit("");
@@ -1208,6 +1244,7 @@ export default function GroupDetailPage() {
       setGroupPaymentCondicionIva("Consumidor Final");
       setGroupPaymentDomicilio("");
       setGroupPaymentPvNum("");
+      setGroupPaymentItems([gNewItem()]);
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -3268,11 +3305,16 @@ export default function GroupDetailPage() {
         if (!open) {
           setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
           setGroupPaymentReceiptType("sin_comprobante");
+          setGroupPaymentEmitirComprobante(false);
           setGroupPaymentDistribution("equal");
           setGroupPaymentCloseAll(false);
+          setGroupPaymentDestino("distribute");
           setGroupPaymentCcEntityType("company");
           setGroupPaymentCcEntityId("");
           setGroupInvoiceDistribution("none");
+          setGroupPaymentReceptorType("company");
+          setGroupPaymentReceptorLocked(false);
+          setGroupPaymentGuestId(null);
           setGroupPaymentEntitySearch("");
           setGroupPaymentShowEntityDropdown(false);
           setGroupPaymentRazonSocial("");
@@ -3281,6 +3323,7 @@ export default function GroupDetailPage() {
           setGroupPaymentCondicionIva("Consumidor Final");
           setGroupPaymentDomicilio("");
           setGroupPaymentPvNum("");
+          setGroupPaymentItems([gNewItem()]);
         }
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -3299,8 +3342,21 @@ export default function GroupDetailPage() {
             const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
             const isFA = groupPaymentReceiptType === "factura_a";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-            const priorBalance = folio?.totals.balance ?? 0;
+            const retentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
+            const groupHasCheckIn = group.reservations.some((r: any) => r.status === "checked_in");
+            const masterAvailable = !!masterFolio && masterFolio.config !== "none" && groupHasCheckIn;
+            const isMaster = groupPaymentDestino === "master";
+            const priorBalance = isMaster ? (masterFolio?.masterBalance ?? 0) : (folio?.totals.balance ?? 0);
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
+            const condicionSupportsFA = isRI;
+            const receiptTypeLabels: Record<string, string> = {
+              ticket: "Ticket",
+              factura_a: "Factura A",
+              factura_b: "Factura B",
+              factura_mipyme_a: "Factura MiPyme A",
+              factura_t: "Factura T",
+              cierre_habitacion: "Voucher Habitaciones",
+            };
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = groupPaymentReceiptType === "factura_t"
               ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
@@ -3335,12 +3391,29 @@ export default function GroupDetailPage() {
                 monotributista: "Monotributista",
                 exento: "Exento",
               };
-              setGroupPaymentCondicionIva(e.condicionIva ? (condMap[e.condicionIva] ?? e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final"));
+              const cond = e.condicionIva ? (condMap[e.condicionIva] ?? e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final");
+              setGroupPaymentCondicionIva(cond);
               setGroupPaymentDomicilio(e.direccion || e.domicilio || "");
               setGroupPaymentCcEntityType(e._kind);
               setGroupPaymentCcEntityId(e.id);
               setGroupPaymentEntitySearch("");
               setGroupPaymentShowEntityDropdown(false);
+              setGroupPaymentReceptorLocked(true);
+              // Downgrade the selected comprobante if it's no longer valid for this entity's condición fiscal
+              if ((groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_mipyme_a") && !(cond === "Responsable Inscripto" || cond === "Exento")) {
+                setGroupPaymentReceiptType("factura_b");
+              }
+            };
+
+            const clearGroupReceptor = () => {
+              setGroupPaymentRazonSocial("");
+              setGroupPaymentCuit("");
+              setGroupPaymentDni("");
+              setGroupPaymentCondicionIva("Consumidor Final");
+              setGroupPaymentDomicilio("");
+              setGroupPaymentCcEntityId("");
+              setGroupPaymentGuestId(null);
+              setGroupPaymentReceptorLocked(false);
             };
 
             const posElectronicos = (posConfigsData as any[]).filter((p: any) => p.activo && p.tipo === "electronico");
@@ -3354,193 +3427,138 @@ export default function GroupDetailPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">A aplicar ahora</p>
-                    <p className="font-semibold text-primary">{fmtMoney(rowsTotal)}</p>
+                    <p className="font-semibold text-primary">{fmtMoney(rowsTotal + retentionsTotal)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Saldo restante</p>
-                    <p className={priorBalance - rowsTotal > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance - rowsTotal)}</p>
+                    <p className={priorBalance - rowsTotal - retentionsTotal > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance - rowsTotal - retentionsTotal)}</p>
                   </div>
                 </div>
-                {/* 1. TIPO DE COMPROBANTE */}
-                <div className="space-y-1">
-                  <Label>Tipo de comprobante</Label>
-                  <Select value={groupPaymentReceiptType} onValueChange={v => {
-                    setGroupPaymentReceiptType(v);
-                    // Auto-adjust condición IVA when switching tipo
-                    if (v === "factura_a" || v === "factura_mipyme_a") {
-                      if (groupPaymentCondicionIva === "Consumidor Final") setGroupPaymentCondicionIva("Responsable Inscripto");
-                    } else if (v === "factura_b") {
-                      if (groupPaymentCondicionIva === "Responsable Inscripto") setGroupPaymentCondicionIva("Consumidor Final");
-                    }
-                  }}>
-                    <SelectTrigger data-testid="select-group-payment-receipt">
-                      <SelectValue placeholder="Seleccionar comprobante..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sin_comprobante">Sin comprobante / Anticipo</SelectItem>
-                      <SelectItem value="ticket">Ticket</SelectItem>
-                      {(!isRI || true) && <SelectItem value="factura_a">Factura A</SelectItem>}
-                      <SelectItem value="factura_b">Factura B</SelectItem>
-                      <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>
-                      <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>
-                      <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {isFiscal && !isMipyme && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
-                    </p>
-                  )}
-                  {isMipyme && (
-                    <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
-                    </p>
-                  )}
-                </div>
-
-                {/* 2. MÉTODOS DE PAGO */}
-                {!isMipyme && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Forma de pago</Label>
-                      {groupPaymentRows.length < 4 && Object.keys(allowedMethods).length > groupPaymentRows.length && (
-                        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1"
-                          onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}>
-                          <Plus className="h-3 w-3" />
-                          Agregar método
-                        </Button>
-                      )}
-                    </div>
-                    {groupPaymentRows.map((row, idx) => (
-                      <div key={idx} className="space-y-0.5">
-                        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
-                          <Select value={row.method}
-                            onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v} : r))}>
-                            <SelectTrigger data-testid={`select-group-payment-method-${idx}`}><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(allowedMethods).filter(([k]) => !groupPaymentRows.some((r, i) => i !== idx && r.method === k)).map(([k, label]) => (
-                                <SelectItem key={k} value={k}>{label as string}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Input type="number" step="0.01" min={0} placeholder="Monto"
-                            value={row.amount}
-                            onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
-                            data-testid={`input-group-payment-amount-${idx}`} />
-                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground shrink-0"
-                            title="Referencia / N° comprobante"
-                            onClick={() => {
-                              const ref = prompt("Referencia / N° comprobante:", row.reference);
-                              if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
-                            }}>
-                            <FileText className="h-4 w-4" />
-                          </Button>
-                          {groupPaymentRows.length > 1 ? (
-                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-destructive/70 hover:text-destructive shrink-0"
-                              onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          ) : <div className="w-9" />}
-                        </div>
-                        {row.reference && <p className="text-xs text-muted-foreground pl-1">Ref: {row.reference}</p>}
-                      </div>
-                    ))}
-                    {groupPaymentRows.length > 1 && (
-                      <div className="flex justify-end text-sm font-semibold border-t pt-2">
-                        Total: <span className="ml-1">{fmtMoney(rowsTotal)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 3. PUNTO DE VENTA (solo fiscal) */}
-                {isFiscal && posElectronicos.length > 0 && (
-                  <div className="space-y-1">
-                    <Label>Punto de Venta (ARCA)</Label>
-                    <Select value={groupPaymentPvNum} onValueChange={setGroupPaymentPvNum}>
-                      <SelectTrigger><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
-                      <SelectContent>
-                        {posElectronicos.map((p: any) => (
-                          <SelectItem key={p.id} value={String(p.numero)}>
-                            PV {String(p.numero).padStart(4, "0")} — {p.nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
-                  </div>
-                )}
-
-                <div className="border-t" />
-
-                {/* 4. DATOS DEL RECEPTOR — estilo POS */}
+                {/* 1. RECEPTOR */}
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Datos del receptor</Label>
+                  <Label className="text-sm font-semibold">1. Receptor del comprobante</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { value: "guest", label: "Huésped" },
+                      { value: "company", label: "Empresa" },
+                      { value: "agency", label: "Agencia" },
+                    ] as const).map(opt => (
+                      <button key={opt.value} type="button"
+                        disabled={groupPaymentReceptorLocked}
+                        onClick={() => { setGroupPaymentReceptorType(opt.value); clearGroupReceptor(); }}
+                        className={`rounded-md border px-2 py-2 text-sm font-medium transition-colors ${groupPaymentReceptorType === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"} ${groupPaymentReceptorLocked ? "opacity-60 cursor-not-allowed" : ""}`}
+                        data-testid={`button-group-receptor-${opt.value}`}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
 
-                  {/* Buscador */}
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar
-                    </Label>
-                    <div className="relative">
-                      <Input
-                        value={groupPaymentEntitySearch}
-                        onChange={e => { setGroupPaymentEntitySearch(e.target.value); setGroupPaymentShowEntityDropdown(true); }}
-                        onFocus={() => setGroupPaymentShowEntityDropdown(true)}
-                        onBlur={() => setTimeout(() => setGroupPaymentShowEntityDropdown(false), 200)}
-                        placeholder="Nombre o CUIT de empresa/agencia..."
-                        className="text-sm"
-                        data-testid="input-group-entity-search"
-                      />
-                      {groupPaymentShowEntityDropdown && entitySearchResults.length > 0 && (
-                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
-                          {entitySearchResults.map((e: any) => (
-                            <button key={e.id} type="button"
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
-                              onMouseDown={() => selectGroupEntity(e)}>
-                              <span>
-                                <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
-                                <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
-                              </span>
-                              {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
-                            </button>
-                          ))}
+                  {groupPaymentReceptorType === "guest" ? (
+                    <GuestSearchCombobox
+                      label=""
+                      selectedGuestId={groupPaymentGuestId}
+                      selectedGuestName={groupPaymentGuestId ? groupPaymentRazonSocial : null}
+                      placeholder="Buscar huésped por nombre, apellido o documento..."
+                      onGuestSelect={async (guest) => {
+                        setGroupPaymentGuestId(guest.id);
+                        setGroupPaymentRazonSocial(`${guest.lastName} ${guest.firstName}`.trim());
+                        setGroupPaymentDni(guest.documentNumber || "");
+                        setGroupPaymentCuit("");
+                        setGroupPaymentCondicionIva("Consumidor Final");
+                        setGroupPaymentCcEntityType("company");
+                        setGroupPaymentCcEntityId("");
+                        setGroupPaymentReceptorLocked(true);
+                        try {
+                          const res = await apiRequest("GET", `/api/guests/${guest.id}`);
+                          const full = await res.json();
+                          if (full?.direccion) setGroupPaymentDomicilio(full.direccion);
+                          if (full?.vatCondition) setGroupPaymentCondicionIva(full.vatCondition);
+                        } catch {}
+                      }}
+                      onClear={() => clearGroupReceptor()}
+                      data-testid="combobox-group-payment-guest"
+                    />
+                  ) : (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Search className="w-3 h-3" /> Buscar {groupPaymentReceptorType === "company" ? "empresa" : "agencia"} para autocompletar
+                      </Label>
+                      {groupPaymentReceptorLocked ? (
+                        <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm bg-muted/30">
+                          <span className="font-medium">{groupPaymentRazonSocial}</span>
+                          <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={clearGroupReceptor}>Cambiar</Button>
                         </div>
-                      )}
-                      {groupPaymentShowEntityDropdown && groupPaymentEntitySearch.length >= 2 && entitySearchResults.length === 0 && (
-                        <div className="absolute z-50 w-full bg-popover border rounded-md shadow-sm mt-1 px-3 py-2 text-sm text-muted-foreground">
-                          Sin resultados
+                      ) : (
+                        <div className="relative">
+                          <Input
+                            value={groupPaymentEntitySearch}
+                            onChange={e => { setGroupPaymentEntitySearch(e.target.value); setGroupPaymentShowEntityDropdown(true); }}
+                            onFocus={() => setGroupPaymentShowEntityDropdown(true)}
+                            onBlur={() => setTimeout(() => setGroupPaymentShowEntityDropdown(false), 200)}
+                            placeholder="Nombre o CUIT..."
+                            className="text-sm"
+                            data-testid="input-group-entity-search"
+                          />
+                          {groupPaymentShowEntityDropdown && entitySearchResults.filter((e: any) => e._kind === groupPaymentReceptorType).length > 0 && (
+                            <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
+                              {entitySearchResults.filter((e: any) => e._kind === groupPaymentReceptorType).map((e: any) => (
+                                <button key={e.id} type="button"
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
+                                  onMouseDown={() => selectGroupEntity(e)}>
+                                  <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
+                                  {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {groupPaymentShowEntityDropdown && groupPaymentEntitySearch.length >= 2 && entitySearchResults.filter((e: any) => e._kind === groupPaymentReceptorType).length === 0 && (
+                            <div className="absolute z-50 w-full bg-popover border rounded-md shadow-sm mt-1 px-3 py-2 text-sm text-muted-foreground">
+                              Sin resultados
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
 
-                  {/* Campos individuales editables */}
+                  {/* Datos fiscales — bloqueados salvo domicilio, una vez seleccionado el receptor */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2 space-y-1">
                       <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
-                      <Input value={groupPaymentRazonSocial} onChange={e => setGroupPaymentRazonSocial(e.target.value)}
-                        placeholder="EMPRESA S.A." data-testid="input-group-razon-social" />
+                      <Input value={groupPaymentRazonSocial} readOnly={groupPaymentReceptorLocked}
+                        className={groupPaymentReceptorLocked ? "bg-muted/40" : ""}
+                        onChange={e => !groupPaymentReceptorLocked && setGroupPaymentRazonSocial(e.target.value)}
+                        placeholder={groupPaymentReceptorType === "guest" ? "Seleccioná un huésped..." : "EMPRESA S.A."} data-testid="input-group-razon-social" />
                     </div>
                     {isFA ? (
                       <div className="space-y-1">
                         <Label className="text-xs">CUIT *</Label>
-                        <Input value={groupPaymentCuit} onChange={e => {
-                          const d = e.target.value.replace(/\D/g, "").slice(0, 11);
-                          const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`;
-                          setGroupPaymentCuit(f);
-                        }} placeholder="XX-XXXXXXXX-X" data-testid="input-group-cuit" />
+                        <Input value={groupPaymentCuit} readOnly={groupPaymentReceptorLocked}
+                          className={groupPaymentReceptorLocked ? "bg-muted/40" : ""}
+                          onChange={e => {
+                            if (groupPaymentReceptorLocked) return;
+                            const d = e.target.value.replace(/\D/g, "").slice(0, 11);
+                            const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`;
+                            setGroupPaymentCuit(f);
+                          }} placeholder="XX-XXXXXXXX-X" data-testid="input-group-cuit" />
                       </div>
                     ) : (
                       <div className="space-y-1">
                         <Label className="text-xs">DNI (opcional)</Label>
-                        <Input value={groupPaymentDni} onChange={e => setGroupPaymentDni(e.target.value)} placeholder="00000000" data-testid="input-group-dni" />
+                        <Input value={groupPaymentDni} readOnly={groupPaymentReceptorLocked}
+                          className={groupPaymentReceptorLocked ? "bg-muted/40" : ""}
+                          onChange={e => !groupPaymentReceptorLocked && setGroupPaymentDni(e.target.value)} placeholder="00000000" data-testid="input-group-dni" />
                       </div>
                     )}
                     <div className="space-y-1">
                       <Label className="text-xs">Condición IVA</Label>
-                      <Select value={groupPaymentCondicionIva} onValueChange={setGroupPaymentCondicionIva}>
+                      <Select value={groupPaymentCondicionIva} onValueChange={v => {
+                        setGroupPaymentCondicionIva(v);
+                        const supportsFA = v === "Responsable Inscripto" || v === "Exento";
+                        if (!supportsFA && (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_mipyme_a")) {
+                          setGroupPaymentReceiptType("factura_b");
+                        }
+                      }} disabled={groupPaymentReceptorLocked}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
@@ -3556,24 +3574,137 @@ export default function GroupDetailPage() {
                   {entityRequired && !hasEntityData && (
                     <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                       <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Completá al menos el nombre/razón social del receptor.
+                      Seleccioná o completá el receptor del comprobante.
                     </p>
                   )}
                 </div>
 
-                {/* 5. ÍTEMS DE LA FACTURA */}
+                <div className="border-t" />
+
+                {/* 2. COMPROBANTE */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">2. Comprobante</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button"
+                      onClick={() => { setGroupPaymentEmitirComprobante(false); setGroupPaymentReceiptType("sin_comprobante"); }}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${!groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                      data-testid="button-group-sin-comprobante">
+                      Sin comprobante / Anticipo
+                    </button>
+                    <button type="button"
+                      onClick={() => {
+                        setGroupPaymentEmitirComprobante(true);
+                        if (groupPaymentReceiptType === "sin_comprobante") {
+                          setGroupPaymentReceiptType(condicionSupportsFA ? "factura_a" : "ticket");
+                        }
+                      }}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                      data-testid="button-group-con-comprobante">
+                      Emitir comprobante
+                    </button>
+                  </div>
+
+                  {groupPaymentEmitirComprobante && (
+                    <div className="space-y-1">
+                      <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
+                        <SelectTrigger data-testid="select-group-payment-receipt">
+                          <SelectValue placeholder="Seleccionar comprobante..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ticket">Ticket</SelectItem>
+                          {condicionSupportsFA && <SelectItem value="factura_a">Factura A</SelectItem>}
+                          <SelectItem value="factura_b">Factura B</SelectItem>
+                          {condicionSupportsFA && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                          <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>
+                          <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {isFiscal && !isMipyme && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Al registrar se abrirá el formulario de emisión con CAE real de ARCA.
+                        </p>
+                      )}
+                      {isMipyme && (
+                        <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          MiPyme A: no requiere forma de pago (cobro diferido hasta 30 días).
+                        </p>
+                      )}
+                      {!condicionSupportsFA && (
+                        <p className="text-xs text-muted-foreground">Factura A / MiPyme A solo disponibles para Responsable Inscripto o Exento.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. DESTINO DEL COBRO */}
+                {masterAvailable && (
+                  <>
+                    <div className="border-t" />
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">3. Destino del cobro</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button"
+                          onClick={() => setGroupPaymentDestino("distribute")}
+                          className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${!isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                          data-testid="button-group-destino-distribute">
+                          <p className="font-medium">Distribuir entre habitaciones</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Se aplica al saldo de cada reserva activa</p>
+                        </button>
+                        <button type="button"
+                          onClick={() => setGroupPaymentDestino("master")}
+                          className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                          data-testid="button-group-destino-master">
+                          <p className="font-medium">Aplicar al Folio Maestro</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Con este pago se salda el Folio Maestro del grupo</p>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* 4. PUNTO DE VENTA (solo fiscal) */}
+                {isFiscal && posElectronicos.length > 0 && (
+                  <>
+                    <div className="border-t" />
+                    <div className="space-y-1">
+                      <Label className="text-sm font-semibold">4. Punto de Venta (ARCA)</Label>
+                      <Select value={groupPaymentPvNum} onValueChange={setGroupPaymentPvNum}>
+                        <SelectTrigger><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
+                        <SelectContent>
+                          {posElectronicos.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.numero)}>
+                              PV {String(p.numero).padStart(4, "0")} — {p.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+                    </div>
+                  </>
+                )}
+
+                {/* 5. CONCEPTOS */}
                 {isFiscal && (
                   <>
                     <div className="border-t" />
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm font-semibold">Ítems</Label>
+                        <Label className="text-sm font-semibold">5. Conceptos</Label>
                         <Button variant="outline" size="sm" type="button"
                           onClick={() => setGroupPaymentItems(p => [...p, gNewItem()])}>
                           <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">Ingrese precios con IVA incluido</p>
+
+                      {groupInvoiceSnapshot?.totals && Number(groupInvoiceSnapshot.totals.eligible) > 0 && (
+                        <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/20 p-2 text-xs">
+                          <div><p className="text-muted-foreground">Facturable</p><p className="font-semibold">{fmtMoney(groupInvoiceSnapshot.totals.eligible)}</p></div>
+                          <div><p className="text-muted-foreground">Facturado</p><p className="font-semibold text-orange-600">{fmtMoney(groupInvoiceSnapshot.totals.invoiced)}</p></div>
+                          <div><p className="text-muted-foreground">Disponible</p><p className="font-semibold text-emerald-600">{fmtMoney(groupInvoiceSnapshot.totals.available)}</p></div>
+                        </div>
+                      )}
 
                       {/* Quick fill from folio */}
                       {!isMipyme && folio && (
@@ -3680,39 +3811,159 @@ export default function GroupDetailPage() {
                   </>
                 )}
 
-                {/* 6. DISTRIBUCIÓN + CERRAR HABITACIONES */}
                 <div className="border-t" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Label>Distribución entre habitaciones</Label>
-                    <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
-                      <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="equal">Partes iguales</SelectItem>
-                        <SelectItem value="proportional">Proporcional al saldo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {groupPaymentDistribution === "equal"
-                        ? "Partes iguales entre reservas activas"
-                        : "Proporcional al saldo pendiente de cada reserva"}
-                    </p>
-                  </div>
-                  <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
-                    <Checkbox
-                      id="close-all-rooms"
-                      checked={groupPaymentCloseAll}
-                      onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
-                      data-testid="checkbox-close-all-rooms"
-                    />
-                    <div className="space-y-1">
-                      <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
-                        Con este pago se cierran todas las habitaciones del grupo
-                      </label>
-                      <p className="text-xs text-muted-foreground">
-                        El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
-                      </p>
+
+                {/* 6. MEDIOS DE PAGO (+ retenciones) */}
+                {!isMipyme && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-semibold">6. Forma de pago</Label>
+                      {groupPaymentRows.length < 4 && Object.keys(allowedMethods).length > groupPaymentRows.length && (
+                        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1"
+                          onClick={() => setGroupPaymentRows(prev => [...prev, {method: "transfer", amount: "", reference: ""}])}>
+                          <Plus className="h-3 w-3" />
+                          Agregar método
+                        </Button>
+                      )}
                     </div>
+                    {groupPaymentRows.map((row, idx) => (
+                      <div key={idx} className="space-y-1 border rounded-md p-2">
+                        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
+                          <Select value={row.method}
+                            onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v, ...(v === "cuenta_corriente" ? { retencionEnabled: false, retencionMonto: "" } : {})} : r))}>
+                            <SelectTrigger data-testid={`select-group-payment-method-${idx}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(allowedMethods).filter(([k]) => !groupPaymentRows.some((r, i) => i !== idx && r.method === k)).map(([k, label]) => (
+                                <SelectItem key={k} value={k}>{label as string}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input type="number" step="0.01" min={0} placeholder="Monto"
+                            value={row.amount}
+                            onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
+                            data-testid={`input-group-payment-amount-${idx}`} />
+                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground shrink-0"
+                            title="Referencia / N° comprobante"
+                            onClick={() => {
+                              const ref = prompt("Referencia / N° comprobante:", row.reference);
+                              if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
+                            }}>
+                            <FileText className="h-4 w-4" />
+                          </Button>
+                          {groupPaymentRows.length > 1 ? (
+                            <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-destructive/70 hover:text-destructive shrink-0"
+                              onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          ) : <div className="w-9" />}
+                        </div>
+                        {row.reference && <p className="text-xs text-muted-foreground pl-1">Ref: {row.reference}</p>}
+                        {row.method !== "cuenta_corriente" ? (
+                          !row.retencionEnabled ? (
+                            <button type="button" className="text-xs text-muted-foreground underline pl-1"
+                              onClick={() => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, retencionEnabled: true, retencionTipo: "iibb"} : r))}
+                              data-testid={`button-group-add-retencion-${idx}`}>
+                              + Agregar retención
+                            </button>
+                          ) : (
+                            <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center bg-muted/20 rounded p-2">
+                              <Select value={row.retencionTipo} onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, retencionTipo: v as "iibb" | "ganancias"} : r))}>
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-group-retencion-tipo-${idx}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="iibb">Retención IIBB</SelectItem>
+                                  <SelectItem value="ganancias">Retención Ganancias</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input type="number" step="0.01" min={0} placeholder="Monto retenido" className="h-8 text-xs"
+                                value={row.retencionMonto || ""}
+                                onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, retencionMonto: e.target.value} : r))}
+                                data-testid={`input-group-retencion-monto-${idx}`} />
+                              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive/70"
+                                onClick={() => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, retencionEnabled: false, retencionMonto: ""} : r))}>
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                              <p className="col-span-3 text-[11px] text-muted-foreground">
+                                Neto {fmtMoney(parseFloat(row.amount) || 0)} + Retención {fmtMoney(parseFloat(row.retencionMonto || "0") || 0)} = Cubre {fmtMoney((parseFloat(row.amount) || 0) + (parseFloat(row.retencionMonto || "0") || 0))}
+                              </p>
+                            </div>
+                          )
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground pl-1">
+                            Las retenciones sobre Cuenta Corriente se registran cuando la empresa/agencia cancele el saldo.
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    {groupPaymentRows.length > 1 && (
+                      <div className="flex justify-end text-sm font-semibold border-t pt-2">
+                        Total: <span className="ml-1">{fmtMoney(rowsTotal)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 7. DISTRIBUCIÓN + CERRAR HABITACIONES (solo destino = habitaciones) */}
+                {!isMaster && (
+                  <>
+                    <div className="border-t" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Label>Distribución entre habitaciones</Label>
+                        <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
+                          <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="equal">Partes iguales</SelectItem>
+                            <SelectItem value="proportional">Proporcional al saldo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {groupPaymentDistribution === "equal"
+                            ? "Partes iguales entre reservas activas"
+                            : "Proporcional al saldo pendiente de cada reserva"}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                        <Checkbox
+                          id="close-all-rooms"
+                          checked={groupPaymentCloseAll}
+                          onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
+                          data-testid="checkbox-close-all-rooms"
+                        />
+                        <div className="space-y-1">
+                          <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
+                            Con este pago se cierran todas las habitaciones del grupo
+                          </label>
+                          <p className="text-xs text-muted-foreground">
+                            El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="border-t" />
+
+                {/* 8. RESUMEN */}
+                <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-2">
+                  <Label className="text-sm font-semibold flex items-center gap-1.5"><Receipt className="h-4 w-4" /> Resumen antes de emitir</Label>
+                  <div className="text-sm space-y-1">
+                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Receptor</span><span className="font-medium text-right">{groupPaymentRazonSocial || "—"}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{groupPaymentEmitirComprobante ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Sin comprobante / Anticipo"}</span></div>
+                    {isFiscal && posElectronicos.length > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Punto de Venta</span><span className="font-medium">{groupPaymentPvNum ? `PV ${groupPaymentPvNum.padStart(4, "0")}` : "Por defecto"}</span></div>
+                    )}
+                    {masterAvailable && (
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Destino</span><span className="font-medium">{isMaster ? "Folio Maestro" : "Distribución entre habitaciones"}</span></div>
+                    )}
+                    {isFiscal && (
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Conceptos</span><span className="font-medium">{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span></div>
+                    )}
+                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Medios de pago</span><span className="font-medium text-right">{groupPaymentRows.filter(r => parseFloat(r.amount || "0") > 0).map(r => `${PAYMENT_METHOD_LABELS[r.method] || r.method} ${fmtMoney(parseFloat(r.amount) || 0)}`).join(" + ") || "—"}</span></div>
+                    {retentionsTotal > 0 && (
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Retenciones</span><span className="font-medium">{fmtMoney(retentionsTotal)}</span></div>
+                    )}
+                    <div className="flex justify-between gap-2 border-t pt-1 font-semibold"><span>Total cubierto</span><span>{fmtMoney(rowsTotal + retentionsTotal)}</span></div>
                   </div>
                 </div>
               </div>
@@ -3732,7 +3983,7 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
-              {groupPaymentMutation.isPending ? "Procesando..." : groupPaymentCloseAll ? "Pagar y Cerrar Grupo" : "Registrar Pago"}
+              {groupPaymentMutation.isPending ? "Procesando..." : (groupPaymentDestino === "distribute" && groupPaymentCloseAll) ? "Pagar y Cerrar Grupo" : groupPaymentDestino === "master" ? "Registrar Pago al Folio Maestro" : "Registrar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

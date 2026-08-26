@@ -39,6 +39,33 @@ function distributeCents(
   return Object.fromEntries(shares.map((share) => [share.id, share.cents / 100]));
 }
 
+// A retención (IIBB/Ganancias) withheld by the payer settles part of the debt
+// without moving cash, so it must count toward the total the payer is
+// crediting — the same convention the single-reservation Prefactura flow
+// already uses (payments.amount = cash + retención, notes keeps the split).
+// Reject malformed payloads here instead of trusting the client.
+function validateAndNormalizePaymentRows<T extends { method: string; retention?: any }>(rows: T[]): T[] {
+  return rows.map((row) => {
+    if (row.retention == null) return { ...row, retention: undefined };
+    if (row.method === "cuenta_corriente") {
+      throw Object.assign(new Error("Las retenciones no aplican a pagos por Cuenta Corriente."), { statusCode: 400 });
+    }
+    const tipo = row.retention.tipo;
+    const monto = Number(row.retention.monto);
+    if (tipo !== "iibb" && tipo !== "ganancias") {
+      throw Object.assign(new Error("Tipo de retención inválido."), { statusCode: 400 });
+    }
+    if (!Number.isFinite(monto) || monto <= 0) {
+      throw Object.assign(new Error("El monto de la retención debe ser un número positivo."), { statusCode: 400 });
+    }
+    return { ...row, retention: { tipo, monto } };
+  });
+}
+
+function paymentRowsGrossTotal(rows: Array<{ amount: string; retention?: { monto: number } | null }>): number {
+  return rows.reduce((s, r) => s + (parseFloat(r.amount) || 0) + (r.retention?.monto || 0), 0);
+}
+
 // Helper: get or create the single placeholder guest for a group
 async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
   const code = `GROUP-${groupId}`;
@@ -906,10 +933,12 @@ export function registerGroupsRoutes(app: Express) {
         receiverDetails,
       } = req.body;
 
-      const paymentRows: Array<{method: string; amount: string; reference?: string}> = rawPaymentRows?.length
-        ? rawPaymentRows
-        : [{ method: legacyMethod, amount: legacyAmount, reference: legacyReference }];
-      const totalAmount = paymentRows.reduce((s: number, r: any) => s + (parseFloat(r.amount) || 0), 0);
+      const paymentRows = validateAndNormalizePaymentRows<{method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number }}>(
+        rawPaymentRows?.length
+          ? rawPaymentRows
+          : [{ method: legacyMethod, amount: legacyAmount, reference: legacyReference }]
+      );
+      const totalAmount = paymentRowsGrossTotal(paymentRows);
       if (totalAmount <= 0) {
         return res.status(400).json({ error: "El monto debe ser positivo" });
       }
@@ -1499,12 +1528,13 @@ export function registerGroupsRoutes(app: Express) {
       // Support multi-row payments and keep a single parent movement for the
       // receipt, regardless of how many payment methods the operator uses.
       const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails } = req.body;
-      const rows: Array<{ method: string; amount: string; reference?: string }> =
+      const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
         Array.isArray(paymentRows) && paymentRows.length > 0
           ? paymentRows
-          : [{ method: method ?? "cash", amount: amount ?? "0", reference: reference ?? undefined }];
+          : [{ method: method ?? "cash", amount: amount ?? "0", reference: reference ?? undefined }]
+      );
 
-      const totalAmount = rows.reduce((s, r) => s + parseFloat(r.amount || "0"), 0);
+      const totalAmount = paymentRowsGrossTotal(rows);
       if (!rows.length || totalAmount <= 0) return res.status(400).json({ error: "Monto total debe ser positivo" });
       if (rows.some((row) => row.method === "cuenta_corriente") && (!billingEntityType || !billingEntityId)) {
         return res.status(400).json({ error: "Seleccione la empresa o agencia para el pago por cuenta corriente." });

@@ -1678,7 +1678,7 @@ export class DatabaseStorage implements IStorage {
   async recordGroupPayment(input: {
     groupId: string;
     destination: GroupPaymentDestination;
-    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;
     date: string;
     reference?: string | null;
     distribution: string;
@@ -1716,7 +1716,20 @@ export class DatabaseStorage implements IStorage {
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
 
       const rows = input.paymentRows.filter((row) => cents(row.amount) > 0);
-      const receivedCents = rows.reduce((sum, row) => sum + cents(row.amount), 0);
+      // A retención (IIBB/Ganancias) withheld by the payer settles part of the
+      // debt without moving cash, so — like the single-reservation Prefactura
+      // flow — every balance/allocation check below must treat the row's
+      // *gross* value (cash + retención) as what the payer is crediting; the
+      // cash-only amount would leave the retained portion permanently
+      // unsettled and desync from the route-level allocation, which is
+      // already computed on the gross total.
+      const grossRowCents = rows.map((row) => {
+        const retentionCents = row.retention && row.method !== "cuenta_corriente"
+          ? Math.round((row.retention.monto || 0) * 100)
+          : 0;
+        return cents(row.amount) + retentionCents;
+      });
+      const receivedCents = grossRowCents.reduce((sum, value) => sum + value, 0);
       if (receivedCents <= 0) throw invalid("El monto debe ser positivo");
       const hasCuentaCorriente = rows.some((row) => row.method === "cuenta_corriente");
       if (hasCuentaCorriente && (!input.billingEntityType || !input.billingEntityId)) {
@@ -1817,16 +1830,38 @@ export class DatabaseStorage implements IStorage {
       // Build one rounded matrix for methods × destinations. Splitting every
       // destination independently can turn a one-cent card amount into two
       // cents across two rooms. This preserves both row (method) and column
-      // (destination) totals exactly.
+      // (destination) totals exactly. grossRowCents (cash + retención per
+      // row) was computed above, alongside receivedCents.
       const allocationByMethod = new Map<string, number[]>();
       let remainingAllocationCents = allocations.map((allocation) => allocation.cents);
       rows.forEach((row, methodIndex) => {
-        const rowCents = cents(row.amount);
+        const rowCents = grossRowCents[methodIndex];
         const split = methodIndex === rows.length - 1
           ? [...remainingAllocationCents]
           : splitAcrossCapacities(rowCents, remainingAllocationCents);
         allocationByMethod.set(`${methodIndex}`, split);
         remainingAllocationCents = remainingAllocationCents.map((amount, index) => amount - split[index]);
+      });
+
+      // When a row's gross amount is split across several rooms (group
+      // distribution), the retención must be split in the same proportion so
+      // each room payment's note reflects its own neto/retención share
+      // instead of the row's full retención.
+      const retentionByMethod = new Map<string, number[]>();
+      rows.forEach((row, methodIndex) => {
+        if (!row.retention || row.method === "cuenta_corriente") return;
+        const rowCents = grossRowCents[methodIndex];
+        const retentionCents = Math.round((row.retention.monto || 0) * 100);
+        if (rowCents <= 0 || retentionCents <= 0) return;
+        const grossSplit = allocationByMethod.get(`${methodIndex}`) || [];
+        let remainingRetentionCents = retentionCents;
+        const split = grossSplit.map((shareCents, index) => {
+          if (index === grossSplit.length - 1) return remainingRetentionCents;
+          const share = Math.round((retentionCents * shareCents) / rowCents);
+          remainingRetentionCents -= share;
+          return share;
+        });
+        retentionByMethod.set(`${methodIndex}`, split);
       });
 
       const reservationIds = allocations
@@ -1933,6 +1968,16 @@ export class DatabaseStorage implements IStorage {
             }
             continue;
           }
+          // A retención withheld by the payer (e.g. a company deducting IIBB
+          // or Ganancias when paying by transfer) settles this room's balance
+          // even though the cash received is smaller than the applied amount.
+          // Stored in the same { retencion: { tipo, monto, neto } } shape the
+          // single-reservation billing flow already writes, so any future
+          // reader of payments.notes keeps working unchanged.
+          const retentionShareCents = retentionByMethod.get(`${methodIndex}`)?.[allocationIndex] || 0;
+          const notes = retentionShareCents > 0
+            ? JSON.stringify({ retencion: { tipo: row.retention!.tipo, monto: retentionShareCents / 100, neto: (appliedCents - retentionShareCents) / 100 } })
+            : null;
           const [created] = await tx.insert(payments).values({
             reservationId: allocation.reservationId,
             amount,
@@ -1941,6 +1986,7 @@ export class DatabaseStorage implements IStorage {
             date: input.date,
             billingTarget: row.method === "cuenta_corriente" ? input.billingEntityType : "guest",
             groupPaymentId: groupPayment.id,
+            notes,
           } as any).returning();
           reservationPayments.push(created);
           if (row.method === "cuenta_corriente") {

@@ -402,7 +402,7 @@ export interface IStorage {
   recordGroupPayment(input: {
     groupId: string;
     destination: GroupPaymentDestination;
-    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;
     date: string;
     reference?: string | null;
     distribution: string;
