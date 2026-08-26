@@ -1,0 +1,264 @@
+import express from "express";
+import * as http from "node:http";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  accountMovementAllocations,
+  accountMovements,
+  groupPayments,
+  payments,
+} from "@shared/schema";
+
+const GROUP_ID = "group-master-account-001";
+const COMPANY_ID = "company-master-account-001";
+
+type LedgerState = {
+  groupPayment: Record<string, any> | null;
+  accountMovements: Record<string, any>[];
+  accountMovementAllocations: Record<string, any>[];
+  payments: Record<string, any>[];
+  nextId: number;
+};
+
+const state: LedgerState = {
+  groupPayment: null,
+  accountMovements: [],
+  accountMovementAllocations: [],
+  payments: [],
+  nextId: 0,
+};
+
+let executeCount = 0;
+
+function nextId(prefix: string) {
+  state.nextId += 1;
+  return `${prefix}-${state.nextId}`;
+}
+
+function queryResult(rows: any[]) {
+  return {
+    then: (resolve: (value: any[]) => unknown, reject: (reason: unknown) => unknown) =>
+      Promise.resolve(rows).then(resolve, reject),
+    limit: async () => rows,
+  };
+}
+
+function makeTransaction() {
+  let selectCount = 0;
+  let deleteCount = 0;
+
+  return {
+    execute: async () => {
+      executeCount += 1;
+      if (executeCount === 1) return { rows: [{ id: GROUP_ID }] };
+
+      return {
+        rows: [{
+          accommodation: "0",
+          group_charges: "10.01",
+          extras: "0",
+          master_parent_paid: "0",
+          direct_all_paid: "0",
+          direct_accommodation_paid: "0",
+          config: "accommodation",
+        }],
+      };
+    },
+    insert: (_table: unknown) => ({
+      values: (value: Record<string, any>) => {
+        // Current-account cargos are inserted without `.returning()` in the
+        // production path, so this write must happen before returning a builder.
+        if (value.entityType && value.type === "cargo") {
+          const movement = { id: nextId("account-movement"), ...value };
+          state.accountMovements.push(movement);
+          return { returning: async () => [movement] };
+        }
+
+        return {
+          returning: async () => {
+          if ("groupId" in value && "destination" in value) {
+            state.groupPayment = { id: nextId("group-payment"), ...value };
+            return [state.groupPayment];
+          }
+
+          if ("reservationId" in value && "method" in value) {
+            const payment = { id: nextId("payment"), ...value };
+            state.payments.push(payment);
+            return [payment];
+          }
+
+          if ("pagoId" in value && "cargoId" in value) {
+            const allocation = { id: nextId("allocation"), ...value };
+            state.accountMovementAllocations.push(allocation);
+            return [allocation];
+          }
+
+          return [{ id: nextId("row"), ...value }];
+        },
+        };
+      },
+    }),
+    select: () => ({
+      from: (_table: unknown) => ({
+        where: () => {
+          selectCount += 1;
+          if (selectCount === 1) {
+            return queryResult(state.groupPayment ? [state.groupPayment] : []);
+          }
+          if (selectCount === 2) {
+            return queryResult(state.accountMovements.filter((movement) => movement.groupPaymentId));
+          }
+          if (selectCount === 3) {
+            return queryResult(state.accountMovementAllocations);
+          }
+          return queryResult([]);
+        },
+      }),
+    }),
+    delete: (_table: unknown) => ({
+      where: async () => {
+        deleteCount += 1;
+        if (deleteCount === 1) {
+          state.accountMovements = [];
+        } else if (deleteCount === 2) {
+          state.payments = [];
+        } else if (deleteCount === 3) {
+          state.groupPayment = null;
+        }
+      },
+    }),
+  };
+}
+
+const fakeDb = {
+  transaction: async (callback: (tx: ReturnType<typeof makeTransaction>) => Promise<unknown>) => {
+    executeCount = 0;
+    return callback(makeTransaction());
+  },
+};
+
+vi.mock("../db", () => ({
+  db: fakeDb,
+  pool: { query: vi.fn() },
+}));
+
+vi.mock("../db-storage", async () => {
+  const actual = await vi.importActual<typeof import("../db-storage")>("../db-storage");
+  return {
+    ...actual,
+    storage: new actual.DatabaseStorage(),
+  };
+});
+
+vi.mock("../auth", () => ({
+  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+}));
+
+vi.mock("../audit", () => ({ audit: vi.fn() }));
+
+async function startApp() {
+  const { registerGroupsRoutes } = await import("../routes/groups");
+  const app = express();
+  app.use(express.json());
+  registerGroupsRoutes(app);
+
+  return new Promise<{ baseUrl: string; close: () => void }>((resolve) => {
+    const server = http.createServer(app);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+async function deleteMasterPayment(baseUrl: string, paymentId: string) {
+  const response = await fetch(
+    `${baseUrl}/api/groups/${GROUP_ID}/master-payments/${paymentId}`,
+    { method: "DELETE" },
+  );
+  return { status: response.status, body: await response.json() as any };
+}
+
+async function recordMixedMasterPayment() {
+  const { storage } = await import("../db-storage");
+  const recorded = await storage.recordGroupPayment({
+    groupId: GROUP_ID,
+    destination: "master_folio",
+    paymentRows: [
+      { method: "cuenta_corriente", amount: "4.01", reference: "CC-001" },
+      { method: "efectivo", amount: "6.00", reference: "cash-001" },
+    ],
+    date: "2026-08-26",
+    reference: "Cobro maestro con centavos",
+    distribution: "master_folio",
+    distributionDetail: { __master_balance__: 10.01 },
+    billingEntityType: "company",
+    billingEntityId: COMPANY_ID,
+  });
+  return recorded.groupPayment;
+}
+
+describe("group master payment and current-account reversal", () => {
+  beforeEach(() => {
+    state.groupPayment = null;
+    state.accountMovements = [];
+    state.accountMovementAllocations = [];
+    state.payments = [];
+    state.nextId = 0;
+  });
+
+  it("keeps mixed master receipts and current-account cargos in sync when reversing", async () => {
+    const groupPayment = await recordMixedMasterPayment();
+
+    expect(groupPayment.amount).toBe("10.01");
+    expect(groupPayment.method).toBe("varios");
+    expect(groupPayment.paymentMethodDetail).toEqual([
+      { method: "cuenta_corriente", amount: "4.01", reference: "CC-001" },
+      { method: "efectivo", amount: "6.00", reference: "cash-001" },
+    ]);
+    expect(state.accountMovements).toHaveLength(1);
+    expect(state.accountMovements[0]).toMatchObject({
+      entityType: "company",
+      entityId: COMPANY_ID,
+      type: "cargo",
+      amount: "4.01",
+      paymentMethod: "cuenta_corriente",
+      groupPaymentId: groupPayment.id,
+    });
+
+    const app = await startApp();
+    try {
+      const result = await deleteMasterPayment(app.baseUrl, groupPayment.id);
+
+      expect(result.status).toBe(200);
+      expect(result.body.success).toBe(true);
+      expect(state.groupPayment).toBeNull();
+      expect(state.accountMovements).toEqual([]);
+    } finally {
+      app.close();
+    }
+
+    const recreatedPayment = await recordMixedMasterPayment();
+    const cargo = state.accountMovements[0];
+    state.accountMovementAllocations.push({
+      id: "allocation-existing",
+      pagoId: "payment-existing",
+      cargoId: cargo.id,
+      amount: cargo.amount,
+    });
+
+    const appWithAppliedCargo = await startApp();
+    try {
+      const result = await deleteMasterPayment(appWithAppliedCargo.baseUrl, recreatedPayment.id);
+
+      expect(result.status).toBe(409);
+      expect(result.body.error).toMatch(/ya fue aplicado/i);
+      expect(state.groupPayment).toMatchObject({ id: recreatedPayment.id, amount: "10.01" });
+      expect(state.accountMovements).toEqual([cargo]);
+    } finally {
+      appWithAppliedCargo.close();
+    }
+  });
+});
