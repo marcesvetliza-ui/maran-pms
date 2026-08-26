@@ -509,8 +509,8 @@ function GroupFormDialog({
 
         <div className="space-y-4">
           {/* ── Información del grupo ── */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
               <Label htmlFor="name">Nombre del Grupo *</Label>
               <Input
                 id="name"
@@ -522,7 +522,7 @@ function GroupFormDialog({
               />
             </div>
 
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label>Color del grupo</Label>
               <div className="flex gap-2 flex-wrap mt-2">
                 {[
@@ -566,7 +566,7 @@ function GroupFormDialog({
               />
             </div>
 
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label htmlFor="contactEmail">Email</Label>
               <Input
                 id="contactEmail"
@@ -579,10 +579,10 @@ function GroupFormDialog({
             </div>
 
             {/* Entidad de facturación */}
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label>Empresa / Agencia de facturación <span className="text-muted-foreground font-normal">(opcional)</span></Label>
               <p className="text-xs text-muted-foreground mb-2">Se pre-seleccionará automáticamente al registrar pagos del grupo.</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select
                   className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-background dark:text-foreground"
                   value={formData.billingEntityType || ""}
@@ -703,7 +703,7 @@ function GroupFormDialog({
               </div>
             )}
 
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <Label htmlFor="notes">Notas</Label>
               <Textarea
                 id="notes"
@@ -756,7 +756,7 @@ function GroupFormDialog({
                         </Button>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <Label className="text-xs">Tipo de Habitación *</Label>
                           <Select
@@ -833,7 +833,7 @@ function GroupFormDialog({
                       </div>
 
                       {block.useCustomDates && (
-                        <div className="grid grid-cols-2 gap-3 rounded-md bg-muted/30 p-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-md bg-muted/30 p-3">
                           <div>
                             <Label className="text-xs">Check-in Bloque</Label>
                             <Input

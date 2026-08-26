@@ -15,6 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +32,10 @@ const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
 function fPeso(n: number | string | undefined | null) {
   const num = parseFloat(String(n ?? 0)) || 0;
   return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 function fDate(d: string | undefined | null) {
@@ -596,6 +604,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [showEntityDropdown, setShowEntityDropdown] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showDuplicateAmountConfirm, setShowDuplicateAmountConfirm] = useState(false);
+  const [duplicateAmountWarnings, setDuplicateAmountWarnings] = useState<string[]>([]);
+  const [duplicateAmountAcknowledged, setDuplicateAmountAcknowledged] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [showRecipientChangeWarning, setShowRecipientChangeWarning] = useState(false);
   const [pendingEntity, setPendingEntity] = useState<any>(null);
@@ -782,14 +793,29 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
   function removeItem(idx: number) { setItems(prev => prev.filter((_, i) => i !== idx)); }
 
-  const preview = items.reduce((acc, it) => {
-    if (it.alicuotaIva === "21") { acc.neto += it.subtotalNeto; acc.iva21 += it.subtotalNeto * 0.21; }
-    else if (it.alicuotaIva === "10.5") { acc.neto += it.subtotalNeto; acc.iva105 += it.subtotalNeto * 0.105; }
-    else if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
-    else if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
+  // Mirrors calcularMontos() in server/billing/invoiceService.ts: accumulate the
+  // *gross* per-bucket amounts first, then round once at the aggregate level.
+  // Rounding each item's neto/IVA individually before summing (the previous
+  // approach) can drift the displayed total by a cent from the authoritative
+  // gross sum the backend actually invoices.
+  const brutos = items.reduce((acc, it) => {
+    const bruto = round2(it.subtotal);
+    if (it.alicuotaIva === "21") acc.bruto21 += bruto;
+    else if (it.alicuotaIva === "10.5") acc.bruto105 += bruto;
+    else if (it.alicuotaIva === "exento") acc.exento += bruto;
+    else if (it.alicuotaIva === "no_gravado") acc.ng += bruto;
     return acc;
-  }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
-  const totalPreview = preview.neto + preview.iva21 + preview.iva105 + preview.exento + preview.ng;
+  }, { bruto21: 0, bruto105: 0, exento: 0, ng: 0 });
+  const neto21 = round2(brutos.bruto21 / 1.21);
+  const neto105 = round2(brutos.bruto105 / 1.105);
+  const preview = {
+    neto: round2(neto21 + neto105),
+    iva21: round2(brutos.bruto21 - neto21),
+    iva105: round2(brutos.bruto105 - neto105),
+    exento: round2(brutos.exento),
+    ng: round2(brutos.ng),
+  };
+  const totalPreview = round2(brutos.bruto21 + brutos.bruto105 + brutos.exento + brutos.ng);
 
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/billing/invoices", body),
@@ -930,6 +956,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setShowRecipientChangeWarning(false); setPendingEntity(null); setShowEntityChangeWarning(false);
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
+    setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1007,6 +1034,38 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       || original.domicilio !== domicilio
       || (recipientProfile.type === "guest"
         && (original.firstName !== guestFirstName || original.lastName !== guestLastName));
+  }
+
+  /**
+   * Flags group sources/destinations where the amount about to be invoiced
+   * matches (or nearly matches) an amount already invoiced for the same
+   * concept. The backend still hard-blocks any amount beyond what's
+   * available; this is an extra sanity check for the case where an operator
+   * accidentally re-selects a concept that was already billed and the
+   * repeated amount would otherwise still fit within the available balance.
+   */
+  function computeGroupDuplicateWarnings(): string[] {
+    const resolvedGroupId = groupId || groupPaymentGroupId;
+    if (!resolvedGroupId) return [];
+    const total = grossItemsTotal(items);
+    if (total <= 0) return [];
+    const warnings: string[] = [];
+    const nearlyEquals = (a: number, b: number) => Math.abs(a - b) <= Math.max(1, b * 0.01);
+    if (groupPaymentId) {
+      const destination = (groupPaymentDestinations || []).find(d => d.id === groupPaymentId);
+      if (destination && destination.invoiced > 0 && nearlyEquals(total, destination.invoiced)) {
+        warnings.push(`"${destination.destination}" ya tiene $${fPeso(destination.invoiced)} facturado y este comprobante es por $${fPeso(total)}, un importe igual o muy cercano.`);
+      }
+    } else {
+      const allocation = allocateGroupInvoiceSources(groupInvoiceSources || [], total);
+      for (const [sourceId, amount] of Object.entries(allocation)) {
+        const source = (groupInvoiceSources || []).find(s => s.id === sourceId);
+        if (source && source.invoiced > 0 && nearlyEquals(amount, source.invoiced)) {
+          warnings.push(`"${source.destination} · ${source.concept}" ya tiene $${fPeso(source.invoiced)} facturado y este comprobante agregaría $${fPeso(amount)}, un importe igual o muy cercano.`);
+        }
+      }
+    }
+    return warnings;
   }
 
   function continueAfterValidation(saveRecipientProfile = false) {
@@ -1218,7 +1277,21 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowConfirm(false)}>← Editar</Button>
-              <Button onClick={() => handleConfirmEmit(recipientHasChanges())} disabled={mutation.isPending} data-testid="btn-confirmar-emitir">
+              <Button
+                onClick={() => {
+                  if (!duplicateAmountAcknowledged) {
+                    const warnings = computeGroupDuplicateWarnings();
+                    if (warnings.length > 0) {
+                      setDuplicateAmountWarnings(warnings);
+                      setShowDuplicateAmountConfirm(true);
+                      return;
+                    }
+                  }
+                  handleConfirmEmit(recipientHasChanges());
+                }}
+                disabled={mutation.isPending}
+                data-testid="btn-confirmar-emitir"
+              >
                 {mutation.isPending ? "Emitiendo..." : "Confirmar y emitir PDF"}
               </Button>
             </DialogFooter>
@@ -1548,6 +1621,32 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={showDuplicateAmountConfirm} onOpenChange={setShowDuplicateAmountConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Importe igual o muy cercano a uno ya facturado</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2 text-sm text-foreground">
+              {duplicateAmountWarnings.map((w, i) => <p key={i}>{w}</p>)}
+              <p className="text-muted-foreground">Verificá que no se trate del mismo concepto ya facturado antes de continuar.</p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setShowDuplicateAmountConfirm(false)}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setDuplicateAmountAcknowledged(true);
+              setShowDuplicateAmountConfirm(false);
+              handleConfirmEmit(recipientHasChanges());
+            }}
+            data-testid="btn-confirmar-importe-duplicado"
+          >
+            Sí, es correcto — continuar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
@@ -1681,6 +1780,15 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
     onSuccess: async (res: any) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      // Group invoices claim fiscal availability from the group; refresh every
+      // group-scoped view so facturado/disponible reflects the NC immediately,
+      // regardless of which screen opened this dialog.
+      if (invoice?.group_id) {
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "invoice-snapshot"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "folio"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "master-folio"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "direct-invoices"] });
+      }
       toast({ title: "Nota de Crédito emitida", description: `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
       onSuccess?.(data);
       onClose();

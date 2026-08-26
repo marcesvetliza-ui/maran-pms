@@ -61,6 +61,7 @@ import {
   type GroupPayment, type InsertGroupPayment,
   type GroupPaymentDestination,
   type GroupFolioData,
+  type GroupReservationLedgerLine,
   type GuestReview, type InsertGuestReview, type GuestReviewWithDetails, type SentimentType,
   type HousekeepingTask, type InsertHousekeepingTask, type HousekeepingTaskWithRoom,
   type RestaurantArea, type InsertRestaurantArea,
@@ -152,6 +153,7 @@ import {
   inventoryCountItems,
 } from "@shared/schema";
 import { assertFinancialSchemaReady } from "./migrate";
+import { getGroupInvoiceSnapshot } from "./billing/groupInvoiceScope";
 
 export class DatabaseStorage implements IStorage {
 
@@ -1676,7 +1678,7 @@ export class DatabaseStorage implements IStorage {
   async recordGroupPayment(input: {
     groupId: string;
     destination: GroupPaymentDestination;
-    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;
     date: string;
     reference?: string | null;
     distribution: string;
@@ -1714,7 +1716,20 @@ export class DatabaseStorage implements IStorage {
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
 
       const rows = input.paymentRows.filter((row) => cents(row.amount) > 0);
-      const receivedCents = rows.reduce((sum, row) => sum + cents(row.amount), 0);
+      // A retención (IIBB/Ganancias) withheld by the payer settles part of the
+      // debt without moving cash, so — like the single-reservation Prefactura
+      // flow — every balance/allocation check below must treat the row's
+      // *gross* value (cash + retención) as what the payer is crediting; the
+      // cash-only amount would leave the retained portion permanently
+      // unsettled and desync from the route-level allocation, which is
+      // already computed on the gross total.
+      const grossRowCents = rows.map((row) => {
+        const retentionCents = row.retention && row.method !== "cuenta_corriente"
+          ? Math.round((row.retention.monto || 0) * 100)
+          : 0;
+        return cents(row.amount) + retentionCents;
+      });
+      const receivedCents = grossRowCents.reduce((sum, value) => sum + value, 0);
       if (receivedCents <= 0) throw invalid("El monto debe ser positivo");
       const hasCuentaCorriente = rows.some((row) => row.method === "cuenta_corriente");
       if (hasCuentaCorriente && (!input.billingEntityType || !input.billingEntityId)) {
@@ -1815,17 +1830,59 @@ export class DatabaseStorage implements IStorage {
       // Build one rounded matrix for methods × destinations. Splitting every
       // destination independently can turn a one-cent card amount into two
       // cents across two rooms. This preserves both row (method) and column
-      // (destination) totals exactly.
+      // (destination) totals exactly. grossRowCents (cash + retención per
+      // row) was computed above, alongside receivedCents.
       const allocationByMethod = new Map<string, number[]>();
       let remainingAllocationCents = allocations.map((allocation) => allocation.cents);
       rows.forEach((row, methodIndex) => {
-        const rowCents = cents(row.amount);
+        const rowCents = grossRowCents[methodIndex];
         const split = methodIndex === rows.length - 1
           ? [...remainingAllocationCents]
           : splitAcrossCapacities(rowCents, remainingAllocationCents);
         allocationByMethod.set(`${methodIndex}`, split);
         remainingAllocationCents = remainingAllocationCents.map((amount, index) => amount - split[index]);
       });
+
+      // When a row's gross amount is split across several rooms (group
+      // distribution), the retención must be split in the same proportion so
+      // each room payment's note reflects its own neto/retención share
+      // instead of the row's full retención.
+      const retentionByMethod = new Map<string, number[]>();
+      rows.forEach((row, methodIndex) => {
+        if (!row.retention || row.method === "cuenta_corriente") return;
+        const rowCents = grossRowCents[methodIndex];
+        const retentionCents = Math.round((row.retention.monto || 0) * 100);
+        if (rowCents <= 0 || retentionCents <= 0) return;
+        const grossSplit = allocationByMethod.get(`${methodIndex}`) || [];
+        let remainingRetentionCents = retentionCents;
+        const split = grossSplit.map((shareCents, index) => {
+          if (index === grossSplit.length - 1) return remainingRetentionCents;
+          const share = Math.round((retentionCents * shareCents) / rowCents);
+          remainingRetentionCents -= share;
+          return share;
+        });
+        retentionByMethod.set(`${methodIndex}`, split);
+      });
+
+      // A retención withheld on the portion of the payment allocated to a
+      // "__"-prefixed target (Folio Maestro balance, group charges) has no
+      // room-level payments.notes to live on. Without capturing it here it
+      // is silently dropped instead of just being recorded elsewhere, so
+      // accumulate it per tipo and persist it directly on the group_payments
+      // row below.
+      const unassignedRetentionCents = new Map<string, number>();
+      allocations.forEach((allocation, allocationIndex) => {
+        if (!allocation.reservationId.startsWith("__")) return;
+        rows.forEach((row, methodIndex) => {
+          if (!row.retention || row.method === "cuenta_corriente") return;
+          const shareCents = retentionByMethod.get(`${methodIndex}`)?.[allocationIndex] || 0;
+          if (shareCents <= 0) return;
+          unassignedRetentionCents.set(row.retention.tipo, (unassignedRetentionCents.get(row.retention.tipo) || 0) + shareCents);
+        });
+      });
+      const retentionDetail = Array.from(unassignedRetentionCents.entries())
+        .map(([tipo, centsAmount]) => ({ tipo, monto: centsAmount / 100 }))
+        .filter((entry) => entry.monto > 0);
 
       const reservationIds = allocations
         .map((allocation) => allocation.reservationId)
@@ -1903,6 +1960,7 @@ export class DatabaseStorage implements IStorage {
         paymentMethodDetail: rows,
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
+        retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
       } as any).returning();
 
       const reservationPayments: Payment[] = [];
@@ -1931,6 +1989,16 @@ export class DatabaseStorage implements IStorage {
             }
             continue;
           }
+          // A retención withheld by the payer (e.g. a company deducting IIBB
+          // or Ganancias when paying by transfer) settles this room's balance
+          // even though the cash received is smaller than the applied amount.
+          // Stored in the same { retencion: { tipo, monto, neto } } shape the
+          // single-reservation billing flow already writes, so any future
+          // reader of payments.notes keeps working unchanged.
+          const retentionShareCents = retentionByMethod.get(`${methodIndex}`)?.[allocationIndex] || 0;
+          const notes = retentionShareCents > 0
+            ? JSON.stringify({ retencion: { tipo: row.retention!.tipo, monto: retentionShareCents / 100, neto: (appliedCents - retentionShareCents) / 100 } })
+            : null;
           const [created] = await tx.insert(payments).values({
             reservationId: allocation.reservationId,
             amount,
@@ -1939,6 +2007,7 @@ export class DatabaseStorage implements IStorage {
             date: input.date,
             billingTarget: row.method === "cuenta_corriente" ? input.billingEntityType : "guest",
             groupPaymentId: groupPayment.id,
+            notes,
           } as any).returning();
           reservationPayments.push(created);
           if (row.method === "cuenta_corriente") {
@@ -1984,17 +2053,20 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+  // Single, batched read of the per-reservation facts (accommodation, active
+  // charges, active payments) that back the group folio, the master folio and
+  // the group invoice summary. Every one of those views must derive its
+  // totals from this same filtered data set (active reservations only,
+  // non-"anulado" charges/payments, totalRoomAmount as the accommodation
+  // source) so they can never disagree about what is actually owed.
+  async getGroupReservationLedger(groupId: string): Promise<GroupReservationLedgerLine[]> {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("Grupo no encontrado");
 
     const activeReservations = group.reservations.filter((r: any) => r.status !== "cancelled");
     const resIds = activeReservations.map((r: any) => r.id).filter(Boolean);
 
-    // Batch-fetch everything in parallel — no per-reservation queries
-    const [gCharges, gPayments, allResCharges, allResPayments] = await Promise.all([
-      this.getGroupCharges(groupId),
-      this.getGroupPayments(groupId),
+    const [allResCharges, allResPayments] = await Promise.all([
       resIds.length > 0
         ? db.select().from(charges).where(inArray(charges.reservationId, resIds))
         : Promise.resolve([]),
@@ -2003,7 +2075,6 @@ export class DatabaseStorage implements IStorage {
         : Promise.resolve([]),
     ]);
 
-    // Build lookup maps
     const chargesMap = new Map<string, Charge[]>();
     for (const c of allResCharges) {
       if (!chargesMap.has(c.reservationId!)) chargesMap.set(c.reservationId!, []);
@@ -2014,6 +2085,45 @@ export class DatabaseStorage implements IStorage {
       if (!paymentsMap.has(p.reservationId!)) paymentsMap.set(p.reservationId!, []);
       paymentsMap.get(p.reservationId!)!.push(p);
     }
+
+    return activeReservations.map((res: any) => {
+      const resCharges = (chargesMap.get(res.id) || []).filter((c: any) => c.status !== "anulado");
+      const resPayments = (paymentsMap.get(res.id) || []).filter((p: any) => p.status !== "anulado");
+      const accommodationTotal = parseFloat(res.totalRoomAmount || "0");
+      const extrasTotal = resCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+      const paymentsTotal = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      return {
+        reservationId: res.id,
+        reservationCode: res.reservationCode || "",
+        guestName: (res.guest as any)?.tipoPersona === "juridica"
+          ? (res.guest?.firstName || "")
+          : `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
+        roomNumber: res.room?.roomNumber || "-",
+        status: res.status,
+        nights: res.nights || 0,
+        accommodationTotal,
+        charges: resCharges,
+        extrasTotal,
+        payments: resPayments,
+        paymentsTotal,
+      };
+    });
+  }
+
+  async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+    const group = await this.getGroup(groupId);
+    if (!group) throw new Error("Grupo no encontrado");
+
+    const activeReservations = group.reservations.filter((r: any) => r.status !== "cancelled");
+    const resIds = activeReservations.map((r: any) => r.id).filter(Boolean);
+
+    // Batch-fetch everything in parallel — no per-reservation queries
+    const [gCharges, gPayments, ledgerLines, billing] = await Promise.all([
+      this.getGroupCharges(groupId),
+      this.getGroupPayments(groupId),
+      this.getGroupReservationLedger(groupId),
+      getGroupInvoiceSnapshot(groupId),
+    ]);
 
     // Fetch void folio_movements for all reservation folios in this group
     let voidMovementsWithContext: GroupFolioData["voidMovements"] = [];
@@ -2070,33 +2180,24 @@ export class DatabaseStorage implements IStorage {
     let indivPaymentsTotal = 0;
     const groupPaymentIds = new Set(gPayments.map((payment) => payment.id));
 
-    const resRows = activeReservations.map((res: any) => {
-      const resCharges = chargesMap.get(res.id) || [];
-      const resPayments = paymentsMap.get(res.id) || [];
-      const accTotal = parseFloat(res.totalRoomAmount || "0");
-      const extTotal = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-      // Exclude voided (anulado) payments from the balance so voids restore the owed amount
-      const activeResPayments = resPayments.filter((p: any) => p.status !== "anulado");
-      const payTotal = activeResPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-      const nights = res.nights || 0;
-
-      accommodationTotal += accTotal;
-      extrasTotal += extTotal;
+    const resRows = ledgerLines.map((line) => {
+      accommodationTotal += line.accommodationTotal;
+      extrasTotal += line.extrasTotal;
       // Payments linked to a group payment are allocations, not a second
       // receipt. Legacy/direct room payments remain independent receipts.
-      indivPaymentsTotal += activeResPayments
+      indivPaymentsTotal += line.payments
         .filter((payment: any) => !payment.groupPaymentId || !groupPaymentIds.has(payment.groupPaymentId))
         .reduce((s: number, payment: any) => s + parseFloat(payment.amount), 0);
 
       return {
-        reservationId: res.id,
-        guestName: `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
-        roomNumber: res.room?.roomNumber || "-",
-        nights,
-        accommodationTotal: accTotal,
-        extrasTotal: extTotal,
-        paymentsTotal: payTotal,
-        balance: accTotal + extTotal - payTotal,
+        reservationId: line.reservationId,
+        guestName: line.guestName,
+        roomNumber: line.roomNumber,
+        nights: line.nights,
+        accommodationTotal: line.accommodationTotal,
+        extrasTotal: line.extrasTotal,
+        paymentsTotal: line.paymentsTotal,
+        balance: line.accommodationTotal + line.extrasTotal - line.paymentsTotal,
       };
     });
 
@@ -2123,6 +2224,7 @@ export class DatabaseStorage implements IStorage {
         voids: voidMovementsTotal,
         balance,
       },
+      billing,
     };
   }
 

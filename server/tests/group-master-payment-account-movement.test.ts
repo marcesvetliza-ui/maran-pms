@@ -259,6 +259,28 @@ describe("group master payment and current-account reversal", () => {
     releaseCargoLock = null;
   });
 
+  it("persists a retención withheld on the Folio Maestro (non-room) portion of a payment instead of dropping it", async () => {
+    const { storage } = await import("../db-storage");
+    const recorded = await storage.recordGroupPayment({
+      groupId: GROUP_ID,
+      destination: "master_folio",
+      paymentRows: [
+        { method: "efectivo", amount: "6.00", reference: "cash-retencion", retention: { tipo: "iibb", monto: 4.01 } },
+      ],
+      date: "2026-08-26",
+      reference: "Pago Folio Maestro con retención",
+      distribution: "master_folio",
+      distributionDetail: { __master_balance__: 10.01 },
+    });
+
+    // Nothing here allocates to a real room, so there is no payments.notes
+    // row to carry the retención — it must instead land on the parent
+    // group_payments row's retentionDetail column, not vanish.
+    expect(recorded.groupPayment.amount).toBe("10.01");
+    expect(recorded.reservationPayments).toHaveLength(0);
+    expect(recorded.groupPayment.retentionDetail).toEqual([{ tipo: "iibb", monto: 4.01 }]);
+  });
+
   it("keeps mixed master receipts and current-account cargos in sync when reversing", async () => {
     const groupPayment = await recordMixedMasterPayment();
 

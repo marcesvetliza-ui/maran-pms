@@ -64,7 +64,9 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
     for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
       const value = parseFloat(String(amount)) || 0;
       const credit = hasPerSourceCredits
-        ? creditMaps.reduce((sum: number, map: any) => sum + (parseFloat(String(map?.[id])) || 0), 0)
+        // Older rows may have been stored double-JSON-encoded (a jsonb scalar
+        // string instead of an object); parse each aggregated entry defensively.
+        ? creditMaps.reduce((sum: number, rawMap: any) => sum + (parseFloat(String(parseJson(rawMap)?.[id])) || 0), 0)
         : value * (total > 0 ? credited / total : 0);
       if (value > 0) result[id] = Math.max(0, value - credit);
     }
@@ -1101,6 +1103,44 @@ export function registerBillingRoutes(app: Express) {
             retenciones = { iibb: retIibb, ganancias: retGanancias, iva: retIva };
           }
         } catch { /* non-fatal — guest data is optional */ }
+      } else if (factura.group_id && factura.group_payment_id) {
+        // Group invoices carry no reserva_id, so the retención withheld by
+        // the payer must be read from the room-level payments allocated
+        // under this invoice's group payment (same { retencion } shape),
+        // PLUS the group_payments row's own retention_detail — the portion
+        // withheld against the Folio Maestro / group-charges balance itself
+        // (a "__"-prefixed target, not a real room) has no payments.notes
+        // row to live on and is recorded there instead.
+        try {
+          const [pmtRows, gpRows] = await Promise.all([
+            db.execute(sql`SELECT notes FROM payments WHERE group_payment_id = ${factura.group_payment_id}`),
+            db.execute(sql`SELECT retention_detail FROM group_payments WHERE id = ${factura.group_payment_id}`),
+          ]);
+          let retIibb = 0, retGanancias = 0, retIva = 0;
+          for (const p of pmtRows.rows as any[]) {
+            if (!p.notes) continue;
+            try {
+              const parsed = typeof p.notes === "string" ? JSON.parse(p.notes) : p.notes;
+              const ret = parsed?.retencion;
+              if (!ret || !ret.monto) continue;
+              if (ret.tipo === "iibb")           retIibb      += Number(ret.monto) || 0;
+              else if (ret.tipo === "ganancias") retGanancias += Number(ret.monto) || 0;
+              else if (ret.tipo === "iva")       retIva       += Number(ret.monto) || 0;
+            } catch { /* unparseable notes — skip */ }
+          }
+          const retentionDetail = (gpRows.rows[0] as any)?.retention_detail;
+          if (Array.isArray(retentionDetail)) {
+            for (const ret of retentionDetail) {
+              if (!ret || !ret.monto) continue;
+              if (ret.tipo === "iibb")           retIibb      += Number(ret.monto) || 0;
+              else if (ret.tipo === "ganancias") retGanancias += Number(ret.monto) || 0;
+              else if (ret.tipo === "iva")       retIva       += Number(ret.monto) || 0;
+            }
+          }
+          if (retIibb + retGanancias + retIva > 0) {
+            retenciones = { iibb: retIibb, ganancias: retGanancias, iva: retIva };
+          }
+        } catch { /* non-fatal — retención display is optional */ }
       }
 
       const logoBuffer = await loadLogoBuffer((config as any).logoUrl);

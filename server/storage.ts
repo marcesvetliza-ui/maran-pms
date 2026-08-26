@@ -60,6 +60,7 @@ import {
   type InsertGroupPayment,
   type GroupPaymentDestination,
   type GroupFolioData,
+  type GroupReservationLedgerLine,
   type GuestReview,
   type InsertGuestReview,
   type GuestReviewWithDetails,
@@ -401,7 +402,7 @@ export interface IStorage {
   recordGroupPayment(input: {
     groupId: string;
     destination: GroupPaymentDestination;
-    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;
     date: string;
     reference?: string | null;
     distribution: string;
@@ -416,6 +417,7 @@ export interface IStorage {
   getGroupPayments(groupId: string): Promise<GroupPayment[]>;
   transferChargeToGroup(chargeId: string, groupId: string): Promise<GroupCharge>;
   getGroupFolio(groupId: string): Promise<GroupFolioData>;
+  getGroupReservationLedger(groupId: string): Promise<GroupReservationLedgerLine[]>;
   distributeGroupPayment(groupId: string, totalAmount: number, distribution: string, manualDetail?: Record<string, number>): Promise<Record<string, number>>;
 
   // Guest Reviews

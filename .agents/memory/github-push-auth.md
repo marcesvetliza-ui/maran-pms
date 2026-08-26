@@ -14,3 +14,9 @@ For Git Data API writes in this environment, create and verify blobs, tree, comm
 **Why:** A large chained OAuth Git Data request can fail with an opaque `PatternError` before yielding a reliable outcome; single-step calls make each stage auditable and prevent assuming a branch was updated.
 
 **How to apply:** After any ambiguous error, re-read the remote ref before continuing. Update the ref with `force: false` only after the new commit is known to be parented to the observed remote head.
+
+For large repository tree comparisons, do not parse a long `git ls-tree` result returned directly by the code-execution shell: its visible output can be partial even when no truncation is reported. Generate and parse the comparison manifest in `/tmp` from the current workspace instead.
+
+**Why:** A partial tree can make unchanged remote files look deleted and risks an unsafe publish manifest.
+
+**How to apply:** Fetch the remote tree through OAuth, save it temporarily, compare it to the local tree with a local Node script, and review the resulting changed/added/deleted path lists before uploading blobs.

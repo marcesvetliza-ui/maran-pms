@@ -45,6 +45,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "destination",
       "receiver_details",
       "invoice_ref",
+      "retention_detail",
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
   },
@@ -1555,6 +1556,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // invoice_nc_ref on group_payments: JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
   await withTimeout("group_payments.invoice_nc_ref", T, () =>
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)
+  );
+
+  // retention_detail on group_payments: [{tipo, monto}] retención withheld on
+  // the portion of a Folio Maestro / group-charges payment that has no real
+  // room to attach payments.notes to — without this column that retención
+  // was silently dropped instead of just recorded elsewhere.
+  await withTimeout("group_payments.retention_detail", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS retention_detail jsonb`)
   );
 
   // group_invoices: facturas emitidas directamente desde el Resumen del Grupo (sin pago asociado)

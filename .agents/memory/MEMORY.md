@@ -39,3 +39,7 @@
 - [Group payment source of truth](group-payment-source-of-truth.md) — the parent group receipt is counted once; linked room payments are allocations, never extra revenue.
 - [Group invoice fiscal scope](group-invoice-fiscal-scope.md) — source claims, NCs, payment reissues and gross-cent totals must share one locked fiscal scope.
 - [PostgreSQL lock observability](postgres-lock-observability.md) — the managed database reports lock waits but can hide other sessions’ query text.
+- [Group financial views share one ledger](group-financial-reconciliation.md) — folio/master-folio(JSON+PDF)/resumen must all read storage.getGroupReservationLedger, not their own hand-rolled loop.
+- [Payment retention (IIBB/Ganancias) display](payment-retention-display.md) — retention lives as JSON on payments.notes; any new payment-listing view/PDF must parse and render it, group invoices need their own group_payment_id branch.
+- [Shared invoice dialog stale state](shared-invoice-dialog-stale-state.md) — a dialog opened from two different mutations (legacy + new flow) must branch on which one triggered it, or it silently prefills the wrong flow's data; extract the branch into a named, unit-tested resolver, not inline IIFE logic.
+- [Group payment dialogs & retención support](group-payment-dialogs-retention-support.md) — only "Pago Grupal" (destino=master) has retención fields; the legacy "Pago al Folio Maestro" dialog has none.
