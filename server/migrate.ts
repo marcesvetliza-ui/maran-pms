@@ -1413,6 +1413,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE group_invoices ADD COLUMN IF NOT EXISTS sales_invoice_id integer UNIQUE`)
   );
 
+  // The fiscal source claim must be written with sales_invoices, before the
+  // client performs its follow-up link request. This makes the group residual
+  // guard safe across simultaneous browser actions and application instances.
+  await withTimeout("sales_invoices.group_invoice_scope", T, () =>
+    db.execute(sql`
+      ALTER TABLE sales_invoices
+        ADD COLUMN IF NOT EXISTS group_id varchar,
+        ADD COLUMN IF NOT EXISTS group_payment_id varchar;
+      CREATE INDEX IF NOT EXISTS sales_invoices_group_id_idx
+        ON sales_invoices (group_id);
+      ALTER TABLE sales_invoices
+        DROP CONSTRAINT IF EXISTS sales_invoices_group_payment_id_unique;
+      DROP INDEX IF EXISTS sales_invoices_group_payment_id_unique;
+      CREATE INDEX IF NOT EXISTS sales_invoices_group_payment_id_idx
+        ON sales_invoices (group_payment_id)
+        WHERE group_payment_id IS NOT NULL;
+    `)
+  );
+
   // Clean up 9 orphaned spa_accounts from March 2026 whose parent appointments
   // were deleted. Mark as 'cancelled' (not DELETE) to preserve payment history.
   // The 3 closed accounts have room_charge payments already applied to folios.

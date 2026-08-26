@@ -2368,6 +2368,12 @@ export const salesInvoices = pgTable("sales_invoices", {
   modoFicticio: boolean("modo_ficticio").default(true),
   estado: text("estado").default("emitida"),
   reservaId: varchar("reserva_id"),
+  // Group invoices persist their owner at issuance time. Linking the display
+  // row afterwards is not enough to protect concurrent emissions.
+  groupId: varchar("group_id"),
+  // A group payment can fund at most one fiscal document. Kept separately
+  // from group_payments.invoice_id so the claim exists before the UI link.
+  groupPaymentId: varchar("group_payment_id"),
   folioId: integer("folio_id"),
   notaCreditoId: integer("nota_credito_id"),
   restaurantOrderId: varchar("restaurant_order_id"),

@@ -37,4 +37,5 @@
 - [Resend domain verification](resend-domain-verification.md) — sending requires SPF/MX on the `send` subdomain and a `from` address under the verified domain.
 - [Confirmation PDF details](confirmation-pdf-details.md) — keep package/extras in a compact full-width block separate from general terms; total is room plus active charges.
 - [Group payment source of truth](group-payment-source-of-truth.md) — the parent group receipt is counted once; linked room payments are allocations, never extra revenue.
+- [Group invoice fiscal scope](group-invoice-fiscal-scope.md) — source claims, NCs, payment reissues and gross-cent totals must share one locked fiscal scope.
 - [PostgreSQL lock observability](postgres-lock-observability.md) — the managed database reports lock waits but can hide other sessions’ query text.

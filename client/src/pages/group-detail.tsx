@@ -939,6 +939,15 @@ export default function GroupDetailPage() {
     },
   });
 
+  const { data: groupInvoiceSnapshot } = useQuery<any>({
+    queryKey: ["/api/groups", groupId, "invoice-snapshot"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/invoice-snapshot`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error loading group invoice availability");
+      return res.json();
+    },
+  });
+
   const { data: directInvoices = [] } = useQuery<any[]>({
     queryKey: ["/api/groups", groupId, "direct-invoices"],
     queryFn: async () => {
@@ -2795,6 +2804,34 @@ export default function GroupDetailPage() {
 
           {invoiceData && (
             <div className="space-y-6 print:text-sm" id="invoice-content">
+              {invoiceData.billing && (
+                <Card className="border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Disponibilidad para facturar</CardTitle>
+                    <CardDescription>Total elegible, ya facturado y disponible por concepto y destino.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-3 gap-3 text-sm">
+                      <div><p className="text-xs text-muted-foreground">Elegible</p><p className="font-semibold">{fmtMoney(invoiceData.billing.totals.eligible)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Ya facturado</p><p className="font-semibold text-orange-600">{fmtMoney(invoiceData.billing.totals.invoiced)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Disponible</p><p className="font-semibold text-emerald-600">{fmtMoney(invoiceData.billing.totals.available)}</p></div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto rounded-md border">
+                      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        <span>Concepto / destino</span><span>Elegible</span><span>Facturado</span><span>Disponible</span>
+                      </div>
+                      {invoiceData.billing.sources.map((source: any) => (
+                        <div key={source.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-2 text-xs">
+                          <span className="truncate" title={source.id}>{source.destination} · {source.concept}</span>
+                          <span>{fmtMoney(source.eligible)}</span>
+                          <span>{fmtMoney(source.invoiced)}</span>
+                          <span className={source.available > 0 ? "font-semibold text-emerald-700" : "text-muted-foreground"}>{fmtMoney(source.available)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               {/* Group Info */}
               <div className="p-4 bg-muted rounded-lg print:bg-transparent print:border print:p-2">
                 <div className="grid grid-cols-2 gap-4">
@@ -2936,9 +2973,15 @@ export default function GroupDetailPage() {
             </Button>
             <Button
               onClick={() => {
-                const balance = invoiceData?.totals?.balance ?? 0;
+                const billableSources = (invoiceData?.billing?.sources ?? groupInvoiceSnapshot?.sources ?? [])
+                  .filter((source: any) => Number(source.available) > 0);
+                const available = Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0);
                 setGroupPaymentReceiptType("factura_b");
-                setGroupPaymentRows([{method: "cash", amount: String(balance), reference: ""}]);
+                setGroupPaymentRows([{method: "cash", amount: String(available), reference: ""}]);
+                setGroupPaymentItems(gItemsFromSimple(billableSources.map((source: any) => ({
+                  descripcion: `${source.destination} — ${source.concept}`,
+                  precioUnitario: Number(source.available),
+                }))));
                 // Pre-fill billing entity from group config
                 if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
                   setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
@@ -2951,7 +2994,7 @@ export default function GroupDetailPage() {
                 setGroupFacturaFromResumen(true);
                 setShowGroupFacturaDialog(true);
               }}
-              disabled={!invoiceData || (invoiceData?.totals?.balance ?? 0) <= 0}
+              disabled={!invoiceData || Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0) <= 0}
               data-testid="button-emitir-factura-resumen"
             >
               <Receipt className="mr-2 h-4 w-4" />
@@ -3659,6 +3702,10 @@ export default function GroupDetailPage() {
           groupPaymentId={pendingGroupPaymentId || undefined}
           groupPaymentGroupId={pendingGroupPaymentId ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
+          groupInvoiceSources={groupInvoiceSnapshot?.sources}
+          groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
+          lockItems={groupFacturaFromResumen}
+          hideAddItems={groupFacturaFromResumen}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
@@ -4207,6 +4254,8 @@ export default function GroupDetailPage() {
             }}
             groupPaymentId={pendingMasterPaymentId || undefined}
             groupPaymentGroupId={pendingMasterPaymentId ? groupId : undefined}
+            groupInvoiceSources={groupInvoiceSnapshot?.sources}
+            groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
             onSuccess={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");

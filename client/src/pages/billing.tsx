@@ -4,6 +4,7 @@ import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { allocateGroupInvoiceSources, grossItemsTotal } from "@/lib/group-invoice-allocation";
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
@@ -512,7 +513,25 @@ type RecipientProfile = {
   lastName?: string;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, groupPaymentId, groupPaymentGroupId, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
+type GroupInvoiceSourcePreview = {
+  id: string;
+  concept: string;
+  destination: string;
+  eligible: number;
+  invoiced: number;
+  available: number;
+};
+
+type GroupPaymentDestinationPreview = {
+  id: string;
+  concept: string;
+  destination: string;
+  eligible: number;
+  invoiced: number;
+  available: number;
+};
+
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -530,6 +549,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   groupPaymentId?: string;
   /** Group owning groupPaymentId. */
   groupPaymentGroupId?: string;
+  /** Server snapshot shown before group emission and used for partial projections. */
+  groupInvoiceSources?: GroupInvoiceSourcePreview[];
+  /** Parent collection destinations, independently auditable from service concepts. */
+  groupPaymentDestinations?: GroupPaymentDestinationPreview[];
   /** When true, the condición IVA field is read-only (pre-set from entity) */
   lockCondicionIva?: boolean;
   /** When true, the "Agregar ítem" button and extra item rows are hidden */
@@ -859,6 +882,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           if (linkRes.ok) {
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "folio"] });
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "master-folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "invoice-snapshot"] });
             onSuccess?.(data);
             onClose(); resetForm();
           } else {
@@ -878,6 +902,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           setLinkPending(false);
           if (linkRes.ok) {
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"] });
             onSuccess?.(data);
             onClose(); resetForm();
           } else {
@@ -1003,11 +1028,22 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   function handleConfirmEmit(saveRecipientProfile = false) {
     setShowConfirm(false);
     saveRecipientOnEmitRef.current = saveRecipientProfile;
+    const resolvedGroupId = groupId || groupPaymentGroupId;
+    const groupSourceAmounts = resolvedGroupId && !groupPaymentId
+      ? allocateGroupInvoiceSources(groupInvoiceSources || [], grossItemsTotal(items))
+      : undefined;
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
       items,
       puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
+      ...(resolvedGroupId ? {
+        groupId: resolvedGroupId,
+        ...(groupPaymentId ? { groupPaymentId } : {
+          sourceChargeIds: Object.keys(groupSourceAmounts || {}),
+          sourceChargeAmounts: groupSourceAmounts,
+        }),
+      } : {}),
       ...((cashArea || showPaymentMethod)
         ? {
             ...(cashArea ? { cashArea } : {}),
@@ -1097,6 +1133,36 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           </div>
         ) : showConfirm ? (
           <div className="space-y-4">
+            {groupInvoiceSources && groupInvoiceSources.length > 0 && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-800 dark:bg-violet-950/20">
+                <p className="mb-2 text-sm font-semibold text-violet-900 dark:text-violet-200">Disponibilidad fiscal del grupo</p>
+                <div className="max-h-40 space-y-1 overflow-y-auto text-xs">
+                  {groupInvoiceSources.map((source) => (
+                    <div key={source.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3">
+                      <span className="truncate" title={`${source.destination} — ${source.concept}`}>{source.destination} · {source.concept}</span>
+                      <span>Elegible ${fPeso(source.eligible)}</span>
+                      <span>Fact. ${fPeso(source.invoiced)}</span>
+                      <span className={source.available > 0 ? "font-semibold text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>Disp. ${fPeso(source.available)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {groupPaymentDestinations && groupPaymentDestinations.length > 0 && (
+              <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-800 dark:bg-sky-950/20">
+                <p className="mb-2 text-sm font-semibold text-sky-900 dark:text-sky-200">Cobros grupales</p>
+                <div className="space-y-1 text-xs">
+                  {groupPaymentDestinations.map((destination) => (
+                    <div key={destination.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3">
+                      <span>{destination.destination}</span>
+                      <span>Elegible ${fPeso(destination.eligible)}</span>
+                      <span>Fact. ${fPeso(destination.invoiced)}</span>
+                      <span className={destination.available > 0 ? "font-semibold text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>Disp. ${fPeso(destination.available)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-blue-600" />
@@ -1516,9 +1582,10 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
 
   const isReservationInvoice = Boolean(invoice?.reserva_id);
+  const isSourceMappedInvoice = isReservationInvoice || Boolean(invoice?.group_id && invoice?.source_charge_amounts);
 
   useEffect(() => {
-    if (!invoice || !isReservationInvoice) {
+    if (!invoice || !isSourceMappedInvoice) {
       setNcItems([]);
       setMappingWarning(null);
       return;
@@ -1537,7 +1604,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
     if (!Array.isArray(rawItems) || !sourceAmounts || sourceIds.length === 0) {
       setNcItems([]);
-      setMappingWarning("Esta factura de reserva no tiene un detalle seguro por cargo. Emití la NC desde el Folio para revisar el vínculo original.");
+      setMappingWarning("Esta factura no tiene un detalle seguro por concepto. Revisá el vínculo original antes de emitir la NC.");
       return;
     }
 
@@ -1607,7 +1674,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
     setMappingWarning(rows.length > 0
       ? null
       : "La factura de reserva ya no tiene cargos disponibles para acreditar.");
-  }, [invoice, isReservationInvoice]);
+  }, [invoice, isSourceMappedInvoice]);
 
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-credito`, body),
@@ -1649,10 +1716,10 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   const totalNcByCharge = ncItems
     .filter(item => item.selected)
     .reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-  const montoNC = isReservationInvoice
+  const montoNC = isSourceMappedInvoice
     ? totalNcByCharge
     : modoParcial ? parseFloat(montoParcial) || 0 : saldoPendiente;
-  const montoInvalido = isReservationInvoice
+  const montoInvalido = isSourceMappedInvoice
     ? Boolean(mappingWarning) ||
       montoNC <= 0 ||
       montoNC > saldoPendiente + 0.01 ||
@@ -1667,7 +1734,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
     }
     mutation.mutate({
       motivo: motivo.trim(),
-      ...(isReservationInvoice
+      ...(isSourceMappedInvoice
         ? {
             items: ncItems
               .filter(item => item.selected && (parseFloat(item.amount) || 0) > 0)
@@ -1705,7 +1772,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
               <div className="text-muted-foreground">Heredada y bloqueada</div>
             </div>
           </div>
-          {isReservationInvoice ? (
+          {isSourceMappedInvoice ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Conceptos a acreditar *</Label>
@@ -1775,7 +1842,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
             </>
           )}
           <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
-            {isReservationInvoice
+            {isSourceMappedInvoice
               ? `Se emitirá una ${tipoNC} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
               : modoParcial
                 ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`

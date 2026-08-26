@@ -32,6 +32,10 @@ export interface NewInvoiceData {
   };
   items: InvoiceItem[];
   reservaId?: string;
+  /** Group that owns this invoice's fiscal sources. */
+  groupId?: string;
+  /** Parent group collection being invoiced, if any. */
+  groupPaymentId?: string;
   restaurantOrderId?: string;
   folioId?: number;
   facturaOriginalId?: number; // para NC
@@ -55,17 +59,22 @@ export const TIPOS_CBT_WSFE: Record<string, number> = {
   NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
 };
 
-function calcularMontos(items: InvoiceItem[], tipo: string) {
-  let montoNeto = 0;
-  let montoIva21 = 0;
-  let montoIva105 = 0;
+/**
+ * Calculates fiscal fields from the gross line amounts, which are the
+ * economic amounts shown to and approved by the operator. Deriving totals
+ * from client-provided per-line net values can lose cents when several lines
+ * are aggregated, causing the fiscal total to differ from the invoice total.
+ */
+export function calcularMontos(items: InvoiceItem[], tipo: string) {
+  let bruto21 = 0;
+  let bruto105 = 0;
   let montoExento = 0;
   let montoNoGravado = 0;
 
   // Factura C (monotributista) y Factura T (turismo) no discriminan IVA:
   // todo el importe se considera "no gravado" a los fines de ARCA.
   if (tipo === "FC" || tipo === "FT" || tipo === "NCC" || tipo === "NCT") {
-    for (const item of items) montoNoGravado += item.subtotal;
+    for (const item of items) montoNoGravado += round2(item.subtotal);
     const montoTotal = round2(montoNoGravado);
     return {
       montoNeto: 0,
@@ -78,32 +87,38 @@ function calcularMontos(items: InvoiceItem[], tipo: string) {
   }
 
   for (const item of items) {
+    const bruto = round2(item.subtotal);
     switch (item.alicuotaIva) {
       case "21":
-        montoNeto += item.subtotalNeto;
-        montoIva21 += item.subtotalNeto * 0.21;
+        bruto21 += bruto;
         break;
       case "10.5":
-        montoNeto += item.subtotalNeto;
-        montoIva105 += item.subtotalNeto * 0.105;
+        bruto105 += bruto;
         break;
       case "exento":
-        montoExento += item.subtotal;
+        montoExento += bruto;
         break;
       case "no_gravado":
-        montoNoGravado += item.subtotal;
+        montoNoGravado += bruto;
         break;
     }
   }
 
-  const montoTotal = montoNeto + montoIva21 + montoIva105 + montoExento + montoNoGravado;
+  const neto21 = round2(bruto21 / 1.21);
+  const neto105 = round2(bruto105 / 1.105);
+  const montoIva21 = round2(bruto21 - neto21);
+  const montoIva105 = round2(bruto105 - neto105);
+  const montoNeto = round2(neto21 + neto105);
+  // Preserve the exact sum of gross line cents. This is authoritative for
+  // availability claims, payment links, PDFs and the ARCA payload.
+  const montoTotal = round2(bruto21 + bruto105 + montoExento + montoNoGravado);
   return {
-    montoNeto: round2(montoNeto),
-    montoIva21: round2(montoIva21),
-    montoIva105: round2(montoIva105),
+    montoNeto,
+    montoIva21,
+    montoIva105,
     montoExento: round2(montoExento),
     montoNoGravado: round2(montoNoGravado),
-    montoTotal: round2(montoTotal),
+    montoTotal,
   };
 }
 
@@ -383,6 +398,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     modoFicticio,
     estado: "emitida",
     reservaId: data.reservaId || null,
+    groupId: data.groupId || null,
+    groupPaymentId: data.groupPaymentId || null,
     restaurantOrderId: data.restaurantOrderId || null,
     folioId: data.folioId || null,
     notaCreditoId: data.facturaOriginalId || null,

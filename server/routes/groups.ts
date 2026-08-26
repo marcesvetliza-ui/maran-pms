@@ -7,22 +7,35 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
+import { assertGroupPaymentInvoiceScope, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
 
 function distributeCents(
   totalCents: number,
   entries: Array<{ id: string; weight: number }>
 ): Record<string, number> {
-  const usable = entries.filter((entry) => entry.weight > 0);
+  const usable = entries
+    .map((entry) => ({ ...entry, weightCents: Math.max(0, Math.round(entry.weight * 100)) }))
+    .filter((entry) => entry.weightCents > 0)
+    .sort((a, b) => a.id.localeCompare(b.id));
   if (totalCents <= 0 || usable.length === 0) return {};
-  const totalWeight = usable.reduce((sum, entry) => sum + entry.weight, 0);
-  let assigned = 0;
-  return Object.fromEntries(usable.map((entry, index) => {
-    const cents = index === usable.length - 1
-      ? totalCents - assigned
-      : Math.round((totalCents * entry.weight) / totalWeight);
-    assigned += cents;
-    return [entry.id, cents / 100];
-  }));
+  const totalWeight = usable.reduce((sum, entry) => sum + entry.weightCents, 0);
+  const shares = usable.map((entry) => {
+    const numerator = totalCents * entry.weightCents;
+    return {
+      id: entry.id,
+      cents: Math.floor(numerator / totalWeight),
+      remainder: numerator % totalWeight,
+    };
+  });
+  let remaining = totalCents - shares.reduce((sum, share) => sum + share.cents, 0);
+  // Largest remainder makes cents deterministic and preserves the exact
+  // economic value independently of display/order changes in the UI.
+  for (const share of [...shares].sort((a, b) => b.remainder - a.remainder || a.id.localeCompare(b.id))) {
+    if (remaining <= 0) break;
+    share.cents++;
+    remaining--;
+  }
+  return Object.fromEntries(shares.map((share) => [share.id, share.cents / 100]));
 }
 
 // Helper: get or create the single placeholder guest for a group
@@ -770,7 +783,10 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const groupChargesList = await storage.getGroupCharges(req.params.groupId);
+      const [groupChargesList, billing] = await Promise.all([
+        storage.getGroupCharges(req.params.groupId),
+        getGroupInvoiceSnapshot(req.params.groupId),
+      ]);
 
       const invoiceData = {
         group: {
@@ -795,7 +811,8 @@ export function registerGroupsRoutes(app: Express) {
           groupCharges: 0,
           payments: 0,
           balance: 0,
-        }
+        },
+        billing,
       };
 
       for (const reservation of group.reservations) {
@@ -853,6 +870,20 @@ export function registerGroupsRoutes(app: Express) {
       res.json(invoiceData);
     } catch (error) {
       res.status(500).json({ error: "Error generating group invoice" });
+    }
+  });
+
+  // Single fiscal snapshot used by the group summary and payment invoice
+  // dialogs. It exposes source-level eligible, invoiced and available values;
+  // UI numbers are previews only and are rechecked under a server lock.
+  app.get("/api/groups/:groupId/invoice-snapshot", requireAuth, async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+      res.json(await getGroupInvoiceSnapshot(req.params.groupId));
+    } catch (error) {
+      console.error("[group-invoice-snapshot] Error:", error);
+      res.status(500).json({ error: "Error al calcular la disponibilidad de facturación del grupo" });
     }
   });
 
@@ -1036,12 +1067,22 @@ export function registerGroupsRoutes(app: Express) {
 
       // Verify the invoice was actually issued through our system (salesInvoices table)
       const [storedInvoice] = await db
-        .select({ id: salesInvoicesTable.id })
+        .select({
+          id: salesInvoicesTable.id,
+          groupId: salesInvoicesTable.groupId,
+          groupPaymentId: salesInvoicesTable.groupPaymentId,
+          sourceChargeAmounts: salesInvoicesTable.sourceChargeAmounts,
+        })
         .from(salesInvoicesTable)
         .where(eq(salesInvoicesTable.id, Number(invoiceId)))
         .limit(1);
       if (!storedInvoice) {
         return res.status(400).json({ error: "El comprobante indicado no existe en el sistema" });
+      }
+      if (storedInvoice.groupId !== req.params.groupId || storedInvoice.groupPaymentId || !storedInvoice.sourceChargeAmounts) {
+        return res.status(409).json({
+          error: "El comprobante no fue emitido con conceptos disponibles de este grupo y no puede vincularse como factura directa.",
+        });
       }
 
       // Verify the group exists
@@ -1090,6 +1131,7 @@ export function registerGroupsRoutes(app: Express) {
           .where(eq(salesInvoicesTable.id, Number(invoiceData.id)))
           .limit(1);
         if (!storedInvoice) throw Object.assign(new Error("El comprobante indicado no existe en el sistema"), { statusCode: 400 });
+        assertGroupPaymentInvoiceScope(storedInvoice, payment, req.params.groupId);
         if (Math.round(Number(storedInvoice.montoTotal) * 100) !== Math.round(Number(payment.amount) * 100)) {
           throw Object.assign(new Error("El importe de la factura debe coincidir exactamente con el cobro grupal."), { statusCode: 400 });
         }
@@ -1108,11 +1150,21 @@ export function registerGroupsRoutes(app: Express) {
           throw Object.assign(new Error("El receptor de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
         }
 
-        // Linking is immutable. A retry for the exact same invoice is safe;
-        // replacing a fiscal document or attributing it to two receipts is not.
+        // A retry for the exact same invoice is safe. A replacement is allowed
+        // only after the previously linked document was fully credited: both
+        // fiscal documents remain in sales_invoices under the same payment
+        // scope, while group_payments points at the currently active one.
         if (payment.invoiceId) {
           if (payment.invoiceId === storedInvoice.id) return { payment, updated: payment };
-          throw Object.assign(new Error("Este cobro ya tiene una factura vinculada y no puede reemplazarse."), { statusCode: 409 });
+          const [previousInvoice] = await tx.select()
+            .from(salesInvoicesTable)
+            .where(eq(salesInvoicesTable.id, payment.invoiceId))
+            .limit(1);
+          const fullyCredited = previousInvoice
+            && Number(previousInvoice.montoAcreditado || 0) >= Number(previousInvoice.montoTotal || 0) - 0.009;
+          if (!fullyCredited) {
+            throw Object.assign(new Error("Este cobro ya tiene una factura fiscal vigente. Primero emití una Nota de Crédito por el total para poder reemitirla."), { statusCode: 409 });
+          }
         }
         const [usedByAnotherPayment] = await tx.select({ id: groupPaymentsTable.id })
           .from(groupPaymentsTable)
@@ -1122,7 +1174,12 @@ export function registerGroupsRoutes(app: Express) {
 
         const [updated] = await tx.update(groupPaymentsTable)
           .set({ invoiceId: storedInvoice.id, invoiceRef: JSON.stringify(invoiceData) })
-          .where(and(eq(groupPaymentsTable.id, payment.id), sql`${groupPaymentsTable.invoiceId} IS NULL`))
+          .where(and(
+            eq(groupPaymentsTable.id, payment.id),
+            payment.invoiceId
+              ? eq(groupPaymentsTable.invoiceId, payment.invoiceId)
+              : sql`${groupPaymentsTable.invoiceId} IS NULL`,
+          ))
           .returning();
         if (!updated) throw Object.assign(new Error("El cobro fue vinculado a una factura por otra operación. Actualice la pantalla."), { statusCode: 409 });
         return { payment, updated };
@@ -1137,7 +1194,7 @@ export function registerGroupsRoutes(app: Express) {
       if (error?.code === "23505") {
         return res.status(409).json({ error: "Esta factura ya está vinculada a otro cobro grupal." });
       }
-      res.status(500).json({ error: "Error al vincular la factura al cobro grupal" });
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error al vincular la factura al cobro grupal" });
     }
   });
 
