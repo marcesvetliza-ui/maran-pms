@@ -5,6 +5,7 @@ import { adminCashMovements, adminCashArqueos, adminCashConfig } from "@shared/s
 import PDFDocument from "pdfkit";
 import { requireAuth } from "./auth";
 import { getArgentinaToday } from "./db-storage";
+import { isValidCentroCosto } from "./routes/cost-centers";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,14 @@ export function registerAdminCashRoutes(app: Express) {
         return res.status(400).json({ error: "tipo, concepto, importe y signo son requeridos" });
       }
 
+      // ── Validar centro de costo contra la lista gestionada ─────────────────
+      const centroCostoTrim = centroCosto ? String(centroCosto).trim() || null : null;
+      if (centroCostoTrim && !(await isValidCentroCosto(centroCostoTrim))) {
+        return res.status(400).json({
+          error: `El centro de costo "${centroCostoTrim}" no existe o está inactivo. Elegí uno de la lista de centros de costo.`,
+        });
+      }
+
       // Check for duplicate cierre
       if (req.body.cierreOrigenId) {
         const dup = await db.execute(sql`
@@ -167,7 +176,7 @@ export function registerAdminCashRoutes(app: Express) {
         importe: String(importe),
         signo,
         cuentaContableId: cuentaContableId || null,
-        centroCosto: centroCosto || null,
+        centroCosto: centroCostoTrim,
         paymentOrderId: paymentOrderId || null,
         areaOrigen: areaOrigen || null,
         cierreOrigenId: req.body.cierreOrigenId || null,
