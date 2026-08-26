@@ -40,6 +40,18 @@ export function assertGroupPaymentInvoiceScope(invoice: any, payment: any, group
   }
 }
 
+// Factura T ("solo alojamiento") is only fiscally valid when the master folio is
+// configured to cover accommodation exclusively — a config="all" master folio also
+// covers extras/cargos grupales, which Factura T cannot legally document.
+export function assertMasterFacturaTAllowed(receiptType: string | undefined | null, masterFolioConfig: string | undefined | null): void {
+  if (receiptType === "factura_t" && masterFolioConfig !== "accommodation") {
+    throw Object.assign(
+      new Error("Factura T solo está disponible cuando el Folio Maestro cubre exclusivamente alojamiento."),
+      { statusCode: 400 },
+    );
+  }
+}
+
 function parseJson(value: unknown): any {
   if (typeof value !== "string") return value;
   try {
