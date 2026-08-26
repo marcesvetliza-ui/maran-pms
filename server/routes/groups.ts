@@ -7,7 +7,7 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
-import { assertGroupPaymentInvoiceScope, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
+import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
 import { assertFinancialSchemaReady } from "../migrate";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
@@ -1572,6 +1572,7 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       const config = (group as any).masterFolioConfig || "accommodation";
+      assertMasterFacturaTAllowed(receiptType, config);
       const paymentDate = date || getArgentinaToday();
 
       const activeRes = group.reservations.filter(

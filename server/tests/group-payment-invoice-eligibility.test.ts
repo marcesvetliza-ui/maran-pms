@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-const { assertGroupPaymentInvoiceEligibility, assertGroupPaymentInvoiceScope } = await import("../billing/groupInvoiceScope");
+const { assertGroupPaymentInvoiceEligibility, assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed } = await import("../billing/groupInvoiceScope");
 
 describe("legacy group-payment invoice eligibility", () => {
   beforeEach(() => {
@@ -36,5 +36,19 @@ describe("legacy group-payment invoice eligibility", () => {
       { id: "payment-1" },
       "group-1",
     )).toThrowError(expect.objectContaining({ statusCode: 409 }));
+  });
+
+  it("rejects Factura T on a Folio Maestro payment when the master folio also covers extras (config=all)", () => {
+    expect(() => assertMasterFacturaTAllowed("factura_t", "all"))
+      .toThrowError(expect.objectContaining({ statusCode: 400 }));
+  });
+
+  it("allows Factura T on a Folio Maestro payment when the master folio is accommodation-only", () => {
+    expect(() => assertMasterFacturaTAllowed("factura_t", "accommodation")).not.toThrow();
+  });
+
+  it("does not restrict non-Factura T receipt types regardless of master folio config", () => {
+    expect(() => assertMasterFacturaTAllowed("factura_b", "all")).not.toThrow();
+    expect(() => assertMasterFacturaTAllowed(undefined, "all")).not.toThrow();
   });
 });
