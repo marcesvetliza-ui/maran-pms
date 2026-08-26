@@ -308,26 +308,26 @@ function AppLayout() {
     <SidebarProvider style={sidebarStyle as React.CSSProperties}>
       <div className="flex h-screen w-full">
         <AppSidebar />
-        <div className="flex flex-col flex-1 min-h-0">
-          <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shrink-0">
-            <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <div className="flex items-center gap-3">
+        <div className="flex flex-col flex-1 min-h-0 min-w-0">
+          <header className="flex items-center justify-between gap-2 sm:gap-4 px-2 sm:px-4 py-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 shrink-0 min-w-0">
+            <SidebarTrigger data-testid="button-sidebar-toggle" className="shrink-0" />
+            <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 overflow-hidden">
               {selectedPosNumero && (
                 <button
                   onClick={changePosMode}
                   title="Cambiar punto de venta"
                   data-testid="button-change-pos"
-                  className="flex items-center gap-1.5 text-xs bg-primary/10 text-primary px-2.5 py-1 rounded-full hover:bg-primary/20 transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 text-xs bg-primary/10 text-primary px-2.5 py-1 rounded-full hover:bg-primary/20 transition-colors cursor-pointer min-w-0 max-w-[120px] sm:max-w-none"
                 >
-                  <Monitor className="w-3 h-3" />
-                  <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
+                  <Monitor className="w-3 h-3 shrink-0" />
+                  <span className="truncate">PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
                 </button>
               )}
               {user && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-current-user">
-                  <User className="w-4 h-4" />
-                  <span>{user.fullName}</span>
-                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{user.role}</span>
+                <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground min-w-0" data-testid="text-current-user">
+                  <User className="w-4 h-4 shrink-0" />
+                  <span className="truncate max-w-[140px]">{user.fullName}</span>
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">{user.role}</span>
                 </div>
               )}
               <Button
@@ -336,10 +336,13 @@ function AppLayout() {
                 onClick={logout}
                 title="Cerrar sesión"
                 data-testid="button-logout"
+                className="shrink-0"
               >
                 <LogOut className="w-4 h-4" />
               </Button>
-              <ThemeToggle />
+              <div className="shrink-0">
+                <ThemeToggle />
+              </div>
             </div>
           </header>
             {import.meta.env.VITE_ENVIRONMENT === "staging" && (
