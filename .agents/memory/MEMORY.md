@@ -42,3 +42,4 @@
 - [Group financial views share one ledger](group-financial-reconciliation.md) — folio/master-folio(JSON+PDF)/resumen must all read storage.getGroupReservationLedger, not their own hand-rolled loop.
 - [Payment retention (IIBB/Ganancias) display](payment-retention-display.md) — retention lives as JSON on payments.notes; any new payment-listing view/PDF must parse and render it, group invoices need their own group_payment_id branch.
 - [Shared invoice dialog stale state](shared-invoice-dialog-stale-state.md) — a dialog opened from two different mutations (legacy + new flow) must branch on which one triggered it, or it silently prefills the wrong flow's data; extract the branch into a named, unit-tested resolver, not inline IIFE logic.
+- [Group payment dialogs & retención support](group-payment-dialogs-retention-support.md) — only "Pago Grupal" (destino=master) has retención fields; the legacy "Pago al Folio Maestro" dialog has none.
