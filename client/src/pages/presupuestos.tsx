@@ -41,6 +41,7 @@ interface ItemRow {
   descripcion: string;
   detalle: string;
   cantidad: string;
+  cantidadHabitaciones: string;
   precioUnitario: string;
   descuento: string;
   subtotal: string;
@@ -74,12 +75,12 @@ const fmt = (v: number) => v.toLocaleString("es-AR", { minimumFractionDigits: 2,
 const fmtDate = (d: string) => { try { const [y,m,day] = d.split("-"); return `${day}/${m}/${y}`; } catch { return d; } };
 const today = getArgentinaToday();
 
-function calcSubtotal(cant: string, precio: string, dto: string): string {
-  const s = toNum(cant) * toNum(precio) * (1 - toNum(dto) / 100);
+function calcSubtotal(cant: string, precio: string, dto: string, cantHabs: string = "1"): string {
+  const s = toNum(cant) * (toNum(cantHabs) || 1) * toNum(precio) * (1 - toNum(dto) / 100);
   return s.toFixed(2);
 }
 function emptyItem(): ItemRow {
-  return { sector: "alojamiento", descripcion: "", detalle: "", cantidad: "1", precioUnitario: "0", descuento: "0", subtotal: "0" };
+  return { sector: "alojamiento", descripcion: "", detalle: "", cantidad: "1", cantidadHabitaciones: "1", precioUnitario: "0", descuento: "0", subtotal: "0" };
 }
 
 function defaultAreaForRole(role?: string): AreaOrigen {
@@ -97,11 +98,12 @@ function ItemRowEdit({ item, idx, onChange, onRemove, roomTypes }: {
   roomTypes: RoomType[];
 }) {
   const update = (field: keyof ItemRow, value: string) => onChange(idx, field, value);
-  const updateCalc = (field: "cantidad" | "precioUnitario" | "descuento", value: string) => {
+  const updateCalc = (field: "cantidad" | "cantidadHabitaciones" | "precioUnitario" | "descuento", value: string) => {
     const sub = calcSubtotal(
       field === "cantidad" ? value : item.cantidad,
       field === "precioUnitario" ? value : item.precioUnitario,
       field === "descuento" ? value : item.descuento,
+      field === "cantidadHabitaciones" ? value : item.cantidadHabitaciones,
     );
     onChange(idx, field, value);
     onChange(idx, "subtotal", sub);
@@ -124,29 +126,40 @@ function ItemRowEdit({ item, idx, onChange, onRemove, roomTypes }: {
       <TableCell className="p-1">
         <div className="space-y-1">
           {item.sector === "alojamiento" && roomTypes.length > 0 && (
-            <Select value="" onValueChange={v => {
-              const rt = roomTypes.find(r => r.id === v);
-              if (rt) {
-                update("descripcion", rt.name);
-                onChange(idx, "descripcion", rt.name);
-              }
-            }}>
-              <SelectTrigger className="h-7 text-xs text-muted-foreground" data-testid={`select-room-type-${idx}`}>
-                <SelectValue placeholder="Autocompletar tipo hab..." />
-              </SelectTrigger>
-              <SelectContent>
-                {roomTypes.filter(rt => rt.id).map(rt => (
-                  <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex gap-1">
+              <Select value="" onValueChange={v => {
+                const rt = roomTypes.find(r => r.id === v);
+                if (rt) {
+                  update("descripcion", rt.name);
+                  onChange(idx, "descripcion", rt.name);
+                }
+              }}>
+                <SelectTrigger className="h-7 text-xs text-muted-foreground flex-1" data-testid={`select-room-type-${idx}`}>
+                  <SelectValue placeholder="Autocompletar tipo hab..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {roomTypes.filter(rt => rt.id).map(rt => (
+                    <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative w-20 shrink-0" title="Cantidad de habitaciones">
+                <Input
+                  className="h-7 text-xs text-right pl-8"
+                  value={item.cantidadHabitaciones}
+                  onChange={e => updateCalc("cantidadHabitaciones", e.target.value)}
+                  data-testid={`input-item-cant-habs-${idx}`}
+                />
+                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">habs</span>
+              </div>
+            </div>
           )}
           <Input className="h-8 text-xs" value={item.descripcion} onChange={e => update("descripcion", e.target.value)} placeholder="Descripción" data-testid={`input-item-desc-${idx}`} />
           <Input className="h-7 text-xs text-muted-foreground" value={item.detalle} onChange={e => update("detalle", e.target.value)} placeholder="Detalle opcional (ej: doble, desayuno incluido...)" data-testid={`input-item-detail-${idx}`} />
         </div>
       </TableCell>
       <TableCell className="p-1 w-20">
-        <Input className="h-8 text-xs text-right" value={item.cantidad} onChange={e => updateCalc("cantidad", e.target.value)} data-testid={`input-item-qty-${idx}`} />
+        <Input className="h-8 text-xs text-right" value={item.cantidad} onChange={e => updateCalc("cantidad", e.target.value)} data-testid={`input-item-qty-${idx}`} title="Cantidad de noches" />
       </TableCell>
       <TableCell className="p-1 w-28">
         <div className="relative">
@@ -193,7 +206,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   const [condLoaded, setCondLoaded] = useState(false);
   const [items, setItems] = useState<ItemRow[]>(
     presupuesto?.items?.length
-      ? presupuesto.items.map(it => ({ id: it.id, sector: it.sector as Sector, descripcion: it.descripcion, detalle: it.detalle || "", cantidad: String(it.cantidad), precioUnitario: String(it.precioUnitario), descuento: String(it.descuento), subtotal: String(it.subtotal) }))
+      ? presupuesto.items.map(it => ({ id: it.id, sector: it.sector as Sector, descripcion: it.descripcion, detalle: it.detalle || "", cantidad: String(it.cantidad), cantidadHabitaciones: String((it as any).cantidadHabitaciones ?? "1"), precioUnitario: String(it.precioUnitario), descuento: String(it.descuento), subtotal: String(it.subtotal) }))
       : [emptyItem()]
   );
 
@@ -228,6 +241,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
       descripcion: item.name,
       detalle: item.description || "",
       cantidad: "1",
+      cantidadHabitaciones: "1",
       precioUnitario: String(item.price),
       descuento: "0",
       subtotal: calcSubtotal("1", String(item.price), "0"),
@@ -250,6 +264,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
       descripcion: item.name,
       detalle: item.description || "",
       cantidad: "1",
+      cantidadHabitaciones: "1",
       precioUnitario: String(item.price),
       descuento: "0",
       subtotal: String(item.price),
@@ -298,6 +313,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
       descripcion: it.descripcion.trim(),
       detalle: it.detalle.trim() || null,
       cantidad: it.cantidad,
+      cantidadHabitaciones: it.sector === "alojamiento" ? (it.cantidadHabitaciones || "1") : "1",
       precioUnitario: it.precioUnitario,
       descuento: it.descuento,
       subtotal: it.subtotal,

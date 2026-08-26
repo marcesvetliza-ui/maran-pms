@@ -2777,6 +2777,10 @@ export const presupuestoItems = pgTable("presupuesto_items", {
   descripcion: text("descripcion").notNull(),
   detalle: text("detalle"),
   cantidad: numeric("cantidad", { precision: 8, scale: 2 }).notNull().default("1"),
+  // Cantidad de habitaciones (solo relevante para ítems de sector "alojamiento"): el subtotal
+  // multiplica cantidadHabitaciones × cantidad(noches) × precioUnitario. Default "1" preserva
+  // el cálculo anterior para ítems ya existentes y para otros sectores.
+  cantidadHabitaciones: numeric("cantidad_habitaciones", { precision: 8, scale: 2 }).notNull().default("1"),
   precioUnitario: numeric("precio_unitario", { precision: 12, scale: 2 }).notNull().default("0"),
   descuento: numeric("descuento", { precision: 5, scale: 2 }).notNull().default("0"),
   subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),

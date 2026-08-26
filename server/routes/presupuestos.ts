@@ -378,12 +378,13 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   // Room rates table
   const hasDiscount = items.some(i => parseFloat(i.descuento ?? "0") > 0);
   if (hasDiscount) {
-    const cols = { tipo: M, tarifa: M + 200, dto: M + 310, tarifa_dto: M + 380, sub: M + 450 };
-    const Ws = { tipo: 195, tarifa: 105, dto: 65, tarifa_dto: 65, sub: 65 };
+    const cols = { tipo: M, habs: M + 150, tarifa: M + 200, dto: M + 310, tarifa_dto: M + 380, sub: M + 450 };
+    const Ws = { tipo: 145, habs: 45, tarifa: 105, dto: 65, tarifa_dto: 65, sub: 65 };
     doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
     doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
     const th = y + 6;
     doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
+    doc.text("CANT. HABS", cols.habs, th, { width: Ws.habs, align: "right" });
     doc.text("PRECIO POR NOCHE", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
     doc.text("DESC.", cols.dto, th, { width: Ws.dto, align: "right" });
     doc.text("P. ESPECIAL", cols.tarifa_dto, th, { width: Ws.tarifa_dto, align: "right" });
@@ -400,6 +401,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
       const tarifaConDto = parseFloat(it.precioUnitario) * (1 - dto / 100);
       doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
       if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
+      doc.fillColor(DARK).fontSize(8).font("Helvetica").text(it.sector === "alojamiento" ? formatNum((it as any).cantidadHabitaciones ?? "1") : "—", cols.habs, cy, { width: Ws.habs, align: "right" });
       doc.fillColor(DARK).fontSize(8).font("Helvetica").text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
       doc.text(dto > 0 ? `${dto}%` : "—", cols.dto, cy, { width: Ws.dto, align: "right" });
       if (dto > 0) { doc.fillColor("#1a6c3a").font("Helvetica-Bold"); }
@@ -408,12 +410,13 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
       y += rowH;
     });
   } else {
-    const cols = { tipo: M, noches: M + 220, tarifa: M + 290, sub: M + 420 };
-    const Ws = { tipo: 215, noches: 65, tarifa: 125, sub: 95 };
+    const cols = { tipo: M, habs: M + 165, noches: M + 220, tarifa: M + 290, sub: M + 420 };
+    const Ws = { tipo: 160, habs: 50, noches: 65, tarifa: 125, sub: 95 };
     doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
     doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
     const th = y + 6;
     doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
+    doc.text("CANT. HABS", cols.habs, th, { width: Ws.habs, align: "right" });
     doc.text("CANTIDAD", cols.noches, th, { width: Ws.noches, align: "right" });
     doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
     doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
@@ -427,6 +430,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
       const cy = y + 6;
       doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
       if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
+      doc.fillColor(DARK).fontSize(8).font("Helvetica").text(it.sector === "alojamiento" ? formatNum((it as any).cantidadHabitaciones ?? "1") : "—", cols.habs, cy, { width: Ws.habs, align: "right" });
       doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
       doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
       doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
