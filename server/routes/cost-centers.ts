@@ -1,11 +1,23 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { costCenters } from "@shared/schema";
 import { requireAuth, requireRole } from "../auth";
 
 // Mismo criterio de roles que el ítem "Centros de Costo" del sidebar.
 const COST_CENTER_ADMIN_ROLES = ["admin", "resp_administracion"];
+
+// Usado por los handlers de Facturas de Compra (server/routes.ts) para evitar que se
+// guarde un centro de costo que no exista o que esté inactivo en la lista gestionada.
+// Un valor vacío/null es válido (el campo es opcional).
+export async function isValidCentroCosto(nombre: string | null | undefined): Promise<boolean> {
+  if (!nombre || !String(nombre).trim()) return true;
+  const rows = await db
+    .select({ id: costCenters.id })
+    .from(costCenters)
+    .where(and(eq(costCenters.nombre, nombre), eq(costCenters.activo, true)));
+  return rows.length > 0;
+}
 
 export function registerCostCentersRoutes(app: Express) {
 

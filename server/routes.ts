@@ -43,7 +43,7 @@ import { registerPublicBookingRoutes } from "./routes/publicBooking";
 import { registerEmailRoutes } from "./routes/emails";
 import { registerCountriesRoutes } from "./routes/countries";
 import { registerPosConfigsRoutes } from "./routes/pos-configs";
-import { registerCostCentersRoutes } from "./routes/cost-centers";
+import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-centers";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 
 function timeToMinutes(time: string): number {
@@ -2768,6 +2768,14 @@ export async function registerRoutes(
     try {
       const body = req.body;
 
+      // ── Validar centro de costo contra la lista gestionada ─────────────────
+      const centroCosto = body.centroCosto ? String(body.centroCosto).trim() || null : null;
+      if (centroCosto && !(await isValidCentroCosto(centroCosto))) {
+        return res.status(400).json({
+          error: `El centro de costo "${centroCosto}" no existe o está inactivo. Elegí uno de la lista de centros de costo.`,
+        });
+      }
+
       // ── Prevenir comprobantes duplicados ──────────────────────────────────
       if (body.numeroComprobante) {
         const supplierClause = body.supplierId
@@ -2834,7 +2842,7 @@ export async function registerRoutes(
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
-          ${montoTotal}, ${body.cuentaContableId||null}, ${body.centroCosto||null}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null}
+          ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null}
         )
         RETURNING *
       `);
@@ -2921,6 +2929,15 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const body = req.body;
+
+      // ── Validar centro de costo contra la lista gestionada ─────────────────
+      const centroCosto = body.centroCosto ? String(body.centroCosto).trim() || null : null;
+      if (centroCosto && !(await isValidCentroCosto(centroCosto))) {
+        return res.status(400).json({
+          error: `El centro de costo "${centroCosto}" no existe o está inactivo. Elegí uno de la lista de centros de costo.`,
+        });
+      }
+
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
         n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
@@ -2936,7 +2953,7 @@ export async function registerRoutes(
           retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
           retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
           monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
-          centro_costo = ${body.centroCosto||null}, observaciones = ${body.observaciones||null},
+          centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
           updated_at = NOW()
         WHERE id = ${id}
         RETURNING *
