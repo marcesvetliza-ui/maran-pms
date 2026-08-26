@@ -1,0 +1,14 @@
+---
+name: Group financial views share one ledger
+description: Why Folio Grupal, Folio Maestro (JSON + PDF) and Resumen del Grupo must all read the same per-reservation ledger function, and what stays intentionally separate
+---
+
+Group billing had three (really four, once the master-folio PDF route is counted) independent per-reservation loops computing "what a group owes" — each with its own subtly different bugs (accommodation from `nights * rate` instead of `totalRoomAmount`, missing `anulado` filters, missing group-payment dedup, or ignoring master-destined group payments entirely in the PDF). They drifted apart after multiple partial payments/charges.
+
+**Why:** A full migration of group data into the shared `accountMovements`/`accountMovementAllocations` ledger (used for companies/agencies/guests) was considered but rejected as too invasive for what was actually a duplication bug — `accountMovements` has no `"group"` entity type and no `groupId` column, only an indirect `groupPaymentId` FK. Migrating it risked losing/duplicating historical movements, which was explicitly out of bounds.
+
+**How to apply:** Any group financial view (folio, master-folio JSON, master-folio PDF, group invoice/resumen, and any future one) must source its per-reservation facts from `storage.getGroupReservationLedger(groupId)` (server/db-storage.ts) rather than re-querying `charges`/`payments` itself. That function is the single place that: filters cancelled reservations, filters `status === "anulado"` charges/payments, and returns `accommodationTotal` from `totalRoomAmount` (never `nights * rate`). Callers still apply their own view-specific rules on top (e.g. master-folio's dedup of room payments against `groupPaymentId`s that are master-destined, or config-dependent extras inclusion) — those differences are legitimate and should stay, only the underlying facts must be shared.
+
+Kept intentionally separate: `getGroupInvoiceSnapshot` (server/billing/groupInvoiceScope.ts) computes fiscal eligible/invoiced/available per source and excludes `transfer_in`/`transfer_out`/`adjustment` charge categories that the folio's "owed" balance legitimately includes — folio's "amount owed" and the snapshot's "amount invoiceable" are different concepts by design. It's now also exposed as a `billing` field on `/folio` and `/master-folio` responses (same snapshot `/invoice` already used) so all three surfaces can show facturado/disponible without ever recomputing it differently — no UI currently renders it on those two, that's left for whoever builds the visual layer.
+
+When touching any group money code, grep for other `for (const reservation of group.reservations)` loops nearby — a duplicate hand-rolled computation (like the master-folio PDF route had) is the recurring failure mode here, not just the JSON API you're looking at.

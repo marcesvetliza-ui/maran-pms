@@ -666,6 +666,25 @@ export const groupInvoices = pgTable("group_invoices", {
 
 export type GroupInvoice = typeof groupInvoices.$inferSelect;
 
+// Shared per-reservation financial facts used to compute the group folio,
+// the master folio and the group invoice summary. Every consumer must derive
+// its totals from these same filtered records (active reservations only,
+// non-"anulado" charges/payments) so the three views can never diverge on
+// what a room actually owes.
+export type GroupReservationLedgerLine = {
+  reservationId: string;
+  reservationCode: string;
+  guestName: string;
+  roomNumber: string;
+  status: string;
+  nights: number;
+  accommodationTotal: number;
+  charges: Charge[];
+  extrasTotal: number;
+  payments: Payment[];
+  paymentsTotal: number;
+};
+
 // Group Folio consolidated data type
 export type GroupFolioData = {
   group: GroupWithDetails;
@@ -702,6 +721,16 @@ export type GroupFolioData = {
     payments: number;
     voids: number;
     balance: number;
+  };
+  // Facturado/disponible computed by the same fiscal snapshot the group
+  // invoice summary uses (server/billing/groupInvoiceScope.ts), so the
+  // Folio Grupal can show billing status without ever recomputing it
+  // differently. Typed structurally here (not imported) to keep this
+  // shared schema file free of server-only billing module dependencies.
+  billing: {
+    sources: Array<{ id: string; concept: string; destination: string; eligible: number; invoiced: number; available: number }>;
+    totals: { eligible: number; invoiced: number; available: number };
+    paymentDestinations: Array<{ id: string; concept: string; destination: string; eligible: number; invoiced: number; available: number; invoiceId: number | null }>;
   };
 };
 

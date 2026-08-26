@@ -784,10 +784,19 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Group not found" });
       }
 
-      const [groupChargesList, billing] = await Promise.all([
+      // Same batched, filtered per-reservation facts (active reservations,
+      // totalRoomAmount, non-"anulado" charges/payments) used by /folio and
+      // /master-folio, plus the group payments they already reconcile
+      // against, so the Resumen del Grupo can never show a different balance
+      // than the Folio Grupal for the same underlying charges and receipts.
+      const [groupChargesList, allGroupPayments, ledgerLines, billing] = await Promise.all([
         storage.getGroupCharges(req.params.groupId),
+        storage.getGroupPayments(req.params.groupId),
+        storage.getGroupReservationLedger(req.params.groupId),
         getGroupInvoiceSnapshot(req.params.groupId),
       ]);
+      const groupPaymentIds = new Set(allGroupPayments.map((payment: any) => payment.id));
+      const groupPaymentsTotal = allGroupPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
 
       const invoiceData = {
         group: {
@@ -816,51 +825,44 @@ export function registerGroupsRoutes(app: Express) {
         billing,
       };
 
-      for (const reservation of group.reservations) {
-        const chargesList = await storage.getCharges(reservation.id);
-        const paymentsList = await storage.getPayments(reservation.id);
-
-        const checkIn = new Date(reservation.checkInDate);
-        const checkOut = new Date(reservation.checkOutDate);
-        const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
-        const rate = parseFloat(reservation.finalRatePerNight || reservation.baseRatePerNight || "0");
-        const accommodationTotal = nights * rate;
-
-        const chargesTotal = chargesList.reduce((sum: number, c: any) => sum + parseFloat(c.amount), 0);
-        const paymentsTotal = paymentsList.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
-        const totalCost = accommodationTotal + chargesTotal;
+      for (const line of ledgerLines) {
+        const totalCost = line.accommodationTotal + line.extrasTotal;
 
         invoiceData.reservations.push({
-          reservationCode: reservation.reservationCode,
-          guest: (reservation.guest as any)?.tipoPersona === "juridica"
-            ? (reservation.guest?.firstName ?? "")
-            : `${reservation.guest?.lastName ?? ""} ${reservation.guest?.firstName ?? ""}`.trim(),
-          room: reservation.room?.roomNumber,
-          nights,
-          ratePerNight: rate,
-          accommodationTotal,
-          charges: chargesList.map((c: any) => ({
+          reservationCode: line.reservationCode,
+          guest: line.guestName,
+          room: line.roomNumber,
+          nights: line.nights,
+          ratePerNight: line.nights > 0 ? line.accommodationTotal / line.nights : line.accommodationTotal,
+          accommodationTotal: line.accommodationTotal,
+          charges: line.charges.map((c: any) => ({
             description: c.description,
             amount: parseFloat(c.amount),
             category: c.category,
             date: c.date,
           })),
-          chargesTotal,
-          payments: paymentsList.map((p: any) => ({
+          chargesTotal: line.extrasTotal,
+          payments: line.payments.map((p: any) => ({
             method: p.method,
             amount: parseFloat(p.amount),
             date: p.date,
             reference: p.reference,
           })),
-          paymentsTotal,
-          balance: totalCost - paymentsTotal,
+          paymentsTotal: line.paymentsTotal,
+          balance: totalCost - line.paymentsTotal,
         });
 
-        invoiceData.totals.accommodation += accommodationTotal;
-        invoiceData.totals.charges += chargesTotal;
-        invoiceData.totals.payments += paymentsTotal;
+        invoiceData.totals.accommodation += line.accommodationTotal;
+        invoiceData.totals.charges += line.extrasTotal;
+        // Payments linked to a group payment are allocations of that parent
+        // receipt, not a second one — the same rule /folio and /master-folio
+        // use to avoid double-counting a single collection.
+        invoiceData.totals.payments += line.payments
+          .filter((payment: any) => !payment.groupPaymentId || !groupPaymentIds.has(payment.groupPaymentId))
+          .reduce((s: number, payment: any) => s + parseFloat(payment.amount), 0);
       }
 
+      invoiceData.totals.payments += groupPaymentsTotal;
       invoiceData.totals.groupCharges = groupChargesList.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
       invoiceData.totals.balance =
         invoiceData.totals.accommodation +
@@ -1393,6 +1395,11 @@ export function registerGroupsRoutes(app: Express) {
       );
        const masterPaymentIds = new Set(gPayments.map((payment: any) => payment.id));
 
+      // Same batched, filtered per-reservation facts used by the group folio
+      // (/folio) and the group invoice summary (/invoice), so the three views
+      // can never disagree about a room's accommodation, extras or payments.
+      const ledgerLines = await storage.getGroupReservationLedger(req.params.groupId);
+
       // Build per-room data
       const rooms: any[] = [];
       let masterAccommodation = 0;
@@ -1401,19 +1408,13 @@ export function registerGroupsRoutes(app: Express) {
        let directAllPaid = 0;
        let directAccommodationPaid = 0;
 
-      for (const res of group.reservations) {
-        if (res.status === "cancelled") continue;
-        const resCharges = await storage.getCharges(res.id);
-        const resPayments = await storage.getPayments(res.id);
-
-        const accommodation = parseFloat((res as any).totalRoomAmount || "0");
-        const activeCharges = resCharges.filter((c: any) => c.status !== "anulado");
-        const extras = activeCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-        const paid = resPayments
-          .filter((p: any) => p.status !== "anulado")
-          .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-         const directPaid = resPayments
-           .filter((p: any) => p.status !== "anulado" && (!p.groupPaymentId || !masterPaymentIds.has(p.groupPaymentId)))
+      for (const line of ledgerLines) {
+        const accommodation = line.accommodationTotal;
+        const activeCharges = line.charges;
+        const extras = line.extrasTotal;
+        const paid = line.paymentsTotal;
+         const directPaid = line.payments
+           .filter((p: any) => !p.groupPaymentId || !masterPaymentIds.has(p.groupPaymentId))
            .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
 
         masterAccommodation += accommodation;
@@ -1425,13 +1426,11 @@ export function registerGroupsRoutes(app: Express) {
          directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
 
         rooms.push({
-          reservationId: res.id,
-          guestName: (res.guest as any)?.tipoPersona === "juridica"
-            ? (res.guest?.firstName || "")
-            : `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
-          roomNumber: res.room?.roomNumber || "-",
-          status: res.status,
-          nights: res.nights || 0,
+          reservationId: line.reservationId,
+          guestName: line.guestName,
+          roomNumber: line.roomNumber,
+          status: line.status,
+          nights: line.nights,
           accommodation,
           extras,
           charges: activeCharges.map((c: any) => ({
@@ -1441,7 +1440,7 @@ export function registerGroupsRoutes(app: Express) {
             date: c.date,
             category: c.category,
           })),
-          individualPayments: resPayments.map((p: any) => ({
+          individualPayments: line.payments.map((p: any) => ({
             id: p.id,
             amount: parseFloat(p.amount),
             method: p.method,
@@ -1467,6 +1466,10 @@ export function registerGroupsRoutes(app: Express) {
       const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
 
+      // Same fiscal snapshot the group invoice summary reads, so facturado/
+      // disponible never diverges between the master folio and Resumen.
+      const billing = await getGroupInvoiceSnapshot(req.params.groupId);
+
       res.json({
         config,
         masterTotal,
@@ -1478,6 +1481,7 @@ export function registerGroupsRoutes(app: Express) {
         groupCharges: gCharges,
         groupPayments: gPayments,
         rooms,
+        billing,
       });
     } catch (error: any) {
       console.error("master-folio error:", error);
@@ -1800,28 +1804,43 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       const gCharges = await storage.getGroupCharges(req.params.groupId);
-      const gPayments = await storage.getGroupPayments(req.params.groupId);
+      const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
+      const gPayments = allGroupPayments.filter((payment: any) =>
+        payment.destination === "master_folio" || payment.distribution === "master_folio"
+      );
+      const masterPaymentIds = new Set(gPayments.map((payment: any) => payment.id));
 
       // Fetch void movements via the group folio helper
       const folioData = await storage.getGroupFolio(req.params.groupId);
       const voidMovements = folioData?.voidMovements ?? [];
       const voidMovementsTotal = folioData?.voidMovementsTotal ?? 0;
 
+      // Same batched, filtered per-reservation facts used by /folio, /master-folio
+      // and /invoice, so the printed PDF can never disagree with the on-screen
+      // master folio or Resumen del Grupo.
+      const ledgerLines = await storage.getGroupReservationLedger(req.params.groupId);
+
       // Build per-room data
       let masterAccommodation = 0;
       let masterExtras = 0;
+      let directAllPaid = 0;
+      let directAccommodationPaid = 0;
       const roomRows: any[] = [];
 
-      for (const reservation of group.reservations) {
-        if (reservation.status === "cancelled") continue;
-        const resCharges = await storage.getCharges(reservation.id);
-        const resPayments = await storage.getPayments(reservation.id);
-        const accommodation = parseFloat((reservation as any).totalRoomAmount || "0");
-        const extras = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-        // Exclude voided payments from balance so voids restore the owed amount (mirrors on-screen folio)
-        const activePmts = resPayments.filter((p: any) => p.status !== "anulado");
-        const paid = activePmts.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-        const individualPayments = resPayments.map((p: any) => ({
+      for (const line of ledgerLines) {
+        const accommodation = line.accommodationTotal;
+        const extras = line.extrasTotal;
+        const paid = line.paymentsTotal;
+        const directPaid = line.payments
+          .filter((p: any) => !p.groupPaymentId || !masterPaymentIds.has(p.groupPaymentId))
+          .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+
+        masterAccommodation += accommodation;
+        if (config === "all") masterExtras += extras;
+        directAllPaid += directPaid;
+        directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
+
+        const individualPayments = line.payments.map((p: any) => ({
           amount: parseFloat(p.amount),
           method: p.method || "",
           reference: p.reference || null,
@@ -1829,17 +1848,25 @@ export function registerGroupsRoutes(app: Express) {
           date: p.date || null,
           status: (p as any).status || null,
         }));
-        const activeCharges = resCharges.filter((c: any) => c.status !== "anulado");
-        masterAccommodation += accommodation;
-        if (config === "all") masterExtras += extras;
-        roomRows.push({ reservation, accommodation, extras, paid, individualPayments, activeCharges });
+        roomRows.push({
+          guestName: line.guestName || "Sin asignar",
+          roomNumber: line.roomNumber,
+          nights: line.nights,
+          accommodation,
+          extras,
+          paid,
+          individualPayments,
+          activeCharges: line.charges,
+        });
       }
 
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
-      // Use active reservation payments as the authoritative paid amount (mirrors getGroupFolio).
-      // gPayments is kept for display/audit only; it is not void-aware and must not drive the balance.
-      const masterPaid = roomRows.reduce((s: number, r: any) => s + r.paid, 0);
+      // Same formula as the on-screen master folio: master-destined group
+      // payments plus each room's direct payment (extras-first offset when
+      // the config only covers accommodation).
+      const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
+      const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
 
       // Generate PDF
@@ -1910,15 +1937,7 @@ export function registerGroupsRoutes(app: Express) {
       doc.fillColor("#000000");
 
       for (const row of roomRows) {
-        const res = row.reservation;
-        const guest = res.guest
-          ? ((res.guest as any).tipoPersona === "juridica"
-              ? res.guest.firstName
-              : `${res.guest.lastName} ${res.guest.firstName}`.trim())
-          : "Sin asignar";
-        const checkIn = new Date(res.checkInDate);
-        const checkOut = new Date(res.checkOutDate);
-        const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+        const guest = row.guestName || "Sin asignar";
 
         if (y > 740) {
           doc.addPage();
@@ -1926,9 +1945,9 @@ export function registerGroupsRoutes(app: Express) {
         }
 
         doc.fontSize(9).font("Helvetica")
-          .text(res.room?.roomNumber || "-", 40, y)
+          .text(row.roomNumber || "-", 40, y)
           .text(guest.substring(0, 26), 80, y)
-          .text(String(nights), 280, y, { align: "right", width: 60 })
+          .text(String(row.nights), 280, y, { align: "right", width: 60 })
           .text(`$${row.accommodation.toLocaleString("es-AR")}`, 350, y, { align: "right", width: 80 })
           .text(row.extras > 0 ? `$${row.extras.toLocaleString("es-AR")}` : "-", 440, y, { align: "right", width: 60 })
           .text(`$${row.paid.toLocaleString("es-AR")}`, 505, y, { align: "right", width: 50 });

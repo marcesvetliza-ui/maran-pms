@@ -61,6 +61,7 @@ import {
   type GroupPayment, type InsertGroupPayment,
   type GroupPaymentDestination,
   type GroupFolioData,
+  type GroupReservationLedgerLine,
   type GuestReview, type InsertGuestReview, type GuestReviewWithDetails, type SentimentType,
   type HousekeepingTask, type InsertHousekeepingTask, type HousekeepingTaskWithRoom,
   type RestaurantArea, type InsertRestaurantArea,
@@ -152,6 +153,7 @@ import {
   inventoryCountItems,
 } from "@shared/schema";
 import { assertFinancialSchemaReady } from "./migrate";
+import { getGroupInvoiceSnapshot } from "./billing/groupInvoiceScope";
 
 export class DatabaseStorage implements IStorage {
 
@@ -1984,17 +1986,20 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+  // Single, batched read of the per-reservation facts (accommodation, active
+  // charges, active payments) that back the group folio, the master folio and
+  // the group invoice summary. Every one of those views must derive its
+  // totals from this same filtered data set (active reservations only,
+  // non-"anulado" charges/payments, totalRoomAmount as the accommodation
+  // source) so they can never disagree about what is actually owed.
+  async getGroupReservationLedger(groupId: string): Promise<GroupReservationLedgerLine[]> {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("Grupo no encontrado");
 
     const activeReservations = group.reservations.filter((r: any) => r.status !== "cancelled");
     const resIds = activeReservations.map((r: any) => r.id).filter(Boolean);
 
-    // Batch-fetch everything in parallel — no per-reservation queries
-    const [gCharges, gPayments, allResCharges, allResPayments] = await Promise.all([
-      this.getGroupCharges(groupId),
-      this.getGroupPayments(groupId),
+    const [allResCharges, allResPayments] = await Promise.all([
       resIds.length > 0
         ? db.select().from(charges).where(inArray(charges.reservationId, resIds))
         : Promise.resolve([]),
@@ -2003,7 +2008,6 @@ export class DatabaseStorage implements IStorage {
         : Promise.resolve([]),
     ]);
 
-    // Build lookup maps
     const chargesMap = new Map<string, Charge[]>();
     for (const c of allResCharges) {
       if (!chargesMap.has(c.reservationId!)) chargesMap.set(c.reservationId!, []);
@@ -2014,6 +2018,45 @@ export class DatabaseStorage implements IStorage {
       if (!paymentsMap.has(p.reservationId!)) paymentsMap.set(p.reservationId!, []);
       paymentsMap.get(p.reservationId!)!.push(p);
     }
+
+    return activeReservations.map((res: any) => {
+      const resCharges = (chargesMap.get(res.id) || []).filter((c: any) => c.status !== "anulado");
+      const resPayments = (paymentsMap.get(res.id) || []).filter((p: any) => p.status !== "anulado");
+      const accommodationTotal = parseFloat(res.totalRoomAmount || "0");
+      const extrasTotal = resCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
+      const paymentsTotal = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      return {
+        reservationId: res.id,
+        reservationCode: res.reservationCode || "",
+        guestName: (res.guest as any)?.tipoPersona === "juridica"
+          ? (res.guest?.firstName || "")
+          : `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
+        roomNumber: res.room?.roomNumber || "-",
+        status: res.status,
+        nights: res.nights || 0,
+        accommodationTotal,
+        charges: resCharges,
+        extrasTotal,
+        payments: resPayments,
+        paymentsTotal,
+      };
+    });
+  }
+
+  async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+    const group = await this.getGroup(groupId);
+    if (!group) throw new Error("Grupo no encontrado");
+
+    const activeReservations = group.reservations.filter((r: any) => r.status !== "cancelled");
+    const resIds = activeReservations.map((r: any) => r.id).filter(Boolean);
+
+    // Batch-fetch everything in parallel — no per-reservation queries
+    const [gCharges, gPayments, ledgerLines, billing] = await Promise.all([
+      this.getGroupCharges(groupId),
+      this.getGroupPayments(groupId),
+      this.getGroupReservationLedger(groupId),
+      getGroupInvoiceSnapshot(groupId),
+    ]);
 
     // Fetch void folio_movements for all reservation folios in this group
     let voidMovementsWithContext: GroupFolioData["voidMovements"] = [];
@@ -2070,33 +2113,24 @@ export class DatabaseStorage implements IStorage {
     let indivPaymentsTotal = 0;
     const groupPaymentIds = new Set(gPayments.map((payment) => payment.id));
 
-    const resRows = activeReservations.map((res: any) => {
-      const resCharges = chargesMap.get(res.id) || [];
-      const resPayments = paymentsMap.get(res.id) || [];
-      const accTotal = parseFloat(res.totalRoomAmount || "0");
-      const extTotal = resCharges.filter((c: any) => c.status !== "anulado").reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-      // Exclude voided (anulado) payments from the balance so voids restore the owed amount
-      const activeResPayments = resPayments.filter((p: any) => p.status !== "anulado");
-      const payTotal = activeResPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-      const nights = res.nights || 0;
-
-      accommodationTotal += accTotal;
-      extrasTotal += extTotal;
+    const resRows = ledgerLines.map((line) => {
+      accommodationTotal += line.accommodationTotal;
+      extrasTotal += line.extrasTotal;
       // Payments linked to a group payment are allocations, not a second
       // receipt. Legacy/direct room payments remain independent receipts.
-      indivPaymentsTotal += activeResPayments
+      indivPaymentsTotal += line.payments
         .filter((payment: any) => !payment.groupPaymentId || !groupPaymentIds.has(payment.groupPaymentId))
         .reduce((s: number, payment: any) => s + parseFloat(payment.amount), 0);
 
       return {
-        reservationId: res.id,
-        guestName: `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim(),
-        roomNumber: res.room?.roomNumber || "-",
-        nights,
-        accommodationTotal: accTotal,
-        extrasTotal: extTotal,
-        paymentsTotal: payTotal,
-        balance: accTotal + extTotal - payTotal,
+        reservationId: line.reservationId,
+        guestName: line.guestName,
+        roomNumber: line.roomNumber,
+        nights: line.nights,
+        accommodationTotal: line.accommodationTotal,
+        extrasTotal: line.extrasTotal,
+        paymentsTotal: line.paymentsTotal,
+        balance: line.accommodationTotal + line.extrasTotal - line.paymentsTotal,
       };
     });
 
@@ -2123,6 +2157,7 @@ export class DatabaseStorage implements IStorage {
         voids: voidMovementsTotal,
         balance,
       },
+      billing,
     };
   }
 
