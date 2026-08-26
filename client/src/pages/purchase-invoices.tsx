@@ -323,11 +323,13 @@ function InvoiceDialog({
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
   const TIPOS_C = ["FACT-C", "NC-C", "RECIBO-C"];
+  // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
+  const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
 
   const applyNetoLines = (updated: NetoLine[]) => {
     setForm(p => {
-      if (TIPOS_C.includes(p.tipoComprobante)) {
-        // Factura C: no IVA — el neto es el total, no calcular IVA
+      if (TIPOS_IMPORTE_UNICO.includes(p.tipoComprobante)) {
+        // Factura C / Retención Recibida: no IVA — el importe cargado es el total, no calcular IVA
         const netoTotal = updated.reduce((sum, l) => sum + (parseFloat(l.neto) || 0), 0);
         return { ...p, montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "", ...ALL_IVA_FIELDS };
       }
@@ -623,6 +625,9 @@ function InvoiceDialog({
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
+  // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
+  // un único importe que ES el total, sin desglose de IVA.
+  const isImporteUnico = isFacturaC || isRetencion;
 
   return (
     <>
@@ -658,8 +663,8 @@ function InvoiceDialog({
                 <div>
                   <Label>Tipo de Comprobante</Label>
                   <Select value={form.tipoComprobante} onValueChange={(v) => {
-                    // Factura C: sin IVA, forzar alícuota 0 y limpiar campos IVA
-                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C") {
+                    // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
+                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({ ...p, tipoComprobante: v, alicuotaIva: "0", ...ALL_IVA_FIELDS }));
                     } else {
                       f("tipoComprobante", v);
@@ -807,10 +812,10 @@ function InvoiceDialog({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-semibold">
-                    {isFacturaC ? "Importe" : "Netos Gravados"}
-                    {isResumen && !isFacturaC && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
+                    {isImporteUnico ? "Importe" : "Netos Gravados"}
+                    {isResumen && !isImporteUnico && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
                   </Label>
-                  {!isFacturaC && (
+                  {!isImporteUnico && (
                     <Button
                       type="button"
                       variant="outline"
@@ -828,9 +833,9 @@ function InvoiceDialog({
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs">{isFacturaC ? "Importe total $" : "Neto gravado $"}</th>
-                        {!isFacturaC && <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>}
-                        {!isFacturaC && <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>}
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs">{isImporteUnico ? "Importe total $" : "Neto gravado $"}</th>
+                        {!isImporteUnico && <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>}
+                        {!isImporteUnico && <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>}
                         <th className="w-8"></th>
                       </tr>
                     </thead>
@@ -838,7 +843,7 @@ function InvoiceDialog({
                       {netoLines.map((line, i) => {
                         const n = parseFloat(line.neto) || 0;
                         const entry = IVA_MAP[line.alicuota];
-                        const ivaCalc = !isFacturaC && entry && n > 0 ? n * entry.rate / 100 : 0;
+                        const ivaCalc = !isImporteUnico && entry && n > 0 ? n * entry.rate / 100 : 0;
                         return (
                           <tr key={i} className="bg-background">
                             <td className="px-2 py-1.5">
@@ -853,7 +858,7 @@ function InvoiceDialog({
                                 data-testid={`input-neto-line-${i}`}
                               />
                             </td>
-                            {!isFacturaC && (
+                            {!isImporteUnico && (
                               <td className="px-2 py-1.5">
                                 <Select
                                   value={line.alicuota}
@@ -872,7 +877,7 @@ function InvoiceDialog({
                                 </Select>
                               </td>
                             )}
-                            {!isFacturaC && (
+                            {!isImporteUnico && (
                               <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
                                 {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
                               </td>
@@ -896,10 +901,10 @@ function InvoiceDialog({
                     </tbody>
                     <tfoot className="border-t bg-muted/30">
                       <tr>
-                        <td colSpan={isFacturaC ? 2 : 2} className="px-3 py-2 text-xs text-muted-foreground">
-                          {isFacturaC ? "Total:" : "Total neto:"} <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
+                        <td colSpan={2} className="px-3 py-2 text-xs text-muted-foreground">
+                          {isImporteUnico ? "Total:" : "Total neto:"} <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
                         </td>
-                        {!isFacturaC && (
+                        {!isImporteUnico && (
                           <td className="px-3 py-2 text-xs text-right text-muted-foreground">
                             Total IVA: <span className="font-bold text-foreground font-mono">
                               ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
