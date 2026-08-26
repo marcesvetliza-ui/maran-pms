@@ -163,6 +163,45 @@ function gItemsFromSimple(simples: Array<{ descripcion: string; precioUnitario: 
   });
 }
 
+// The `showMasterFacturaDialog` invoice dialog is shared by two entry points — the legacy
+// "Pago al Folio Maestro" dialog (masterPayment* state) and the "Aplicar al Folio Maestro"
+// destino inside the unified "Pago Grupal" dialog (groupPayment* state). Both flows funnel
+// into the SAME dialog instance, so it must be told, explicitly, which state produced the
+// payment it is about to invoice — otherwise it silently falls back to one flow's data even
+// when the other flow is the one that ran (this exact bug shipped once: a fiscal invoice
+// opened from the Pago Grupal toggle got prefilled with stale/empty legacy masterPayment*
+// data). Any future third entry point into showMasterFacturaDialog MUST go through this
+// resolver with its own explicit `fromGroupDialog`-style discriminant rather than reaching
+// into `masterPayment*`/`groupPayment*` state directly. Covered by
+// group-detail.master-factura-source.test.ts.
+export type MasterFacturaSourceState = {
+  receiptType: string;
+  paymentRows: Array<{ amount: string }>;
+  items: GItem[];
+  razonSocial: string;
+  cuit: string;
+  condicionIva: string;
+  domicilio: string;
+};
+export function resolveMasterFacturaSource(
+  fromGroupDialog: boolean,
+  groupState: MasterFacturaSourceState,
+  masterState: MasterFacturaSourceState,
+  defaultDescripcion: { fromGroupDialog: string; fromMasterDialog: string },
+) {
+  const source = fromGroupDialog ? groupState : masterState;
+  return {
+    effectiveReceiptType: source.receiptType,
+    totalPaid: source.paymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+    effectiveItems: source.items,
+    effectiveRazonSocial: source.razonSocial,
+    effectiveCuit: source.cuit,
+    effectiveCondicionIva: source.condicionIva,
+    effectiveDomicilio: source.domicilio,
+    defaultDescripcion: fromGroupDialog ? defaultDescripcion.fromGroupDialog : defaultDescripcion.fromMasterDialog,
+  };
+}
+
 const fmtDate = (d: string) => {
   if (!d) return "-";
   const [y, m, dd] = d.split("-").map(Number);
@@ -4555,13 +4594,25 @@ export default function GroupDetailPage() {
       </Dialog>
 
       {showMasterFacturaDialog && (() => {
-        // This dialog is shared by two entry points — see masterFacturaFromGroupDialog above.
-        // Read amounts/receiver/items from whichever state actually produced the payment.
+        // This dialog is shared by two entry points — see masterFacturaFromGroupDialog and
+        // resolveMasterFacturaSource above. Read amounts/receiver/items from whichever state
+        // actually produced the payment via the shared resolver, never inline/ad-hoc here.
         const fromGroupDialog = masterFacturaFromGroupDialog;
-        const effectiveReceiptType = fromGroupDialog ? groupPaymentReceiptType : masterPaymentReceiptType;
-        const totalPaid = fromGroupDialog
-          ? groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-          : masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+        const {
+          effectiveReceiptType,
+          totalPaid,
+          effectiveItems,
+          effectiveRazonSocial,
+          effectiveCuit,
+          effectiveCondicionIva,
+          effectiveDomicilio,
+          defaultDescripcion,
+        } = resolveMasterFacturaSource(
+          fromGroupDialog,
+          { receiptType: groupPaymentReceiptType, paymentRows: groupPaymentRows, items: groupPaymentItems, razonSocial: groupPaymentRazonSocial, cuit: groupPaymentCuit, condicionIva: groupPaymentCondicionIva, domicilio: groupPaymentDomicilio },
+          { receiptType: masterPaymentReceiptType, paymentRows: masterPaymentRows, items: masterPaymentItems, razonSocial: masterPaymentRazonSocial, cuit: masterPaymentCuit, condicionIva: masterPaymentCondicionIva, domicilio: masterPaymentDomicilio },
+          { fromGroupDialog: `Pago grupal — ${group?.name ?? ""}`, fromMasterDialog: `Pago Folio Maestro — ${group?.name ?? ""}` },
+        );
         const allowedTiposMap: Record<string, string[]> = {
           factura_a: ["FA"],
           factura_b: ["FB"],
@@ -4575,12 +4626,6 @@ export default function GroupDetailPage() {
         const isMipymeInvoice = effectiveReceiptType === "factura_mipyme_a";
         const isFullPaymentForInvoice = isMipymeInvoice || Math.abs(totalPaid - (masterFolio?.masterTotal ?? 0)) < 0.01;
         const effectiveDistribution = isFullPaymentForInvoice ? masterInvoiceDistribution : "none";
-        const effectiveItems = fromGroupDialog ? groupPaymentItems : masterPaymentItems;
-        const effectiveRazonSocial = fromGroupDialog ? groupPaymentRazonSocial : masterPaymentRazonSocial;
-        const effectiveCuit = fromGroupDialog ? groupPaymentCuit : masterPaymentCuit;
-        const effectiveCondicionIva = fromGroupDialog ? groupPaymentCondicionIva : masterPaymentCondicionIva;
-        const effectiveDomicilio = fromGroupDialog ? groupPaymentDomicilio : masterPaymentDomicilio;
-        const defaultDescripcion = fromGroupDialog ? `Pago grupal — ${group?.name ?? ""}` : `Pago Folio Maestro — ${group?.name ?? ""}`;
 
         return (
           <EmitirFacturaDialog
