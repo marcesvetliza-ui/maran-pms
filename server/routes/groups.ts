@@ -27,6 +27,18 @@ function parsePaymentRetention(notes: unknown): { tipo: string; monto: number } 
   }
 }
 
+// Retención withheld on the portion of a group_payments row allocated to a
+// "__"-prefixed target (Folio Maestro balance, group charges) — no real room
+// exists to carry it on payments.notes, so it lives on the parent row's
+// retention_detail column instead. See parsePaymentRetention above for the
+// room-level counterpart.
+function parseGroupPaymentRetentions(retentionDetail: unknown): Array<{ tipo: string; monto: number }> {
+  if (!Array.isArray(retentionDetail)) return [];
+  return retentionDetail
+    .map((r: any) => ({ tipo: String(r?.tipo || ""), monto: Number(r?.monto) || 0 }))
+    .filter((r) => r.monto > 0);
+}
+
 function distributeCents(
   totalCents: number,
   entries: Array<{ id: string; weight: number }>
@@ -1918,8 +1930,13 @@ export function registerGroupsRoutes(app: Express) {
       const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
       const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
-      const masterRetentionsTotal = roomRows.reduce((sum: number, row: any) =>
+      const roomRetentionsTotal = roomRows.reduce((sum: number, row: any) =>
         sum + row.individualPayments.reduce((s: number, p: any) => s + (p.retention?.monto || 0), 0), 0);
+      // Retención withheld on the Folio Maestro / group-charges portion of a
+      // parent group payment (no room to carry it on payments.notes).
+      const organizerRetentionsTotal = gPayments.reduce((sum: number, gp: any) =>
+        sum + parseGroupPaymentRetentions(gp.retentionDetail).reduce((s: number, r) => s + r.monto, 0), 0);
+      const masterRetentionsTotal = roomRetentionsTotal + organizerRetentionsTotal;
 
       // Generate PDF
       const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -2171,6 +2188,15 @@ export function registerGroupsRoutes(app: Express) {
             .text(`${fmtAR(p.date)} — ${p.method}${p.reference ? ` (${p.reference})` : ""}`, 50, y)
             .text(`$${parseFloat(p.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
+          for (const ret of parseGroupPaymentRetentions((p as any).retentionDetail)) {
+            if (y > 740) { doc.addPage(); y = 40; }
+            const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : `Ret. ${ret.tipo}`;
+            doc.fontSize(7.2).font("Helvetica-Oblique").fillColor("#b45309")
+              .text(`    ↳ ${retLabel}`, 60, y, { width: 300 })
+              .text(`$${ret.monto.toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+            doc.fillColor("#000000");
+            y += 11;
+          }
         }
       }
 

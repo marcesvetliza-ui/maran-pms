@@ -2491,6 +2491,19 @@ export default function GroupDetailPage() {
                                     <span className="text-xs text-muted-foreground">→ {receiverName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
+                                  {/* Retención (IIBB/Ganancias) withheld on the Folio Maestro / group-charges
+                                      portion of this payment — no room to carry it on payments.notes, so it's
+                                      stored on the group_payments row itself (retentionDetail). */}
+                                  {Array.isArray(gp.retentionDetail) && gp.retentionDetail.map((ret: any, retIdx: number) => {
+                                    if (!ret?.monto) return null;
+                                    const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : ret.tipo ? `Ret. ${ret.tipo}` : null;
+                                    if (!retLabel) return null;
+                                    return (
+                                      <Badge key={retIdx} variant="outline" className="text-xs border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400" data-testid={`badge-retention-master-${gp.id}-${retIdx}`}>
+                                        {retLabel}: ${ret.monto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                      </Badge>
+                                    );
+                                  })}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0 ml-2">
                                   {/* NC button: only for payments with an emitted invoice and no NC yet */}

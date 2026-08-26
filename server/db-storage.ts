@@ -1864,6 +1864,26 @@ export class DatabaseStorage implements IStorage {
         retentionByMethod.set(`${methodIndex}`, split);
       });
 
+      // A retención withheld on the portion of the payment allocated to a
+      // "__"-prefixed target (Folio Maestro balance, group charges) has no
+      // room-level payments.notes to live on. Without capturing it here it
+      // is silently dropped instead of just being recorded elsewhere, so
+      // accumulate it per tipo and persist it directly on the group_payments
+      // row below.
+      const unassignedRetentionCents = new Map<string, number>();
+      allocations.forEach((allocation, allocationIndex) => {
+        if (!allocation.reservationId.startsWith("__")) return;
+        rows.forEach((row, methodIndex) => {
+          if (!row.retention || row.method === "cuenta_corriente") return;
+          const shareCents = retentionByMethod.get(`${methodIndex}`)?.[allocationIndex] || 0;
+          if (shareCents <= 0) return;
+          unassignedRetentionCents.set(row.retention.tipo, (unassignedRetentionCents.get(row.retention.tipo) || 0) + shareCents);
+        });
+      });
+      const retentionDetail = Array.from(unassignedRetentionCents.entries())
+        .map(([tipo, centsAmount]) => ({ tipo, monto: centsAmount / 100 }))
+        .filter((entry) => entry.monto > 0);
+
       const reservationIds = allocations
         .map((allocation) => allocation.reservationId)
         .filter((reservationId) => !reservationId.startsWith("__"));
@@ -1940,6 +1960,7 @@ export class DatabaseStorage implements IStorage {
         paymentMethodDetail: rows,
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
+        retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
       } as any).returning();
 
       const reservationPayments: Payment[] = [];

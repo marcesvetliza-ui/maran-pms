@@ -647,6 +647,12 @@ export const groupPayments = pgTable("group_payments", {
   // linked through groupPaymentId are merely its allocations.
   destination: text("destination").$type<GroupPaymentDestination>().notNull().default("group_distribution"),
   receiverDetails: jsonb("receiver_details"), // { razonSocial, cuit, dni, condicionIva, domicilio }
+  // Retención (IIBB/Ganancias) withheld on the portion of this payment
+  // allocated to the Folio Maestro / group charges (a "__"-prefixed target,
+  // not a real room): [{ tipo, monto }]. Retención on portions allocated to
+  // real rooms is instead recorded on that room's payments.notes — this
+  // column exists only so the non-room portion isn't silently discarded.
+  retentionDetail: jsonb("retention_detail"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
