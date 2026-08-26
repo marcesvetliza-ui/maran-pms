@@ -7,6 +7,7 @@ import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
+import { assertFinancialSchemaReady } from "../migrate";
 
 export function registerEventsRoutes(app: Express) {
   // Event Rooms
@@ -309,6 +310,7 @@ export function registerEventsRoutes(app: Express) {
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
       }
+      if (method === "cuenta_corriente") assertFinancialSchemaReady();
       if (method === "room_charge" && !reservationId) {
         return res.status(400).json({ error: "reservationId es requerido para cargo a habitacion" });
       }
@@ -354,25 +356,23 @@ export function registerEventsRoutes(app: Express) {
         const entityType = ccEntityType || (evt?.companyId ? "company" : null);
         const entityId = ccEntityId || evt?.companyId || null;
         if (entityType && entityId) {
-          try {
-            const today = new Date().toISOString().split("T")[0];
-            await storage.createAccountMovement({
-              entityType: entityType as "company" | "agency",
-              entityId,
-              date: today,
-              type: "cargo",
-              description: `Evento: ${evt?.name || req.params.eventId}`,
-              amount: String(parseFloat(amount).toFixed(2)),
-            });
-          } catch (e) {
-            console.error("Error creando movimiento CC para evento:", e);
-          }
+          const today = new Date().toISOString().split("T")[0];
+          await storage.createAccountMovement({
+            entityType: entityType as "company" | "agency",
+            entityId,
+            date: today,
+            type: "cargo",
+            description: `Evento: ${evt?.name || req.params.eventId}`,
+            amount: String(parseFloat(amount).toFixed(2)),
+          });
         }
       }
 
       res.status(201).json(payment);
     } catch (error) {
-      res.status(500).json({ error: "Error creating event payment" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error creating event payment",
+      });
     }
   });
 

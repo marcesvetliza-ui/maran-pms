@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { randomUUID } from "crypto";
 import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
+import { assertFinancialSchemaReady } from "./migrate";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks, rooms } from "@shared/schema";
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
@@ -2045,6 +2046,7 @@ export async function registerRoutes(
   app.post("/api/cash/movements", requireAuth, async (req, res) => {
     try {
       const body = req.body;
+      if (body.sourceType === "cobro_cc") assertFinancialSchemaReady();
       const movement = await storage.createCashMovement(body);
 
       // Si es un cobro de cuenta corriente, crear movimiento en account_movements
@@ -2066,7 +2068,9 @@ export async function registerRoutes(
       res.status(201).json(movement);
     } catch (error) {
       console.error("Error creating cash movement:", error);
-      res.status(500).json({ error: "Error creating movement" });
+      res.status((error as { statusCode?: number })?.statusCode || 500).json({
+        error: (error as Error)?.message || "Error creating movement",
+      });
     }
   });
 

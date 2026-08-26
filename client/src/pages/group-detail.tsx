@@ -103,6 +103,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import type { 
   GroupWithDetails, 
   GroupStatus, 
@@ -426,9 +427,11 @@ type AssignRow = {
   originalRoomId: string;
   firstName: string;
   lastName: string;
+  guestId: string | null;
+  guestMode: "search" | "new";
 };
 
-function AssignBlockDialog({
+export function AssignBlockDialog({
   group,
   block,
   open,
@@ -474,6 +477,8 @@ function AssignBlockDialog({
       originalRoomId: res.roomId || "",
       firstName: "",
       lastName: "",
+      guestId: null,
+      guestMode: "search" as const,
     })),
     ...Array.from({ length: emptyCount }, () => ({
       reservationId: null,
@@ -481,36 +486,10 @@ function AssignBlockDialog({
       originalRoomId: "",
       firstName: "",
       lastName: "",
+      guestId: null,
+      guestMode: "search" as const,
     })),
   ]);
-
-  const [duplicateWarnings, setDuplicateWarnings] = useState<Record<number, string | null>>({});
-
-  // Debounced duplicate-guest check: when firstName+lastName are both ≥2 chars, search guests
-  useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    rows.forEach((row, idx) => {
-      const q = `${row.firstName.trim()} ${row.lastName.trim()}`.trim();
-      if (row.firstName.trim().length >= 2 && row.lastName.trim().length >= 2) {
-        const t = setTimeout(async () => {
-          try {
-            const res = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
-            if (!res.ok) return;
-            const results: any[] = await res.json();
-            const match = results.find(g =>
-              g.firstName?.toLowerCase() === row.firstName.trim().toLowerCase() &&
-              g.lastName?.toLowerCase() === row.lastName.trim().toLowerCase()
-            );
-            setDuplicateWarnings(prev => ({ ...prev, [idx]: match ? `${match.lastName} ${match.firstName}` : null }));
-          } catch {}
-        }, 400);
-        timers.push(t);
-      } else {
-        setDuplicateWarnings(prev => ({ ...prev, [idx]: null }));
-      }
-    });
-    return () => timers.forEach(clearTimeout);
-  }, [rows.map(r => `${r.firstName}|${r.lastName}`).join(",")]);
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId, group.id],
@@ -542,7 +521,7 @@ function AssignBlockDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAssignAll = async () => {
-    const validRows = rows.filter(r => r.roomId && r.firstName.trim());
+    const validRows = rows.filter(r => r.roomId && (r.guestId || r.firstName.trim()));
     if (validRows.length === 0) {
       toast({
         title: "Completá al menos un nombre de pasajero",
@@ -561,6 +540,7 @@ function AssignBlockDialog({
       try {
         if (row.reservationId) {
           await apiRequest("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
+            guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
@@ -568,6 +548,7 @@ function AssignBlockDialog({
         } else {
           await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
+            guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             ratePlanId: block.ratePlanId,
@@ -648,24 +629,26 @@ function AssignBlockDialog({
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
+              <div className="grid grid-cols-[1.3fr_2fr_auto] gap-2 text-xs font-medium text-muted-foreground px-1">
                 <span>Habitación</span>
-                <span>Nombre</span>
-                <span>Apellido</span>
+                <span>Huésped</span>
                 <span></span>
               </div>
               {rows.map((row, index) => {
                 const roomOptions = getRoomOptions(row);
                 const otherChosenRoomIds = allChosenRoomIds.filter((id, i) => i !== index);
+                const updateRow = (changes: Partial<AssignRow>) => {
+                  setRows((currentRows) => currentRows.map((currentRow, rowIndex) =>
+                    rowIndex === index ? { ...currentRow, ...changes } : currentRow
+                  ));
+                };
                 return (
                   <div key={row.reservationId ?? `new-${index}`} className="flex flex-col gap-0.5">
-                    <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-center">
+                    <div className="grid grid-cols-[1.3fr_2fr_auto] gap-2 items-start">
                     <Select
                       value={row.roomId}
                       onValueChange={(value) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], roomId: value };
-                        setRows(updated);
+                        updateRow({ roomId: value });
                       }}
                     >
                       <SelectTrigger data-testid={`select-room-${index}`}>
@@ -688,49 +671,85 @@ function AssignBlockDialog({
                       </SelectContent>
                     </Select>
 
-                    <Input
-                      placeholder="Nombre"
-                      value={row.firstName}
-                      name={`passenger-firstname-${index}`}
-                      autoComplete="off"
-                      onChange={(e) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], firstName: e.target.value };
-                        setRows(updated);
-                      }}
-                      data-testid={`input-firstname-${index}`}
-                    />
-
-                    <Input
-                      placeholder="Apellido"
-                      value={row.lastName}
-                      name={`passenger-lastname-${index}`}
-                      autoComplete="off"
-                      onChange={(e) => {
-                        const updated = [...rows];
-                        updated[index] = { ...updated[index], lastName: e.target.value };
-                        setRows(updated);
-                      }}
-                      data-testid={`input-lastname-${index}`}
-                    />
+                    <div className="min-w-0">
+                      {row.guestMode === "new" ? (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">Nuevo huésped</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-1.5 text-xs"
+                              onClick={() => updateRow({ guestMode: "search", firstName: "", lastName: "", guestId: null })}
+                              data-testid={`button-search-guest-${index}`}
+                            >
+                              <Search className="h-3 w-3 mr-1" />
+                              Buscar existente
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              placeholder="Nombre"
+                              value={row.firstName}
+                              name={`passenger-firstname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ firstName: e.target.value })}
+                              data-testid={`input-firstname-${index}`}
+                            />
+                            <Input
+                              placeholder="Apellido"
+                              value={row.lastName}
+                              name={`passenger-lastname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ lastName: e.target.value })}
+                              data-testid={`input-lastname-${index}`}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <GuestSearchCombobox
+                          label=""
+                          selectedGuestId={row.guestId}
+                          selectedGuestName={row.guestId ? `${row.lastName} ${row.firstName}`.trim() : null}
+                          placeholder="Buscar nombre, apellido o documento..."
+                          onGuestSelect={(guest) => updateRow({
+                            guestId: guest.id,
+                            firstName: guest.firstName,
+                            lastName: guest.lastName || "",
+                            guestMode: "search",
+                          })}
+                          onClear={() => updateRow({
+                            guestId: null,
+                            firstName: "",
+                            lastName: "",
+                            guestMode: "search",
+                          })}
+                          onCreateNew={(prefillName) => {
+                            const parts = (prefillName || "").trim().split(/\s+/).filter(Boolean);
+                            updateRow({
+                              guestId: null,
+                              guestMode: "new",
+                              firstName: parts[0] || "",
+                              lastName: parts.slice(1).join(" "),
+                            });
+                          }}
+                          data-testid={`guest-selector-${index}`}
+                        />
+                      )}
+                    </div>
 
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => setRows(rows.filter((_, i) => i !== index))}
+                      onClick={() => setRows((currentRows) => currentRows.filter((_, i) => i !== index))}
                       title="Quitar fila"
                       data-testid={`button-remove-row-${index}`}
                     >
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
-                  {duplicateWarnings[index] && (
-                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1 px-1">
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Ya existe un huésped con este nombre: <strong>{duplicateWarnings[index]}</strong>
-                    </p>
-                  )}
                   </div>
                 );
               })}
@@ -742,7 +761,7 @@ function AssignBlockDialog({
                   variant="ghost"
                   size="sm"
                   className="text-xs"
-                  onClick={() => setRows([...rows, { reservationId: null, roomId: "", originalRoomId: "", firstName: "", lastName: "" }])}
+                  onClick={() => setRows([...rows, { reservationId: null, roomId: "", originalRoomId: "", firstName: "", lastName: "", guestId: null, guestMode: "search" }])}
                   data-testid="button-add-assignment-row"
                 >
                   <Plus className="h-3 w-3 mr-1" />
@@ -758,13 +777,13 @@ function AssignBlockDialog({
           {!allDone && rows.length > 0 && (
             <Button
               onClick={handleAssignAll}
-              disabled={isSubmitting || rows.every(r => !r.firstName.trim())}
+              disabled={isSubmitting || rows.every(r => !r.guestId && !r.firstName.trim())}
               data-testid="button-confirm-assign-all"
             >
               {isSubmitting ? (
                 <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Guardando...</>
               ) : (
-                `Guardar ${rows.filter(r => r.firstName.trim()).length} pasajero(s)`
+                `Guardar ${rows.filter(r => r.guestId || r.firstName.trim()).length} pasajero(s)`
               )}
             </Button>
           )}
@@ -916,6 +935,15 @@ export default function GroupDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/groups/${groupId}/master-folio`, { credentials: "include" });
       if (!res.ok) throw new Error("Error loading master folio");
+      return res.json();
+    },
+  });
+
+  const { data: groupInvoiceSnapshot } = useQuery<any>({
+    queryKey: ["/api/groups", groupId, "invoice-snapshot"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/invoice-snapshot`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error loading group invoice availability");
       return res.json();
     },
   });
@@ -1113,11 +1141,20 @@ export default function GroupDetailPage() {
         closeAllRooms: groupPaymentCloseAll,
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
+        receiverDetails: {
+          razonSocial: groupPaymentRazonSocial || undefined,
+          cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
+          dni: groupPaymentDni || undefined,
+          condicionIva: groupPaymentCondicionIva || undefined,
+          domicilio: groupPaymentDomicilio || undefined,
+        },
       });
     },
     onSuccess: async (res) => {
       const data = await res.json().catch(() => ({}));
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ predicate: (q) =>
         Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
@@ -1130,7 +1167,7 @@ export default function GroupDetailPage() {
       if (needsFactura || needsVoucher) {
         // Close the payment dialog and open the invoice dialog with the payment ID
         setShowGroupPaymentDialog(false);
-        setPendingGroupPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setPendingGroupPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
         setShowGroupFacturaDialog(true);
         return;
       }
@@ -1190,6 +1227,7 @@ export default function GroupDetailPage() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       toast({ title: "Cargo agregado al folio grupal" });
       setShowAddGroupChargeDialog(false);
       setFolioChargeDescription("");
@@ -1283,6 +1321,13 @@ export default function GroupDetailPage() {
         receiptType: masterPaymentReceiptType,
         billingEntityType: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityType : undefined,
         billingEntityId: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityId : undefined,
+        receiverDetails: {
+          razonSocial: masterPaymentRazonSocial || undefined,
+          cuit: masterPaymentCuit.replace(/-/g, "") || undefined,
+          dni: masterPaymentDni || undefined,
+          condicionIva: masterPaymentCondicionIva || undefined,
+          domicilio: masterPaymentDomicilio || undefined,
+        },
       });
     },
     onSuccess: async (res) => {
@@ -1294,7 +1339,7 @@ export default function GroupDetailPage() {
       const needsFactura = ["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType);
       if (needsFactura) {
         setShowMasterPaymentDialog(false);
-        setPendingMasterPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
         setShowMasterFacturaDialog(true);
         return;
       }
@@ -2290,13 +2335,17 @@ export default function GroupDetailPage() {
                               const found = (list as any[]).find((e: any) => e.id === gp.billingEntityId);
                               return found ? (found.razonSocial || found.nombreFantasia) : null;
                             })();
+                            const receiverName = gp.receiverDetails?.razonSocial || entityName;
+                            const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
+                              ? gp.paymentMethodDetail.map((row: any) => PAYMENT_METHOD_LABELS[row.method] || row.method).join(" + ")
+                              : PAYMENT_METHOD_LABELS[gp.method] || gp.method;
                             // NC button: show only when there's an invoice with a known DB id and no NC yet
                             const canEmitNc = invoiceRefParsed?.id && !ncRefParsed;
                             return (
                               <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
-                                  <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
+                                  <Badge variant="secondary">{methodsLabel}</Badge>
                                   {/* Bug 8: receipt type for all comprobantes */}
                                   {receiptLabel && (
                                     <Badge variant="outline" className="text-xs gap-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
@@ -2318,8 +2367,8 @@ export default function GroupDetailPage() {
                                     </Badge>
                                   )}
                                   {/* Bug 7: entity name */}
-                                  {entityName && (
-                                    <span className="text-xs text-muted-foreground">→ {entityName}</span>
+                                  {receiverName && (
+                                    <span className="text-xs text-muted-foreground">→ {receiverName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
                                 </div>
@@ -2755,6 +2804,34 @@ export default function GroupDetailPage() {
 
           {invoiceData && (
             <div className="space-y-6 print:text-sm" id="invoice-content">
+              {invoiceData.billing && (
+                <Card className="border-violet-200 dark:border-violet-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Disponibilidad para facturar</CardTitle>
+                    <CardDescription>Total elegible, ya facturado y disponible por concepto y destino.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-3 gap-3 text-sm">
+                      <div><p className="text-xs text-muted-foreground">Elegible</p><p className="font-semibold">{fmtMoney(invoiceData.billing.totals.eligible)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Ya facturado</p><p className="font-semibold text-orange-600">{fmtMoney(invoiceData.billing.totals.invoiced)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Disponible</p><p className="font-semibold text-emerald-600">{fmtMoney(invoiceData.billing.totals.available)}</p></div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto rounded-md border">
+                      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        <span>Concepto / destino</span><span>Elegible</span><span>Facturado</span><span>Disponible</span>
+                      </div>
+                      {invoiceData.billing.sources.map((source: any) => (
+                        <div key={source.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 py-2 text-xs">
+                          <span className="truncate" title={source.id}>{source.destination} · {source.concept}</span>
+                          <span>{fmtMoney(source.eligible)}</span>
+                          <span>{fmtMoney(source.invoiced)}</span>
+                          <span className={source.available > 0 ? "font-semibold text-emerald-700" : "text-muted-foreground"}>{fmtMoney(source.available)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               {/* Group Info */}
               <div className="p-4 bg-muted rounded-lg print:bg-transparent print:border print:p-2">
                 <div className="grid grid-cols-2 gap-4">
@@ -2896,9 +2973,15 @@ export default function GroupDetailPage() {
             </Button>
             <Button
               onClick={() => {
-                const balance = invoiceData?.totals?.balance ?? 0;
+                const billableSources = (invoiceData?.billing?.sources ?? groupInvoiceSnapshot?.sources ?? [])
+                  .filter((source: any) => Number(source.available) > 0);
+                const available = Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0);
                 setGroupPaymentReceiptType("factura_b");
-                setGroupPaymentRows([{method: "cash", amount: String(balance), reference: ""}]);
+                setGroupPaymentRows([{method: "cash", amount: String(available), reference: ""}]);
+                setGroupPaymentItems(gItemsFromSimple(billableSources.map((source: any) => ({
+                  descripcion: `${source.destination} — ${source.concept}`,
+                  precioUnitario: Number(source.available),
+                }))));
                 // Pre-fill billing entity from group config
                 if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
                   setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
@@ -2911,7 +2994,7 @@ export default function GroupDetailPage() {
                 setGroupFacturaFromResumen(true);
                 setShowGroupFacturaDialog(true);
               }}
-              disabled={!invoiceData || (invoiceData?.totals?.balance ?? 0) <= 0}
+              disabled={!invoiceData || Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0) <= 0}
               data-testid="button-emitir-factura-resumen"
             >
               <Receipt className="mr-2 h-4 w-4" />
@@ -3150,6 +3233,7 @@ export default function GroupDetailPage() {
             const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
             const isFA = groupPaymentReceiptType === "factura_a";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+            const priorBalance = folio?.totals.balance ?? 0;
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = groupPaymentReceiptType === "factura_t"
@@ -3197,6 +3281,20 @@ export default function GroupDetailPage() {
 
             return (
               <div className="space-y-5">
+                <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Saldo previo</p>
+                    <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">A aplicar ahora</p>
+                    <p className="font-semibold text-primary">{fmtMoney(rowsTotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Saldo restante</p>
+                    <p className={priorBalance - rowsTotal > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance - rowsTotal)}</p>
+                  </div>
+                </div>
                 {/* 1. TIPO DE COMPROBANTE */}
                 <div className="space-y-1">
                   <Label>Tipo de comprobante</Label>
@@ -3525,13 +3623,13 @@ export default function GroupDetailPage() {
                       <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="equal">Partes iguales</SelectItem>
-                        <SelectItem value="proportional">Proporcional al costo</SelectItem>
+                        <SelectItem value="proportional">Proporcional al saldo</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground mt-1">
                       {groupPaymentDistribution === "equal"
                         ? "Partes iguales entre reservas activas"
-                        : "Proporcional al costo total de cada reserva"}
+                        : "Proporcional al saldo pendiente de cada reserva"}
                     </p>
                   </div>
                   <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
@@ -3601,8 +3699,13 @@ export default function GroupDetailPage() {
               precioUnitario: it.precioUnitario * it.cantidad,
             })),
           }}
-          paymentId={pendingGroupPaymentId || undefined}
+          groupPaymentId={pendingGroupPaymentId || undefined}
+          groupPaymentGroupId={pendingGroupPaymentId ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
+          groupInvoiceSources={groupInvoiceSnapshot?.sources}
+          groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
+          lockItems={groupFacturaFromResumen}
+          hideAddItems={groupFacturaFromResumen}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
@@ -3723,9 +3826,19 @@ export default function GroupDetailPage() {
                     </div>
                   )}
                   <div className="flex justify-between font-semibold border-t pt-1">
-                    <span>Saldo pendiente</span>
+                    <span>Saldo previo</span>
                     <span className={masterFolio.masterBalance > 0.01 ? "text-red-600" : "text-green-600"}>
                       ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">A aplicar ahora</span>
+                    <span className="font-semibold text-primary">${rowsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>Saldo restante</span>
+                    <span className={masterFolio.masterBalance - rowsTotal > 0.01 ? "text-red-600" : "text-green-600"}>
+                      ${(masterFolio.masterBalance - rowsTotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -3735,11 +3848,9 @@ export default function GroupDetailPage() {
                   <Label>Tipo de comprobante</Label>
                   <Select value={masterPaymentReceiptType} onValueChange={(v) => {
                     setMasterPaymentReceiptType(v);
-                    if (v !== "none" && masterFolio.masterPaid > 0) {
-                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: String(masterFolio.masterTotal.toFixed(2)) } : r));
-                    } else if (v === "none") {
-                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "" } : r));
-                    }
+                    // The receipt type never changes the collection amount:
+                    // an invoice must be issued for exactly the saldo being
+                    // received, not for the historic full master total.
                     if (v === "factura_a" || v === "factura_mipyme_a") {
                       if (masterPaymentCondicionIva === "Consumidor Final") setMasterPaymentCondicionIva("Responsable Inscripto");
                     } else if (v === "factura_b") {
@@ -4141,7 +4252,10 @@ export default function GroupDetailPage() {
                 precioUnitario: it.precioUnitario * it.cantidad,
               })),
             }}
-            paymentId={pendingMasterPaymentId || undefined}
+            groupPaymentId={pendingMasterPaymentId || undefined}
+            groupPaymentGroupId={pendingMasterPaymentId ? groupId : undefined}
+            groupInvoiceSources={groupInvoiceSnapshot?.sources}
+            groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
             onSuccess={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");

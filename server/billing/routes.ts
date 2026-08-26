@@ -5,11 +5,13 @@ import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
-import { emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
+import { assertGroupInvoiceAllocation, assertGroupPaymentInvoiceEligibility } from "./groupInvoiceScope";
+import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 
@@ -277,6 +279,19 @@ class FolioInvoiceValidationError extends Error {
 async function withReservationInvoiceLock<T>(reservationId: string, action: () => Promise<T>): Promise<T> {
   const client = await pool.connect();
   const lockKey = `folio-invoice:${reservationId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
+}
+
+/** Serializes group-source validation and invoice persistence across app instances. */
+async function withGroupInvoiceLock<T>(groupId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `group-invoice:${groupId}`;
   try {
     await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
     return await action();
@@ -721,16 +736,19 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
       if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
         return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
       }
+      if (cashFormaPago === "cuenta_corriente") assertFinancialSchemaReady();
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
+      const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
+      const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
       const normalizedSourceChargeIds = Array.isArray(sourceChargeIds)
         ? [...new Set(sourceChargeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0))]
         : [];
@@ -836,12 +854,46 @@ export function registerBillingRoutes(app: Express) {
         }
         }
 
+        // Group fiscal sources are claimed when the invoice is created, not in
+        // the later UI link request. This makes a second open tab see the
+        // first invoice before it can consume the same available concept.
+        if (groupId) {
+          const itemsTotal = calcularMontos(items, tipoComprobante).montoTotal;
+          if (groupPaymentId) {
+            await assertGroupPaymentInvoiceEligibility(groupId, groupPaymentId, itemsTotal);
+          } else {
+            const amountIds = Object.keys(sanitizedSourceChargeAmounts);
+            const hasSameSources = amountIds.length === normalizedSourceChargeIds.length
+              && amountIds.every((id) => normalizedSourceChargeIds.includes(id));
+            if (!hasSameSources) {
+              throw new FolioInvoiceValidationError(
+                "Las facturas grupales deben incluir el importe de cada concepto seleccionado."
+              );
+            }
+            // Preserve a durable source → fiscal-line relation. The credit
+            // note flow can then reuse the original item's tax treatment
+            // without guessing from an edited or aggregated item list.
+            if (items.length !== normalizedSourceChargeIds.length ||
+              normalizedSourceChargeIds.some((sourceId: string, index: number) =>
+                Math.round((Number(items[index]?.subtotal) || 0) * 100) !==
+                Math.round((Number(sanitizedSourceChargeAmounts[sourceId]) || 0) * 100)
+              )) {
+              throw new FolioInvoiceValidationError(
+                "Cada concepto grupal debe conservar un renglón fiscal con el mismo importe."
+              );
+            }
+            await assertGroupInvoiceAllocation(groupId, sanitizedSourceChargeAmounts, itemsTotal);
+          }
+        }
+
         const user = (req as any).user;
         return emitirFactura({
           tipoComprobante,
           cliente,
           items,
           reservaId: reservationId || undefined,
+          groupId: groupId || undefined,
+          groupPaymentId: groupPaymentId || undefined,
           folioId,
           operador: user?.fullName || user?.username,
           puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
@@ -854,28 +906,26 @@ export function registerBillingRoutes(app: Express) {
 
       const factura = reservationId
         ? await withReservationInvoiceLock(reservationId, emitInvoice)
-        : await emitInvoice();
+        : groupId
+          ? await withGroupInvoiceLock(groupId, emitInvoice)
+          : await emitInvoice();
       const user = (req as any).user;
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
       if (cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        try {
-          const total = parseFloat(String((factura as any).montoTotal || "0"));
-          if (total > 0) {
-            const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
-            await storage.createAccountMovement({
-              entityType: ccEntityType,
-              entityId: ccEntityId,
-              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-              type: "cargo",
-              description: cashLabelBody || nroFac,
-              amount: String(total.toFixed(2)),
-              reference: nroFac,
-              createdBy: user?.id || null,
-            } as any);
-          }
-        } catch (ccErr) {
-          console.error("[Billing] Error registrando movimiento de Cuenta Corriente:", ccErr);
+        const total = parseFloat(String((factura as any).montoTotal || "0"));
+        if (total > 0) {
+          const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
+          await storage.createAccountMovement({
+            entityType: ccEntityType,
+            entityId: ccEntityId,
+            date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+            type: "cargo",
+            description: cashLabelBody || nroFac,
+            amount: String(total.toFixed(2)),
+            reference: nroFac,
+            createdBy: user?.id || null,
+          } as any);
         }
       } else if (cashArea && cashFormaPago) {
         // Registrar movimiento de caja si se especificó un área
@@ -902,8 +952,9 @@ export function registerBillingRoutes(app: Express) {
 
       res.status(201).json(factura);
     } catch (e: any) {
-      if (e instanceof FolioInvoiceValidationError) {
-        return res.status(e.status).json({ error: e.message });
+      const status = e?.statusCode || e?.status;
+      if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
+        return res.status(status || 400).json({ error: e.message });
       }
       res.status(500).json({ error: e.message });
     }
@@ -1105,12 +1156,14 @@ export function registerBillingRoutes(app: Express) {
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       let original = row.rows[0] as any;
 
-      // Serialize every invoice/NC operation for a reservation across app
+      // Serialize every invoice/NC operation for a reservation or group across app
       // instances. Re-read after acquiring the lock so a second request sees
       // any NC emitted by the first one before validating its available amount.
-      if (original.reserva_id) {
+      if (original.reserva_id || original.group_id) {
         creditLockClient = await pool.connect();
-        creditLockKey = `folio-invoice:${original.reserva_id}`;
+        creditLockKey = original.reserva_id
+          ? `folio-invoice:${original.reserva_id}`
+          : `group-invoice:${original.group_id}`;
         await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
         const lockedRow = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
         if (!lockedRow.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
@@ -1196,7 +1249,11 @@ export function registerBillingRoutes(app: Express) {
       let montoNC = 0;
       let esParcial = false;
 
-      if (!original.reserva_id) {
+      // A group payment is a fiscal destination, not a collection of service
+      // sources. It keeps the standard monetary NC flow. Only direct group
+      // invoices (group_id without group_payment_id) carry exact source maps.
+      const isMappedGroupInvoice = Boolean(original.group_id && !original.group_payment_id);
+      if (!original.reserva_id && !isMappedGroupInvoice) {
         // Keep the existing generic NC behavior for Restaurant, SPA and Events.
         // Reservation invoices use the stricter per-charge contract below.
         const montoParcial = monto !== undefined && monto !== null ? parseFloat(monto) : undefined;
@@ -1228,7 +1285,7 @@ export function registerBillingRoutes(app: Express) {
       const sourceIds = parseJson(original.source_charge_ids);
       const normalizedSourceIds = Array.isArray(sourceIds) ? sourceIds.map(String) : [];
       const originalItems = parseJson(original.items);
-      if (!original.reserva_id || Object.keys(sourceAmounts).length === 0 || !Array.isArray(originalItems)) {
+      if ((!original.reserva_id && !isMappedGroupInvoice) || Object.keys(sourceAmounts).length === 0 || !Array.isArray(originalItems)) {
         return res.status(409).json({
           error: "Esta factura histórica no tiene una relación segura con sus cargos. No se puede emitir una NC desde el Folio sin revisar el vínculo original.",
         });
@@ -1354,10 +1411,11 @@ export function registerBillingRoutes(app: Express) {
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
         reservaId: original.reserva_id || undefined,
+        groupId: original.group_id || undefined,
         folioId: original.folio_id || undefined,
         cashFormaPago: original.cash_forma_pago,
-        sourceChargeIds: original.reserva_id ? Object.keys(sourceChargeAmounts) : undefined,
-        sourceChargeAmounts: original.reserva_id ? sourceChargeAmounts : undefined,
+        sourceChargeIds: original.reserva_id || isMappedGroupInvoice ? Object.keys(sourceChargeAmounts) : undefined,
+        sourceChargeAmounts: original.reserva_id || isMappedGroupInvoice ? sourceChargeAmounts : undefined,
         recoverableCreditNote: Boolean(original.reserva_id),
       } as NewInvoiceData);
 

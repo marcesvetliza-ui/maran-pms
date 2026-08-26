@@ -58,6 +58,7 @@ import {
   type InsertGroupCharge,
   type GroupPayment,
   type InsertGroupPayment,
+  type GroupPaymentDestination,
   type GroupFolioData,
   type GuestReview,
   type InsertGuestReview,
@@ -388,6 +389,7 @@ export interface IStorage {
       checkOutDate?: string;
       agreedRate?: string;
       ratePlanId?: string | null;
+      guestId?: string | null;
     }
   ): Promise<Reservation | undefined>;
 
@@ -396,6 +398,21 @@ export interface IStorage {
   getGroupCharges(groupId: string): Promise<GroupCharge[]>;
   deleteGroupCharge(id: string): Promise<boolean>;
   createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment>;
+  recordGroupPayment(input: {
+    groupId: string;
+    destination: GroupPaymentDestination;
+    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    date: string;
+    reference?: string | null;
+    distribution: string;
+    distributionDetail: Record<string, number>;
+    receivedBy?: string | null;
+    notes?: string | null;
+    receiptType?: string | null;
+    billingEntityType?: "company" | "agency" | null;
+    billingEntityId?: string | null;
+    receiverDetails?: Record<string, string | undefined> | null;
+  }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }>;
   getGroupPayments(groupId: string): Promise<GroupPayment[]>;
   transferChargeToGroup(chargeId: string, groupId: string): Promise<GroupCharge>;
   getGroupFolio(groupId: string): Promise<GroupFolioData>;
