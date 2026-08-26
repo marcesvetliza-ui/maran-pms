@@ -124,7 +124,7 @@ const TIPOS = [
   { value: "RECIBO-C", label: "Recibo C" },
 ];
 
-const CENTROS_COSTO = ["Hotel", "Restaurant", "Spa", "Administración", "Mantenimiento", "Housekeeping", "Marketing", "RRHH", "Lavadero"];
+const CENTROS_COSTO = ["Hotel", "Restaurant", "Spa", "Eventos", "Administración", "Mantenimiento", "Housekeeping", "Marketing", "RRHH", "Lavadero"];
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },

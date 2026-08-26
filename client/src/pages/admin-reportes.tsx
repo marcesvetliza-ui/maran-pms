@@ -545,6 +545,7 @@ function IngresosReport() {
                 <Line type="monotone" dataKey="alojamiento" stroke="#3B82F6" dot={false} name="Alojamiento" />
                 <Line type="monotone" dataKey="restaurant" stroke="#F59E0B" dot={false} name="Restaurant" />
                 <Line type="monotone" dataKey="spa" stroke="#10B981" dot={false} name="Spa" />
+                <Line type="monotone" dataKey="eventos" stroke="#8B5CF6" dot={false} name="Eventos" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>

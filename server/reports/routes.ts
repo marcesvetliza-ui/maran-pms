@@ -76,6 +76,15 @@ async function ingresosSpa(desde: string, hasta: string): Promise<number> {
   return $n((r.rows[0] as any)?.total);
 }
 
+async function ingresosEventos(desde: string, hasta: string): Promise<number> {
+  const r = await db.execute(sql`
+    SELECT COALESCE(SUM(amount::numeric), 0) AS total
+    FROM event_payments
+    WHERE DATE(created_at) BETWEEN ${desde} AND ${hasta}
+  `);
+  return $n((r.rows[0] as any)?.total);
+}
+
 async function costosCompras(desde: string, hasta: string): Promise<any[]> {
   const r = await db.execute(sql`
     SELECT
@@ -415,18 +424,20 @@ export function registerReportsRoutes(app: Express) {
       const prevP = prevPeriodo(periodo);
       const { desde: prevDesde, hasta: prevHasta } = periodoToRange(prevP);
 
-      const [aloj, rest, spa, prevAloj, prevRest, prevSpa] = await Promise.all([
+      const [aloj, rest, spa, eventos, prevAloj, prevRest, prevSpa, prevEventos] = await Promise.all([
         ingresosAlojamiento(desde, hasta),
         ingresosRestaurant(desde, hasta),
         ingresosSpa(desde, hasta),
+        ingresosEventos(desde, hasta),
         ingresosAlojamiento(prevDesde, prevHasta),
         ingresosRestaurant(prevDesde, prevHasta),
         ingresosSpa(prevDesde, prevHasta),
+        ingresosEventos(prevDesde, prevHasta),
       ]);
 
       const varPct = (actual: number, prev: number) => prev > 0 ? Math.round(((actual - prev) / prev) * 1000) / 10 : 0;
-      const total = aloj + rest + spa;
-      const prevTotal = prevAloj + prevRest + prevSpa;
+      const total = aloj + rest + spa + eventos;
+      const prevTotal = prevAloj + prevRest + prevSpa + prevEventos;
 
       // Alojamiento por tipo de habitación
       const alojTipo = await db.execute(sql`
@@ -463,7 +474,8 @@ export function registerReportsRoutes(app: Express) {
           day_series::date AS fecha,
           COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.date = day_series::date), 0) AS alojamiento,
           COALESCE((SELECT SUM(ro.total::numeric) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
-          COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE DATE(sp.created_at) = day_series::date), 0) AS spa
+          COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE DATE(sp.created_at) = day_series::date), 0) AS spa,
+          COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos
         FROM generate_series(${desde}::date, ${hasta}::date, '1 day'::interval) AS day_series
         ORDER BY day_series
       `);
@@ -474,6 +486,7 @@ export function registerReportsRoutes(app: Express) {
           { nombre: "Alojamiento", ingresos: aloj, porcentaje: pct(aloj, total), variacionMesAnterior: varPct(aloj, prevAloj), color: "#3B82F6" },
           { nombre: "Restaurant", ingresos: rest, porcentaje: pct(rest, total), variacionMesAnterior: varPct(rest, prevRest), color: "#F59E0B" },
           { nombre: "Spa", ingresos: spa, porcentaje: pct(spa, total), variacionMesAnterior: varPct(spa, prevSpa), color: "#10B981" },
+          { nombre: "Eventos", ingresos: eventos, porcentaje: pct(eventos, total), variacionMesAnterior: varPct(eventos, prevEventos), color: "#8B5CF6" },
         ],
         totalIngresos: total,
         variacionTotal: varPct(total, prevTotal),
@@ -494,7 +507,8 @@ export function registerReportsRoutes(app: Express) {
           alojamiento: $n(r.alojamiento),
           restaurant: $n(r.restaurant),
           spa: $n(r.spa),
-          total: $n(r.alojamiento) + $n(r.restaurant) + $n(r.spa),
+          eventos: $n(r.eventos),
+          total: $n(r.alojamiento) + $n(r.restaurant) + $n(r.spa) + $n(r.eventos),
         })),
       });
     } catch (e: any) {
@@ -522,6 +536,7 @@ export function registerReportsRoutes(app: Express) {
         { nombre: "Mantenimiento",         prefixes: ["4.2.1.08.16","4.2.1.08.22"] },
         { nombre: "Servicios Públicos",    prefixes: ["4.2.1.08.11"] },
         { nombre: "Comercial / Publicidad", prefixes: ["4.2.1.08.05","4.2.1.08.12"] },
+        { nombre: "Eventos",               prefixes: ["4.2.1.08.40"] },
       ];
 
       let totalGeneral = 0;

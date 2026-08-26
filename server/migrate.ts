@@ -1805,6 +1805,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Centro de costo / plan de cuentas: cuentas de gasto para Eventos
+  await withTimeout("accounting_accounts.eventos seed", T, () =>
+    db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo) VALUES
+      ('4.2.1.08.40.01', 'Catering e Insumos Eventos', 'egreso'),
+      ('4.2.1.08.40.02', 'Alquiler de Mobiliario y Equipamiento', 'egreso'),
+      ('4.2.1.08.40.03', 'Decoración y Ambientación', 'egreso'),
+      ('4.2.1.08.40.04', 'Servicios Tercerizados Eventos', 'egreso'),
+      ('4.2.1.08.40.05', 'Otros Gastos Eventos', 'egreso')
+      ON CONFLICT (codigo) DO NOTHING
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

@@ -5,6 +5,7 @@ Maran Suite System is a comprehensive full-stack hospitality management suite fo
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
+Suggested actions / follow-up task proposals (title and description) must be written in Spanish, matching the rest of the app and communication with the user.
 
 ## Module Structure (Sellable Modules)
 The sidebar is organized into 8 independently sellable modules. This reflects the commercial structure for future multi-tenant licensing:
