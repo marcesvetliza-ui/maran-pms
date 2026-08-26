@@ -1,1 +1,0 @@
-import{t as c}from"./constructFrom-rJN6zrQ_.js";import{t as f}from"./format-DJj0WG7M.js";function k(n,e){const o=f(),s=e?.weekStartsOn??e?.locale?.options?.weekStartsOn??o.weekStartsOn??o.locale?.options?.weekStartsOn??0,t=c(n),a=t.getDay(),r=(a<s?-7:0)+6-(a-s);return t.setDate(t.getDate()+r),t.setHours(23,59,59,999),t}export{k as e};
