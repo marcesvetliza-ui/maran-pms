@@ -1361,6 +1361,34 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS payment_method_detail jsonb`)
   );
 
+  await withTimeout("group_payments.destination_and_receiver", T, () =>
+    db.execute(sql`
+      ALTER TABLE group_payments
+        ADD COLUMN IF NOT EXISTS destination text NOT NULL DEFAULT 'group_distribution',
+        ADD COLUMN IF NOT EXISTS receiver_details jsonb;
+      UPDATE group_payments
+      SET destination = 'master_folio'
+      WHERE destination = 'group_distribution'
+        AND distribution = 'master_folio';
+    `)
+  );
+
+  await withTimeout("group_payments.invoice_id", T, () =>
+    db.execute(sql`
+      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_id integer;
+      CREATE UNIQUE INDEX IF NOT EXISTS group_payments_invoice_id_unique
+        ON group_payments (invoice_id) WHERE invoice_id IS NOT NULL;
+    `)
+  );
+
+  await withTimeout("account_movements.group_payment_id", T, () =>
+    db.execute(sql`
+      ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS group_payment_id varchar;
+      CREATE INDEX IF NOT EXISTS account_movements_group_payment_id_idx
+        ON account_movements (group_payment_id);
+    `)
+  );
+
   // invoice_nc_ref on group_payments: JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
   await withTimeout("group_payments.invoice_nc_ref", T, () =>
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)

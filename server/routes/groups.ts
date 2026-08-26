@@ -2,11 +2,28 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable } from "@shared/schema";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations } from "@shared/schema";
+import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
+
+function distributeCents(
+  totalCents: number,
+  entries: Array<{ id: string; weight: number }>
+): Record<string, number> {
+  const usable = entries.filter((entry) => entry.weight > 0);
+  if (totalCents <= 0 || usable.length === 0) return {};
+  const totalWeight = usable.reduce((sum, entry) => sum + entry.weight, 0);
+  let assigned = 0;
+  return Object.fromEntries(usable.map((entry, index) => {
+    const cents = index === usable.length - 1
+      ? totalCents - assigned
+      : Math.round((totalCents * entry.weight) / totalWeight);
+    assigned += cents;
+    return [entry.id, cents / 100];
+  }));
+}
 
 // Helper: get or create the single placeholder guest for a group
 async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
@@ -839,155 +856,83 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/groups/:groupId/payment", async (req, res) => {
+  app.post("/api/groups/:groupId/payment", requireAuth, async (req, res) => {
     try {
       const group = await storage.getGroup(req.params.groupId);
       if (!group) {
-        return res.status(404).json({ error: "Group not found" });
+        return res.status(404).json({ error: "Grupo no encontrado" });
       }
 
       const {
         paymentRows: rawPaymentRows,
         amount: legacyAmount, method: legacyMethod, reference: legacyReference,
         receiptType, distribution, closeAllRooms,
-        // Legacy CC fields (kept for compat)
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
-        // New unified billing entity fields
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
+        receiverDetails,
       } = req.body;
 
-      // Support multi-row paymentRows (new) or legacy single amount/method
       const paymentRows: Array<{method: string; amount: string; reference?: string}> = rawPaymentRows?.length
         ? rawPaymentRows
         : [{ method: legacyMethod, amount: legacyAmount, reference: legacyReference }];
-
       const totalAmount = paymentRows.reduce((s: number, r: any) => s + (parseFloat(r.amount) || 0), 0);
       if (totalAmount <= 0) {
-        return res.status(400).json({ error: "Amount must be positive" });
+        return res.status(400).json({ error: "El monto debe ser positivo" });
       }
 
-      // Billing entity: new fields take priority, then CC legacy fields
       const billingEntityType = rawBillingEntityType || legacyCcEntityType;
       const billingEntityId = rawBillingEntityId || legacyCcEntityId;
-
       const hasCuentaCorriente = paymentRows.some((r: any) => r.method === "cuenta_corriente");
       if (hasCuentaCorriente && (!billingEntityType || !billingEntityId)) {
-        return res.status(400).json({ error: "billingEntityType and billingEntityId are required for cuenta_corriente" });
+        return res.status(400).json({ error: "Seleccione la empresa o agencia para el pago por cuenta corriente." });
       }
 
       const activeReservations = group.reservations.filter(
         (r: any) => r.status === "confirmed" || r.status === "checked_in"
       );
-
       if (activeReservations.length === 0) {
         return res.status(400).json({ error: "No hay reservas activas (confirmadas o en casa) para registrar pagos" });
       }
 
       const today = getArgentinaToday();
-      const refText = `Pago grupal${closeAllRooms ? " (cierre total)" : ""} - ${group.name}`;
-
-      // Primary method for single-row compat (first row's method)
-      const primaryMethod = paymentRows[0]?.method || "cash";
-      const primaryRef = paymentRows[0]?.reference || refText;
-
-      const registerCcMovement = async (reservation: any, paymentAmt: number, rowMethod = primaryMethod) => {
-        if (rowMethod !== "cuenta_corriente" || paymentAmt <= 0.001 || !billingEntityId) return;
-        const guest = reservation.guest;
-        const guestName = guest ? `${guest.firstName} ${guest.lastName}` : "Huésped";
-        const roomNum = reservation.room?.roomNumber || reservation.roomId;
-        try {
-          await storage.createAccountMovement({
-            entityType: billingEntityType,
-            entityId: billingEntityId,
-            date: today,
-            type: "cargo",
-            description: `Pago grupal ${group.name} — Hab. ${roomNum}`,
-            amount: paymentAmt.toFixed(2),
-            reservationId: reservation.id,
-            reservationCode: reservation.reservationCode,
-            guestName,
-            reference: primaryRef,
-          });
-        } catch (e) {
-          console.error("Error creating group CC account movement:", e);
-        }
-      };
-
-      let balanceDiff = 0;
-      if (closeAllRooms) {
-        let totalGroupDebt = 0;
-        for (const reservation of activeReservations) {
-          const chargesTotal = await storage.getChargesTotal(reservation.id);
-          const paymentsTotal = await storage.getPaymentsTotal(reservation.id);
-          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-          totalGroupDebt += roomTotal + chargesTotal - paymentsTotal;
-        }
-        balanceDiff = totalAmount - totalGroupDebt;
+      const balances = await Promise.all(activeReservations.map(async (reservation: any) => {
+        const [chargesTotal, paymentsTotal] = await Promise.all([
+          storage.getChargesTotal(reservation.id),
+          storage.getPaymentsTotal(reservation.id),
+        ]);
+        return {
+          id: reservation.id,
+          balance: Math.max(0, parseFloat(reservation.totalRoomAmount || "0") + chargesTotal - paymentsTotal),
+        };
+      }));
+      const totalBalance = balances.reduce((sum, item) => sum + item.balance, 0);
+      if (totalAmount > totalBalance + 0.009) {
+        return res.status(400).json({ error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo grupal disponible de $${totalBalance.toFixed(2)}.` });
+      }
+      if (closeAllRooms && Math.abs(totalAmount - totalBalance) > 0.009) {
+        return res.status(400).json({ error: `Para cerrar todas las habitaciones, el pago debe coincidir exactamente con el saldo de $${totalBalance.toFixed(2)}.` });
       }
 
-      const createdPaymentIds: string[] = [];
-
-      // Helper: create a payment entry for a single row for a reservation
-      const createRowPayment = async (reservationId: string, amt: number, row: {method: string; amount: string; reference?: string}) => {
-        const p = await storage.createPayment({
-          reservationId,
-          amount: amt.toFixed(2),
-          method: row.method,
-          reference: row.reference || refText,
-          date: today,
-          ...(row.method === "cuenta_corriente" ? { billingTarget: billingEntityType } : {}),
-        });
-        return p;
-      };
-
-      if (distribution === "proportional") {
-        let totalCost = 0;
-        const costs: { id: string; cost: number; balance: number }[] = [];
-        for (const reservation of activeReservations) {
-          const chargesTotal = await storage.getChargesTotal(reservation.id);
-          const paymentsTotal = await storage.getPaymentsTotal(reservation.id);
-          const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-          const balance = roomTotal + chargesTotal - paymentsTotal;
-          const cost = roomTotal + chargesTotal;
-          costs.push({ id: reservation.id, cost, balance });
-          totalCost += cost;
-        }
-        for (const item of costs) {
-          let paymentAmt: number;
-          if (closeAllRooms) {
-            paymentAmt = Math.max(0, item.balance);
-          } else {
-            const proportion = totalCost > 0 ? item.cost / totalCost : 1 / costs.length;
-            paymentAmt = totalAmount * proportion;
-          }
-          if (paymentAmt > 0.001) {
-            // Distribute across payment rows proportionally to their amounts
-            for (const row of paymentRows) {
-              const rowTotal = parseFloat(row.amount) || 0;
-              if (rowTotal <= 0) continue;
-              const rowProportion = rowTotal / totalAmount;
-              const rowAmt = paymentAmt * rowProportion;
-              const p = await createRowPayment(item.id, rowAmt, row);
-              if (p?.id) createdPaymentIds.push(String(p.id));
-              const reservation = activeReservations.find((r: any) => r.id === item.id);
-              if (reservation) await registerCcMovement(reservation, rowAmt, row.method);
-            }
-          }
-        }
-      } else {
-        const perRoom = totalAmount / activeReservations.length;
-        for (const reservation of activeReservations) {
-          for (const row of paymentRows) {
-            const rowTotal = parseFloat(row.amount) || 0;
-            if (rowTotal <= 0) continue;
-            const rowProportion = rowTotal / totalAmount;
-            const rowAmt = perRoom * rowProportion;
-            const p = await createRowPayment(reservation.id, rowAmt, row);
-            if (p?.id) createdPaymentIds.push(String(p.id));
-            await registerCcMovement(reservation, rowAmt, row.method);
-          }
-        }
-      }
+      const allocation = closeAllRooms
+        ? Object.fromEntries(balances.filter((item) => item.balance > 0).map((item) => [item.id, Number(item.balance.toFixed(2))]))
+        : distributeCents(
+            Math.round(totalAmount * 100),
+            balances.map((item) => ({ id: item.id, weight: distribution === "proportional" ? item.balance : 1 }))
+          );
+      const recorded = await storage.recordGroupPayment({
+        groupId: req.params.groupId,
+        destination: "group_distribution",
+        paymentRows,
+        date: today,
+        reference: `Pago grupal${closeAllRooms ? " (cierre total)" : ""} — ${group.name}`,
+        distribution: distribution || "equal",
+        distributionDetail: allocation,
+        receivedBy: (req.user as any)?.username || null,
+        receiptType: receiptType || null,
+        billingEntityType: billingEntityType || null,
+        billingEntityId: billingEntityId || null,
+        receiverDetails: receiverDetails || null,
+      });
 
       let checkoutCount = 0;
       if (closeAllRooms) {
@@ -1033,15 +978,16 @@ export function registerGroupsRoutes(app: Express) {
 
       res.json({
         success: true,
-        distributed: activeReservations.length,
+        groupPayment: recorded.groupPayment,
+        groupPaymentId: recorded.groupPayment.id,
+        distributed: Object.keys(allocation).length,
         checkoutCount,
-        balanceDiff: closeAllRooms ? balanceDiff : undefined,
-        paymentIds: createdPaymentIds,
-        paymentId: createdPaymentIds[0] ?? null,
+        paymentIds: recorded.reservationPayments.map((payment) => payment.id),
+        paymentId: recorded.reservationPayments[0]?.id ?? null,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error processing group payment:", error);
-      res.status(500).json({ error: "Error processing group payment" });
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error al registrar pago grupal" });
     }
   });
 
@@ -1123,6 +1069,78 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // Link an issued invoice to the parent group payment. This avoids relying on
+  // one arbitrary room allocation when a payment has several rooms or methods.
+  app.patch("/api/groups/:groupId/payments/:paymentId/invoice", requireAuth, async (req, res) => {
+    try {
+      const { invoiceData } = req.body;
+      if (!invoiceData?.id) return res.status(400).json({ error: "invoiceData es requerido" });
+      const { payment, updated } = await db.transaction(async (tx) => {
+        const [payment] = await tx.select()
+          .from(groupPaymentsTable)
+          .where(and(
+            eq(groupPaymentsTable.id, req.params.paymentId),
+            eq(groupPaymentsTable.groupId, req.params.groupId),
+          ))
+          .limit(1);
+        if (!payment) throw Object.assign(new Error("Cobro grupal no encontrado"), { statusCode: 404 });
+
+        const [storedInvoice] = await tx.select()
+          .from(salesInvoicesTable)
+          .where(eq(salesInvoicesTable.id, Number(invoiceData.id)))
+          .limit(1);
+        if (!storedInvoice) throw Object.assign(new Error("El comprobante indicado no existe en el sistema"), { statusCode: 400 });
+        if (Math.round(Number(storedInvoice.montoTotal) * 100) !== Math.round(Number(payment.amount) * 100)) {
+          throw Object.assign(new Error("El importe de la factura debe coincidir exactamente con el cobro grupal."), { statusCode: 400 });
+        }
+
+        const receiver = (payment.receiverDetails || {}) as Record<string, string | undefined>;
+        const normalize = (value?: string | null) => String(value || "").replace(/\D/g, "");
+        const normalizeName = (value?: string | null) => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
+        if (receiver.cuit && normalize(storedInvoice.clienteCuit) !== normalize(receiver.cuit)) {
+          throw Object.assign(new Error("El CUIT de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
+        }
+        if (!receiver.cuit && receiver.dni && normalize(storedInvoice.clienteDni) !== normalize(receiver.dni)) {
+          throw Object.assign(new Error("El DNI de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
+        }
+        if (!receiver.cuit && !receiver.dni && receiver.razonSocial
+          && normalizeName(storedInvoice.clienteRazonSocial) !== normalizeName(receiver.razonSocial)) {
+          throw Object.assign(new Error("El receptor de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
+        }
+
+        // Linking is immutable. A retry for the exact same invoice is safe;
+        // replacing a fiscal document or attributing it to two receipts is not.
+        if (payment.invoiceId) {
+          if (payment.invoiceId === storedInvoice.id) return { payment, updated: payment };
+          throw Object.assign(new Error("Este cobro ya tiene una factura vinculada y no puede reemplazarse."), { statusCode: 409 });
+        }
+        const [usedByAnotherPayment] = await tx.select({ id: groupPaymentsTable.id })
+          .from(groupPaymentsTable)
+          .where(eq(groupPaymentsTable.invoiceId, storedInvoice.id))
+          .limit(1);
+        if (usedByAnotherPayment) throw Object.assign(new Error("Esta factura ya está vinculada a otro cobro grupal."), { statusCode: 409 });
+
+        const [updated] = await tx.update(groupPaymentsTable)
+          .set({ invoiceId: storedInvoice.id, invoiceRef: JSON.stringify(invoiceData) })
+          .where(and(eq(groupPaymentsTable.id, payment.id), sql`${groupPaymentsTable.invoiceId} IS NULL`))
+          .returning();
+        if (!updated) throw Object.assign(new Error("El cobro fue vinculado a una factura por otra operación. Actualice la pantalla."), { statusCode: 409 });
+        return { payment, updated };
+      });
+      await audit(req, "update", "groups", `Factura vinculada al cobro grupal: $${payment.amount}`, {
+        entityType: "group",
+        entityId: req.params.groupId,
+      });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[group-payment-invoice] Error:", error);
+      if (error?.code === "23505") {
+        return res.status(409).json({ error: "Esta factura ya está vinculada a otro cobro grupal." });
+      }
+      res.status(500).json({ error: "Error al vincular la factura al cobro grupal" });
+    }
+  });
+
   app.post("/api/groups/:groupId/charges", requireAuth, async (req, res) => {
     try {
       const { description, amount, date, category } = req.body;
@@ -1183,55 +1201,35 @@ export function registerGroupsRoutes(app: Express) {
         distributionDetail
       );
 
-      const groupPayment = await storage.createGroupPayment({
+      // A single parent movement owns both the receipt and all room
+      // allocations. This keeps this legacy entry point aligned with Pago
+      // Grupal and avoids counting parent + children twice.
+      const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
-        amount: totalAmount.toFixed(2),
-        method,
+        destination: "group_distribution",
+        paymentRows: [{ method, amount: totalAmount.toFixed(2), reference }],
         date: paymentDate,
-        reference: reference || null,
+        reference: reference || "Pago grupal distribuido",
         distribution: distrib,
         distributionDetail: detail,
         receivedBy: (req.user as any)?.username || null,
         notes: notes || null,
+        receiptType: "sin_comprobante",
       });
-
-      // Validate: the sum of distributed amounts must not exceed the total payment.
-      // This prevents duplication in case of floating-point rounding drift.
-      const distributedSum = Object.values(detail).reduce((s, v) => s + (v as number), 0);
-      if (distributedSum > totalAmount + 0.01) {
-        return res.status(400).json({
-          error: `Inconsistencia en la distribución: la suma de partes (${distributedSum.toFixed(2)}) supera el total (${totalAmount.toFixed(2)}). Revise los montos.`,
-        });
-      }
-
-      // Apply a rounding correction to the last reservation so the sum is exact.
-      const resIds = Object.keys(detail).filter(id => (detail[id] as number) > 0);
-      if (resIds.length > 1) {
-        const sumWithoutLast = resIds.slice(0, -1).reduce((s, id) => s + parseFloat((detail[id] as number).toFixed(2)), 0);
-        const lastId = resIds[resIds.length - 1];
-        (detail as any)[lastId] = Math.max(0, totalAmount - sumWithoutLast);
-      }
-
-      for (const [reservationId, amt] of Object.entries(detail)) {
-        if ((amt as number) > 0.005) {
-          await storage.createPayment({
-            reservationId,
-            amount: (amt as number).toFixed(2),
-            method,
-            reference: reference || `Pago grupal`,
-            date: paymentDate,
-            groupPaymentId: groupPayment.id,
-          } as any);
-        }
-      }
 
       await audit(req, "create", "groups",
         `Pago grupal: $${req.body.amount} (${req.body.method})`,
         { entityType: "group", entityId: req.params.groupId }
       );
-      res.json({ success: true, groupPayment, distributed: Object.keys(detail).length });
-    } catch (error) {
-      res.status(500).json({ error: "Error al registrar pago grupal" });
+      res.json({
+        success: true,
+        groupPayment: recorded.groupPayment,
+        groupPaymentId: recorded.groupPayment.id,
+        paymentId: recorded.reservationPayments[0]?.id ?? null,
+        distributed: Object.keys(detail).length,
+      });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error al registrar pago grupal" });
     }
   });
 
@@ -1328,13 +1326,21 @@ export function registerGroupsRoutes(app: Express) {
 
       const config = (group as any).masterFolioConfig || "accommodation";
       const gCharges = await storage.getGroupCharges(req.params.groupId);
-      const gPayments = await storage.getGroupPayments(req.params.groupId);
+      const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
+      // Only master-folio receipts reduce and appear on this folio. Group
+      // payments distributed directly to rooms are a different destination.
+      const gPayments = allGroupPayments.filter((payment: any) =>
+        payment.destination === "master_folio" || payment.distribution === "master_folio"
+      );
+       const masterPaymentIds = new Set(gPayments.map((payment: any) => payment.id));
 
       // Build per-room data
       const rooms: any[] = [];
       let masterAccommodation = 0;
       let masterExtras = 0;
       let masterTransferred = 0;
+       let directAllPaid = 0;
+       let directAccommodationPaid = 0;
 
       for (const res of group.reservations) {
         if (res.status === "cancelled") continue;
@@ -1344,10 +1350,20 @@ export function registerGroupsRoutes(app: Express) {
         const accommodation = parseFloat((res as any).totalRoomAmount || "0");
         const activeCharges = resCharges.filter((c: any) => c.status !== "anulado");
         const extras = activeCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-        const paid = resPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+        const paid = resPayments
+          .filter((p: any) => p.status !== "anulado")
+          .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+         const directPaid = resPayments
+           .filter((p: any) => p.status !== "anulado" && (!p.groupPaymentId || !masterPaymentIds.has(p.groupPaymentId)))
+           .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
 
         masterAccommodation += accommodation;
         if (config === "all") masterExtras += extras;
+         directAllPaid += directPaid;
+         // Direct room receipts have an explicit extras-first scope. This
+         // keeps a payment for extras from reducing an accommodation-only
+         // master folio while still preventing duplicate room collection.
+         directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
 
         rooms.push({
           reservationId: res.id,
@@ -1388,12 +1404,8 @@ export function registerGroupsRoutes(app: Express) {
       // Total master folio charges
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal + masterTransferred;
 
-      // Payments received: use individual reservation payments as source of truth
-      // (includes master folio distributions + any direct payments to individual rooms)
-      const indivPaid = rooms.reduce((s: number, r: any) => s + r.individualPayments.reduce((ps: number, p: any) => ps + p.amount, 0), 0);
-      const gPaid = gPayments.reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-      // Take the larger value to avoid double-counting when both records exist
-      const masterPaid = Math.max(gPaid, indivPaid);
+      const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
+      const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
 
       res.json({
@@ -1420,9 +1432,9 @@ export function registerGroupsRoutes(app: Express) {
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
 
-      // Support multi-row payments: { paymentRows: [{method, amount, reference}], receiptType, billingEntityType, billingEntityId }
-      // Backward compat: { amount, method, reference }
-      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId } = req.body;
+      // Support multi-row payments and keep a single parent movement for the
+      // receipt, regardless of how many payment methods the operator uses.
+      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails } = req.body;
       const rows: Array<{ method: string; amount: string; reference?: string }> =
         Array.isArray(paymentRows) && paymentRows.length > 0
           ? paymentRows
@@ -1430,6 +1442,9 @@ export function registerGroupsRoutes(app: Express) {
 
       const totalAmount = rows.reduce((s, r) => s + parseFloat(r.amount || "0"), 0);
       if (!rows.length || totalAmount <= 0) return res.status(400).json({ error: "Monto total debe ser positivo" });
+      if (rows.some((row) => row.method === "cuenta_corriente") && (!billingEntityType || !billingEntityId)) {
+        return res.status(400).json({ error: "Seleccione la empresa o agencia para el pago por cuenta corriente." });
+      }
 
       const config = (group as any).masterFolioConfig || "accommodation";
       const paymentDate = date || getArgentinaToday();
@@ -1437,87 +1452,84 @@ export function registerGroupsRoutes(app: Express) {
       const activeRes = group.reservations.filter(
         (r: any) => r.status === "confirmed" || r.status === "checked_in"
       );
+      const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
+      const masterPaymentIds = new Set(allGroupPayments
+        .filter((payment: any) => payment.destination === "master_folio" || payment.distribution === "master_folio")
+        .map((payment: any) => payment.id));
 
-      // Build room distribution proportions (same logic for all rows)
-      let roomShares: { id: string; share: number }[] = [];
-      let totalShare = 0;
-      if (config === "accommodation" || config === "all") {
-        for (const r of activeRes) {
-          const accommodation = parseFloat((r as any).totalRoomAmount || "0");
-          let share = accommodation;
-          if (config === "all") {
-            const resCharges = await storage.getCharges(r.id);
-            const extras = resCharges
-              .filter((c: any) => c.status !== "anulado")
-              .reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
-            share += extras;
-          }
-          roomShares.push({ id: r.id, share });
-          totalShare += share;
+      const allBillableRes = group.reservations.filter((r: any) => r.status !== "cancelled");
+      const roomAmounts = new Map<string, number>();
+      let masterAccommodation = 0;
+      let masterExtras = 0;
+      let directAllPaid = 0;
+      let directAccommodationPaid = 0;
+      for (const reservation of allBillableRes) {
+        const accommodation = parseFloat((reservation as any).totalRoomAmount || "0");
+        masterAccommodation += accommodation;
+        const charges = await storage.getCharges(reservation.id);
+        const extras = charges
+          .filter((charge: any) => charge.status !== "anulado")
+          .reduce((sum: number, charge: any) => sum + parseFloat(charge.amount), 0);
+        let roomAmount = accommodation;
+        if (config === "all") {
+          masterExtras += extras;
+          roomAmount += extras;
         }
+        const reservationPayments = await storage.getPayments(reservation.id);
+        const alreadyApplied = reservationPayments
+          .filter((payment: any) => payment.status !== "anulado")
+          .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
+        const directPaid = reservationPayments
+          .filter((payment: any) => payment.status !== "anulado" && (!payment.groupPaymentId || !masterPaymentIds.has(payment.groupPaymentId)))
+          .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
+        directAllPaid += directPaid;
+        directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
+        // Use the actual remaining room saldo for a new master distribution.
+        roomAmounts.set(reservation.id, Math.max(0, roomAmount - alreadyApplied));
+      }
+      const groupChargesTotal = (await storage.getGroupCharges(req.params.groupId))
+        .reduce((sum, charge) => sum + parseFloat(charge.amount), 0);
+      const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
+      const masterParentPaid = allGroupPayments
+        .filter((payment: any) => masterPaymentIds.has(payment.id))
+        .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
+      const masterBalance = masterTotal - masterParentPaid - (config === "all" ? directAllPaid : directAccommodationPaid);
+      if (totalAmount > masterBalance + 0.009) {
+        return res.status(400).json({
+          error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo del Folio Maestro de $${Math.max(0, masterBalance).toFixed(2)}.`,
+        });
       }
 
-      const allCreatedPaymentIds: string[] = [];
-      const groupPayments: any[] = [];
+      const allocationEntries = activeRes
+        .map((reservation: any) => ({ id: reservation.id, weight: roomAmounts.get(reservation.id) || 0 }))
+        .filter((entry) => entry.weight > 0);
+      if (groupChargesTotal > 0) allocationEntries.push({ id: "__group_charges__", weight: groupChargesTotal });
+       // A historical/checked-out balance remains on the parent receipt.
+       // Add its capacity even when active rooms exist, otherwise a valid
+       // mixed historical/current balance would be forced onto those rooms.
+       const activeAllocationCapacity = allocationEntries.reduce((sum, entry) => sum + entry.weight, 0);
+       const historicalMasterBalance = Math.max(0, masterBalance - activeAllocationCapacity);
+       if (historicalMasterBalance > 0.0001) {
+         allocationEntries.push({ id: "__master_balance__", weight: historicalMasterBalance });
+       }
+       if (allocationEntries.length === 0) allocationEntries.push({ id: "__master_balance__", weight: 1 });
+      const allocation = distributeCents(Math.round(totalAmount * 100), allocationEntries);
 
-      // Process each payment row independently
-      for (const row of rows) {
-        const rowAmount = parseFloat(row.amount || "0");
-        if (rowAmount <= 0.005) continue;
-
-        // Compute proportional distribution for this row's amount
-        let distribution: Record<string, number> = {};
-        if (roomShares.length > 0) {
-          let totalDistributed = 0;
-          for (const { id, share } of roomShares.slice(0, -1)) {
-            const proportional = totalShare > 0
-              ? (share / totalShare) * rowAmount
-              : rowAmount / (activeRes.length || 1);
-            const capped = Math.min(proportional, share);
-            const rounded = Math.round(capped * 100) / 100;
-            distribution[id] = rounded;
-            totalDistributed += rounded;
-          }
-          if (roomShares.length > 0) {
-            const last = roomShares[roomShares.length - 1];
-            const remainder = Math.max(0, rowAmount - totalDistributed);
-            distribution[last.id] = Math.min(remainder, last.share);
-          }
-        }
-
-        // Create group payment record
-        const groupPayment = await storage.createGroupPayment({
-          groupId: req.params.groupId,
-          amount: rowAmount.toFixed(2),
-          method: row.method,
-          date: paymentDate,
-          reference: row.reference || `Pago Folio Maestro — ${group.name}`,
-          distribution: "master_folio",
-          distributionDetail: distribution,
-          receivedBy: (req.user as any)?.username || null,
-          notes: notes || null,
-          receiptType: receiptType || "none",
-          billingEntityType: billingEntityType || null,
-          billingEntityId: billingEntityId || null,
-          paymentMethodDetail: rows.length > 1 ? rows : null,
-        } as any);
-        groupPayments.push(groupPayment);
-
-        // Apply individual room payments
-        for (const [reservationId, amt] of Object.entries(distribution)) {
-          if ((amt as number) > 0.005) {
-            const p = await storage.createPayment({
-              reservationId,
-              amount: (amt as number).toFixed(2),
-              method: row.method,
-              reference: row.reference || `Pago Folio Maestro — ${group.name}`,
-              date: paymentDate,
-              groupPaymentId: groupPayment.id,
-            } as any);
-            if (p?.id) allCreatedPaymentIds.push(String(p.id));
-          }
-        }
-      }
+      const recorded = await storage.recordGroupPayment({
+        groupId: req.params.groupId,
+        destination: "master_folio",
+        paymentRows: rows,
+        date: paymentDate,
+        reference: reference || `Pago Folio Maestro — ${group.name}`,
+        distribution: "master_folio",
+        distributionDetail: allocation,
+        receivedBy: (req.user as any)?.username || null,
+        notes: notes || null,
+        receiptType: receiptType || "none",
+        billingEntityType: billingEntityType || null,
+        billingEntityId: billingEntityId || null,
+        receiverDetails: receiverDetails || null,
+      });
 
       await audit(req, "create", "groups",
         `Pago Folio Maestro: $${totalAmount.toFixed(2)} (${rows.map(r => r.method).join("+")}) — config: ${config}`,
@@ -1526,14 +1538,15 @@ export function registerGroupsRoutes(app: Express) {
 
       res.json({
         success: true,
-        groupPayment: groupPayments[0],
-        paymentId: allCreatedPaymentIds[0] ?? null,
-        paymentIds: allCreatedPaymentIds,
-        distributed: allCreatedPaymentIds.length,
+        groupPayment: recorded.groupPayment,
+        groupPaymentId: recorded.groupPayment.id,
+        paymentId: recorded.reservationPayments[0]?.id ?? null,
+        paymentIds: recorded.reservationPayments.map((payment) => payment.id),
+        distributed: recorded.reservationPayments.length,
       });
     } catch (error: any) {
       console.error("master-payment error:", error);
-      res.status(500).json({ error: "Error al registrar pago maestro" });
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error al registrar pago maestro" });
     }
   });
 
@@ -1541,19 +1554,39 @@ export function registerGroupsRoutes(app: Express) {
   app.delete("/api/groups/:groupId/master-payments/:paymentId", requireAuth, async (req, res) => {
     try {
       const { groupId, paymentId } = req.params;
-      const [gp] = await db.select().from(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId)).limit(1);
-      if (!gp) return res.status(404).json({ error: "Pago no encontrado" });
-      if ((gp as any).groupId !== groupId) return res.status(403).json({ error: "El pago no pertenece a este grupo" });
-      if ((gp as any).invoiceRef) return res.status(400).json({ error: "No se puede eliminar un pago con factura electrónica emitida. Emita una Nota de Crédito en su lugar." });
-      // Delete linked individual payments first
-      await db.delete(paymentsTable).where(eq((paymentsTable as any).groupPaymentId, paymentId));
-      // Delete the group payment record
-      await db.delete(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId));
+      const gp = await db.transaction(async (tx) => {
+        const [payment] = await tx.select()
+          .from(groupPaymentsTable)
+          .where(and(eq(groupPaymentsTable.id, paymentId), eq(groupPaymentsTable.groupId, groupId)))
+          .limit(1);
+        if (!payment) throw Object.assign(new Error("Pago no encontrado o no pertenece a este grupo"), { statusCode: 404 });
+        if (payment.invoiceRef) {
+          throw Object.assign(new Error("No se puede eliminar un pago con factura electrónica emitida. Emita una Nota de Crédito en su lugar."), { statusCode: 400 });
+        }
+
+        const ccCargos = await tx.select({ id: accountMovementsTable.id })
+          .from(accountMovementsTable)
+          .where(eq(accountMovementsTable.groupPaymentId, paymentId));
+        const cargoIds = ccCargos.map((cargo) => cargo.id);
+        if (cargoIds.length > 0) {
+          const [settledCargo] = await tx.select({ id: accountMovementAllocations.id })
+            .from(accountMovementAllocations)
+            .where(inArray(accountMovementAllocations.cargoId, cargoIds))
+            .limit(1);
+          if (settledCargo) {
+            throw Object.assign(new Error("No se puede eliminar este pago: su cargo de cuenta corriente ya fue aplicado. Emita una reversión contable."), { statusCode: 409 });
+          }
+          await tx.delete(accountMovementsTable).where(inArray(accountMovementsTable.id, cargoIds));
+        }
+        await tx.delete(paymentsTable).where(eq((paymentsTable as any).groupPaymentId, paymentId));
+        await tx.delete(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId));
+        return payment;
+      });
       await audit(req, "delete", "groups", `Pago maestro eliminado: $${(gp as any).amount} (${(gp as any).method})`, { entityType: "group", entityId: groupId });
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting master payment:", error?.message || error);
-      res.status(500).json({ error: "Error al eliminar pago maestro" });
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error al eliminar pago maestro" });
     }
   });
 

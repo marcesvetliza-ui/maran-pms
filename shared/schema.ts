@@ -624,6 +624,7 @@ export type InsertGroupCharge = z.infer<typeof insertGroupChargeSchema>;
 export type GroupCharge = typeof groupCharges.$inferSelect;
 
 // Group Payments (Pagos del folio grupal)
+export type GroupPaymentDestination = "group_distribution" | "master_folio";
 export const groupPayments = pgTable("group_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   groupId: varchar("group_id").notNull(),
@@ -636,11 +637,16 @@ export const groupPayments = pgTable("group_payments", {
   receivedBy: varchar("received_by"),
   notes: text("notes"),
   invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
+  invoiceId: integer("invoice_id").unique(), // normalized, immutable link to sales_invoices
   invoiceNcRef: text("invoice_nc_ref"), // JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
   receiptType: text("receipt_type"),           // "none" = Adelanto Grupos, "factura_a", "factura_b", etc.
   billingEntityType: text("billing_entity_type"), // "company" | "agency" — who received the fiscal comprobante
   billingEntityId: varchar("billing_entity_id"),  // FK to companies or agencies
   paymentMethodDetail: jsonb("payment_method_detail"), // [{method, amount, reference}] for multi-method splits
+  // The parent payment is the financial source of truth. Reservation payments
+  // linked through groupPaymentId are merely its allocations.
+  destination: text("destination").$type<GroupPaymentDestination>().notNull().default("group_distribution"),
+  receiverDetails: jsonb("receiver_details"), // { razonSocial, cuit, dni, condicionIva, domicilio }
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2054,6 +2060,9 @@ export const accountMovements = pgTable("account_movements", {
   guestName: text("guest_name"),
   reference: text("reference"),
   paymentMethod: text("payment_method"),
+  // Source parent for cargos created by a group payment. Lets reversals or
+  // permitted deletions keep the current-account ledger in lockstep.
+  groupPaymentId: varchar("group_payment_id").references(() => groupPayments.id),
   retentions: jsonb("retentions").$type<AccountRetention[]>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

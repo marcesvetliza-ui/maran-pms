@@ -1132,11 +1132,20 @@ export default function GroupDetailPage() {
         closeAllRooms: groupPaymentCloseAll,
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
+        receiverDetails: {
+          razonSocial: groupPaymentRazonSocial || undefined,
+          cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
+          dni: groupPaymentDni || undefined,
+          condicionIva: groupPaymentCondicionIva || undefined,
+          domicilio: groupPaymentDomicilio || undefined,
+        },
       });
     },
     onSuccess: async (res) => {
       const data = await res.json().catch(() => ({}));
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ predicate: (q) =>
         Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
@@ -1149,7 +1158,7 @@ export default function GroupDetailPage() {
       if (needsFactura || needsVoucher) {
         // Close the payment dialog and open the invoice dialog with the payment ID
         setShowGroupPaymentDialog(false);
-        setPendingGroupPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setPendingGroupPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
         setShowGroupFacturaDialog(true);
         return;
       }
@@ -1209,6 +1218,7 @@ export default function GroupDetailPage() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       toast({ title: "Cargo agregado al folio grupal" });
       setShowAddGroupChargeDialog(false);
       setFolioChargeDescription("");
@@ -1302,6 +1312,13 @@ export default function GroupDetailPage() {
         receiptType: masterPaymentReceiptType,
         billingEntityType: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityType : undefined,
         billingEntityId: masterPaymentReceiptType !== "none" ? masterPaymentCcEntityId : undefined,
+        receiverDetails: {
+          razonSocial: masterPaymentRazonSocial || undefined,
+          cuit: masterPaymentCuit.replace(/-/g, "") || undefined,
+          dni: masterPaymentDni || undefined,
+          condicionIva: masterPaymentCondicionIva || undefined,
+          domicilio: masterPaymentDomicilio || undefined,
+        },
       });
     },
     onSuccess: async (res) => {
@@ -1313,7 +1330,7 @@ export default function GroupDetailPage() {
       const needsFactura = ["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType);
       if (needsFactura) {
         setShowMasterPaymentDialog(false);
-        setPendingMasterPaymentId(data.paymentId ? String(data.paymentId) : "");
+        setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
         setShowMasterFacturaDialog(true);
         return;
       }
@@ -2309,13 +2326,17 @@ export default function GroupDetailPage() {
                               const found = (list as any[]).find((e: any) => e.id === gp.billingEntityId);
                               return found ? (found.razonSocial || found.nombreFantasia) : null;
                             })();
+                            const receiverName = gp.receiverDetails?.razonSocial || entityName;
+                            const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
+                              ? gp.paymentMethodDetail.map((row: any) => PAYMENT_METHOD_LABELS[row.method] || row.method).join(" + ")
+                              : PAYMENT_METHOD_LABELS[gp.method] || gp.method;
                             // NC button: show only when there's an invoice with a known DB id and no NC yet
                             const canEmitNc = invoiceRefParsed?.id && !ncRefParsed;
                             return (
                               <div key={gp.id} className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-${gp.id}`}>
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-muted-foreground">{fmtDate(gp.date)}</span>
-                                  <Badge variant="secondary">{PAYMENT_METHOD_LABELS[gp.method] || gp.method}</Badge>
+                                  <Badge variant="secondary">{methodsLabel}</Badge>
                                   {/* Bug 8: receipt type for all comprobantes */}
                                   {receiptLabel && (
                                     <Badge variant="outline" className="text-xs gap-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
@@ -2337,8 +2358,8 @@ export default function GroupDetailPage() {
                                     </Badge>
                                   )}
                                   {/* Bug 7: entity name */}
-                                  {entityName && (
-                                    <span className="text-xs text-muted-foreground">→ {entityName}</span>
+                                  {receiverName && (
+                                    <span className="text-xs text-muted-foreground">→ {receiverName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
                                 </div>
@@ -3169,6 +3190,7 @@ export default function GroupDetailPage() {
             const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
             const isFA = groupPaymentReceiptType === "factura_a";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+            const priorBalance = folio?.totals.balance ?? 0;
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = groupPaymentReceiptType === "factura_t"
@@ -3216,6 +3238,20 @@ export default function GroupDetailPage() {
 
             return (
               <div className="space-y-5">
+                <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Saldo previo</p>
+                    <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">A aplicar ahora</p>
+                    <p className="font-semibold text-primary">{fmtMoney(rowsTotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Saldo restante</p>
+                    <p className={priorBalance - rowsTotal > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance - rowsTotal)}</p>
+                  </div>
+                </div>
                 {/* 1. TIPO DE COMPROBANTE */}
                 <div className="space-y-1">
                   <Label>Tipo de comprobante</Label>
@@ -3544,13 +3580,13 @@ export default function GroupDetailPage() {
                       <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="equal">Partes iguales</SelectItem>
-                        <SelectItem value="proportional">Proporcional al costo</SelectItem>
+                        <SelectItem value="proportional">Proporcional al saldo</SelectItem>
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground mt-1">
                       {groupPaymentDistribution === "equal"
                         ? "Partes iguales entre reservas activas"
-                        : "Proporcional al costo total de cada reserva"}
+                        : "Proporcional al saldo pendiente de cada reserva"}
                     </p>
                   </div>
                   <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
@@ -3620,7 +3656,8 @@ export default function GroupDetailPage() {
               precioUnitario: it.precioUnitario * it.cantidad,
             })),
           }}
-          paymentId={pendingGroupPaymentId || undefined}
+          groupPaymentId={pendingGroupPaymentId || undefined}
+          groupPaymentGroupId={pendingGroupPaymentId ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
           onSuccess={() => {
             setShowGroupFacturaDialog(false);
@@ -3742,9 +3779,19 @@ export default function GroupDetailPage() {
                     </div>
                   )}
                   <div className="flex justify-between font-semibold border-t pt-1">
-                    <span>Saldo pendiente</span>
+                    <span>Saldo previo</span>
                     <span className={masterFolio.masterBalance > 0.01 ? "text-red-600" : "text-green-600"}>
                       ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">A aplicar ahora</span>
+                    <span className="font-semibold text-primary">${rowsTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>Saldo restante</span>
+                    <span className={masterFolio.masterBalance - rowsTotal > 0.01 ? "text-red-600" : "text-green-600"}>
+                      ${(masterFolio.masterBalance - rowsTotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
@@ -3754,11 +3801,9 @@ export default function GroupDetailPage() {
                   <Label>Tipo de comprobante</Label>
                   <Select value={masterPaymentReceiptType} onValueChange={(v) => {
                     setMasterPaymentReceiptType(v);
-                    if (v !== "none" && masterFolio.masterPaid > 0) {
-                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: String(masterFolio.masterTotal.toFixed(2)) } : r));
-                    } else if (v === "none") {
-                      setMasterPaymentRows(prev => prev.map((r, i) => i === 0 ? { ...r, amount: masterFolio.masterBalance > 0 ? String(masterFolio.masterBalance.toFixed(2)) : "" } : r));
-                    }
+                    // The receipt type never changes the collection amount:
+                    // an invoice must be issued for exactly the saldo being
+                    // received, not for the historic full master total.
                     if (v === "factura_a" || v === "factura_mipyme_a") {
                       if (masterPaymentCondicionIva === "Consumidor Final") setMasterPaymentCondicionIva("Responsable Inscripto");
                     } else if (v === "factura_b") {
@@ -4160,7 +4205,8 @@ export default function GroupDetailPage() {
                 precioUnitario: it.precioUnitario * it.cantidad,
               })),
             }}
-            paymentId={pendingMasterPaymentId || undefined}
+            groupPaymentId={pendingMasterPaymentId || undefined}
+            groupPaymentGroupId={pendingMasterPaymentId ? groupId : undefined}
             onSuccess={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");

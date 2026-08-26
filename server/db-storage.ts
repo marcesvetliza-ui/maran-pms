@@ -59,6 +59,7 @@ import {
   type GroupWithDetails, type GroupRoomBlockWithDetails,
   type GroupCharge, type InsertGroupCharge,
   type GroupPayment, type InsertGroupPayment,
+  type GroupPaymentDestination,
   type GroupFolioData,
   type GuestReview, type InsertGuestReview, type GuestReviewWithDetails, type SentimentType,
   type HousekeepingTask, type InsertHousekeepingTask, type HousekeepingTaskWithRoom,
@@ -1666,6 +1667,301 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  /**
+   * Records one received group payment and its room-level allocations atomically.
+   * The parent row in group_payments is the only financial movement; rows in
+   * payments are traceable allocations and must never be added again to a total.
+   */
+  async recordGroupPayment(input: {
+    groupId: string;
+    destination: GroupPaymentDestination;
+    paymentRows: Array<{ method: string; amount: string; reference?: string }>;
+    date: string;
+    reference?: string | null;
+    distribution: string;
+    distributionDetail: Record<string, number>;
+    receivedBy?: string | null;
+    notes?: string | null;
+    receiptType?: string | null;
+    billingEntityType?: "company" | "agency" | null;
+    billingEntityId?: string | null;
+    receiverDetails?: Record<string, string | undefined> | null;
+  }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }> {
+    const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+    const cents = (value: number | string) => Math.round((parseFloat(String(value)) || 0) * 100);
+    const splitAcrossCapacities = (total: number, capacities: number[]) => {
+      let remainingTotal = total;
+      let remainingCapacity = capacities.reduce((sum, amount) => sum + amount, 0);
+      return capacities.map((capacity, index) => {
+        const amount = index === capacities.length - 1
+          ? remainingTotal
+          : Math.min(capacity, Math.round((remainingTotal * capacity) / remainingCapacity));
+        remainingTotal -= amount;
+        remainingCapacity -= capacity;
+        return amount;
+      });
+    };
+
+    return db.transaction(async (tx) => {
+      // Serialize all collection attempts for the same group before validating
+      // balances. This is what prevents two open dialogs from accepting the
+      // same remaining saldo.
+      const lock = await tx.execute(sql`
+        SELECT id FROM groups WHERE id = ${input.groupId} FOR UPDATE
+      `);
+      if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+
+      const rows = input.paymentRows.filter((row) => cents(row.amount) > 0);
+      const receivedCents = rows.reduce((sum, row) => sum + cents(row.amount), 0);
+      if (receivedCents <= 0) throw invalid("El monto debe ser positivo");
+      const hasCuentaCorriente = rows.some((row) => row.method === "cuenta_corriente");
+      if (hasCuentaCorriente && (!input.billingEntityType || !input.billingEntityId)) {
+        throw invalid("Seleccione la empresa o agencia para el pago por cuenta corriente.");
+      }
+
+      if (input.destination === "master_folio") {
+        // This calculation must live under the group row lock. Route-level
+        // previews are helpful for the UI but cannot safely decide whether a
+        // second, simultaneous collection still fits the balance.
+        const master = await tx.execute(sql`
+          SELECT
+            COALESCE((
+              SELECT SUM(r.total_room_amount::numeric)
+              FROM reservations r
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              WHERE l.group_id = ${input.groupId}
+                AND r.status <> 'cancelled'
+            ), 0) AS accommodation,
+            COALESCE((
+              SELECT SUM(c.amount::numeric)
+              FROM group_charges c
+              WHERE c.group_id = ${input.groupId}
+            ), 0) AS group_charges,
+            COALESCE((
+              SELECT SUM(c.amount::numeric)
+              FROM charges c
+              JOIN reservations r ON r.id = c.reservation_id
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              WHERE l.group_id = ${input.groupId}
+                AND r.status <> 'cancelled'
+                AND c.status <> 'anulado'
+            ), 0) AS extras,
+            COALESCE((
+              SELECT SUM(p.amount::numeric)
+              FROM group_payments p
+              WHERE p.group_id = ${input.groupId}
+                AND (p.destination = 'master_folio' OR p.distribution = 'master_folio')
+            ), 0) AS master_parent_paid,
+            COALESCE((
+              SELECT SUM(p.amount::numeric)
+              FROM payments p
+              JOIN group_reservation_links l ON l.reservation_id = p.reservation_id
+              LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
+              WHERE l.group_id = ${input.groupId}
+                AND (gp.id IS NULL OR (gp.destination IS DISTINCT FROM 'master_folio' AND gp.distribution IS DISTINCT FROM 'master_folio'))
+                AND (p.status IS NULL OR p.status = 'active')
+            ), 0) AS direct_all_paid,
+            COALESCE((
+              SELECT SUM(LEAST(r.total_room_amount::numeric, GREATEST(0,
+                COALESCE((
+                  SELECT SUM(p.amount::numeric)
+                  FROM payments p
+                  LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
+                  WHERE p.reservation_id = r.id
+                    AND (p.status IS NULL OR p.status = 'active')
+                    AND (gp.id IS NULL OR (gp.destination IS DISTINCT FROM 'master_folio' AND gp.distribution IS DISTINCT FROM 'master_folio'))
+                ), 0) - COALESCE((
+                  SELECT SUM(c.amount::numeric)
+                  FROM charges c
+                  WHERE c.reservation_id = r.id AND c.status <> 'anulado'
+                ), 0)
+              )))
+              FROM reservations r
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              WHERE l.group_id = ${input.groupId} AND r.status <> 'cancelled'
+            ), 0) AS direct_accommodation_paid,
+            COALESCE((
+              SELECT master_folio_config FROM groups WHERE id = ${input.groupId}
+            ), 'accommodation') AS config
+        `);
+        const totals = master.rows[0] as any;
+        const masterTotalCents = cents(totals.accommodation) + cents(totals.group_charges)
+          + (totals.config === "all" ? cents(totals.extras) : 0);
+        // Direct room payments are deterministically scoped extras-first. In
+        // an accommodation-only master folio, a payment that only covers room
+        // extras must not make the remaining accommodation unavailable.
+        const scopedDirectCents = totals.config === "all"
+          ? cents(totals.direct_all_paid)
+          : cents(totals.direct_accommodation_paid);
+        const totalReceivedCents = cents(totals.master_parent_paid) + scopedDirectCents;
+        const availableCents = masterTotalCents - totalReceivedCents;
+        if (receivedCents > availableCents) {
+          throw invalid(`El cobro supera el saldo disponible del Folio Maestro de $${Math.max(0, availableCents) / 100}.`);
+        }
+      }
+
+      const allocations = Object.entries(input.distributionDetail || {})
+        .map(([reservationId, amount]) => ({ reservationId, cents: cents(amount) }))
+        .filter((allocation) => allocation.cents > 0);
+      const allocatedCents = allocations.reduce((sum, allocation) => sum + allocation.cents, 0);
+      if (allocatedCents !== receivedCents) {
+        throw invalid("La distribución debe coincidir exactamente con el importe recibido.");
+      }
+      if (input.destination === "group_distribution" && allocations.some((allocation) => allocation.reservationId.startsWith("__"))) {
+        throw invalid("Un Pago Grupal solo puede distribuirse entre habitaciones activas del grupo.");
+      }
+      // Build one rounded matrix for methods × destinations. Splitting every
+      // destination independently can turn a one-cent card amount into two
+      // cents across two rooms. This preserves both row (method) and column
+      // (destination) totals exactly.
+      const allocationByMethod = new Map<string, number[]>();
+      let remainingAllocationCents = allocations.map((allocation) => allocation.cents);
+      rows.forEach((row, methodIndex) => {
+        const rowCents = cents(row.amount);
+        const split = methodIndex === rows.length - 1
+          ? [...remainingAllocationCents]
+          : splitAcrossCapacities(rowCents, remainingAllocationCents);
+        allocationByMethod.set(`${methodIndex}`, split);
+        remainingAllocationCents = remainingAllocationCents.map((amount, index) => amount - split[index]);
+      });
+
+      const reservationIds = allocations
+        .map((allocation) => allocation.reservationId)
+        .filter((reservationId) => !reservationId.startsWith("__"));
+
+      const reservationDetails = new Map<string, { reservationCode: string | null; guestName: string; roomNumber: string | null }>();
+      if (reservationIds.length > 0) {
+        const activeReservations = await tx.execute(sql`
+          SELECT r.id, r.reservation_code,
+                 r.total_room_amount::numeric AS accommodation,
+                 rm.room_number,
+                 COALESCE(NULLIF(TRIM(CONCAT_WS(' ', g.first_name, g.last_name)), ''), 'Huésped') AS guest_name,
+                 COALESCE((
+                   SELECT SUM(c.amount::numeric)
+                   FROM charges c
+                   WHERE c.reservation_id = r.id
+                     AND c.status <> 'anulado'
+                 ), 0) AS extras,
+                 COALESCE((
+                   SELECT SUM(p.amount::numeric)
+                   FROM payments p
+                   WHERE p.reservation_id = r.id
+                     AND (p.status IS NULL OR p.status = 'active')
+                 ), 0) AS paid
+          FROM reservations r
+          JOIN group_reservation_links l ON l.reservation_id = r.id
+          LEFT JOIN guests g ON g.id = r.guest_id
+          LEFT JOIN rooms rm ON rm.id = r.room_id
+          WHERE l.group_id = ${input.groupId}
+            AND r.id IN (${sql.join(reservationIds.map((id) => sql`${id}`), sql`, `)})
+            AND r.status IN ('confirmed', 'checked_in')
+          ORDER BY r.id
+          FOR UPDATE OF r
+        `);
+        const balances = new Map((activeReservations.rows as any[]).map((row) => [
+          row.id,
+          cents(Number(row.accommodation || 0) + Number(row.extras || 0) - Number(row.paid || 0)),
+        ]));
+        for (const row of activeReservations.rows as any[]) {
+          reservationDetails.set(row.id, {
+            reservationCode: row.reservation_code || null,
+            guestName: row.guest_name || "Huésped",
+            roomNumber: row.room_number || null,
+          });
+        }
+
+        if (balances.size !== reservationIds.length) {
+          throw invalid("Una de las habitaciones ya no está activa para recibir este cobro.");
+        }
+        // Every room allocation, regardless of collection destination, must
+        // fit the current room balance. This also closes the race where a
+        // direct group collection lands after a master dialog was opened.
+        for (const allocation of allocations) {
+          if (allocation.reservationId.startsWith("__")) continue;
+          const available = balances.get(allocation.reservationId) ?? 0;
+          if (allocation.cents > available) {
+            throw invalid("La distribución supera el saldo pendiente de una habitación. Actualice el folio e inténtelo nuevamente.");
+          }
+        }
+      }
+
+      const [groupPayment] = await tx.insert(groupPayments).values({
+        groupId: input.groupId,
+        amount: (receivedCents / 100).toFixed(2),
+        method: rows.length === 1 ? rows[0].method : "varios",
+        date: input.date,
+        reference: input.reference || null,
+        distribution: input.distribution,
+        distributionDetail: Object.fromEntries(allocations.map((allocation) => [allocation.reservationId, allocation.cents / 100])),
+        receivedBy: input.receivedBy || null,
+        notes: input.notes || null,
+        receiptType: input.receiptType || null,
+        billingEntityType: input.billingEntityType || null,
+        billingEntityId: input.billingEntityId || null,
+        paymentMethodDetail: rows,
+        destination: input.destination,
+        receiverDetails: input.receiverDetails || null,
+      } as any).returning();
+
+      const reservationPayments: Payment[] = [];
+      for (const [allocationIndex, allocation] of allocations.entries()) {
+        for (const [methodIndex, row] of rows.entries()) {
+          const appliedCents = allocationByMethod.get(`${methodIndex}`)?.[allocationIndex] || 0;
+          if (appliedCents <= 0) continue;
+          const amount = (appliedCents / 100).toFixed(2);
+          const isRoomAllocation = !allocation.reservationId.startsWith("__");
+          const reservation = reservationDetails.get(allocation.reservationId);
+          if (!isRoomAllocation) {
+            // Master-folio group charges have no room payment to create, but
+            // a credit-account portion still needs a receivable ledger entry.
+            if (row.method === "cuenta_corriente") {
+              await tx.insert(accountMovements).values({
+                entityType: input.billingEntityType!,
+                entityId: input.billingEntityId!,
+                date: input.date,
+                type: "cargo",
+                description: `Pago Folio Maestro — ${input.reference || "Cargo grupal"}`,
+                amount,
+                groupPaymentId: groupPayment.id,
+                reference: row.reference || input.reference || "Pago Folio Maestro",
+                paymentMethod: row.method,
+              } as any);
+            }
+            continue;
+          }
+          const [created] = await tx.insert(payments).values({
+            reservationId: allocation.reservationId,
+            amount,
+            method: row.method,
+            reference: row.reference || input.reference || "Pago grupal",
+            date: input.date,
+            billingTarget: row.method === "cuenta_corriente" ? input.billingEntityType : "guest",
+            groupPaymentId: groupPayment.id,
+          } as any).returning();
+          reservationPayments.push(created);
+          if (row.method === "cuenta_corriente") {
+            await tx.insert(accountMovements).values({
+              entityType: input.billingEntityType!,
+              entityId: input.billingEntityId!,
+              date: input.date,
+              type: "cargo",
+              description: `${input.destination === "master_folio" ? "Pago Folio Maestro" : "Pago grupal"} — Hab. ${reservation?.roomNumber || allocation.reservationId}`,
+              amount,
+              groupPaymentId: groupPayment.id,
+              reservationId: allocation.reservationId,
+              reservationCode: reservation?.reservationCode || null,
+              guestName: reservation?.guestName || "Huésped",
+              reference: row.reference || input.reference || "Pago grupal",
+              paymentMethod: row.method,
+            } as any);
+          }
+        }
+      }
+
+      return { groupPayment, reservationPayments };
+    });
+  }
+
   async getGroupPayments(groupId: string): Promise<GroupPayment[]> {
     return db.select().from(groupPayments).where(eq(groupPayments.groupId, groupId)).orderBy(desc(groupPayments.createdAt));
   }
@@ -1770,6 +2066,7 @@ export class DatabaseStorage implements IStorage {
     let accommodationTotal = 0;
     let extrasTotal = 0;
     let indivPaymentsTotal = 0;
+    const groupPaymentIds = new Set(gPayments.map((payment) => payment.id));
 
     const resRows = activeReservations.map((res: any) => {
       const resCharges = chargesMap.get(res.id) || [];
@@ -1783,7 +2080,11 @@ export class DatabaseStorage implements IStorage {
 
       accommodationTotal += accTotal;
       extrasTotal += extTotal;
-      indivPaymentsTotal += payTotal;
+      // Payments linked to a group payment are allocations, not a second
+      // receipt. Legacy/direct room payments remain independent receipts.
+      indivPaymentsTotal += activeResPayments
+        .filter((payment: any) => !payment.groupPaymentId || !groupPaymentIds.has(payment.groupPaymentId))
+        .reduce((s: number, payment: any) => s + parseFloat(payment.amount), 0);
 
       return {
         reservationId: res.id,
@@ -1797,10 +2098,10 @@ export class DatabaseStorage implements IStorage {
       };
     });
 
-    // IMPORTANT: individual payments already carry the distributed amounts per room.
-    // groupPaymentsTotal is an audit record of the received total and must NOT be added
-    // again — doing so would duplicate the full payment amount.
-    const totalPayments = indivPaymentsTotal;
+    // Parent group payments are the receipt source of truth. Their linked room
+    // payments are intentionally excluded above so every received peso is
+    // counted once, including the portion applied to group-only charges.
+    const totalPayments = indivPaymentsTotal + groupPaymentsTotal;
     const balance = accommodationTotal + extrasTotal + groupChargesTotal - totalPayments;
 
     return {
@@ -1836,23 +2137,38 @@ export class DatabaseStorage implements IStorage {
     );
     if (activeRes.length === 0) return {};
 
+    const totalCents = Math.round(totalAmount * 100);
+    const distributeByWeights = (weights: number[]) => {
+      const normalized = weights.some((weight) => weight > 0)
+        ? weights
+        : activeRes.map(() => 1);
+      const totalWeight = normalized.reduce((sum, weight) => sum + weight, 0);
+      let assigned = 0;
+      return Object.fromEntries(activeRes.map((reservation, index) => {
+        const cents = index === activeRes.length - 1
+          ? totalCents - assigned
+          : Math.round((totalCents * normalized[index]) / totalWeight);
+        assigned += cents;
+        return [reservation.id, cents / 100];
+      }));
+    };
+
     if (distribution === "equal") {
-      const perRoom = totalAmount / activeRes.length;
-      return Object.fromEntries(activeRes.map(r => [r.id, perRoom]));
+      return distributeByWeights(activeRes.map(() => 1));
     }
     if (distribution === "proportional_nights") {
-      const totalNights = activeRes.reduce((s, r) => s + (r.nights || 1), 0);
-      return Object.fromEntries(activeRes.map(r => [r.id, totalAmount * ((r.nights || 1) / totalNights)]));
+      return distributeByWeights(activeRes.map((reservation) => reservation.nights || 1));
     }
     if (distribution === "proportional_rate") {
-      const totalCost = activeRes.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
-      return Object.fromEntries(activeRes.map(r => [r.id, totalAmount * (parseFloat(r.totalRoomAmount || "0") / (totalCost || 1))]));
+      return distributeByWeights(activeRes.map((reservation) => parseFloat(reservation.totalRoomAmount || "0")));
     }
     if (distribution === "manual" && manualDetail) {
-      return manualDetail;
+      return Object.fromEntries(Object.entries(manualDetail).map(([reservationId, amount]) => [
+        reservationId,
+        Math.round((parseFloat(String(amount)) || 0) * 100) / 100,
+      ]));
     }
-    const perRoom = totalAmount / activeRes.length;
-    return Object.fromEntries(activeRes.map(r => [r.id, perRoom]));
+    return distributeByWeights(activeRes.map(() => 1));
   }
 
   async getGuestReviews(): Promise<GuestReviewWithDetails[]> {
