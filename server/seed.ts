@@ -931,6 +931,15 @@ export async function refreshRealData() {
     `);
 
     await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS cost_centers (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL UNIQUE,
+        activo BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS purchase_invoices (
         id SERIAL PRIMARY KEY,
         tipo_comprobante TEXT NOT NULL,
@@ -1115,6 +1124,17 @@ export async function refreshRealData() {
         ('1.1.1.05', 'Banco de la Nación', 'activo'),
         ('2.1.1.01', 'Proveedores a Pagar', 'pasivo')
         ON CONFLICT (codigo) DO NOTHING
+      `);
+    }
+
+    // Seed Centros de Costo (solo si vacío)
+    const existingCostCenters = await db.execute(sql`SELECT id FROM cost_centers LIMIT 1`);
+    if (existingCostCenters.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO cost_centers (nombre) VALUES
+        ('Hotel'), ('Restaurant'), ('Spa'), ('Eventos'), ('Administración'),
+        ('Mantenimiento'), ('Housekeeping'), ('Marketing'), ('RRHH'), ('Lavadero')
+        ON CONFLICT (nombre) DO NOTHING
       `);
     }
 

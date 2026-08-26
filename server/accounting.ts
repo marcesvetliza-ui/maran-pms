@@ -142,25 +142,15 @@ export async function generarAsiento(
 
   // HABER
   if (invoice.condicionPago === "contado" || isBanco || isTarjeta) {
-    // Pago inmediato: haber = caja o banco.
-    // NOTA: invoice.montoTotal (total) es el total "documental" del comprobante y ya incluye
-    // las retenciones sumadas (no son una retención que el hotel aplica, sino una que le
-    // hicieron a él — p.ej. en una Liquidación de Tarjetas). El movimiento real de caja/banco
-    // es neto de esas retenciones, así que se recalcula acá en base a los componentes en vez
-    // de usar `total` directamente, para no duplicar la retención y mantener el asiento
-    // balanceado (debe = haber).
-    const netoCaja =
-      neto + iva21 + iva105 + iva27 + iva5 + iva25 + percIva + percIibb + percGanancias +
-      impInt + ley25 - retIva - retIibb - retGanancias - retSuss;
-    if (acCaja) lines.push({ accountId: acCaja, debe: 0, haber: netoCaja * sign });
-    // Retenciones en haber (reducen el pago/depósito real)
+    // Pago inmediato: haber = caja o banco
+    if (acCaja) lines.push({ accountId: acCaja, debe: 0, haber: total * sign });
+    // Retenciones en haber (reducen el pago)
     if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: 0, haber: retIva * sign });
     if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
     if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
     if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
   } else {
-    // Cuenta corriente: haber = proveedores a pagar, por el total completo (bruto).
-    // La retención recién resta cuando se genera la Orden de Pago que cancela este comprobante.
+    // Cuenta corriente: haber = proveedores a pagar
     if (acProv) lines.push({ accountId: acProv, debe: 0, haber: total * sign });
   }
 

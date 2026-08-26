@@ -43,6 +43,7 @@ import { registerPublicBookingRoutes } from "./routes/publicBooking";
 import { registerEmailRoutes } from "./routes/emails";
 import { registerCountriesRoutes } from "./routes/countries";
 import { registerPosConfigsRoutes } from "./routes/pos-configs";
+import { registerCostCentersRoutes } from "./routes/cost-centers";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 
 function timeToMinutes(time: string): number {
@@ -2796,17 +2797,13 @@ export async function registerRoutes(
       // ─────────────────────────────────────────────────────────────────────
 
       // Calcular montoTotal
-      // Las retenciones cargadas en el comprobante son retenciones que nos hicieron a nosotros
-      // (p.ej. en una Liquidación de Tarjetas), no retenciones que nosotros aplicamos a un
-      // proveedor — por lo tanto suman al total del comprobante. La retención solo resta al
-      // momento de generar la Orden de Pago, que es cuando el hotel efectivamente la aplica.
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
         n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
         n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
         n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") + n("retencionIibb") + n("retencionGanancias") +
-        n("retencionIva") + n("retencionSuss");
+        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
+        n("retencionIva") - n("retencionSuss");
 
       // Estado según condición de pago
       const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
@@ -2918,25 +2915,19 @@ export async function registerRoutes(
   app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const existing = await db.execute(sql`SELECT estado, condicion_pago FROM purchase_invoices WHERE id = ${id}`);
+      const existing = await db.execute(sql`SELECT estado FROM purchase_invoices WHERE id = ${id}`);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
-      const existingRow = existing.rows[0] as any;
-      // Editables: comprobantes pendientes (cuenta corriente sin pagar) o de contado
-      // (que quedan "pagado" al cargarse, sin OP asociada). Los pagados vía OP quedan bloqueados
-      // porque ya están reconciliados con una Orden de Pago y su asiento contable.
-      const editable = existingRow.estado === "pendiente" || (existingRow.estado === "pagado" && existingRow.condicion_pago === "contado");
-      if (!editable) {
-        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes o de contado" });
+      if ((existing.rows[0] as any).estado !== "pendiente") {
+        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const body = req.body;
-      // Ídem creación: la retención suma en el comprobante, solo resta en la Orden de Pago.
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal =
         n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
         n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
         n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") + n("retencionIibb") + n("retencionGanancias") +
-        n("retencionIva") + n("retencionSuss");
+        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
+        n("retencionIva") - n("retencionSuss");
       const result = await db.execute(sql`
         UPDATE purchase_invoices SET
           monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
@@ -3125,11 +3116,69 @@ export async function registerRoutes(
   });
 
   // Accounting accounts (plan de cuentas)
+  // Roles habilitados para administrar el plan de cuentas y los centros de costo
+  // (mismo criterio que el ítem "Plan de Cuentas"/"Centros de Costo" del sidebar).
+  const ACCOUNTING_ADMIN_ROLES = ["admin", "resp_administracion"];
+  // Por defecto solo devuelve las cuentas activas (para selects en formularios).
+  // ?all=1 devuelve también las inactivas (para la pantalla de administración del plan de cuentas).
   app.get("/api/accounting-accounts", requireAuth, async (req, res) => {
     try {
-      const result = await db.execute(sql`SELECT * FROM accounting_accounts WHERE activo = true ORDER BY codigo`);
+      const includeInactive = req.query.all === "1" || req.query.all === "true";
+      if (includeInactive && !ACCOUNTING_ADMIN_ROLES.includes((req.user as Express.User).role)) {
+        return res.status(403).json({ error: "No autorizado para esta acción" });
+      }
+      const result = includeInactive
+        ? await db.execute(sql`SELECT * FROM accounting_accounts ORDER BY codigo`)
+        : await db.execute(sql`SELECT * FROM accounting_accounts WHERE activo = true ORDER BY codigo`);
       res.json(result.rows);
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/accounting-accounts", requireRole(ACCOUNTING_ADMIN_ROLES), async (req, res) => {
+    try {
+      const { codigo, nombre, tipo, nivel } = req.body;
+      if (!codigo || !nombre || !tipo) {
+        return res.status(400).json({ error: "codigo, nombre y tipo son requeridos" });
+      }
+      if (!["activo", "pasivo", "patrimonio_neto", "ingreso", "egreso"].includes(tipo)) {
+        return res.status(400).json({ error: "tipo inválido" });
+      }
+      const result = await db.execute(sql`
+        INSERT INTO accounting_accounts (codigo, nombre, tipo, nivel, activo)
+        VALUES (${String(codigo).trim()}, ${String(nombre).trim()}, ${tipo}, ${nivel ? parseInt(nivel) : 1}, true)
+        RETURNING *
+      `);
+      res.status(201).json(result.rows[0]);
+    } catch (e: any) {
+      if (String(e.message).includes("duplicate key")) {
+        return res.status(409).json({ error: "Ya existe una cuenta con ese código" });
+      }
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/accounting-accounts/:id", requireRole(ACCOUNTING_ADMIN_ROLES), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { codigo, nombre, tipo, nivel, activo } = req.body;
+      const result = await db.execute(sql`
+        UPDATE accounting_accounts SET
+          codigo = ${codigo !== undefined ? String(codigo).trim() : sql`codigo`},
+          nombre = ${nombre !== undefined ? String(nombre).trim() : sql`nombre`},
+          tipo = ${tipo !== undefined ? tipo : sql`tipo`},
+          nivel = ${nivel !== undefined ? parseInt(nivel) : sql`nivel`},
+          activo = ${activo !== undefined ? !!activo : sql`activo`}
+        WHERE id = ${id}
+        RETURNING *
+      `);
+      if (!result.rows[0]) return res.status(404).json({ error: "Cuenta no encontrada" });
+      res.json(result.rows[0]);
+    } catch (e: any) {
+      if (String(e.message).includes("duplicate key")) {
+        return res.status(409).json({ error: "Ya existe una cuenta con ese código" });
+      }
       res.status(500).json({ error: e.message });
     }
   });
@@ -3450,6 +3499,7 @@ export async function registerRoutes(
   registerEmailRoutes(app);
   registerCountriesRoutes(app);
   registerPosConfigsRoutes(app);
+  registerCostCentersRoutes(app);
   registerGiftVouchersRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);

@@ -211,6 +211,8 @@ const menuSections = [
       { label: "Países (AFIP)",          icon: Globe,         href: "/admin/countries",     roles: ["admin"] },
       { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin"] },
       { label: "Puntos de Venta",        icon: Store,         href: "/pos-configs",         roles: ["admin","resp_administracion"] },
+      { label: "Plan de Cuentas",        icon: BookOpen,      href: "/admin/accounting-accounts", roles: ["admin","resp_administracion"] },
+      { label: "Centros de Costo",       icon: Tag,           href: "/admin/cost-centers",   roles: ["admin","resp_administracion"] },
       { label: "Seguridad de claves",    icon: KeyRound,      href: "/seguridad",           roles: ["admin"] },
       { label: "Administración sistema", icon: Shield,        href: "/administration",      roles: ["admin"], adminOnly: true },
       { label: "Código fuente",          icon: Code2,         href: "/source-code",         roles: ["admin"], adminOnly: true, devOnly: true },

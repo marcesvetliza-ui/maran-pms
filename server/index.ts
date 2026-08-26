@@ -230,6 +230,20 @@ app.use((req, res, next) => {
       ALTER TABLE accounting_suppliers
         ADD COLUMN IF NOT EXISTS cuenta_contable_id INTEGER REFERENCES accounting_accounts(id)
     `));
+    await mig("cost_centers table", () => iDb.execute(iSql`
+      CREATE TABLE IF NOT EXISTS cost_centers (
+        id SERIAL PRIMARY KEY,
+        nombre TEXT NOT NULL UNIQUE,
+        activo BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `));
+    await mig("cost_centers seed", () => iDb.execute(iSql`
+      INSERT INTO cost_centers (nombre) VALUES
+        ('Hotel'), ('Restaurant'), ('Spa'), ('Eventos'), ('Administración'),
+        ('Mantenimiento'), ('Housekeeping'), ('Marketing'), ('RRHH'), ('Lavadero')
+      ON CONFLICT (nombre) DO NOTHING
+    `));
     await mig("email_config SMTP columns", () => iDb.execute(iSql`
       ALTER TABLE email_config
         ADD COLUMN IF NOT EXISTS smtp_host TEXT DEFAULT 'smtp.gmail.com',

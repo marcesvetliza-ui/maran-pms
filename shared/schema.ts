@@ -2454,6 +2454,20 @@ export const insertPosConfigSchema = createInsertSchema(posConfigs).omit({ id: t
 export type InsertPosConfig = z.infer<typeof insertPosConfigSchema>;
 export type PosConfig = typeof posConfigs.$inferSelect;
 
+// ─── Centros de Costo ──────────────────────────────────────────────────────────
+// Lista gestionada de centros de costo (informativos, usados en Facturas de Compra).
+// La agrupación del reporte "Costos por Departamento" NO usa esta tabla: se basa en el
+// prefijo del código de la cuenta contable vinculada (ver accountingAccounts / server/reports/routes.ts).
+export const costCenters = pgTable("cost_centers", {
+  id: serial("id").primaryKey(),
+  nombre: text("nombre").notNull().unique(),
+  activo: boolean("activo").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+export const insertCostCenterSchema = createInsertSchema(costCenters).omit({ id: true, createdAt: true });
+export type InsertCostCenter = z.infer<typeof insertCostCenterSchema>;
+export type CostCenter = typeof costCenters.$inferSelect;
+
 export const reservationChangelog = pgTable("reservation_changelog", {
   id: serial("id").primaryKey(),
   reservationId: varchar("reservation_id").notNull().references(() => reservations.id),

@@ -123,8 +123,6 @@ const TIPOS = [
   { value: "RECIBO-B", label: "Recibo B" },
   { value: "RECIBO-C", label: "Recibo C" },
 ];
-
-const CENTROS_COSTO = ["Hotel", "Restaurant", "Spa", "Eventos", "Administración", "Mantenimiento", "Housekeeping", "Marketing", "RRHH", "Lavadero"];
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },
@@ -322,6 +320,10 @@ function InvoiceDialog({
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
+  const { data: costCenters = [] } = useQuery<{ id: number; nombre: string }[]>({
+    queryKey: ["/api/cost-centers"],
+  });
+
   const TIPOS_C = ["FACT-C", "NC-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
   const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
@@ -467,17 +469,13 @@ function InvoiceDialog({
     }
   };
 
-  // Las retenciones cargadas en un comprobante son retenciones que nos hicieron a nosotros
-  // (no que nosotros aplicamos), por lo tanto suman al total del comprobante, no restan.
-  // La retención solo resta al momento de generar la Orden de Pago (ahí sí es una retención
-  // que el hotel aplica al proveedor).
   const total = useMemo(() => {
     return (
       $n(form.montoNeto) + $n(form.montoIva21) + $n(form.montoIva105) + $n(form.montoIva27) +
       $n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoExento) + $n(form.montoNoGravado) +
       $n(form.impuestosInternos) + $n(form.ley25413) + $n(form.percepcionIibb) +
-      $n(form.percepcionIva) + $n(form.percepcionGanancias) +
-      $n(form.retencionIibb) + $n(form.retencionGanancias) + $n(form.retencionIva) + $n(form.retencionSuss)
+      $n(form.percepcionIva) + $n(form.percepcionGanancias) -
+      $n(form.retencionIibb) - $n(form.retencionGanancias) - $n(form.retencionIva) - $n(form.retencionSuss)
     );
   }, [form]);
 
@@ -983,6 +981,9 @@ function InvoiceDialog({
                         ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".
+                  </p>
                 </div>
                 <div className="col-span-2">
                   <Label>Centro de Costo</Label>
@@ -992,9 +993,12 @@ function InvoiceDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">— Sin clasificar —</SelectItem>
-                      {CENTROS_COSTO.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {costCenters.map((c) => <SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Informativo. El reporte "Costos por Departamento" agrupa por la Cuenta Contable de Gasto, no por este campo.
+                  </p>
                 </div>
                 <div className="col-span-2">
                   <Label>Observaciones</Label>
@@ -2232,25 +2236,25 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              {(inv.estado === "pendiente" || (inv.estado === "pagado" && inv.condicionPago === "contado")) && (
-                                <Button
-                                  variant="ghost" size="icon"
-                                  onClick={() => setEditingInvoice(inv)}
-                                  title="Editar"
-                                  data-testid={`btn-edit-invoice-${inv.id}`}
-                                >
-                                  <Pencil className="h-4 w-4 text-muted-foreground" />
-                                </Button>
-                              )}
                               {inv.estado === "pendiente" && (
-                                <Button
-                                  variant="ghost" size="icon"
-                                  onClick={() => setAnularId(inv.id)}
-                                  title="Anular"
-                                  data-testid={`btn-anular-invoice-${inv.id}`}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
+                                <>
+                                  <Button
+                                    variant="ghost" size="icon"
+                                    onClick={() => setEditingInvoice(inv)}
+                                    title="Editar"
+                                    data-testid={`btn-edit-invoice-${inv.id}`}
+                                  >
+                                    <Pencil className="h-4 w-4 text-muted-foreground" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost" size="icon"
+                                    onClick={() => setAnularId(inv.id)}
+                                    title="Anular"
+                                    data-testid={`btn-anular-invoice-${inv.id}`}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </>
                               )}
                             </div>
                           </TableCell>

@@ -70,6 +70,8 @@ const AdminBookingPage = lazy(() => import("@/pages/admin-booking-engine"));
 const AdminFoliosPage = lazy(() => import("@/pages/admin-folios"));
 const EmailConfigPage = lazy(() => import("@/pages/email-config"));
 const CountriesAbmPage = lazy(() => import("@/pages/countries-abm"));
+const AccountingAccountsAbmPage = lazy(() => import("@/pages/accounting-accounts-abm"));
+const CostCentersAbmPage = lazy(() => import("@/pages/cost-centers-abm"));
 const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
@@ -241,6 +243,8 @@ function Router() {
         <Route path="/admin/booking-engine" component={AdminBookingPage} />
         <Route path="/email-config" component={EmailConfigPage} />
         <Route path="/admin/countries" component={CountriesAbmPage} />
+        <Route path="/admin/accounting-accounts" component={AccountingAccountsAbmPage} />
+        <Route path="/admin/cost-centers" component={CostCentersAbmPage} />
         <Route path="/admin/indec" component={AdminIndecPage} />
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
