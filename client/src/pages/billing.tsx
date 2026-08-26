@@ -34,6 +34,10 @@ function fPeso(n: number | string | undefined | null) {
   return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function fDate(d: string | undefined | null) {
   if (!d) return "—";
   const dt = new Date(d + "T12:00:00");
@@ -789,14 +793,29 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
   function removeItem(idx: number) { setItems(prev => prev.filter((_, i) => i !== idx)); }
 
-  const preview = items.reduce((acc, it) => {
-    if (it.alicuotaIva === "21") { acc.neto += it.subtotalNeto; acc.iva21 += it.subtotalNeto * 0.21; }
-    else if (it.alicuotaIva === "10.5") { acc.neto += it.subtotalNeto; acc.iva105 += it.subtotalNeto * 0.105; }
-    else if (it.alicuotaIva === "exento") acc.exento += it.subtotalNeto;
-    else if (it.alicuotaIva === "no_gravado") acc.ng += it.subtotalNeto;
+  // Mirrors calcularMontos() in server/billing/invoiceService.ts: accumulate the
+  // *gross* per-bucket amounts first, then round once at the aggregate level.
+  // Rounding each item's neto/IVA individually before summing (the previous
+  // approach) can drift the displayed total by a cent from the authoritative
+  // gross sum the backend actually invoices.
+  const brutos = items.reduce((acc, it) => {
+    const bruto = round2(it.subtotal);
+    if (it.alicuotaIva === "21") acc.bruto21 += bruto;
+    else if (it.alicuotaIva === "10.5") acc.bruto105 += bruto;
+    else if (it.alicuotaIva === "exento") acc.exento += bruto;
+    else if (it.alicuotaIva === "no_gravado") acc.ng += bruto;
     return acc;
-  }, { neto: 0, iva21: 0, iva105: 0, exento: 0, ng: 0 });
-  const totalPreview = preview.neto + preview.iva21 + preview.iva105 + preview.exento + preview.ng;
+  }, { bruto21: 0, bruto105: 0, exento: 0, ng: 0 });
+  const neto21 = round2(brutos.bruto21 / 1.21);
+  const neto105 = round2(brutos.bruto105 / 1.105);
+  const preview = {
+    neto: round2(neto21 + neto105),
+    iva21: round2(brutos.bruto21 - neto21),
+    iva105: round2(brutos.bruto105 - neto105),
+    exento: round2(brutos.exento),
+    ng: round2(brutos.ng),
+  };
+  const totalPreview = round2(brutos.bruto21 + brutos.bruto105 + brutos.exento + brutos.ng);
 
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/billing/invoices", body),
