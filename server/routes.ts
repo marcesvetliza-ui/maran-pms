@@ -2749,7 +2749,15 @@ export async function registerRoutes(
         JOIN accounting_accounts aa ON aa.id = ael.account_id
         WHERE ae.origen_id = ${id} AND ae.origen_tipo = 'purchase_invoice'
       `);
-      res.json({ ...result.rows[0], asientoLines: entry.rows });
+      // Orden(es) de Pago que cancelaron este comprobante
+      const ordenesPago = await db.execute(sql`
+        SELECT po.id, po.numero, po.fecha, po.forma_pago, poi.importe_cancelado
+        FROM payment_order_items poi
+        JOIN payment_orders po ON po.id = poi.payment_order_id
+        WHERE poi.invoice_id = ${id}
+        ORDER BY po.fecha DESC, po.id DESC
+      `);
+      res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

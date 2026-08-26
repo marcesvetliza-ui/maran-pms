@@ -1298,12 +1298,18 @@ function InvoiceDialog({
 // ─── Subcomponent: Invoice Detail Dialog ─────────────────────────────────────
 
 function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice | null; accounts: AccountingAccount[]; onClose: () => void }) {
+  const { data: detail } = useQuery<any>({
+    queryKey: ["/api/purchase-invoices", invoice?.id],
+    queryFn: () => fetch(`/api/purchase-invoices/${invoice!.id}`, { credentials: "include" }).then((r) => r.json()),
+    enabled: !!invoice && invoice.estado === "pagado",
+  });
   if (!invoice) return null;
   const fmt2 = (v?: string | number) => {
     const n = parseFloat(String(v || "0"));
     return n !== 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—";
   };
   const account = accounts.find((a) => a.id === invoice.cuentaContableId);
+  const ordenesPago: any[] = detail?.ordenesPago || [];
 
   const rows: [string, string][] = [
     ["Tipo", invoice.tipoComprobante],
@@ -1370,6 +1376,32 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               <div className="text-xs text-muted-foreground">Centro de costo</div>
               <div className="text-sm">{invoice.centroCosto}</div>
             </div>
+          )}
+          {invoice.estado === "pagado" && (
+            <>
+              <Separator />
+              <div>
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pago</div>
+                {ordenesPago.length > 0 ? (
+                  <div className="space-y-2">
+                    {ordenesPago.map((op) => (
+                      <div key={op.id} className="flex items-center justify-between text-sm bg-muted/50 rounded-md px-3 py-2">
+                        <div>
+                          <div className="font-medium">OP {op.numero}</div>
+                          <div className="text-xs text-muted-foreground capitalize">{op.forma_pago?.replace(/_/g, " ")}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-muted-foreground">Fecha de pago</div>
+                          <div className="font-medium">{op.fecha}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Pagado de contado (sin Orden de Pago asociada)</div>
+                )}
+              </div>
+            </>
           )}
           {invoice.observaciones && (
             <div>
