@@ -277,7 +277,7 @@ function AddBlockDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Agregar Bloque de Habitaciones</DialogTitle>
           <DialogDescription>
@@ -285,7 +285,7 @@ function AddBlockDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Tipo de Habitación *</Label>
               <Select value={roomTypeId} onValueChange={(v) => {
@@ -331,7 +331,7 @@ function AddBlockDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Plan Tarifario</Label>
               <Select value={ratePlanId} onValueChange={handleRatePlanChange} disabled={!roomTypeId}>
@@ -377,7 +377,7 @@ function AddBlockDialog({
           </div>
 
           {useCustomDates && (
-            <div className="grid grid-cols-2 gap-4 rounded-md border p-3 bg-muted/30">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-md border p-3 bg-muted/30">
               <div>
                 <Label>Check-in Bloque</Label>
                 <Input
