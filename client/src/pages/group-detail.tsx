@@ -838,6 +838,34 @@ export default function GroupDetailPage() {
   const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
+  // Full reset of the "Pago Grupal" dialog's form state. Must run whenever that dialog's
+  // flow truly ends — on plain success, after a fiscal/voucher follow-up dialog it opened
+  // succeeds, or if that follow-up dialog is abandoned — or the next time the dialog is
+  // opened it reopens with a stale locked receptor (see masterFacturaFromGroupDialog above).
+  const resetGroupPaymentDialogFields = () => {
+    setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
+    setGroupPaymentReceiptType("sin_comprobante");
+    setGroupPaymentEmitirComprobante(false);
+    setGroupPaymentDistribution("equal");
+    setGroupPaymentCloseAll(false);
+    setGroupPaymentDestino("distribute");
+    setGroupPaymentCcEntityType("company");
+    setGroupPaymentCcEntityId("");
+    setGroupInvoiceDistribution("none");
+    setGroupPaymentReceptorType("company");
+    setGroupPaymentReceptorLocked(false);
+    setGroupPaymentGuestId(null);
+    setGroupPaymentEntitySearch("");
+    setGroupPaymentShowEntityDropdown(false);
+    setGroupPaymentRazonSocial("");
+    setGroupPaymentCuit("");
+    setGroupPaymentDni("");
+    setGroupPaymentCondicionIva("Consumidor Final");
+    setGroupPaymentDomicilio("");
+    setGroupPaymentPvNum("");
+    setGroupPaymentItems([gNewItem()]);
+  };
+
   // Cambiar habitación
   const [changingReservation, setChangingReservation] = useState<ReservationWithDetails | null>(null);
   const [changeRoomId, setChangeRoomId] = useState("");
@@ -885,6 +913,12 @@ export default function GroupDetailPage() {
   const [masterPaymentPvNum, setMasterPaymentPvNum] = useState("");
   const [masterPaymentItems, setMasterPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [masterInvoiceDistribution, setMasterInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
+  // showMasterFacturaDialog is shared by two entry points: the legacy dedicated
+  // "Pago al Folio Maestro" dialog (masterPayment* state) and the unified "Pago Grupal"
+  // dialog's "Aplicar al Folio Maestro" destino (groupPayment* state). This flag records
+  // which one just registered the payment, so the invoice dialog is pre-filled from the
+  // matching state instead of always reading the legacy masterPayment* fields.
+  const [masterFacturaFromGroupDialog, setMasterFacturaFromGroupDialog] = useState(false);
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
   // Delete group charge confirmation
@@ -1194,6 +1228,7 @@ export default function GroupDetailPage() {
         // Close the payment dialog and open the invoice dialog with the payment ID
         setShowGroupPaymentDialog(false);
         if (isMaster) {
+          setMasterFacturaFromGroupDialog(true);
           setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
           setShowMasterFacturaDialog(true);
         } else {
@@ -1225,26 +1260,7 @@ export default function GroupDetailPage() {
         toast({ title: isMaster ? "Pago al Folio Maestro registrado exitosamente" : "Pago grupal registrado exitosamente" });
       }
       setShowGroupPaymentDialog(false);
-      setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-      setGroupPaymentReceiptType("sin_comprobante");
-      setGroupPaymentEmitirComprobante(false);
-      setGroupPaymentDistribution("equal");
-      setGroupPaymentCloseAll(false);
-      setGroupPaymentDestino("distribute");
-      setGroupPaymentCcEntityType("company");
-      setGroupPaymentCcEntityId("");
-      setGroupInvoiceDistribution("none");
-      setGroupPaymentReceptorType("company");
-      setGroupPaymentReceptorLocked(false);
-      setGroupPaymentGuestId(null);
-      setGroupPaymentEntitySearch("");
-      setGroupPaymentRazonSocial("");
-      setGroupPaymentCuit("");
-      setGroupPaymentDni("");
-      setGroupPaymentCondicionIva("Consumidor Final");
-      setGroupPaymentDomicilio("");
-      setGroupPaymentPvNum("");
-      setGroupPaymentItems([gNewItem()]);
+      resetGroupPaymentDialogFields();
       if (showInvoiceDialog) {
         loadInvoice();
       }
@@ -1376,6 +1392,7 @@ export default function GroupDetailPage() {
       const needsFactura = ["factura_a", "factura_b", "factura_mipyme_a"].includes(masterPaymentReceiptType);
       if (needsFactura) {
         setShowMasterPaymentDialog(false);
+        setMasterFacturaFromGroupDialog(false);
         setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
         setShowMasterFacturaDialog(true);
         return;
@@ -3320,27 +3337,7 @@ export default function GroupDetailPage() {
       <Dialog open={showGroupPaymentDialog} onOpenChange={(open) => {
         setShowGroupPaymentDialog(open);
         if (!open) {
-          setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-          setGroupPaymentReceiptType("sin_comprobante");
-          setGroupPaymentEmitirComprobante(false);
-          setGroupPaymentDistribution("equal");
-          setGroupPaymentCloseAll(false);
-          setGroupPaymentDestino("distribute");
-          setGroupPaymentCcEntityType("company");
-          setGroupPaymentCcEntityId("");
-          setGroupInvoiceDistribution("none");
-          setGroupPaymentReceptorType("company");
-          setGroupPaymentReceptorLocked(false);
-          setGroupPaymentGuestId(null);
-          setGroupPaymentEntitySearch("");
-          setGroupPaymentShowEntityDropdown(false);
-          setGroupPaymentRazonSocial("");
-          setGroupPaymentCuit("");
-          setGroupPaymentDni("");
-          setGroupPaymentCondicionIva("Consumidor Final");
-          setGroupPaymentDomicilio("");
-          setGroupPaymentPvNum("");
-          setGroupPaymentItems([gNewItem()]);
+          resetGroupPaymentDialogFields();
         }
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -4013,6 +4010,7 @@ export default function GroupDetailPage() {
             setShowGroupFacturaDialog(false);
             setPendingGroupPaymentId("");
             setGroupFacturaFromResumen(false);
+            resetGroupPaymentDialogFields();
           }}
           config={billingConfig}
           allowedTipos={
@@ -4044,14 +4042,7 @@ export default function GroupDetailPage() {
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
-            setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-            setGroupPaymentReceiptType("sin_comprobante");
-            setGroupPaymentDistribution("equal");
-            setGroupPaymentCloseAll(false);
-            setGroupPaymentCcEntityType("company");
-            setGroupPaymentCcEntityId("");
-            setGroupInvoiceDistribution("none");
-            setGroupPaymentItems([gNewItem()]);
+            resetGroupPaymentDialogFields();
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
             if (showInvoiceDialog) {
               loadInvoice();
@@ -4551,7 +4542,13 @@ export default function GroupDetailPage() {
       </Dialog>
 
       {showMasterFacturaDialog && (() => {
-        const totalPaid = masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+        // This dialog is shared by two entry points — see masterFacturaFromGroupDialog above.
+        // Read amounts/receiver/items from whichever state actually produced the payment.
+        const fromGroupDialog = masterFacturaFromGroupDialog;
+        const effectiveReceiptType = fromGroupDialog ? groupPaymentReceiptType : masterPaymentReceiptType;
+        const totalPaid = fromGroupDialog
+          ? groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+          : masterPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
         const allowedTiposMap: Record<string, string[]> = {
           factura_a: ["FA"],
           factura_b: ["FB"],
@@ -4562,9 +4559,15 @@ export default function GroupDetailPage() {
         // Compute invoice items based on chosen distribution mode.
         // Distribution modes (totalizados/detallados) only apply when the payment covers
         // the full folio total, so that invoice items always sum to the amount being invoiced.
-        const isMipymeInvoice = masterPaymentReceiptType === "factura_mipyme_a";
+        const isMipymeInvoice = effectiveReceiptType === "factura_mipyme_a";
         const isFullPaymentForInvoice = isMipymeInvoice || Math.abs(totalPaid - (masterFolio?.masterTotal ?? 0)) < 0.01;
         const effectiveDistribution = isFullPaymentForInvoice ? masterInvoiceDistribution : "none";
+        const effectiveItems = fromGroupDialog ? groupPaymentItems : masterPaymentItems;
+        const effectiveRazonSocial = fromGroupDialog ? groupPaymentRazonSocial : masterPaymentRazonSocial;
+        const effectiveCuit = fromGroupDialog ? groupPaymentCuit : masterPaymentCuit;
+        const effectiveCondicionIva = fromGroupDialog ? groupPaymentCondicionIva : masterPaymentCondicionIva;
+        const effectiveDomicilio = fromGroupDialog ? groupPaymentDomicilio : masterPaymentDomicilio;
+        const defaultDescripcion = fromGroupDialog ? `Pago grupal — ${group?.name ?? ""}` : `Pago Folio Maestro — ${group?.name ?? ""}`;
 
         return (
           <EmitirFacturaDialog
@@ -4572,17 +4575,20 @@ export default function GroupDetailPage() {
             onClose={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");
+              if (fromGroupDialog) {
+                resetGroupPaymentDialogFields();
+              }
             }}
             config={billingConfig}
-            allowedTipos={allowedTiposMap[masterPaymentReceiptType] ?? ["FB"]}
+            allowedTipos={allowedTiposMap[effectiveReceiptType] ?? ["FB"]}
             compactMode={true}
             initialValues={{
-              razonSocial: masterPaymentRazonSocial || group?.name || "",
-              cuit: masterPaymentCuit ? masterPaymentCuit.replace(/-/g, "") : undefined,
-              condicionIva: masterPaymentCondicionIva || undefined,
-              domicilio: masterPaymentDomicilio || undefined,
-              items: masterPaymentItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
-                descripcion: it.descripcion || `Pago Folio Maestro — ${group?.name ?? ""}`,
+              razonSocial: effectiveRazonSocial || group?.name || "",
+              cuit: effectiveCuit ? effectiveCuit.replace(/-/g, "") : undefined,
+              condicionIva: effectiveCondicionIva || undefined,
+              domicilio: effectiveDomicilio || undefined,
+              items: effectiveItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
+                descripcion: it.descripcion || defaultDescripcion,
                 precioUnitario: it.precioUnitario * it.cantidad,
               })),
             }}
@@ -4593,17 +4599,21 @@ export default function GroupDetailPage() {
             onSuccess={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");
-              setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
-              setMasterPaymentReceiptType("none");
-              setMasterPaymentCcEntityType("company");
-              setMasterPaymentCcEntityId("");
               setMasterInvoiceDistribution("none");
-              setMasterPaymentRazonSocial("");
-              setMasterPaymentCuit("");
-              setMasterPaymentDni("");
-              setMasterPaymentCondicionIva("Consumidor Final");
-              setMasterPaymentDomicilio("");
-              setMasterPaymentItems([gNewItem()]);
+              if (fromGroupDialog) {
+                resetGroupPaymentDialogFields();
+              } else {
+                setMasterPaymentRows([{method: "cash", amount: "", reference: ""}]);
+                setMasterPaymentReceiptType("none");
+                setMasterPaymentCcEntityType("company");
+                setMasterPaymentCcEntityId("");
+                setMasterPaymentRazonSocial("");
+                setMasterPaymentCuit("");
+                setMasterPaymentDni("");
+                setMasterPaymentCondicionIva("Consumidor Final");
+                setMasterPaymentDomicilio("");
+                setMasterPaymentItems([gNewItem()]);
+              }
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
