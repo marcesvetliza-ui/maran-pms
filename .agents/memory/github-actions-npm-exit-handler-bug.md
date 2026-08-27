@@ -1,36 +1,47 @@
 ---
-name: GitHub Actions npm "Exit handler never called" bug
-description: npm ci/install hangs ~70-75s then crashes with "Exit handler never called!" on this repo's GitHub Actions runner, leaving node_modules incomplete (e.g. tsx missing). Read before touching .github/workflows/test.yml install step.
+name: GitHub Actions npm install failures — root cause was the package-lock, not npm itself
+description: npm ci/install in .github/workflows/test.yml hung ~70-75s then crashed with "Exit handler never called!" — root cause was package-lock.json "resolved" URLs pointing at Replit's internal package-firewall host, unreachable from GitHub's runners. Read before touching the CI install step or before assuming this class of npm crash is unfixable.
 ---
 
-`npm ci` (and `npm install`) in `.github/workflows/test.yml`'s "Instalar dependencias" step
-reproducibly hangs for ~70-75 seconds and then crashes with:
+## Real root cause (confirmed Aug 27, 2026)
 
-```
-npm error Exit handler never called!
-```
+Replit's dev environment routes npm through an internal proxy
+(`NPM_CONFIG_REGISTRY=http://package-firewall.replit.local/npm/`, npm config
+`replace-registry-host=npmjs`). That proxy rewrites `resolved` URLs in
+`package-lock.json` to point at `package-firewall.replit.local` instead of
+`registry.npmjs.org`. That hostname only resolves *inside* a Replit
+workspace — it is not reachable from a GitHub Actions runner. When CI ran
+`npm ci`/`npm install`, npm tried to fetch ~146 packages from an
+unreachable host, and repeated connection failures across many packages is
+what produced the consistent ~70-75s hang before npm's install pipeline hit
+the (unrelated, cosmetic) "Exit handler never called!" bug during error
+unwind. Locally on Replit the same lockfile installs fine because the proxy
+answers those requests — which is exactly why the failure looked
+runner-specific and "random" rather than an obvious bad-URL error.
 
-This leaves `node_modules` incomplete — e.g. `tsx` binary missing, causing the next step
-(`npm run db:migrate:ci`) to fail with `sh: 1: tsx: not found`. Locally (outside GitHub Actions,
-same package.json/package-lock.json), a clean `npm ci` succeeds in ~17s with no issue — so it's
-specific to the GitHub-hosted runner, not the dependency tree itself.
+**Fix:** rewrite every `"resolved": "http://package-firewall.replit.local/npm/..."`
+entry in `package-lock.json` to `"resolved": "https://registry.npmjs.org/..."`
+(the path structure is identical, so a plain string substitution works and
+preserves the existing `integrity` hashes — verified with a clean `npm ci`
+in a scratch dir with the firewall registry env vars unset). This is safe to
+commit: a later plain `npm install` inside the Replit workspace does **not**
+re-introduce firewall URLs into an already-resolved lockfile (verified), so
+the lockfile stays CI-safe unless someone manually points npm at the
+firewall registry while regenerating it from scratch.
 
-**Fixes tried, all failed identically (same ~70-75s hang, same error) across 6 separate CI runs:**
-- `npm ci --no-audit --no-fund`
-- `npm install -g npm@latest` before install (also separately failed with EBADENGINE: npm 12 requires Node ^22.22.2+, incompatible with Node 20)
-- Bumping `actions/setup-node` to `node-version: "22"` (ships npm 10.9.8) — same bug
-- Retrying the install 3x in a bash loop with `rm -rf node_modules` between attempts — all 3 attempts failed identically
-- Switching from `npm ci` to `npm install` — same bug
-- `NPM_CONFIG_UPDATE_NOTIFIER=false` (to rule out npm's background update-check network call) — same bug
+**How to apply:** If `package-lock.json` ever re-acquires
+`package-firewall.replit.local` resolved URLs (e.g. after deleting and
+fully regenerating the lockfile from within a Replit workspace), redo the
+same substitution before pushing, or regenerate with
+`NPM_CONFIG_REGISTRY` and `npm_config_registry` both explicitly unset via
+`env -u` (both the upper- and lower-case env vars are set in this
+environment and both must be cleared, or npm's config merge picks the
+firewall URL back up).
 
-**Why:** Root cause not identified. The suspiciously consistent ~70-75s timing across every
-variant (different npm/Node versions, different install commands, different flags) suggests a
-deterministic trigger rather than random network flakiness, but the actual cause inside npm's
-install pipeline was not isolated. This matches the long-standing, still-partially-unresolved
-npm/cli bug class documented at https://github.com/npm/cli/wiki/%22cb()-never-called%3F-Exit-handler-never-called%3F-I'm-having-the-same-problem!%22.
-
-**How to apply:** Don't re-try the six approaches above blind — they're confirmed dead ends on
-this repo's CI runner as of Aug 27, 2026. Untried directions worth exploring next: pin an older
-npm version (e.g. `npm@9`) instead of upgrading; try `yarn`/`pnpm` instead of npm for the CI
-install step only; or add verbose/debug logging (`npm ci --loglevel silly`) and inspect the full
-debug log npm points to, which wasn't captured in past attempts.
+**Six earlier "fixes" that were dead ends and why:** `--no-audit --no-fund`,
+upgrading npm, bumping Node to 22, retrying 3x with `rm -rf node_modules`,
+switching `npm ci`→`npm install`, and disabling the update-notifier network
+check all failed identically because none of them touched the actual
+problem — the lockfile pointing at an unreachable internal host. Don't
+re-diagnose this as a flaky-npm-bug issue again; check
+`grep package-firewall package-lock.json` first.
