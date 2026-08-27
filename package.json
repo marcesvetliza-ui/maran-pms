@@ -10,7 +10,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "test": "vitest run && vitest run --config vitest.server.config.ts server/tests/folio-invoice-concurrency.test.ts && if [ -n \"$DATABASE_URL\" ]; then npm run test:postgres; else echo '[test] DATABASE_URL no configurada: se omiten las pruebas de integración PostgreSQL. Ejecute npm run test:postgres con una base de desarrollo migrada.'; fi",
-    "test:postgres": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para las pruebas PostgreSQL. Use una base de desarrollo/pruebas migrada, nunca producción.' >&2; exit 1; fi; vitest run --config vitest.server.config.ts server/tests/group-master-payment-account-movement.pg.test.ts server/tests/group-master-payment-cash-reversal.pg.test.ts",
+    "test:postgres": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para las pruebas PostgreSQL. Use una base de desarrollo/pruebas migrada, nunca producción.' >&2; exit 1; fi; vitest run --config vitest.server.config.ts server/tests/group-master-payment-account-movement.pg.test.ts server/tests/group-master-payment-cash-reversal.pg.test.ts server/tests/group-distribution-payment-cash-reversal.pg.test.ts",
     "test:watch": "vitest",
     "lint:dates": "bash script/check-date-patterns.sh",
     "test:dates": "bash script/test-check-date-patterns.sh"

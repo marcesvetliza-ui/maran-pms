@@ -19,3 +19,9 @@ to end, seed `groups` + one `group_charges` row, then call the real HTTP routes 
 `../audit`, not `db`/`db-storage`/`migrate`). Also remember `npm run test:postgres` in package.json lists pg
 test files explicitly (no glob) — any new `*.pg.test.ts` must be added to that script by hand or it silently
 never runs.
+
+The `group_distribution` destination (direct "Pago Grupal" via POST /api/groups/:groupId/payment or the legacy
+/payment/v2) is different: it requires at least one real `reservations` row (status confirmed/checked_in) linked
+via `group_reservation_links`, because it allocates across active rooms rather than the `__group_charges__`
+bucket. `reservations.guest_id/room_type_id/room_id` have no DB-level FK constraints, so fixture-only ids for
+those columns are fine — no need to also insert `guests`/`rooms`/`room_types` rows.
