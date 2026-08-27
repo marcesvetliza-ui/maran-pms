@@ -43,6 +43,7 @@ const mockStorage = {
   getGroups: vi.fn().mockResolvedValue([]),
   getGroupCharges: vi.fn().mockResolvedValue([]),
   getGroupPayments: vi.fn().mockResolvedValue([]),
+  getGroupReservationLedger: vi.fn().mockResolvedValue([]),
   getCharges: vi.fn().mockResolvedValue([]),
   getPayments: vi.fn().mockResolvedValue([]),
   createGroupCharge: vi.fn(),
@@ -180,6 +181,28 @@ function makeCharge(id: string, description: string, amount = "50.00") {
   };
 }
 
+/**
+ * The /master-folio route builds its `rooms` array from
+ * storage.getGroupReservationLedger (the shared per-reservation ledger also
+ * used by /folio and /invoice), not from storage.getCharges directly. Build
+ * a minimal ledger line carrying the given charges so these tests still
+ * exercise the route's own tag-stripping of `charges[].description`.
+ */
+function makeLedgerLine(charges: ReturnType<typeof makeCharge>[]) {
+  return {
+    reservationId: "res-001",
+    guestName: "María García",
+    roomNumber: "101",
+    status: "confirmed",
+    nights: 3,
+    accommodationTotal: 300,
+    extrasTotal: charges.reduce((s, c) => s + parseFloat(c.amount), 0),
+    paymentsTotal: 0,
+    payments: [],
+    charges,
+  };
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio", () => {
@@ -202,8 +225,8 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
 
   it("strips an [xfer:…] tag from a charge description", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
-    mockStorage.getCharges.mockResolvedValue([
-      makeCharge("c-001", "Minibar [xfer:abc123]"),
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      makeLedgerLine([makeCharge("c-001", "Minibar [xfer:abc123]")]),
     ]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
@@ -220,8 +243,8 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
 
   it("strips a [corr:…] tag from a charge description", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
-    mockStorage.getCharges.mockResolvedValue([
-      makeCharge("c-002", "Lavandería [corr:corr-xyz]"),
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      makeLedgerLine([makeCharge("c-002", "Lavandería [corr:corr-xyz]")]),
     ]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
@@ -238,8 +261,8 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
 
   it("strips a [res:…] tag from a charge description", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
-    mockStorage.getCharges.mockResolvedValue([
-      makeCharge("c-003", "Desayuno [res:res-001]"),
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      makeLedgerLine([makeCharge("c-003", "Desayuno [res:res-001]")]),
     ]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
@@ -256,8 +279,8 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
 
   it("strips multiple bracket tags from a single description", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
-    mockStorage.getCharges.mockResolvedValue([
-      makeCharge("c-004", "Servicio de habitación [xfer:xf-99] [res:res-001]"),
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      makeLedgerLine([makeCharge("c-004", "Servicio de habitación [xfer:xf-99] [res:res-001]")]),
     ]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
@@ -275,8 +298,8 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
 
   it("returns an untagged description unchanged", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
-    mockStorage.getCharges.mockResolvedValue([
-      makeCharge("c-005", "Estacionamiento"),
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      makeLedgerLine([makeCharge("c-005", "Estacionamiento")]),
     ]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
@@ -293,7 +316,7 @@ describe("master-folio tag-stripping — GET /api/groups/:groupId/master-folio",
   it("does not mutate the original charge object returned by storage", async () => {
     mockStorage.getGroup.mockResolvedValue(makeGroup());
     const originalCharge = makeCharge("c-006", "Spa [xfer:sp-007]");
-    mockStorage.getCharges.mockResolvedValue([originalCharge]);
+    mockStorage.getGroupReservationLedger.mockResolvedValue([makeLedgerLine([originalCharge])]);
 
     const { status, body } = await getMasterFolio(baseUrl, GROUP_ID);
 

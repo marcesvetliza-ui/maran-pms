@@ -124,6 +124,7 @@ vi.mock("../db-storage", async () => {
 
 vi.mock("../billing/groupInvoiceScope", () => ({
   assertGroupPaymentInvoiceScope: vi.fn(),
+  assertMasterFacturaTAllowed: vi.fn(),
   getGroupInvoiceSnapshot: vi.fn().mockResolvedValue({
     sources: [],
     totals: { eligible: 0, invoiced: 0, available: 0 },

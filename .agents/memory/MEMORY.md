@@ -51,4 +51,4 @@
 - [Group payment cash movements](group-payment-cash-movements.md) — every payment-collecting flow (incl. legacy entry points) must register a cash movement, or Caja silently excludes real money collected.
 - [PG test fixture for master-folio flows](pg-test-master-folio-fixture.md) — seed group_charges (not rooms/reservations) for a real-DB master-folio balance; new *.pg.test.ts files must be added to package.json's test:postgres by hand.
 - [Group payments report SQL-level filters](group-payment-filters-sql.md) — groupId/status filter the main query in SQL; the "Grupo" dropdown uses a separate date-only-scoped options endpoint so it never shrinks with the status filter.
-- [npm test orphaned server tests](npm-test-orphaned-server-tests.md) — server/tests/*.test.ts only runs if individually named in package.json; new tests must be added to the script by hand.
+- [npm test server test wiring](npm-test-orphaned-server-tests.md) — npm test/test:postgres now glob all server/tests/*.test.ts and *.pg.test.ts; watch for mock-drift 500s once orphaned tests actually run.
