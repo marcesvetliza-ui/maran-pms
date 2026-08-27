@@ -42,17 +42,21 @@ jobs:
 
       - name: Instalar dependencias
         run: |
+          # `npm ci` dispara de forma reproducible el bug "Exit handler never
+          # called!" de npm en este runner (ver npm/cli#7657). `npm install`
+          # usa una ruta de reify distinta que no lo activa; mantenemos
+          # también un fallback a npm ci con reintentos por si reaparece.
           for i in 1 2 3; do
-            echo "Intento $i de npm ci..."
-            if npm ci --no-audit --no-fund; then
-              echo "npm ci OK"
+            echo "Intento $i de npm install..."
+            if npm install --no-audit --no-fund; then
+              echo "npm install OK"
               exit 0
             fi
-            echo "npm ci falló en el intento $i, reintentando..."
+            echo "npm install falló en el intento $i, reintentando..."
             rm -rf node_modules
             sleep 5
           done
-          echo "npm ci falló luego de 3 intentos"
+          echo "npm install falló luego de 3 intentos"
           exit 1
 
       - name: Preparar esquema de PostgreSQL para tests de integración
