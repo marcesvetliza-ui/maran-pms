@@ -52,3 +52,4 @@
 - [PG test fixture for master-folio flows](pg-test-master-folio-fixture.md) — seed group_charges (not rooms/reservations) for a real-DB master-folio balance; new *.pg.test.ts files must be added to package.json's test:postgres by hand.
 - [Group payments report SQL-level filters](group-payment-filters-sql.md) — groupId/status filter the main query in SQL; the "Grupo" dropdown uses a separate date-only-scoped options endpoint so it never shrinks with the status filter.
 - [npm test server test wiring](npm-test-orphaned-server-tests.md) — npm test/test:postgres now glob all server/tests/*.test.ts and *.pg.test.ts; watch for mock-drift 500s once orphaned tests actually run.
+- [GitHub Actions npm exit-handler bug](github-actions-npm-exit-handler-bug.md) — npm ci/install hangs ~70-75s then crashes on this repo's CI runner; 6 fixes tried and failed identically, don't repeat them.
