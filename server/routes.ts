@@ -1707,11 +1707,24 @@ export async function registerRoutes(
   // opening each one individually.
   app.get("/api/reports/group-payments", requireAuth, async (req, res) => {
     try {
-      const { from, to } = req.query as { from: string; to: string };
-      const data = await storage.getReportGroupPayments(from, to);
+      const { from, to, groupId, status } = req.query as { from: string; to: string; groupId?: string; status?: string };
+      const data = await storage.getReportGroupPayments(from, to, groupId || undefined, status || undefined);
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Error fetching group payments report" });
+    }
+  });
+
+  // Distinct groups for the Reportes › Grupos filter dropdown — see
+  // getReportGroupPaymentsGroupOptions for why this stays independent of
+  // the groupId/status filters on the main endpoint above.
+  app.get("/api/reports/group-payments/groups", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportGroupPaymentsGroupOptions(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching group payments group options" });
     }
   });
 

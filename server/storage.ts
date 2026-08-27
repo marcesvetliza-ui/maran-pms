@@ -781,7 +781,8 @@ export interface IStorage {
   getReportByChannel(from: string, to: string): Promise<any[]>;
   getReportReservations(from: string, to: string, status?: string): Promise<any[]>;
   getReportPayments(from: string, to: string): Promise<any>;
-  getReportGroupPayments(from: string, to: string): Promise<any[]>;
+  getReportGroupPayments(from: string, to: string, groupId?: string, status?: string): Promise<any[]>;
+  getReportGroupPaymentsGroupOptions(from: string, to: string): Promise<{ id: string; label: string }[]>;
   getReportTopGuests(from: string, to: string, limit?: number): Promise<any[]>;
   getReportHousekeeping(from: string, to: string): Promise<any>;
   getReportRestaurant(from: string, to: string): Promise<any>;

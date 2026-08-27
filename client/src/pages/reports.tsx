@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -278,9 +278,12 @@ export default function ReportsPage() {
   // Cross-group payment history — reuses GroupPaymentHistoryRow, the same
   // row renderer as the per-group Folio Grupal tab, so both views agree on
   // what a payment's money-relevant facts look like.
+  // groupId/status are applied at the SQL level (server/db-storage.ts
+  // getReportGroupPayments) so a large date range never requires downloading
+  // every payment just to narrow it down client-side.
   const groupPayments = useQuery<any[]>({
-    queryKey: ["/api/reports/group-payments", appliedFrom, appliedTo],
-    queryFn: () => fetchReport(`/api/reports/group-payments?from=${appliedFrom}&to=${appliedTo}`),
+    queryKey: ["/api/reports/group-payments", appliedFrom, appliedTo, groupPaymentsGroupFilter, groupPaymentsStatusFilter],
+    queryFn: () => fetchReport(`/api/reports/group-payments?from=${appliedFrom}&to=${appliedTo}${groupPaymentsGroupFilter !== "all" ? `&groupId=${groupPaymentsGroupFilter}` : ""}${groupPaymentsStatusFilter !== "all" ? `&status=${groupPaymentsStatusFilter}` : ""}`),
     enabled: activeTab === "group-payments",
   });
 
@@ -294,24 +297,20 @@ export default function ReportsPage() {
     enabled: activeTab === "group-payments",
   });
 
-  // Distinct groups present in the current date range, for the group picker —
-  // derived from the payments themselves so the list never offers a group
-  // with zero payments in the selected period.
-  const groupPaymentsGroupOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const gp of groupPayments.data ?? []) {
-      if (!map.has(gp.groupId)) map.set(gp.groupId, gp.groupName || gp.groupCode || gp.groupId);
-    }
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
-  }, [groupPayments.data]);
+  // Distinct groups present in the current date range, for the group picker.
+  // Fetched independently of groupId/status so selecting a status never
+  // shrinks the list of selectable groups, and stays cheap (one row per
+  // group) no matter how many payments the range contains.
+  const groupPaymentsGroupOptionsQuery = useQuery<{ id: string; label: string }[]>({
+    queryKey: ["/api/reports/group-payments/groups", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/group-payments/groups?from=${appliedFrom}&to=${appliedTo}`),
+    enabled: activeTab === "group-payments",
+  });
+  const groupPaymentsGroupOptions = groupPaymentsGroupOptionsQuery.data ?? [];
 
-  const filteredGroupPayments = useMemo(() => {
-    return (groupPayments.data ?? []).filter((gp) => {
-      if (groupPaymentsGroupFilter !== "all" && gp.groupId !== groupPaymentsGroupFilter) return false;
-      if (groupPaymentsStatusFilter !== "all" && getGroupPaymentStatus(gp) !== groupPaymentsStatusFilter) return false;
-      return true;
-    });
-  }, [groupPayments.data, groupPaymentsGroupFilter, groupPaymentsStatusFilter]);
+  // Filtering now happens server-side; this is just the fetched (already
+  // filtered) result, kept under its old name to minimize churn below.
+  const filteredGroupPayments = groupPayments.data ?? [];
 
   const periodoFromDate = (dateStr: string) => {
     const d = new Date(dateStr + "T12:00:00");
@@ -1713,9 +1712,9 @@ export default function ReportsPage() {
               <CardTitle data-testid="text-group-payments-title">Historial de Pagos Grupales</CardTitle>
             </CardHeader>
             <CardContent>
-              {groupPayments.isLoading ? (
+              {groupPayments.isLoading || groupPaymentsGroupOptionsQuery.isLoading ? (
                 <LoadingSkeleton />
-              ) : groupPayments.data && groupPayments.data.length > 0 ? (
+              ) : groupPaymentsGroupOptions.length > 0 ? (
                 <>
                   <div className="mb-4 flex flex-wrap items-end gap-3">
                     <div className="w-full sm:w-56">

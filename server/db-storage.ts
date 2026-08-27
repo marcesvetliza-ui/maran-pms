@@ -29,7 +29,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
   throw new Error(`Tipo de valor de voucher inválido: ${value}`);
 }
 
-import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, getTableColumns } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "./db";
 import { IStorage } from "./storage";
 import {
@@ -5206,7 +5206,22 @@ export class DatabaseStorage implements IStorage {
   // renders per-group (client/src/components/group-payment-history-row.tsx),
   // plus groupName/groupCode so a mixed list of payments from many groups
   // stays attributable without a second round-trip per row.
-  async getReportGroupPayments(from: string, to: string): Promise<any[]> {
+  // status mirrors the client's getGroupPaymentStatus: "anulado" (NC issued)
+  // takes priority over "facturado" (invoice emitted), otherwise "pendiente".
+  // Keep this in sync with client/src/pages/reports.tsx.
+  private groupPaymentStatusCondition(status?: string) {
+    if (status === "anulado") return isNotNull(groupPayments.invoiceNcRef);
+    if (status === "facturado") return and(isNotNull(groupPayments.invoiceRef), isNull(groupPayments.invoiceNcRef));
+    if (status === "pendiente") return and(isNull(groupPayments.invoiceRef), isNull(groupPayments.invoiceNcRef));
+    return undefined;
+  }
+
+  async getReportGroupPayments(from: string, to: string, groupId?: string, status?: string): Promise<any[]> {
+    const conditions = [gte(groupPayments.date, from), lte(groupPayments.date, to)];
+    if (groupId) conditions.push(eq(groupPayments.groupId, groupId));
+    const statusCondition = this.groupPaymentStatusCondition(status);
+    if (statusCondition) conditions.push(statusCondition);
+
     const rows = await db.select({
       id: groupPayments.id,
       groupId: groupPayments.groupId,
@@ -5229,9 +5244,30 @@ export class DatabaseStorage implements IStorage {
     })
       .from(groupPayments)
       .leftJoin(groups, eq(groups.id, groupPayments.groupId))
-      .where(and(gte(groupPayments.date, from), lte(groupPayments.date, to)))
+      .where(and(...conditions))
       .orderBy(desc(groupPayments.date), desc(groupPayments.createdAt));
     return rows;
+  }
+
+  // Distinct groups with at least one payment in the date range, for the
+  // Reportes › Grupos "Grupo" filter dropdown. Independent of the
+  // groupId/status filters above so narrowing by status never shrinks the
+  // list of selectable groups, and cheap regardless of how many payments
+  // exist in the range (grouped down to one row per group).
+  async getReportGroupPaymentsGroupOptions(from: string, to: string): Promise<{ id: string; label: string }[]> {
+    const rows = await db.select({
+      id: groupPayments.groupId,
+      name: groups.name,
+      code: groups.groupCode,
+    })
+      .from(groupPayments)
+      .leftJoin(groups, eq(groups.id, groupPayments.groupId))
+      .where(and(gte(groupPayments.date, from), lte(groupPayments.date, to)))
+      .groupBy(groupPayments.groupId, groups.name, groups.groupCode);
+
+    return rows
+      .map((r) => ({ id: r.id, label: r.name || r.code || r.id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }
 
   async getReportTopGuests(from: string, to: string, limit: number = 50): Promise<any[]> {
