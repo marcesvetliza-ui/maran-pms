@@ -5201,6 +5201,39 @@ export class DatabaseStorage implements IStorage {
     return { byMethod, grandTotal: Math.round(grandTotal) };
   }
 
+  // Group payments across ALL groups for a date range — the Reportes ›
+  // Grupos view. Returns the same raw fields GroupPaymentHistoryRow already
+  // renders per-group (client/src/components/group-payment-history-row.tsx),
+  // plus groupName/groupCode so a mixed list of payments from many groups
+  // stays attributable without a second round-trip per row.
+  async getReportGroupPayments(from: string, to: string): Promise<any[]> {
+    const rows = await db.select({
+      id: groupPayments.id,
+      groupId: groupPayments.groupId,
+      groupName: groups.name,
+      groupCode: groups.groupCode,
+      date: groupPayments.date,
+      amount: groupPayments.amount,
+      method: groupPayments.method,
+      reference: groupPayments.reference,
+      distribution: groupPayments.distribution,
+      paymentMethodDetail: groupPayments.paymentMethodDetail,
+      destination: groupPayments.destination,
+      receiptType: groupPayments.receiptType,
+      billingEntityType: groupPayments.billingEntityType,
+      billingEntityId: groupPayments.billingEntityId,
+      invoiceRef: groupPayments.invoiceRef,
+      invoiceNcRef: groupPayments.invoiceNcRef,
+      receiverDetails: groupPayments.receiverDetails,
+      retentionDetail: groupPayments.retentionDetail,
+    })
+      .from(groupPayments)
+      .leftJoin(groups, eq(groups.id, groupPayments.groupId))
+      .where(and(gte(groupPayments.date, from), lte(groupPayments.date, to)))
+      .orderBy(desc(groupPayments.date), desc(groupPayments.createdAt));
+    return rows;
+  }
+
   async getReportTopGuests(from: string, to: string, limit: number = 50): Promise<any[]> {
     const periodRes = await db.select().from(reservations)
       .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));

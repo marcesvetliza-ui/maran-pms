@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GroupPaymentHistoryRow } from "@/components/group-payment-history-row";
 import {
   LineChart,
   BarChart,
@@ -255,6 +257,25 @@ export default function ReportsPage() {
     enabled: activeTab === "pending-balances",
   });
 
+  // Cross-group payment history — reuses GroupPaymentHistoryRow, the same
+  // row renderer as the per-group Folio Grupal tab, so both views agree on
+  // what a payment's money-relevant facts look like.
+  const groupPayments = useQuery<any[]>({
+    queryKey: ["/api/reports/group-payments", appliedFrom, appliedTo],
+    queryFn: () => fetchReport(`/api/reports/group-payments?from=${appliedFrom}&to=${appliedTo}`),
+    enabled: activeTab === "group-payments",
+  });
+
+  const companiesForGroupPayments = useQuery<any[]>({
+    queryKey: ["/api/companies"],
+    enabled: activeTab === "group-payments",
+  });
+
+  const agenciesForGroupPayments = useQuery<any[]>({
+    queryKey: ["/api/agencies"],
+    enabled: activeTab === "group-payments",
+  });
+
   const periodoFromDate = (dateStr: string) => {
     const d = new Date(dateStr + "T12:00:00");
     return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
@@ -382,6 +403,7 @@ export default function ReportsPage() {
     eventos: { label: "Eventos", tabs: ["events"] },
     operaciones: { label: "Operaciones", tabs: ["housekeeping", "housekeeping-productivity", "maintenance", "inventory"] },
     administracion: { label: "Administración", tabs: ["payments", "billing"] },
+    grupos: { label: "Grupos", tabs: ["group-payments"] },
   };
   const TAB_TO_AREA: Record<string, string> = Object.fromEntries(
     Object.entries(AREA_TABS).flatMap(([area, v]) => v.tabs.map((t) => [t, area]))
@@ -478,6 +500,34 @@ export default function ReportsPage() {
               formatARS(parseFloat(p.amount || "0")), p.reference || ""
             ]),
             "facturacion"
+          );
+        }
+        break;
+      case "group-payments":
+        if (groupPayments.data) {
+          exportCSV(
+            ["Fecha", "Grupo", "Monto", "Método", "Destino", "Comprobante", "Receptor", "Retención"],
+            groupPayments.data.map((gp) => {
+              const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
+                ? gp.paymentMethodDetail.map((row: any) => row.method).join(" + ")
+                : gp.method;
+              const receiverName = gp.receiverDetails?.razonSocial
+                || (gp.billingEntityId ? (gp.billingEntityType === "agency"
+                  ? agenciesForGroupPayments.data?.find((e: any) => e.id === gp.billingEntityId)
+                  : companiesForGroupPayments.data?.find((e: any) => e.id === gp.billingEntityId))?.razonSocial
+                : null)
+                || "";
+              const retencion = Array.isArray(gp.retentionDetail)
+                ? gp.retentionDetail.filter((r: any) => r?.monto).map((r: any) => `${r.tipo}: ${formatARS(parseFloat(r.monto || "0"))}`).join(" + ")
+                : "";
+              return [
+                gp.date, gp.groupName || gp.groupCode || gp.groupId, formatARS(parseFloat(gp.amount || "0")),
+                methodsLabel, gp.destination === "master_folio" ? "Folio Maestro" : "Distribuido entre habitaciones",
+                gp.invoiceRef ? "Facturado" : (gp.receiptType && gp.receiptType !== "none" ? gp.receiptType : "Anticipo"),
+                receiverName, retencion,
+              ];
+            }),
+            "pagos-grupales"
           );
         }
         break;
@@ -689,6 +739,15 @@ export default function ReportsPage() {
             <TabsTrigger value="billing" data-testid="tab-billing">
               <CreditCard className="h-4 w-4 mr-1" />
               Facturación
+            </TabsTrigger>
+          </TabsList>
+        )}
+
+        {activeArea === "grupos" && (
+          <TabsList className="flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="group-payments" data-testid="tab-group-payments">
+              <Users className="h-4 w-4 mr-1" />
+              Pagos de Grupos
             </TabsTrigger>
           </TabsList>
         )}
@@ -1610,6 +1669,45 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="group-payments" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle data-testid="text-group-payments-title">Historial de Pagos Grupales</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {groupPayments.isLoading ? (
+                <LoadingSkeleton />
+              ) : groupPayments.data && groupPayments.data.length > 0 ? (
+                <>
+                  <div className="mb-4 flex flex-wrap gap-4">
+                    <p className="text-lg font-semibold" data-testid="text-group-payments-total">
+                      Total: {formatARS(groupPayments.data.reduce((s, gp) => s + parseFloat(gp.amount || "0"), 0))}
+                    </p>
+                    <p className="text-sm text-muted-foreground pt-1">
+                      {groupPayments.data.length} pago{groupPayments.data.length === 1 ? "" : "s"} en {new Set(groupPayments.data.map((gp) => gp.groupId)).size} grupo{new Set(groupPayments.data.map((gp) => gp.groupId)).size === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="rounded-md border divide-y" data-testid="list-group-payments">
+                    {groupPayments.data.map((gp) => (
+                      <Link key={gp.id} href={`/groups/${gp.groupId}`} className="block hover:bg-muted/40 transition-colors" data-testid={`link-group-payment-${gp.id}`}>
+                        <GroupPaymentHistoryRow
+                          gp={gp}
+                          companies={companiesForGroupPayments.data ?? []}
+                          agencies={agenciesForGroupPayments.data ?? []}
+                          groupName={gp.groupName || gp.groupCode || gp.groupId}
+                        />
+                      </Link>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="text-muted-foreground text-center py-8">No hay pagos de grupos para el período seleccionado</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="arrivals-departures" className="space-y-4 mt-4">
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {

@@ -1700,6 +1700,21 @@ export async function registerRoutes(
     }
   });
 
+  // Cross-group payment history for Reportes › Grupos — same money-relevant
+  // facts as the per-group "Historial de Pagos Grupales" card
+  // (client/src/components/group-payment-history-row.tsx), but across every
+  // group in the date range so reconciling many groups doesn't require
+  // opening each one individually.
+  app.get("/api/reports/group-payments", requireAuth, async (req, res) => {
+    try {
+      const { from, to } = req.query as { from: string; to: string };
+      const data = await storage.getReportGroupPayments(from, to);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching group payments report" });
+    }
+  });
+
   app.get("/api/reports/caja-unificada", requireAuth, async (req, res) => {
     try {
       const fecha = (req.query.fecha as string) || getArgentinaToday();
