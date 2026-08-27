@@ -95,6 +95,42 @@ function paymentRowsGrossTotal(rows: Array<{ amount: string; retention?: { monto
   return rows.reduce((s, r) => s + (parseFloat(r.amount) || 0) + (r.retention?.monto || 0), 0);
 }
 
+// Group payments (Pago Grupal / Pagar Folio Maestro) previously never touched
+// the cash register: they went straight into group_payments/payments with no
+// matching cash_movements row, so they were invisible in Caja/Reportes even
+// though real cash/card/transfer money changed hands. This registers one
+// income movement per non-cuenta_corriente row (cuenta_corriente settles via
+// account_movements, not cash — registering it here would double count).
+// Area is "reception" (there's no dedicated "grupos" cash-register shift/area)
+// so these land in the same shift a receptionist already has open, exactly
+// like an individual reservation payment would.
+// Best-effort: a failure here must never roll back the payment that already
+// succeeded, matching the pattern used for reservation/restaurant/spa/event
+// payments elsewhere in this codebase.
+async function registerGroupPaymentCashMovements(params: {
+  groupId: string;
+  rows: Array<{ method: string; amount: string; retention?: { tipo: string; monto: number } | null }>;
+  groupPaymentId: string;
+  receiptType?: string | null;
+  registeredBy?: string | null;
+  label: string;
+}) {
+  for (const row of params.rows) {
+    if (row.method === "cuenta_corriente") continue;
+    const amount = parseFloat(row.amount) || 0;
+    if (amount <= 0) continue;
+    try {
+      await storage.registerCashMovement(
+        "reception", "group_payment", params.groupId, params.label,
+        row.method, String(amount), "income",
+        params.registeredBy || undefined, params.receiptType || undefined, params.groupPaymentId
+      );
+    } catch (e) {
+      console.error("Error registrando movimiento de caja (pago grupal):", e);
+    }
+  }
+}
+
 // Helper: get or create the single placeholder guest for a group
 async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
   const code = `GROUP-${groupId}`;
@@ -1027,6 +1063,15 @@ export function registerGroupsRoutes(app: Express) {
         receiverDetails: receiverDetails || null,
       });
 
+      await registerGroupPaymentCashMovements({
+        groupId: req.params.groupId,
+        rows: paymentRows,
+        groupPaymentId: recorded.groupPayment.id,
+        receiptType: receiptType || null,
+        registeredBy: (req.user as any)?.username || null,
+        label: `Pago Grupal — ${group.name}`,
+      });
+
       let checkoutCount = 0;
       if (closeAllRooms) {
         for (const reservation of activeReservations) {
@@ -1335,6 +1380,20 @@ export function registerGroupsRoutes(app: Express) {
         receivedBy: (req.user as any)?.username || null,
         notes: notes || null,
         receiptType: "sin_comprobante",
+      });
+
+      // This legacy entry point must register a cash movement exactly like
+      // the unified Pago Grupal / Folio Maestro flows do, or payments made
+      // through it are invisible in Caja while still counted in the
+      // group-scoped unified report — an inconsistent operational cash view.
+      const groupForLabel = await storage.getGroup(req.params.groupId);
+      await registerGroupPaymentCashMovements({
+        groupId: req.params.groupId,
+        rows: [{ method, amount: totalAmount.toFixed(2) }],
+        groupPaymentId: recorded.groupPayment.id,
+        receiptType: "sin_comprobante",
+        registeredBy: (req.user as any)?.username || null,
+        label: `Pago Grupal — ${groupForLabel?.name || req.params.groupId}`,
       });
 
       await audit(req, "create", "groups",
@@ -1655,6 +1714,15 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: receiverDetails || null,
+      });
+
+      await registerGroupPaymentCashMovements({
+        groupId: req.params.groupId,
+        rows,
+        groupPaymentId: recorded.groupPayment.id,
+        receiptType: receiptType || null,
+        registeredBy: (req.user as any)?.username || null,
+        label: `Pago Folio Maestro — ${group.name}`,
       });
 
       await audit(req, "create", "groups",

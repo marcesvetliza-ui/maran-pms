@@ -135,6 +135,111 @@ const CONDICION_IVA_OPTIONS = [
   "No Responsable",
 ];
 
+// Guests/companies/agencies persist Condición IVA in different shapes (snake_case
+// enum values like "responsable_inscripto" for guests/companies/agencies vs. the
+// display labels used by CONDICION_IVA_OPTIONS here). Any value coming from one of
+// those records must go through this normalizer before it's used to drive the
+// Select or the comprobante-type filter below, or it silently fails to match any
+// option and the field looks blank/default instead of reflecting the real value.
+const CONDICION_IVA_NORMALIZE_MAP: Record<string, string> = {
+  responsable_inscripto: "Responsable Inscripto",
+  consumidor_final: "Consumidor Final",
+  monotributo: "Monotributista",
+  monotributista: "Monotributista",
+  exento: "Exento",
+  no_responsable: "No Responsable",
+};
+function normalizeCondicionIva(raw: string | null | undefined): string {
+  if (!raw) return "Consumidor Final";
+  if (CONDICION_IVA_OPTIONS.includes(raw)) return raw;
+  const key = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
+  return CONDICION_IVA_NORMALIZE_MAP[key] || "Consumidor Final";
+}
+
+// One row of the full "Historial de Pagos Grupales" — every group_payments
+// record for the group regardless of destino (Folio Maestro vs. Distribuido
+// entre habitaciones), so a distributed payment is no longer invisible
+// outside the raw DB. Kept intentionally lighter than the Folio Maestro
+// card's inline list (no NC/anular actions here — those stay scoped to the
+// Folio Maestro reconciliation flow) but shows the same money-relevant facts:
+// comprobante/invoice status, receptor, método(s), retención and destino.
+function GroupPaymentHistoryRow({ gp, companies, agencies }: { gp: any; companies: any[]; agencies: any[] }) {
+  const invoiceRefParsed = (() => {
+    if (!gp.invoiceRef) return null;
+    try { return JSON.parse(gp.invoiceRef); } catch { return null; }
+  })();
+  const invoiceBadge = invoiceRefParsed
+    ? `${invoiceRefParsed.tipo_comprobante ?? "FAC"} ${String(invoiceRefParsed.punto_venta ?? "").padStart(4, "0")}-${String(invoiceRefParsed.numero ?? "").padStart(8, "0")}`
+    : null;
+  const ncRefParsed = (() => {
+    if (!gp.invoiceNcRef) return null;
+    try { return JSON.parse(gp.invoiceNcRef); } catch { return null; }
+  })();
+  const ncBadge = ncRefParsed
+    ? `${ncRefParsed.tipo_comprobante ?? "NC"} ${String(ncRefParsed.punto_venta ?? "").padStart(4, "0")}-${String(ncRefParsed.numero ?? "").padStart(8, "0")}`
+    : null;
+  const receiptLabel = invoiceBadge ? null
+    : (!gp.receiptType || gp.receiptType === "none") ? "Anticipo"
+    : gp.receiptType === "factura_a" ? "Factura A"
+    : gp.receiptType === "factura_b" ? "Factura B"
+    : gp.receiptType === "factura_t" ? "Factura T"
+    : gp.receiptType === "factura_mipyme_a" ? "MiPyme A"
+    : gp.receiptType === "ticket" ? "Ticket"
+    : gp.receiptType === "cierre_habitacion" ? "Voucher Habitaciones"
+    : gp.receiptType;
+  const entityName = (() => {
+    if (!gp.billingEntityId) return null;
+    const list = gp.billingEntityType === "agency" ? agencies : companies;
+    const found = (list as any[]).find((e: any) => e.id === gp.billingEntityId);
+    return found ? (found.razonSocial || found.nombreFantasia) : null;
+  })();
+  const receiverName = gp.receiverDetails?.razonSocial || entityName;
+  const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
+    ? gp.paymentMethodDetail.map((row: any) => PAYMENT_METHOD_LABELS[row.method] || row.method).join(" + ")
+    : PAYMENT_METHOD_LABELS[gp.method] || gp.method;
+  const destinoLabel = gp.destination === "master_folio" ? "Folio Maestro" : "Distribuido entre habitaciones";
+  return (
+    <div className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-history-${gp.id}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted-foreground">{gp.date}</span>
+        <Badge variant="secondary">{methodsLabel}</Badge>
+        <Badge variant="outline" className="text-xs">{destinoLabel}</Badge>
+        {receiptLabel && (
+          <Badge variant="outline" className="text-xs gap-1 border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+            <Receipt className="h-3 w-3" />
+            {receiptLabel}
+          </Badge>
+        )}
+        {invoiceBadge && (
+          <Badge variant="outline" className="text-xs font-mono gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
+            <Receipt className="h-3 w-3" />
+            {invoiceBadge}
+          </Badge>
+        )}
+        {ncBadge && (
+          <Badge variant="outline" className="text-xs font-mono gap-1 border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-400">
+            <FileX className="h-3 w-3" />
+            {ncBadge}
+          </Badge>
+        )}
+        {receiverName && <span className="text-xs text-muted-foreground">→ {receiverName}</span>}
+        {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
+        {Array.isArray(gp.retentionDetail) && gp.retentionDetail.map((ret: any, retIdx: number) => {
+          if (!ret?.monto) return null;
+          const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : ret.tipo ? `Ret. ${ret.tipo}` : null;
+          if (!retLabel) return null;
+          return (
+            <Badge key={retIdx} variant="outline" className="text-xs border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-400">
+              {retLabel}: ${Number(ret.monto).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+            </Badge>
+          );
+        })}
+      </div>
+      <span className="font-semibold text-green-600 shrink-0 ml-2">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+    </div>
+  );
+}
+
 type GItem = {
   descripcion: string;
   cantidad: number;
@@ -941,6 +1046,30 @@ export default function GroupDetailPage() {
 
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
 
+  // Pre-loads the "Pago Grupal" Receptor from the group's configured billing
+  // empresa/agencia (group.billingEntityType/billingEntityId), so the operator
+  // doesn't have to re-search a company that's already on file for this group.
+  // Returns true when it actually applied a receptor.
+  function prefillGroupReceptorFromBillingEntity(): boolean {
+    const entityType = (group as any)?.billingEntityType as "company" | "agency" | undefined;
+    const entityId = (group as any)?.billingEntityId as string | undefined;
+    if (!entityType || !entityId) return false;
+    const list = entityType === "agency" ? agencies : companies;
+    const entity = (list as any[]).find((e: any) => e.id === entityId);
+    if (!entity) return false;
+    setGroupPaymentReceptorType(entityType);
+    setGroupPaymentRazonSocial(entity.razonSocial || entity.nombreFantasia || "");
+    setGroupPaymentCuit(entity.cuilCuit ? String(entity.cuilCuit).replace(/-/g, "") : "");
+    setGroupPaymentDni("");
+    setGroupPaymentCondicionIva(normalizeCondicionIva(entity.condicionIva));
+    setGroupPaymentDomicilio(entity.direccion || entity.domicilio || "");
+    setGroupPaymentCcEntityType(entityType);
+    setGroupPaymentCcEntityId(entityId);
+    setGroupPaymentGuestId(null);
+    setGroupPaymentReceptorLocked(true);
+    return true;
+  }
+
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
     queryKey: ["/api/groups", groupId, "folio"],
     queryFn: async () => {
@@ -972,6 +1101,19 @@ export default function GroupDetailPage() {
     queryKey: ["/api/groups", groupId, "direct-invoices"],
     queryFn: async () => {
       const res = await fetch(`/api/groups/${groupId}/direct-invoices`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  // Full history of every "Pago Grupal" received for this group, regardless of
+  // destino (Folio Maestro vs. Distribuido entre habitaciones). The Folio
+  // Maestro card below only lists master-destined payments, so without this a
+  // group_distribution payment was invisible everywhere except the raw DB.
+  const { data: groupPaymentsHistory = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "payments"],
+    queryFn: async () => {
+      const res = await fetch(`/api/groups/${groupId}/payments`, { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
@@ -1292,6 +1434,7 @@ export default function GroupDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
       toast({ title: "Pago grupal registrado" });
       setShowFolioPaymentDialog(false);
       setFolioPaymentAmount("");
@@ -1596,6 +1739,26 @@ export default function GroupDetailPage() {
     );
   }
 
+  // Hoisted out of the "Pago Grupal" dialog's inline render block so the
+  // DialogFooter's confirm button (rendered as a JSX sibling, outside that
+  // block's lexical scope) can actually gate submission on it — a mismatch
+  // between "Conceptos" (invoice items) and "Forma de pago" must block the
+  // Registrar Pago button itself, not just show a warning.
+  const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+  const groupPaymentIsMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+  const groupPaymentHasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
+  const groupPaymentEntityRequired = (groupPaymentIsFiscal && !groupPaymentIsMipyme) || groupPaymentHasCuentaCorriente;
+  const groupPaymentHasEntityData = !!groupPaymentRazonSocial.trim();
+  const groupPaymentRowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
+  const groupPaymentItemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
+  const groupPaymentItemsVsPaymentDiff = Math.round((groupPaymentItemsTotal - (groupPaymentRowsTotal + groupPaymentRetentionsTotal)) * 100) / 100;
+  const groupPaymentItemsMismatch = groupPaymentIsFiscal && Math.abs(groupPaymentItemsVsPaymentDiff) > 0.01;
+  const groupPaymentCanSubmit = !groupPaymentMutation.isPending
+    && (groupPaymentIsMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+    && (!groupPaymentEntityRequired || groupPaymentHasEntityData)
+    && !groupPaymentItemsMismatch;
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-4 flex-wrap">
@@ -1646,15 +1809,8 @@ export default function GroupDetailPage() {
           <Button
             variant="default"
             onClick={() => {
-              setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
-              // Pre-fill billing entity from group config
-              if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
-                setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
-                setGroupPaymentCcEntityId((group as any).billingEntityId);
-              } else {
-                setGroupPaymentCcEntityType("company");
-                setGroupPaymentCcEntityId("");
-              }
+              resetGroupPaymentDialogFields();
+              prefillGroupReceptorFromBillingEntity();
               setShowGroupPaymentDialog(true);
             }}
             disabled={groupPaymentMutation.isPending}
@@ -2224,21 +2380,11 @@ export default function GroupDetailPage() {
                             // "Pagar Folio Maestro" opens the unified "Pago Grupal" dialog
                             // pre-set to destino="master" (Aplicar al Folio Maestro) — the
                             // dedicated legacy dialog was retired in favor of this toggle.
+                            resetGroupPaymentDialogFields();
                             const balance = masterFolio.masterBalance;
                             setGroupPaymentRows([{method: "cash", amount: balance > 0 ? String(balance.toFixed(2)) : "", reference: ""}]);
                             setGroupPaymentDestino("master");
-                            // Factura T only covers accommodation-only master folios.
-                            if (groupPaymentReceiptType === "factura_t" && masterFolio.config !== "accommodation") {
-                              setGroupPaymentReceiptType("sin_comprobante");
-                            }
-                            // Pre-fill billing entity from group config
-                            if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
-                              setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
-                              setGroupPaymentCcEntityId((group as any).billingEntityId);
-                            } else {
-                              setGroupPaymentCcEntityType("company");
-                              setGroupPaymentCcEntityId("");
-                            }
+                            prefillGroupReceptorFromBillingEntity();
                             setShowGroupPaymentDialog(true);
                           }}
                           disabled={masterFolio.masterBalance <= 0.01}
@@ -2256,21 +2402,21 @@ export default function GroupDetailPage() {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 p-3 border border-blue-200 dark:border-blue-800">
                         <p className="text-xs text-muted-foreground mb-1">Alojamiento</p>
-                        <p className="text-lg font-bold text-blue-700 dark:text-blue-400">${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        <p className="text-lg font-bold text-blue-700 dark:text-blue-400">${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       {masterFolio.config === "all" && (
                         <div className="rounded-lg bg-purple-50 dark:bg-purple-950/30 p-3 border border-purple-200 dark:border-purple-800">
                           <p className="text-xs text-muted-foreground mb-1">Extras (hab.)</p>
-                          <p className="text-lg font-bold text-purple-700 dark:text-purple-400">${masterFolio.masterExtras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                          <p className="text-lg font-bold text-purple-700 dark:text-purple-400">${masterFolio.masterExtras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                         </div>
                       )}
                       <div className="rounded-lg bg-orange-50 dark:bg-orange-950/30 p-3 border border-orange-200 dark:border-orange-800">
                         <p className="text-xs text-muted-foreground mb-1">Cargos grupales</p>
-                        <p className="text-lg font-bold text-orange-700 dark:text-orange-400">${masterFolio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        <p className="text-lg font-bold text-orange-700 dark:text-orange-400">${masterFolio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       <div className="rounded-lg bg-green-50 dark:bg-green-950/30 p-3 border border-green-200 dark:border-green-800">
                         <p className="text-xs text-muted-foreground mb-1">Pagado</p>
-                        <p className="text-lg font-bold text-green-700 dark:text-green-400">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                        <p className="text-lg font-bold text-green-700 dark:text-green-400">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       <div className={`rounded-lg p-3 border col-span-2 sm:col-span-1 ${masterFolio.masterBalance > 0.01 ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800" : "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"}`}>
                         <p className="text-xs text-muted-foreground mb-1">Saldo pendiente</p>
@@ -2477,6 +2623,27 @@ export default function GroupDetailPage() {
                       </div>
                     )}
 
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* ══════════════════════════════════════════════════ */}
+              {/* HISTORIAL DE PAGOS GRUPALES (todos los destinos)   */}
+              {/* ══════════════════════════════════════════════════ */}
+              {groupPaymentsHistory.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <Receipt className="h-5 w-5 text-muted-foreground" />
+                      Historial de Pagos Grupales
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="rounded-md border divide-y">
+                      {groupPaymentsHistory.map((gp: any) => (
+                        <GroupPaymentHistoryRow key={gp.id} gp={gp} companies={companies as any[]} agencies={agencies as any[]} />
+                      ))}
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -3065,11 +3232,8 @@ export default function GroupDetailPage() {
                   descripcion: `${source.destination} — ${source.concept}`,
                   precioUnitario: Number(source.available),
                 }))));
-                // Pre-fill billing entity from group config
-                if ((group as any)?.billingEntityType && (group as any)?.billingEntityId) {
-                  setGroupPaymentCcEntityType((group as any).billingEntityType as "company" | "agency");
-                  setGroupPaymentCcEntityId((group as any).billingEntityId);
-                } else {
+                // Pre-fill receptor (razón social, CUIT, Condición IVA) from group config
+                if (!prefillGroupReceptorFromBillingEntity()) {
                   setGroupPaymentCcEntityId("");
                   setGroupPaymentCcEntityType("company");
                 }
@@ -3281,6 +3445,16 @@ export default function GroupDetailPage() {
       </AlertDialog>
 
       <Dialog open={showGroupPaymentDialog} onOpenChange={(open) => {
+        if (!open) {
+          // Outside-click / Escape must not silently discard a partially filled
+          // payment — confirm first whenever there's anything worth losing.
+          const hasUnsavedData = groupPaymentRows.some(r => (parseFloat(r.amount) || 0) > 0)
+            || !!groupPaymentRazonSocial.trim()
+            || groupPaymentItems.some(it => it.descripcion.trim() || it.precioUnitario > 0);
+          if (hasUnsavedData && !window.confirm("Hay datos del pago sin guardar. ¿Cerrar de todas formas?")) {
+            return;
+          }
+        }
         setShowGroupPaymentDialog(open);
         if (!open) {
           resetGroupPaymentDialogFields();
@@ -3301,6 +3475,11 @@ export default function GroupDetailPage() {
             const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
             const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
             const isFA = groupPaymentReceiptType === "factura_a";
+            // CUIT vs. DNI must follow WHO the receptor is (Empresa/Agencia always has
+            // CUIT; only a Huésped may show a DNI instead), never which comprobante is
+            // being emitted — a Huésped paying with Factura A still identifies by DNI
+            // unless they explicitly provide a CUIT via razón social search.
+            const isEntityReceptor = groupPaymentReceptorType === "company" || groupPaymentReceptorType === "agency";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
             const retentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
             const groupHasCheckIn = group.reservations.some((r: any) => r.status === "checked_in");
@@ -3328,9 +3507,18 @@ export default function GroupDetailPage() {
             const hasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
             const entityRequired = (isFiscal && !isMipyme) || hasCuentaCorriente;
             const hasEntityData = !!groupPaymentRazonSocial.trim();
+            // "Conceptos" (the invoice line items) must add up to exactly what's being
+            // collected in "Forma de pago" (rows + retenciones) — this holds for all
+            // three quick-fill modes (Sin desglose/Totalizados/Detallados) and for
+            // manually edited items alike, or the emitted comprobante's total silently
+            // diverges from the money actually received.
+            const itemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
+            const itemsVsPaymentDiff = Math.round((itemsTotal - (rowsTotal + retentionsTotal)) * 100) / 100;
+            const itemsMismatch = isFiscal && Math.abs(itemsVsPaymentDiff) > 0.01;
             const canSubmit = !groupPaymentMutation.isPending
               && (isMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-              && (!entityRequired || hasEntityData);
+              && (!entityRequired || hasEntityData)
+              && !itemsMismatch;
 
             // Entity search autocomplete
             const entitySearchResults: any[] = groupPaymentEntitySearch.length >= 2
@@ -3344,18 +3532,29 @@ export default function GroupDetailPage() {
                 }).slice(0, 8)
               : [];
 
+            // Comprobante types are strictly split by Condición IVA: Responsable
+            // Inscripto/Exento may only receive Factura A/MiPyme A (never Ticket/B),
+            // while every other condición may only receive Ticket/Factura B (never
+            // A/MiPyme A). Factura T and Voucher Habitaciones sit outside this split
+            // (foreign-guest and no-comprobante rules respectively). Call this any
+            // time the receptor's condición changes so the current selection — and
+            // the dropdown's visible options — stay consistent with the new value.
+            const applyStrictComprobanteForCondicion = (condicion: string) => {
+              const supportsFA = condicion === "Responsable Inscripto" || condicion === "Exento";
+              setGroupPaymentReceiptType(prev => {
+                if (prev === "sin_comprobante" || prev === "cierre_habitacion" || prev === "factura_t") return prev;
+                const prevIsFAFamily = prev === "factura_a" || prev === "factura_mipyme_a";
+                if (supportsFA && !prevIsFAFamily) return "factura_a";
+                if (!supportsFA && prevIsFAFamily) return "ticket";
+                return prev;
+              });
+            };
+
             const selectGroupEntity = (e: any) => {
               setGroupPaymentRazonSocial(e.razonSocial || e.nombreFantasia || "");
               setGroupPaymentCuit(e.cuilCuit ? String(e.cuilCuit).replace(/-/g, "") : "");
               setGroupPaymentDni("");
-              const condMap: Record<string, string> = {
-                responsable_inscripto: "Responsable Inscripto",
-                consumidor_final: "Consumidor Final",
-                monotributo: "Monotributista",
-                monotributista: "Monotributista",
-                exento: "Exento",
-              };
-              const cond = e.condicionIva ? (condMap[e.condicionIva] ?? e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final");
+              const cond = e.condicionIva ? normalizeCondicionIva(e.condicionIva) : (e.cuilCuit ? "Responsable Inscripto" : "Consumidor Final");
               setGroupPaymentCondicionIva(cond);
               setGroupPaymentDomicilio(e.direccion || e.domicilio || "");
               setGroupPaymentCcEntityType(e._kind);
@@ -3363,10 +3562,7 @@ export default function GroupDetailPage() {
               setGroupPaymentEntitySearch("");
               setGroupPaymentShowEntityDropdown(false);
               setGroupPaymentReceptorLocked(true);
-              // Downgrade the selected comprobante if it's no longer valid for this entity's condición fiscal
-              if ((groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_mipyme_a") && !(cond === "Responsable Inscripto" || cond === "Exento")) {
-                setGroupPaymentReceiptType("factura_b");
-              }
+              applyStrictComprobanteForCondicion(cond);
             };
 
             const clearGroupReceptor = () => {
@@ -3429,6 +3625,7 @@ export default function GroupDetailPage() {
                         setGroupPaymentDni(guest.documentNumber || "");
                         setGroupPaymentCuit("");
                         setGroupPaymentCondicionIva("Consumidor Final");
+                        applyStrictComprobanteForCondicion("Consumidor Final");
                         setGroupPaymentCcEntityType("company");
                         setGroupPaymentCcEntityId("");
                         setGroupPaymentReceptorLocked(true);
@@ -3436,7 +3633,15 @@ export default function GroupDetailPage() {
                           const res = await apiRequest("GET", `/api/guests/${guest.id}`);
                           const full = await res.json();
                           if (full?.direccion) setGroupPaymentDomicilio(full.direccion);
-                          if (full?.vatCondition) setGroupPaymentCondicionIva(full.vatCondition);
+                          if (full?.vatCondition) {
+                            // Guests store condición IVA as a lowercase snake_case enum
+                            // (e.g. "responsable_inscripto"), not the Title-Case labels
+                            // this dialog's Select uses — normalize it or the field
+                            // silently fails to match any option and looks unset.
+                            const normalized = normalizeCondicionIva(full.vatCondition);
+                            setGroupPaymentCondicionIva(normalized);
+                            applyStrictComprobanteForCondicion(normalized);
+                          }
                         } catch {}
                       }}
                       onClear={() => clearGroupReceptor()}
@@ -3488,13 +3693,13 @@ export default function GroupDetailPage() {
                   {/* Datos fiscales — bloqueados salvo domicilio, una vez seleccionado el receptor */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2 space-y-1">
-                      <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
+                      <Label className="text-xs">{isEntityReceptor ? "Razón Social *" : "Nombre y Apellido *"}</Label>
                       <Input value={groupPaymentRazonSocial} readOnly={groupPaymentReceptorLocked}
                         className={groupPaymentReceptorLocked ? "bg-muted/40" : ""}
                         onChange={e => !groupPaymentReceptorLocked && setGroupPaymentRazonSocial(e.target.value)}
                         placeholder={groupPaymentReceptorType === "guest" ? "Seleccioná un huésped..." : "EMPRESA S.A."} data-testid="input-group-razon-social" />
                     </div>
-                    {isFA ? (
+                    {isEntityReceptor ? (
                       <div className="space-y-1">
                         <Label className="text-xs">CUIT *</Label>
                         <Input value={groupPaymentCuit} readOnly={groupPaymentReceptorLocked}
@@ -3518,10 +3723,7 @@ export default function GroupDetailPage() {
                       <Label className="text-xs">Condición IVA</Label>
                       <Select value={groupPaymentCondicionIva} onValueChange={v => {
                         setGroupPaymentCondicionIva(v);
-                        const supportsFA = v === "Responsable Inscripto" || v === "Exento";
-                        if (!supportsFA && (groupPaymentReceiptType === "factura_a" || groupPaymentReceiptType === "factura_mipyme_a")) {
-                          setGroupPaymentReceiptType("factura_b");
-                        }
+                        applyStrictComprobanteForCondicion(v);
                       }} disabled={groupPaymentReceptorLocked}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -3553,7 +3755,7 @@ export default function GroupDetailPage() {
                       onClick={() => { setGroupPaymentEmitirComprobante(false); setGroupPaymentReceiptType("sin_comprobante"); }}
                       className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${!groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                       data-testid="button-group-sin-comprobante">
-                      Sin comprobante / Anticipo
+                      Anticipo
                     </button>
                     <button type="button"
                       onClick={() => {
@@ -3575,9 +3777,11 @@ export default function GroupDetailPage() {
                           <SelectValue placeholder="Seleccionar comprobante..." />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="ticket">Ticket</SelectItem>
+                          {/* Strict split by Condición IVA: RI/Exento only see A/MiPyme A,
+                              everyone else only sees Ticket/B — never both families at once. */}
+                          {!condicionSupportsFA && <SelectItem value="ticket">Ticket</SelectItem>}
                           {condicionSupportsFA && <SelectItem value="factura_a">Factura A</SelectItem>}
-                          <SelectItem value="factura_b">Factura B</SelectItem>
+                          {!condicionSupportsFA && <SelectItem value="factura_b">Factura B</SelectItem>}
                           {condicionSupportsFA && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
                           {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
                           <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
@@ -3775,8 +3979,14 @@ export default function GroupDetailPage() {
                       {/* Total preview */}
                       <div className="bg-muted/30 rounded-lg p-3 text-sm flex justify-between font-semibold">
                         <span>TOTAL ítems:</span>
-                        <span>{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span>
+                        <span>{fmtMoney(itemsTotal)}</span>
                       </div>
+                      {itemsMismatch && (
+                        <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-items-payment-mismatch">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          Los Conceptos ({fmtMoney(itemsTotal)}) no coinciden con la Forma de pago ({fmtMoney(rowsTotal + retentionsTotal)}). Diferencia: {fmtMoney(Math.abs(itemsVsPaymentDiff))}.
+                        </p>
+                      )}
                     </div>
                   </>
                 )}
@@ -3919,7 +4129,7 @@ export default function GroupDetailPage() {
                   <Label className="text-sm font-semibold flex items-center gap-1.5"><Receipt className="h-4 w-4" /> Resumen antes de emitir</Label>
                   <div className="text-sm space-y-1">
                     <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Receptor</span><span className="font-medium text-right">{groupPaymentRazonSocial || "—"}</span></div>
-                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{groupPaymentEmitirComprobante ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Sin comprobante / Anticipo"}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{groupPaymentEmitirComprobante ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Anticipo"}</span></div>
                     {isFiscal && posElectronicos.length > 0 && (
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Punto de Venta</span><span className="font-medium">{groupPaymentPvNum ? `PV ${groupPaymentPvNum.padStart(4, "0")}` : "Por defecto"}</span></div>
                     )}
@@ -3946,10 +4156,7 @@ export default function GroupDetailPage() {
             </Button>
             <Button
               onClick={() => groupPaymentMutation.mutate()}
-              disabled={groupPaymentMutation.isPending
-                || (groupPaymentReceiptType !== "factura_mipyme_a" && !groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-                || (["factura_a", "factura_b", "factura_t"].includes(groupPaymentReceiptType) && !groupPaymentRazonSocial.trim())
-              }
+              disabled={!groupPaymentCanSubmit}
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
@@ -4000,6 +4207,7 @@ export default function GroupDetailPage() {
             setPendingGroupPaymentId("");
             resetGroupPaymentDialogFields();
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
             if (showInvoiceDialog) {
               loadInvoice();
             }
@@ -4056,6 +4264,7 @@ export default function GroupDetailPage() {
               setPendingMasterPaymentId("");
               resetGroupPaymentDialogFields();
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
           />
@@ -4710,6 +4919,7 @@ export default function GroupDetailPage() {
             // The server propagates invoice_nc_ref to the linked group_payment automatically.
             // Refresh master-folio so the NC badge appears and the NC button disappears.
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
           }}
         />
       )}

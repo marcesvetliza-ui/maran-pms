@@ -1705,6 +1705,13 @@ export async function registerRoutes(
       const fecha = (req.query.fecha as string) || getArgentinaToday();
       const todos: any[] = [];
 
+      // Room-level payments created as an allocation of a group payment
+      // (p.group_payment_id set — see recordGroupPayment) are excluded here:
+      // the "grupos" block below counts the *entire* group_payments.amount
+      // once per movement, which already covers every cent of that group
+      // payment regardless of whether it was allocated to a room or to the
+      // Folio Maestro/group-charges balance. Counting both would double the
+      // cash figure for every group payment distributed to rooms.
       const resPayments = await db.execute(sql`
         SELECT p.id, 'reserva' as modulo, p.method as metodo, p.amount as monto,
                p.date as fecha_pago, g.first_name || ' ' || g.last_name as descripcion,
@@ -1713,6 +1720,7 @@ export async function registerRoutes(
         LEFT JOIN reservations r ON p.reservation_id = r.id
         LEFT JOIN guests g ON r.guest_id = g.id
         WHERE p.date = ${fecha} AND (p.status IS NULL OR p.status = 'active')
+          AND p.group_payment_id IS NULL
       `);
       todos.push(...(resPayments.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
 
@@ -1736,6 +1744,27 @@ export async function registerRoutes(
         WHERE ep.paid_at::date = ${fecha} AND (ep.status IS NULL OR ep.status = 'active')
       `);
       todos.push(...(evtRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
+
+      // Group payments (Pago Grupal / Pagar Folio Maestro) can bundle several
+      // payment methods in one row via payment_method_detail — expand each
+      // method into its own movement, same granularity as the other modules.
+      // Cuenta Corriente rows settle through account_movements, not cash, so
+      // they're excluded here just like the group_payment cash-movement writer.
+      const grupoRows = await db.execute(sql`
+        SELECT gp.id || '-' || COALESCE(pmd->>'method', gp.method) as id, 'grupos' as modulo,
+               COALESCE(pmd->>'method', gp.method) as metodo,
+               COALESCE((pmd->>'amount')::numeric, gp.amount::numeric) as monto,
+               gp.date as fecha_pago,
+               'Grupo - ' || COALESCE(g.name, gp.group_id) as descripcion,
+               g.name as referencia,
+               gp.retention_detail as retencion
+        FROM group_payments gp
+        LEFT JOIN groups g ON g.id = gp.group_id
+        LEFT JOIN LATERAL jsonb_array_elements(gp.payment_method_detail) AS pmd ON true
+        WHERE gp.date = ${fecha}
+          AND COALESCE(pmd->>'method', gp.method) IS DISTINCT FROM 'cuenta_corriente'
+      `);
+      todos.push(...(grupoRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
 
       const porMetodo: Record<string, number> = {};
       const porModulo: Record<string, number> = {};

@@ -1,0 +1,12 @@
+---
+name: Group payments and unified cash reporting
+description: Group payments are one financial event that can fan out into per-room ledger rows and cash-register entries; any aggregate report must pick exactly one representation
+---
+
+A single group payment (Pago Grupal / Pagar Folio Maestro) can simultaneously: (a) create one ledger row per room it was allocated to, tagged with the parent group-payment id, and (b) be represented as its own single event for cash-register/report purposes. Both representations carry the *same* money.
+
+**Why:** any report or aggregate that unions "per-reservation payments" with "per-group payments" without excluding the linked rows on one side double-counts every group payment that was distributed to rooms — the room-level rows and the group-level row are two views of one collection, not two collections. This is easy to miss because each query looks correct in isolation.
+
+**How to apply:** when adding a new cash/report aggregate that reads both individual-reservation payments and group payments, explicitly exclude reservation-payment rows that are tagged as belonging to a group payment (or otherwise pick one canonical source), then verify with a distributed (multi-room) group payment specifically — a master-folio-only payment won't expose the bug since it has no room-level rows to duplicate.
+
+Separately: a payment type that never produces a cash-register movement (as group payments didn't, unlike individual reservation payments) silently excludes itself from daily cash reconciliation even though real money changed hands. When adding a new payment flow, check whether it needs to register a cash movement the same way existing flows do. A withheld retención is not itself a cash movement — it's a non-cash deduction, so only the actually-collected amount should register.

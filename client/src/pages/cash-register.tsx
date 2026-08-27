@@ -879,7 +879,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 text-xs text-muted-foreground">
                               <div><span className="font-medium text-foreground">ID movimiento:</span> #{m.id}</div>
                               {m.sourceType && m.sourceType !== "manual" && (
-                                <div><span className="font-medium text-foreground">Origen:</span> {m.sourceType === "cobro_cc" ? "Cobro CC" : m.sourceType === "reservation" ? "Reserva" : m.sourceType === "restaurant" ? "Restaurant" : m.sourceType === "spa" ? "SPA" : m.sourceType === "event" ? "Evento" : m.sourceType}</div>
+                                <div><span className="font-medium text-foreground">Origen:</span> {m.sourceType === "cobro_cc" ? "Cobro CC" : m.sourceType === "reservation" ? "Reserva" : m.sourceType === "restaurant" ? "Restaurant" : m.sourceType === "spa" ? "SPA" : m.sourceType === "event" ? "Evento" : m.sourceType === "group_payment" ? "Pago Grupal" : m.sourceType}</div>
                               )}
                               {m.sourceLabel && m.sourceLabel !== m.description && (
                                 <div><span className="font-medium text-foreground">Referencia:</span> {m.sourceLabel}</div>

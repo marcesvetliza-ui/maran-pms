@@ -52,6 +52,18 @@ const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
 ];
 
+// Condición IVA → tipo de comprobante is a strict, mutually exclusive split:
+// Responsable Inscripto/Exento only ever get Factura A/MiPyme A, everyone
+// else (Monotributista, Consumidor Final, etc.) only gets Factura B —
+// mirrors the same rule enforced server-side in POST /api/billing/invoices
+// and client-side in group-detail.tsx's applyStrictComprobanteForCondicion.
+// Kept in sync here too since this dialog is the single point of invoice
+// emission for reservations, restaurant, spa and events, not just groups.
+function isRiOrExento(condicionIva: string): boolean {
+  const normalized = String(condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return normalized === "responsable_inscripto" || normalized === "exento";
+}
+
 const AREA_LABELS: Record<string, { label: string; color: string }> = {
   recepcion: { label: "Recepción", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   restaurant: { label: "Restaurant", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
@@ -700,8 +712,11 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     const eType: "company" | "agency" = entity._type === "Agencia" ? "agency" : "company";
     setSelectedEntityInfo({ type: eType, id: entity.id });
     if (cuitVal || condVal === "Responsable Inscripto" || condVal === "Exento" || condVal === "Monotributista") {
-      // FA requiere CUIT; sin CUIT usar FB como fallback
-      const auto = (condVal === "Responsable Inscripto" || condVal === "Exento") ? (cuitVal ? "FA" : "FB") : "FB";
+      // Responsable Inscripto/Exento may only receive FA/MiPyme A (never FB),
+      // regardless of whether CUIT is present yet — a missing CUIT surfaces
+      // as a validation error on submit instead of silently switching to an
+      // invalid comprobante for this condición.
+      const auto = isRiOrExento(condVal) ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA") : "FB";
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
       setTipo(nextTipo);
       recalcForTipo(nextTipo, tipo);
@@ -731,7 +746,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       const cuitClean = cuit.replace(/-/g, "");
       if (!cuitClean) errs.cuit = "Requerido para Factura A";
       else if (!/^\d{11}$/.test(cuitClean)) errs.cuit = "Debe tener 11 dígitos (ej: 20123456789)";
-      if (condicionIva === "Consumidor Final") errs.condicionIva = "Factura A no aplica para Consumidor Final";
+    }
+    if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
+      errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto o Exento";
+    }
+    if (tipo === "FB" && isRiOrExento(condicionIva)) {
+      errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto o Exento";
     }
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
@@ -1000,6 +1020,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         if (linkRes.ok) {
           queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "master-folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "invoice-snapshot"] });
           toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al cobro grupal." });
           onSuccess?.(emittedInvoiceData);
           onClose(); resetForm();
@@ -1010,6 +1031,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         const linkRes = await apiRequest("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData: emittedInvoiceData });
         if (linkRes.ok) {
           queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"] });
           toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al folio del grupo." });
           onSuccess?.(emittedInvoiceData);
           onClose(); resetForm();
@@ -1303,8 +1325,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           <Label>Tipo de comprobante</Label>
           <Select value={tipo} onValueChange={v => {
             const prevTipo = tipo; setTipo(v);
-            const cIva = (v === "FA" || v === "FM") ? "Responsable Inscripto" : (v === "FC" || v === "FT") ? "Consumidor Final" : "Consumidor Final";
-            setCondicionIva(cIva); recalcForTipo(v, prevTipo);
+            if (v === "FA" || v === "FM") {
+              // Keep an already-compatible condición (Exento shouldn't be
+              // clobbered into Responsable Inscripto); only correct it when
+              // the current value would be an invalid pairing.
+              if (!isRiOrExento(condicionIva)) setCondicionIva("Responsable Inscripto");
+            } else if (v === "FB" && isRiOrExento(condicionIva)) {
+              setCondicionIva("Consumidor Final");
+            } else if (v === "FC" || v === "FT") {
+              setCondicionIva("Consumidor Final");
+            }
+            recalcForTipo(v, prevTipo);
           }}>
             <SelectTrigger data-testid="select-tipo-factura"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -1467,8 +1498,21 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               {lockCondicionIva ? (
                 <div className="h-9 flex items-center px-3 border rounded-md bg-muted/30 text-sm text-muted-foreground">{condicionIva}</div>
               ) : (
-                <Select value={condicionIva} onValueChange={v => { setCondicionIva(v); if (fieldErrors.condicionIva) setFieldErrors(p => ({ ...p, condicionIva: "" })); }}>
-                  <SelectTrigger className={fieldErrors.condicionIva ? "border-red-500" : ""}><SelectValue /></SelectTrigger>
+                <Select value={condicionIva} onValueChange={v => {
+                  setCondicionIva(v);
+                  if (fieldErrors.condicionIva) setFieldErrors(p => ({ ...p, condicionIva: "" }));
+                  // Auto-correct tipo when the new condición would make the
+                  // current one invalid — same strict split as the tipo
+                  // selector above, applied in the other direction.
+                  const nowRiExento = isRiOrExento(v);
+                  if (!nowRiExento && (tipo === "FA" || tipo === "FM") && tipos.includes("FB")) {
+                    const prevTipo = tipo; setTipo("FB"); recalcForTipo("FB", prevTipo);
+                  } else if (nowRiExento && tipo === "FB") {
+                    const next = tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : tipo;
+                    if (next !== tipo) { const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo); }
+                  }
+                }}>
+                  <SelectTrigger data-testid="select-condicion-iva" className={fieldErrors.condicionIva ? "border-red-500" : ""}><SelectValue /></SelectTrigger>
                   <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
                 </Select>
               )}

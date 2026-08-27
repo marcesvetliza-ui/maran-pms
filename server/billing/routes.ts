@@ -770,13 +770,20 @@ export function registerBillingRoutes(app: Express) {
         !["arg", "ar", "200"].includes(String(folioContext.nationalityCode || "").trim().toLowerCase()) &&
         !["argentina", "argentino", "argentina/a", "argentine"].includes(String(folioContext.nationality || "").trim().toLowerCase());
 
+      // Condición IVA → tipo de comprobante is a strict, mutually exclusive
+      // split: Responsable Inscripto/Exento only ever get Factura A/MiPyme A,
+      // everyone else (Monotributista, Consumidor Final, etc.) only gets
+      // Factura B — matching the same rule enforced client-side in
+      // group-detail.tsx's applyStrictComprobanteForCondicion. Kept as one
+      // shared rule (not scoped to groupId) since this endpoint is the single
+      // point of invoice emission for reservations, groups, spa and events.
       if (tipoComprobante === "FA" || tipoComprobante === "FM") {
-        if (!["responsable_inscripto", "monotributista"].includes(vatCondition) || cuitDigits.length !== 11) {
-          return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto o Monotributista" });
+        if (!["responsable_inscripto", "exento"].includes(vatCondition) || cuitDigits.length !== 11) {
+          return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto o Exento" });
         }
       }
-      if (tipoComprobante === "FB" && !["exento", "consumidor_final"].includes(vatCondition)) {
-        return res.status(400).json({ error: "Factura B corresponde a receptores Exentos o Consumidor Final" });
+      if (tipoComprobante === "FB" && ["responsable_inscripto", "exento"].includes(vatCondition)) {
+        return res.status(400).json({ error: "Factura B no corresponde a receptores Responsable Inscripto o Exento" });
       }
       if (tipoComprobante === "FT" && (!isForeignGuest || !folioContext?.hasAccommodation)) {
         return res.status(400).json({ error: "Factura T solo puede emitirse a un huésped extranjero por alojamiento" });
