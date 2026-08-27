@@ -41,7 +41,19 @@ jobs:
           cache: "npm"
 
       - name: Instalar dependencias
-        run: npm ci --no-audit --no-fund
+        run: |
+          for i in 1 2 3; do
+            echo "Intento $i de npm ci..."
+            if npm ci --no-audit --no-fund; then
+              echo "npm ci OK"
+              exit 0
+            fi
+            echo "npm ci falló en el intento $i, reintentando..."
+            rm -rf node_modules
+            sleep 5
+          done
+          echo "npm ci falló luego de 3 intentos"
+          exit 1
 
       - name: Preparar esquema de PostgreSQL para tests de integración
         run: npm run db:migrate:ci
