@@ -29,6 +29,11 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/maran_test
+      # Evita que npm haga una llamada de red en segundo plano para chequear
+      # si hay una versión más nueva de npm disponible. Esa llamada cuelga en
+      # este runner y dispara el bug "Exit handler never called!" de npm
+      # (ver npm/cli#7657) justo al terminar la instalación.
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
 
     steps:
       - name: Checkout código
