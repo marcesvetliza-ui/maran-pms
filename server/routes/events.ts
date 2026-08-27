@@ -272,8 +272,29 @@ export function registerEventsRoutes(app: Express) {
 
   app.patch("/api/events/charges/:id", async (req, res) => {
     try {
-      const charge = await storage.updateEventCharge(req.params.id, req.body);
+      const before = await storage.getEventCharge(req.params.id);
+      if (!before) return res.status(404).json({ error: "Event charge not found" });
+      const evt = await storage.getEvent(before.eventId);
+      if (evt && (evt.status === "invoiced" || evt.status === "cancelled")) {
+        return res.status(400).json({ error: "No se pueden editar cargos de un evento facturado o cancelado" });
+      }
+
+      const body = { ...req.body };
+      if (body.quantity !== undefined || body.unitPrice !== undefined) {
+        const qty = body.quantity !== undefined ? Number(body.quantity) : before.quantity;
+        const unitPrice = body.unitPrice !== undefined ? parseFloat(body.unitPrice) : parseFloat(before.unitPrice);
+        body.totalAmount = (qty * unitPrice).toFixed(2);
+      }
+
+      const charge = await storage.updateEventCharge(req.params.id, body);
       if (!charge) return res.status(404).json({ error: "Event charge not found" });
+
+      // Motor financiero: mantener el movimiento del folio en línea con el cargo editado.
+      storage.updateFolioMovementBySource("event_charge", charge.id, {
+        amount: parseFloat(charge.totalAmount),
+        description: charge.description,
+      }).catch(e => console.error("[Folio] Error sincronizando edición de cargo evento:", e));
+
       res.json(charge);
     } catch (error) {
       res.status(500).json({ error: "Error updating event charge" });
@@ -282,7 +303,21 @@ export function registerEventsRoutes(app: Express) {
 
   app.delete("/api/events/charges/:id", async (req, res) => {
     try {
+      const before = await storage.getEventCharge(req.params.id);
+      if (before) {
+        const evt = await storage.getEvent(before.eventId);
+        if (evt && (evt.status === "invoiced" || evt.status === "cancelled")) {
+          return res.status(400).json({ error: "No se pueden eliminar cargos de un evento facturado o cancelado" });
+        }
+      }
+
       await storage.deleteEventCharge(req.params.id);
+
+      // Motor financiero: quitar del folio el movimiento del cargo eliminado,
+      // para que no siga sumando en el folio ni en el PDF exportado.
+      storage.deleteFolioMovementsBySource("event_charge", req.params.id)
+        .catch(e => console.error("[Folio] Error eliminando cargo del folio evento:", e));
+
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting event charge" });

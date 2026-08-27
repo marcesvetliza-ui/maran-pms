@@ -645,6 +645,7 @@ export interface IStorage {
 
   // Event Charges
   getEventCharges(eventId: string): Promise<EventChargeWithType[]>;
+  getEventCharge(id: string): Promise<EventCharge | undefined>;
   createEventCharge(charge: InsertEventCharge): Promise<EventCharge>;
   updateEventCharge(id: string, charge: Partial<InsertEventCharge>): Promise<EventCharge | undefined>;
   deleteEventCharge(id: string): Promise<boolean>;

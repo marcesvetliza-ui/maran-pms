@@ -1808,6 +1808,83 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Bug fix: deleteEventCharge never removed the matching folio_movements row,
+  // so charges removed from an event (loaded by mistake, later changed) kept
+  // summing into the event's folio total and PDF export. Fixed going forward
+  // in routes/events.ts; this cleans up the 17 orphaned rows already found in
+  // production whose source event_charges no longer exist, then recomputes
+  // the affected folios' totals/balance to match.
+  await withTimeout("folio_movements.cleanup_orphaned_event_charges", T, () =>
+    db.execute(sql`
+      DELETE FROM folio_movements
+      WHERE id IN (
+        'd2c993db-d900-4410-af7c-380638085943',
+        'f487fbbd-d567-4dbc-9b51-0268bb17b8a1',
+        'e41f8485-d1a9-42a1-97ea-14d8607d7183',
+        'e122bcd5-84b6-4ec4-9a66-d0862cdfb46d',
+        '137ff376-e6a2-4517-9db5-128b942f6d58',
+        '47a622c8-3ecd-4b1e-beca-40d92870f101',
+        '6bf98e2a-45ff-4988-ac3f-788f30887fad',
+        '7349c515-075e-479b-97db-2442b51ae8e9',
+        '36473937-893f-4e9a-b9ee-4a9192f7d371',
+        '24d950b1-74fa-4c73-b1e9-a639efa6f107',
+        '861a2222-32af-4b31-a307-2da1923777c3',
+        '54db69ff-8da7-49db-b526-fc60e0eefc8b',
+        '0a93aaf1-8697-4755-a5db-4bce64ed9a1d',
+        'f1dfadd6-5729-4904-80c3-0c1fee82f5a1',
+        '4454ebdd-c500-46a0-afad-680c6cef60a3',
+        '1d4e5946-5bda-4cc6-a624-e73481be1aba',
+        '02088777-9a5b-4c30-b7c8-9cdc89cd857d',
+        '33dca043-b6ca-4ffa-8513-1ff8bbba65e7'
+      )
+      AND source_type = 'event_charge'
+    `)
+  );
+  await withTimeout("folios.recalc_after_event_charge_cleanup", T, () =>
+    db.execute(sql`
+      UPDATE folios f SET
+        total_charges = COALESCE((
+          SELECT SUM(amount::numeric) FROM folio_movements
+          WHERE folio_id = f.id AND type IN ('charge','transfer_in')
+        ), 0),
+        total_payments = COALESCE((
+          SELECT SUM(amount::numeric) FROM folio_movements
+          WHERE folio_id = f.id AND type IN ('payment','advance','discount','transfer_out','void')
+        ), 0)
+      WHERE f.entity_type = 'event'
+        AND f.id IN (
+          '68e3ec06-ef02-46e2-af74-06bd74bacaa1',
+          '56e90f6f-3e9e-43d8-87f5-0a97f1c14605',
+          '0815f03b-6237-4879-97ef-6660667fa0d0',
+          'd93f4ecf-5bf3-4a7f-b808-859b00ba7127',
+          '16100fc0-25d6-426b-9622-cbca17db1a22',
+          '6f853c1d-c47e-4757-bd85-9d76b0252aa4',
+          '73d6fb36-a1eb-4753-bc8e-620294cafd63',
+          'a96b010d-3e09-474f-b6b9-812265551e69',
+          'f03ff7f5-f7bb-4c66-bde2-abca3e21293c',
+          '16a3b4c9-2ea6-4747-9167-db4249d0ec85'
+        )
+    `)
+  );
+  await withTimeout("folios.recalc_balance_after_event_charge_cleanup", T, () =>
+    db.execute(sql`
+      UPDATE folios SET balance = total_charges::numeric - total_payments::numeric
+      WHERE entity_type = 'event'
+        AND id IN (
+          '68e3ec06-ef02-46e2-af74-06bd74bacaa1',
+          '56e90f6f-3e9e-43d8-87f5-0a97f1c14605',
+          '0815f03b-6237-4879-97ef-6660667fa0d0',
+          'd93f4ecf-5bf3-4a7f-b808-859b00ba7127',
+          '16100fc0-25d6-426b-9622-cbca17db1a22',
+          '6f853c1d-c47e-4757-bd85-9d76b0252aa4',
+          '73d6fb36-a1eb-4753-bc8e-620294cafd63',
+          'a96b010d-3e09-474f-b6b9-812265551e69',
+          'f03ff7f5-f7bb-4c66-bde2-abca3e21293c',
+          '16a3b4c9-2ea6-4747-9167-db4249d0ec85'
+        )
+    `)
+  );
+
   // Centro de costo / plan de cuentas: cuentas de gasto para Eventos
   await withTimeout("accounting_accounts.eventos seed", T, () =>
     db.execute(sql`

@@ -4228,6 +4228,11 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+  async getEventCharge(id: string): Promise<EventCharge | undefined> {
+    const [row] = await db.select().from(eventCharges).where(eq(eventCharges.id, id));
+    return row;
+  }
+
   async createEventCharge(charge: InsertEventCharge): Promise<EventCharge> {
     const [created] = await db.insert(eventCharges).values(charge as any).returning();
     return created;
@@ -6221,6 +6226,47 @@ export class DatabaseStorage implements IStorage {
     }).returning();
     await this.recalcFolioBalance(folioId);
     return movement;
+  }
+
+  // Remove folio_movements created from a since-deleted source record (e.g. a
+  // charge line item removed before invoicing). Unlike addFolioAdjustment/void,
+  // this is a hard delete: the source itself no longer exists, so there is
+  // nothing to keep an audit trail of — leaving the movement in place is what
+  // causes deleted items to keep appearing (and summing) in folio exports.
+  async deleteFolioMovementsBySource(sourceType: string, sourceId: string): Promise<void> {
+    const toDelete = await db.select().from(folioMovements).where(and(
+      eq(folioMovements.sourceType, sourceType),
+      eq(folioMovements.sourceId, sourceId),
+    ));
+    if (toDelete.length === 0) return;
+    const folioIds = Array.from(new Set(toDelete.map(m => m.folioId)));
+    await db.delete(folioMovements).where(and(
+      eq(folioMovements.sourceType, sourceType),
+      eq(folioMovements.sourceId, sourceId),
+    ));
+    for (const folioId of folioIds) {
+      await this.recalcFolioBalance(folioId);
+    }
+  }
+
+  // Keep a folio_movement's amount/description in sync when its source record
+  // (e.g. a charge line item) is edited after being posted to the folio.
+  async updateFolioMovementBySource(
+    sourceType: string,
+    sourceId: string,
+    updates: { amount?: number; description?: string },
+  ): Promise<void> {
+    const [existing] = await db.select().from(folioMovements).where(and(
+      eq(folioMovements.sourceType, sourceType),
+      eq(folioMovements.sourceId, sourceId),
+    )).limit(1);
+    if (!existing) return;
+    const set: Record<string, unknown> = {};
+    if (updates.amount !== undefined) set.amount = updates.amount.toFixed(2);
+    if (updates.description !== undefined) set.description = updates.description;
+    if (Object.keys(set).length === 0) return;
+    await db.update(folioMovements).set(set).where(eq(folioMovements.id, existing.id));
+    await this.recalcFolioBalance(existing.folioId);
   }
 
   async closeFolio(folioId: string, closedBy: string): Promise<Folio> {
