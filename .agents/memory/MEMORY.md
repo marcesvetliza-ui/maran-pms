@@ -49,3 +49,4 @@
 - [dist/ folder was tracked in git](dist-folder-git-tracking.md) — caused mass rename/rename merge conflicts on divergent history; now gitignored/untracked.
 - [Condición IVA → comprobante split](condicion-iva-comprobante-split.md) — RI/Exento→Factura A/MiPyme A; everyone else→Ticket/Factura B. One rule, two places to keep in sync.
 - [Group payment cash movements](group-payment-cash-movements.md) — every payment-collecting flow (incl. legacy entry points) must register a cash movement, or Caja silently excludes real money collected.
+- [PG test fixture for master-folio flows](pg-test-master-folio-fixture.md) — seed group_charges (not rooms/reservations) for a real-DB master-folio balance; new *.pg.test.ts files must be added to package.json's test:postgres by hand.
