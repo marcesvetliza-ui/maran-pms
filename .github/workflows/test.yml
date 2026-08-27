@@ -41,7 +41,7 @@ jobs:
           cache: "npm"
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Preparar esquema de PostgreSQL para tests de integración
         run: npm run db:migrate:ci
