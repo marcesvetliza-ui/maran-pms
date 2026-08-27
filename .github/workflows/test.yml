@@ -40,6 +40,9 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Actualizar npm (evita el bug "Exit handler never called" de npm 10.8.x en npm ci)
+        run: npm install -g npm@latest
+
       - name: Instalar dependencias
         run: npm ci --no-audit --no-fund
 
