@@ -5209,10 +5209,19 @@ export class DatabaseStorage implements IStorage {
   // status mirrors the client's getGroupPaymentStatus: "anulado" (NC issued)
   // takes priority over "facturado" (invoice emitted), otherwise "pendiente".
   // Keep this in sync with client/src/pages/reports.tsx.
+  // Mirrors the client's getGroupPaymentStatus (client/src/pages/reports.tsx):
+  // both treat a NULL *and* an empty-string invoice_ref/invoice_nc_ref as "no
+  // comprobante", since these text columns technically permit '' even though
+  // every write path only ever stores NULL or a non-empty JSON string. Without
+  // the `ne(col, "")` guards, an empty string would be non-NULL in SQL and
+  // silently read as facturado/anulado here while the UI still showed
+  // Pendiente for the same row.
   private groupPaymentStatusCondition(status?: string) {
-    if (status === "anulado") return isNotNull(groupPayments.invoiceNcRef);
-    if (status === "facturado") return and(isNotNull(groupPayments.invoiceRef), isNull(groupPayments.invoiceNcRef));
-    if (status === "pendiente") return and(isNull(groupPayments.invoiceRef), isNull(groupPayments.invoiceNcRef));
+    const hasNcRef = and(isNotNull(groupPayments.invoiceNcRef), ne(groupPayments.invoiceNcRef, ""));
+    const hasInvoiceRef = and(isNotNull(groupPayments.invoiceRef), ne(groupPayments.invoiceRef, ""));
+    if (status === "anulado") return hasNcRef;
+    if (status === "facturado") return and(hasInvoiceRef, not(hasNcRef!));
+    if (status === "pendiente") return and(not(hasInvoiceRef!), not(hasNcRef!));
     return undefined;
   }
 

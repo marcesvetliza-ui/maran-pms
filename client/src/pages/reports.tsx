@@ -137,13 +137,13 @@ function exportCSV(headers: string[], rows: string[][], filename: string) {
 // invoice) takes priority over "facturado" (invoice emitted), otherwise the
 // payment is still "pendiente" (an advance with no comprobante yet). Shared
 // by the group-payments filter and its CSV export so both agree.
-function getGroupPaymentStatus(gp: any): "facturado" | "pendiente" | "anulado" {
+export function getGroupPaymentStatus(gp: any): "facturado" | "pendiente" | "anulado" {
   if (gp.invoiceNcRef) return "anulado";
   if (gp.invoiceRef) return "facturado";
   return "pendiente";
 }
 
-const GROUP_PAYMENT_STATUS_LABELS: Record<string, string> = {
+export const GROUP_PAYMENT_STATUS_LABELS: Record<string, string> = {
   facturado: "Facturado",
   pendiente: "Pendiente",
   anulado: "Anulado",
