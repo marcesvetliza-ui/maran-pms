@@ -133,6 +133,22 @@ function exportCSV(headers: string[], rows: string[][], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// Comprobante status for a group payment: "anulado" (NC issued reverses the
+// invoice) takes priority over "facturado" (invoice emitted), otherwise the
+// payment is still "pendiente" (an advance with no comprobante yet). Shared
+// by the group-payments filter and its CSV export so both agree.
+function getGroupPaymentStatus(gp: any): "facturado" | "pendiente" | "anulado" {
+  if (gp.invoiceNcRef) return "anulado";
+  if (gp.invoiceRef) return "facturado";
+  return "pendiente";
+}
+
+const GROUP_PAYMENT_STATUS_LABELS: Record<string, string> = {
+  facturado: "Facturado",
+  pendiente: "Pendiente",
+  anulado: "Anulado",
+};
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-3">
@@ -163,6 +179,8 @@ export default function ReportsPage() {
   const [appliedTo, setAppliedTo] = useState(defaults.to);
   const [activeTab, setActiveTab] = useState("occupancy");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [groupPaymentsGroupFilter, setGroupPaymentsGroupFilter] = useState("all");
+  const [groupPaymentsStatusFilter, setGroupPaymentsStatusFilter] = useState("all");
 
   function applyPreset(preset: string) {
     const d = getPresetDates(preset);
@@ -275,6 +293,25 @@ export default function ReportsPage() {
     queryKey: ["/api/agencies"],
     enabled: activeTab === "group-payments",
   });
+
+  // Distinct groups present in the current date range, for the group picker —
+  // derived from the payments themselves so the list never offers a group
+  // with zero payments in the selected period.
+  const groupPaymentsGroupOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const gp of groupPayments.data ?? []) {
+      if (!map.has(gp.groupId)) map.set(gp.groupId, gp.groupName || gp.groupCode || gp.groupId);
+    }
+    return Array.from(map.entries()).map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [groupPayments.data]);
+
+  const filteredGroupPayments = useMemo(() => {
+    return (groupPayments.data ?? []).filter((gp) => {
+      if (groupPaymentsGroupFilter !== "all" && gp.groupId !== groupPaymentsGroupFilter) return false;
+      if (groupPaymentsStatusFilter !== "all" && getGroupPaymentStatus(gp) !== groupPaymentsStatusFilter) return false;
+      return true;
+    });
+  }, [groupPayments.data, groupPaymentsGroupFilter, groupPaymentsStatusFilter]);
 
   const periodoFromDate = (dateStr: string) => {
     const d = new Date(dateStr + "T12:00:00");
@@ -504,10 +541,10 @@ export default function ReportsPage() {
         }
         break;
       case "group-payments":
-        if (groupPayments.data) {
+        if (filteredGroupPayments.length > 0) {
           exportCSV(
             ["Fecha", "Grupo", "Monto", "Método", "Destino", "Comprobante", "Receptor", "Retención"],
-            groupPayments.data.map((gp) => {
+            filteredGroupPayments.map((gp) => {
               const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
                 ? gp.paymentMethodDetail.map((row: any) => row.method).join(" + ")
                 : gp.method;
@@ -523,7 +560,7 @@ export default function ReportsPage() {
               return [
                 gp.date, gp.groupName || gp.groupCode || gp.groupId, formatARS(parseFloat(gp.amount || "0")),
                 methodsLabel, gp.destination === "master_folio" ? "Folio Maestro" : "Distribuido entre habitaciones",
-                gp.invoiceRef ? "Facturado" : (gp.receiptType && gp.receiptType !== "none" ? gp.receiptType : "Anticipo"),
+                GROUP_PAYMENT_STATUS_LABELS[getGroupPaymentStatus(gp)],
                 receiverName, retencion,
               ];
             }),
@@ -1680,26 +1717,62 @@ export default function ReportsPage() {
                 <LoadingSkeleton />
               ) : groupPayments.data && groupPayments.data.length > 0 ? (
                 <>
-                  <div className="mb-4 flex flex-wrap gap-4">
-                    <p className="text-lg font-semibold" data-testid="text-group-payments-total">
-                      Total: {formatARS(groupPayments.data.reduce((s, gp) => s + parseFloat(gp.amount || "0"), 0))}
-                    </p>
-                    <p className="text-sm text-muted-foreground pt-1">
-                      {groupPayments.data.length} pago{groupPayments.data.length === 1 ? "" : "s"} en {new Set(groupPayments.data.map((gp) => gp.groupId)).size} grupo{new Set(groupPayments.data.map((gp) => gp.groupId)).size === 1 ? "" : "s"}
-                    </p>
+                  <div className="mb-4 flex flex-wrap items-end gap-3">
+                    <div className="w-full sm:w-56">
+                      <label className="text-xs text-muted-foreground mb-1 block">Grupo</label>
+                      <Select value={groupPaymentsGroupFilter} onValueChange={setGroupPaymentsGroupFilter}>
+                        <SelectTrigger data-testid="select-group-payments-group-filter">
+                          <SelectValue placeholder="Todos los grupos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos los grupos</SelectItem>
+                          {groupPaymentsGroupOptions.map((g) => (
+                            <SelectItem key={g.id} value={g.id}>{g.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full sm:w-56">
+                      <label className="text-xs text-muted-foreground mb-1 block">Comprobante</label>
+                      <Select value={groupPaymentsStatusFilter} onValueChange={setGroupPaymentsStatusFilter}>
+                        <SelectTrigger data-testid="select-group-payments-status-filter">
+                          <SelectValue placeholder="Todos los estados" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos los estados</SelectItem>
+                          <SelectItem value="facturado">Facturado</SelectItem>
+                          <SelectItem value="pendiente">Pendiente</SelectItem>
+                          <SelectItem value="anulado">Anulado</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="rounded-md border divide-y" data-testid="list-group-payments">
-                    {groupPayments.data.map((gp) => (
-                      <Link key={gp.id} href={`/groups/${gp.groupId}`} className="block hover:bg-muted/40 transition-colors" data-testid={`link-group-payment-${gp.id}`}>
-                        <GroupPaymentHistoryRow
-                          gp={gp}
-                          companies={companiesForGroupPayments.data ?? []}
-                          agencies={agenciesForGroupPayments.data ?? []}
-                          groupName={gp.groupName || gp.groupCode || gp.groupId}
-                        />
-                      </Link>
-                    ))}
-                  </div>
+                  {filteredGroupPayments.length > 0 ? (
+                    <>
+                      <div className="mb-4 flex flex-wrap gap-4">
+                        <p className="text-lg font-semibold" data-testid="text-group-payments-total">
+                          Total: {formatARS(filteredGroupPayments.reduce((s, gp) => s + parseFloat(gp.amount || "0"), 0))}
+                        </p>
+                        <p className="text-sm text-muted-foreground pt-1">
+                          {filteredGroupPayments.length} pago{filteredGroupPayments.length === 1 ? "" : "s"} en {new Set(filteredGroupPayments.map((gp) => gp.groupId)).size} grupo{new Set(filteredGroupPayments.map((gp) => gp.groupId)).size === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <div className="rounded-md border divide-y" data-testid="list-group-payments">
+                        {filteredGroupPayments.map((gp) => (
+                          <Link key={gp.id} href={`/groups/${gp.groupId}`} className="block hover:bg-muted/40 transition-colors" data-testid={`link-group-payment-${gp.id}`}>
+                            <GroupPaymentHistoryRow
+                              gp={gp}
+                              companies={companiesForGroupPayments.data ?? []}
+                              agencies={agenciesForGroupPayments.data ?? []}
+                              groupName={gp.groupName || gp.groupCode || gp.groupId}
+                            />
+                          </Link>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-center py-8" data-testid="text-group-payments-no-match">Ningún pago coincide con el filtro seleccionado</p>
+                  )}
                 </>
               ) : (
                 <p className="text-muted-foreground text-center py-8">No hay pagos de grupos para el período seleccionado</p>
