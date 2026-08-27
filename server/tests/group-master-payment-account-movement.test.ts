@@ -169,6 +169,16 @@ function makeTransaction() {
         }
       },
     }),
+    // The reversal also anulas any cash_movements row tied to the deleted
+    // group payment. This suite records payments directly via
+    // storage.recordGroupPayment (bypassing the POST routes that call
+    // registerGroupPaymentCashMovements), so no cash_movements rows ever
+    // exist here — this stub only needs to satisfy the call, not track state.
+    update: (_table: unknown) => ({
+      set: (_values: Record<string, any>) => ({
+        where: async () => {},
+      }),
+    }),
     ownsCargoLock: () => ownsCargoLock,
   };
 }

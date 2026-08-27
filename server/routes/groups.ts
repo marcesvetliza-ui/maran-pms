@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
 import { db } from "../db";
-import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations } from "@shared/schema";
+import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations, cashMovements as cashMovementsTable } from "@shared/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
@@ -1786,6 +1786,24 @@ export function registerGroupsRoutes(app: Express) {
         }
         await tx.delete(paymentsTable).where(eq((paymentsTable as any).groupPaymentId, paymentId));
         await tx.delete(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId));
+
+        // registerGroupPaymentCashMovements() links each cash_movements row it
+        // creates to the group payment via payment_id = group_payments.id.
+        // Deleting the payment above without also anulando those rows would
+        // leave Caja/Reportes showing income that no longer exists — anular
+        // them here, in the same transaction, exactly like the manual
+        // anulación path in cash-register.tsx marks a movement (never a hard
+        // delete, so the audit trail survives).
+        const operator = (req.user as any)?.username || "sistema";
+        await tx.update(cashMovementsTable)
+          .set({
+            anulado: true,
+            motivoAnulacion: "Pago maestro (Folio Maestro / Pago Grupal) eliminado",
+            anuladoPor: operator,
+            anuladoAt: new Date(),
+          })
+          .where(and(eq(cashMovementsTable.paymentId, paymentId), eq(cashMovementsTable.anulado, false)));
+
         return payment;
       });
       await audit(req, "delete", "groups", `Pago maestro eliminado: $${(gp as any).amount} (${(gp as any).method})`, { entityType: "group", entityId: groupId });
