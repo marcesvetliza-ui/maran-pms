@@ -39,7 +39,7 @@ jobs:
             echo "::error::No se configuró STAGING_URL. Agregá el secret en GitHub → Settings → Secrets → STAGING_URL"
             exit 1
           fi
-          echo "staging_url=$URL" >> $GITHUB_OUTPUT
+          echo "staging_url=$URL" >> "$GITHUB_OUTPUT"
           echo "Staging URL: $URL"
 
       - name: Esperar que staging responda
@@ -61,7 +61,7 @@ jobs:
           URL="${{ steps.url.outputs.staging_url }}"
           RESPONSE=$(curl -s "$URL/api/health")
           echo "Health response: $RESPONSE"
-          ENV=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin).get('environment',''))" 2>/dev/null || echo "")
+          ENV=$(printf '%s\n' "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('environment',''))" 2>/dev/null || echo "")
           if [ "$ENV" = "staging" ]; then
             echo "✓ Entorno confirmado como staging"
           else
@@ -69,7 +69,10 @@ jobs:
           fi
 
       - name: Correr smoke tests contra staging
-        run: node scripts/smoke-test.js ${{ steps.url.outputs.staging_url }} admin ${{ secrets.SMOKE_TEST_PASSWORD }}
+        env:
+          STAGING_URL: ${{ steps.url.outputs.staging_url }}
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: node scripts/smoke-test.js "$STAGING_URL" admin "$SMOKE_TEST_PASSWORD"
 
       - name: Notificar resultado
         if: failure()
