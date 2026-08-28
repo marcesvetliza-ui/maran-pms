@@ -747,6 +747,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("presupuestos.participantes", T, () =>
     db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS participantes INTEGER`)
   );
+  await withTimeout("presupuestos.datos_destinatario", T, async () => {
+    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS cuit TEXT`);
+    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS direccion TEXT`);
+    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS contacto TEXT`);
+  });
   await withTimeout("presupuesto_items.cantidad_habitaciones", T, () =>
     db.execute(sql`ALTER TABLE presupuesto_items ADD COLUMN IF NOT EXISTS cantidad_habitaciones NUMERIC(8,2) NOT NULL DEFAULT '1'`)
   );

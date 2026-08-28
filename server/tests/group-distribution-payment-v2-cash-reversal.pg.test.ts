@@ -132,6 +132,10 @@ async function postLegacyGroupDistributionPayment(fixture: Fixture) {
     body: JSON.stringify({
       amount: "150.00",
       method: "efectivo",
+      reference: "REC-PG-V2-001",
+      receiptType: "none",
+      receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+      concepts: [{ description: "Anticipo grupal PostgreSQL", amount: 150 }],
       distribution: "equal",
     }),
   });

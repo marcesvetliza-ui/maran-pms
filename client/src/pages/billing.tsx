@@ -551,7 +551,7 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -573,6 +573,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   groupInvoiceSources?: GroupInvoiceSourcePreview[];
   /** Parent collection destinations, independently auditable from service concepts. */
   groupPaymentDestinations?: GroupPaymentDestinationPreview[];
+  groupFolioContext?: {
+    billingTarget: "guest";
+    nationality?: string;
+    nationalityCode?: string;
+    hasAccommodation: boolean;
+  };
   /** When true, the condición IVA field is read-only (pre-set from entity) */
   lockCondicionIva?: boolean;
   /** When true, the "Agregar ítem" button and extra item rows are hidden */
@@ -1110,7 +1116,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     setShowConfirm(false);
     saveRecipientOnEmitRef.current = saveRecipientProfile;
     const resolvedGroupId = groupId || groupPaymentGroupId;
-    const groupSourceAmounts = resolvedGroupId && !groupPaymentId
+    const groupSourceAmounts = resolvedGroupId
       ? allocateGroupInvoiceSources(groupInvoiceSources || [], grossItemsTotal(items))
       : undefined;
     mutation.mutate({
@@ -1120,10 +1126,10 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,
-        ...(groupPaymentId ? { groupPaymentId } : {
-          sourceChargeIds: Object.keys(groupSourceAmounts || {}),
-          sourceChargeAmounts: groupSourceAmounts,
-        }),
+        ...(groupPaymentId ? { groupPaymentId } : {}),
+        sourceChargeIds: Object.keys(groupSourceAmounts || {}),
+        sourceChargeAmounts: groupSourceAmounts,
+        ...(groupFolioContext ? { folioContext: groupFolioContext } : {}),
       } : {}),
       ...((cashArea || showPaymentMethod)
         ? {

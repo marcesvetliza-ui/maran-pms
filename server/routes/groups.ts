@@ -95,6 +95,65 @@ function paymentRowsGrossTotal(rows: Array<{ amount: string; retention?: { monto
   return rows.reduce((s, r) => s + (parseFloat(r.amount) || 0) + (r.retention?.monto || 0), 0);
 }
 
+const supportedGroupReceiptTypes = new Set([
+  "sin_comprobante", "none", "factura_a", "factura_b", "factura_mipyme_a", "factura_t",
+]);
+
+/** Validate collection evidence before either group collection path persists it. */
+function validateGroupPaymentEvidence(
+  receiptType: unknown,
+  rows: Array<{ method: string; amount: string; reference?: string }>,
+  receiverDetails: unknown,
+  concepts: unknown,
+) {
+  const normalizedReceiptType = String(receiptType ?? "sin_comprobante").trim().toLowerCase();
+  if (!supportedGroupReceiptTypes.has(normalizedReceiptType)) {
+    throw Object.assign(new Error("Tipo de comprobante no admitido para cobros grupales."), { statusCode: 400 });
+  }
+  if (!rows.some((row) => Number(row.amount) > 0)) {
+    throw Object.assign(new Error("Debe informar al menos un detalle de cobro con importe positivo."), { statusCode: 400 });
+  }
+  const isFiscal = ["factura_a", "factura_b", "factura_mipyme_a", "factura_t"].includes(normalizedReceiptType);
+  for (const row of rows) {
+    if (!isFiscal && Number(row.amount) > 0 && !String(row.reference || "").trim()) {
+      throw Object.assign(new Error("Cada medio de pago debe incluir una referencia no vacía."), { statusCode: 400 });
+    }
+  }
+  const normalizedConcepts = (Array.isArray(concepts) ? concepts : [])
+    .map((concept: any) => ({
+      description: String(concept?.description || concept?.descripcion || "").trim().replace(/\s+/g, " "),
+      amount: Number(concept?.amount ?? concept?.subtotal ?? 0),
+    }))
+    .filter((concept) => concept.description && Number.isFinite(concept.amount) && concept.amount > 0);
+  if (normalizedConcepts.length === 0) {
+    throw Object.assign(new Error("Debe informar al menos un concepto con detalle e importe positivo."), { statusCode: 400 });
+  }
+  const raw = receiverDetails && typeof receiverDetails === "object" ? receiverDetails as Record<string, unknown> : {};
+  const receiver = {
+    razonSocial: String(raw.razonSocial || "").trim().replace(/\s+/g, " "),
+    cuit: String(raw.cuit || "").replace(/\D/g, ""),
+    // DNI also carries foreign passport numbers in the group flow.
+    dni: String(raw.dni || "").toUpperCase().replace(/[^A-Z0-9]/g, ""),
+    condicionIva: String(raw.condicionIva || "").trim() || undefined,
+    domicilio: String(raw.domicilio || "").trim() || undefined,
+  };
+  if (!receiver.razonSocial || (!receiver.cuit && !receiver.dni)) {
+    throw Object.assign(new Error("Seleccione un receptor con nombre y CUIT o DNI."), { statusCode: 400 });
+  }
+  return { receiptType: normalizedReceiptType, receiver, concepts: normalizedConcepts };
+}
+
+function formatGroupPaymentNotes(
+  existingNotes: unknown,
+  concepts: Array<{ description: string; amount: number }>,
+) {
+  const conceptText = concepts
+    .map((concept) => `${concept.description}: $${concept.amount.toFixed(2)}`)
+    .join("; ");
+  const note = String(existingNotes || "").trim();
+  return note ? `${note}\nConceptos: ${conceptText}` : `Conceptos: ${conceptText}`;
+}
+
 // Group payments (Pago Grupal / Pagar Folio Maestro) previously never touched
 // the cash register: they went straight into group_payments/payments with no
 // matching cash_movements row, so they were invisible in Caja/Reportes even
@@ -996,7 +1055,7 @@ export function registerGroupsRoutes(app: Express) {
         receiptType, distribution, closeAllRooms,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
-        receiverDetails,
+        receiverDetails, concepts, notes,
       } = req.body;
 
       const paymentRows = validateAndNormalizePaymentRows<{method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number }}>(
@@ -1008,6 +1067,7 @@ export function registerGroupsRoutes(app: Express) {
       if (totalAmount <= 0) {
         return res.status(400).json({ error: "El monto debe ser positivo" });
       }
+      const evidence = validateGroupPaymentEvidence(receiptType, paymentRows, receiverDetails, concepts);
 
       const billingEntityType = rawBillingEntityType || legacyCcEntityType;
       const billingEntityId = rawBillingEntityId || legacyCcEntityId;
@@ -1053,21 +1113,23 @@ export function registerGroupsRoutes(app: Express) {
         destination: "group_distribution",
         paymentRows,
         date: today,
-        reference: `Pago grupal${closeAllRooms ? " (cierre total)" : ""} — ${group.name}`,
+        reference: paymentRows.map((row) => String(row.reference || "").trim()).filter(Boolean).join(" / ")
+          || `Pago grupal${closeAllRooms ? " (cierre total)" : ""} — ${group.name}`,
         distribution: distribution || "equal",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
-        receiptType: receiptType || null,
+        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        receiptType: evidence.receiptType,
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
-        receiverDetails: receiverDetails || null,
+        receiverDetails: evidence.receiver,
       });
 
       await registerGroupPaymentCashMovements({
         groupId: req.params.groupId,
         rows: paymentRows,
         groupPaymentId: recorded.groupPayment.id,
-        receiptType: receiptType || null,
+        receiptType: evidence.receiptType,
         registeredBy: (req.user as any)?.username || null,
         label: `Pago Grupal — ${group.name}`,
       });
@@ -1239,17 +1301,14 @@ export function registerGroupsRoutes(app: Express) {
           .limit(1);
         if (!storedInvoice) throw Object.assign(new Error("El comprobante indicado no existe en el sistema"), { statusCode: 400 });
         assertGroupPaymentInvoiceScope(storedInvoice, payment, req.params.groupId);
-        if (Math.round(Number(storedInvoice.montoTotal) * 100) !== Math.round(Number(payment.amount) * 100)) {
-          throw Object.assign(new Error("El importe de la factura debe coincidir exactamente con el cobro grupal."), { statusCode: 400 });
-        }
-
         const receiver = (payment.receiverDetails || {}) as Record<string, string | undefined>;
-        const normalize = (value?: string | null) => String(value || "").replace(/\D/g, "");
+        const normalizeCuit = (value?: string | null) => String(value || "").replace(/\D/g, "");
+        const normalizeDocument = (value?: string | null) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
         const normalizeName = (value?: string | null) => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
-        if (receiver.cuit && normalize(storedInvoice.clienteCuit) !== normalize(receiver.cuit)) {
+        if (receiver.cuit && normalizeCuit(storedInvoice.clienteCuit) !== normalizeCuit(receiver.cuit)) {
           throw Object.assign(new Error("El CUIT de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
         }
-        if (!receiver.cuit && receiver.dni && normalize(storedInvoice.clienteDni) !== normalize(receiver.dni)) {
+        if (!receiver.cuit && receiver.dni && normalizeDocument(storedInvoice.clienteDni) !== normalizeDocument(receiver.dni)) {
           throw Object.assign(new Error("El DNI de la factura no coincide con el receptor del cobro."), { statusCode: 400 });
         }
         if (!receiver.cuit && !receiver.dni && receiver.razonSocial
@@ -1329,6 +1388,24 @@ export function registerGroupsRoutes(app: Express) {
 
   app.delete("/api/groups/:groupId/charges/:chargeId", requireAuth, async (req, res) => {
     try {
+      const [charge] = await db.select().from(groupChargesTable)
+        .where(and(eq(groupChargesTable.id, req.params.chargeId), eq(groupChargesTable.groupId, req.params.groupId)))
+        .limit(1);
+      if (!charge) return res.status(404).json({ error: "Cargo no encontrado o no pertenece a este grupo" });
+      const sourceId = `group-charge:${req.params.chargeId}`;
+      const activeReference = await db.execute(sql`
+        SELECT 1
+        FROM sales_invoices si
+        WHERE si.group_id = ${req.params.groupId}
+          AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND si.estado IN ('emitida', 'parcial')
+          AND COALESCE(si.source_charge_amounts->>${sourceId}, '0')::numeric > 0
+          AND COALESCE(si.monto_total, 0)::numeric > COALESCE(si.monto_acreditado, 0)::numeric + 0.009
+        LIMIT 1
+      `);
+      if (activeReference.rows.length) {
+        return res.status(409).json({ error: "No se puede eliminar un cargo incluido en una factura fiscal vigente." });
+      }
       const ok = await storage.deleteGroupCharge(req.params.chargeId);
       if (!ok) return res.status(404).json({ error: "Cargo no encontrado" });
       res.json({ success: true });
@@ -1349,12 +1426,14 @@ export function registerGroupsRoutes(app: Express) {
   app.post("/api/groups/:groupId/payment/v2", requireAuth, async (req, res) => {
     try {
       assertFinancialSchemaReady();
-      const { amount, method, date, reference, distribution, distributionDetail, notes } = req.body;
+      const { amount, method, date, reference, distribution, distributionDetail, notes, receiptType, receiverDetails, concepts } = req.body;
       if (!amount || !method) {
         return res.status(400).json({ error: "amount y method son requeridos" });
       }
       const totalAmount = parseFloat(amount);
       if (totalAmount <= 0) return res.status(400).json({ error: "El monto debe ser positivo" });
+      const paymentRows = [{ method, amount: totalAmount.toFixed(2), reference }];
+      const evidence = validateGroupPaymentEvidence(receiptType, paymentRows, receiverDetails, concepts);
 
       const paymentDate = date || new Date().toISOString().split("T")[0];
       const distrib = distribution || "equal";
@@ -1372,14 +1451,15 @@ export function registerGroupsRoutes(app: Express) {
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
         destination: "group_distribution",
-        paymentRows: [{ method, amount: totalAmount.toFixed(2), reference }],
+        paymentRows,
         date: paymentDate,
         reference: reference || "Pago grupal distribuido",
         distribution: distrib,
         distributionDetail: detail,
         receivedBy: (req.user as any)?.username || null,
-        notes: notes || null,
-        receiptType: "sin_comprobante",
+        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        receiptType: evidence.receiptType,
+        receiverDetails: evidence.receiver,
       });
 
       // This legacy entry point must register a cash movement exactly like
@@ -1389,9 +1469,9 @@ export function registerGroupsRoutes(app: Express) {
       const groupForLabel = await storage.getGroup(req.params.groupId);
       await registerGroupPaymentCashMovements({
         groupId: req.params.groupId,
-        rows: [{ method, amount: totalAmount.toFixed(2) }],
+        rows: paymentRows,
         groupPaymentId: recorded.groupPayment.id,
-        receiptType: "sin_comprobante",
+        receiptType: evidence.receiptType,
         registeredBy: (req.user as any)?.username || null,
         label: `Pago Grupal — ${groupForLabel?.name || req.params.groupId}`,
       });
@@ -1617,7 +1697,7 @@ export function registerGroupsRoutes(app: Express) {
 
       // Support multi-row payments and keep a single parent movement for the
       // receipt, regardless of how many payment methods the operator uses.
-      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails } = req.body;
+      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails, concepts } = req.body;
       const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
         Array.isArray(paymentRows) && paymentRows.length > 0
           ? paymentRows
@@ -1626,12 +1706,13 @@ export function registerGroupsRoutes(app: Express) {
 
       const totalAmount = paymentRowsGrossTotal(rows);
       if (!rows.length || totalAmount <= 0) return res.status(400).json({ error: "Monto total debe ser positivo" });
+      const evidence = validateGroupPaymentEvidence(receiptType, rows, receiverDetails, concepts);
       if (rows.some((row) => row.method === "cuenta_corriente") && (!billingEntityType || !billingEntityId)) {
         return res.status(400).json({ error: "Seleccione la empresa o agencia para el pago por cuenta corriente." });
       }
 
       const config = (group as any).masterFolioConfig || "accommodation";
-      assertMasterFacturaTAllowed(receiptType, config);
+      assertMasterFacturaTAllowed(evidence.receiptType, config);
       const paymentDate = date || getArgentinaToday();
 
       const activeRes = group.reservations.filter(
@@ -1705,22 +1786,23 @@ export function registerGroupsRoutes(app: Express) {
         destination: "master_folio",
         paymentRows: rows,
         date: paymentDate,
-        reference: reference || `Pago Folio Maestro — ${group.name}`,
+        reference: rows.map((row) => String(row.reference || "").trim()).filter(Boolean).join(" / ")
+          || reference || `Pago Folio Maestro — ${group.name}`,
         distribution: "master_folio",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
-        notes: notes || null,
-        receiptType: receiptType || "none",
+        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        receiptType: evidence.receiptType,
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
-        receiverDetails: receiverDetails || null,
+        receiverDetails: evidence.receiver,
       });
 
       await registerGroupPaymentCashMovements({
         groupId: req.params.groupId,
         rows,
         groupPaymentId: recorded.groupPayment.id,
-        receiptType: receiptType || null,
+        receiptType: evidence.receiptType,
         registeredBy: (req.user as any)?.username || null,
         label: `Pago Folio Maestro — ${group.name}`,
       });

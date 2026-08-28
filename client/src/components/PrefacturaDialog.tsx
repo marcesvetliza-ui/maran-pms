@@ -1026,7 +1026,11 @@ export function PrefacturaDialog({
         const invoiceBody = await invoiceRes.json();
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
         invoiceData = invoiceBody;
-        setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
+        setTimeout(() => {
+          if (typeof window !== "undefined") {
+            window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank");
+          }
+        }, 300);
 
         // Apply prior advances only after the fiscal document exists. A failed
         // link is persisted for manual retry, never silently discarded.

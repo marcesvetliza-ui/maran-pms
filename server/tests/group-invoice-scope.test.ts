@@ -76,4 +76,51 @@ describe("group invoice source availability", () => {
       .toEqual({ "group-charge:g-1": 0.03 });
     expect(calcularMontos(items, "FB").montoTotal).toBe(total);
   });
+
+  it.each([
+    {
+      label: "anticipo no fiscal",
+      collected: 120_000,
+      fiscalInvoices: [],
+      expectedFinancial: 180_000,
+      expectedFiscal: 300_000,
+    },
+    {
+      label: "anticipo fiscal",
+      collected: 120_000,
+      fiscalInvoices: [{
+        monto_total: "120000.00",
+        monto_acreditado: "0.00",
+        source_charge_amounts: { "reservation:r-1:accommodation": 120_000 },
+      }],
+      expectedFinancial: 180_000,
+      expectedFiscal: 180_000,
+    },
+    {
+      label: "anticipos mixtos",
+      collected: 300_000,
+      fiscalInvoices: [{
+        monto_total: "200000.00",
+        monto_acreditado: "0.00",
+        source_charge_amounts: { "reservation:r-1:accommodation": 200_000 },
+      }],
+      expectedFinancial: 0,
+      expectedFiscal: 100_000,
+    },
+  ])("keeps financial and fiscal balances independent: $label", ({
+    collected,
+    fiscalInvoices,
+    expectedFinancial,
+    expectedFiscal,
+  }) => {
+    const eligible = 300_000;
+    const fiscallyDocumented = fiscalInvoices.reduce(
+      (total, invoice) => total + Object.values(parseGroupInvoiceSourceAmounts(invoice))
+        .reduce((sum, amount) => sum + amount, 0),
+      0,
+    );
+
+    expect(Math.max(0, eligible - collected)).toBe(expectedFinancial);
+    expect(Math.max(0, eligible - fiscallyDocumented)).toBe(expectedFiscal);
+  });
 });

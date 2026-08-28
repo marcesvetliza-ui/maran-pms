@@ -130,7 +130,10 @@ async function postGroupDistributionPayment(fixture: Fixture) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      paymentRows: [{ method: "efectivo", amount: "150.00" }],
+      receiptType: "none",
+      receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+      concepts: [{ description: "Anticipo grupal PostgreSQL", amount: 150 }],
+      paymentRows: [{ method: "efectivo", amount: "150.00", reference: "REC-PG-DIRECT-001" }],
       distribution: "equal",
       closeAllRooms: false,
     }),

@@ -79,6 +79,19 @@ function formatNum(v: any): string {
   const n = parseFloat(String(v ?? 0));
   return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2);
 }
+export function getRecipientDetails(pres: any): string {
+  return [
+    pres.cuit ? `CUIT: ${pres.cuit}` : null,
+    pres.direccion ? `Dirección: ${pres.direccion}` : null,
+    pres.contacto ? `Contacto: ${pres.contacto}` : null,
+  ].filter(Boolean).join(" · ");
+}
+function isAccommodationOnly(items: any[]): boolean {
+  return items.length > 0 && items.every(item => item.sector === "alojamiento");
+}
+export function getPresupuestoQuantityLabel(items: any[]): "NOCHES" | "CANTIDAD" {
+  return isAccommodationOnly(items) ? "NOCHES" : "CANTIDAD";
+}
 
 const NAVY = "#1a3a6c";
 const ORANGE = "#e8841a";
@@ -358,6 +371,10 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
+  const recipientDetails = getRecipientDetails(pres);
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 220 });
+  }
   const c2 = M + 280, c3 = M + 390;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EMISIÓN", c2, y + 8, { characterSpacing: 0.5 });
   doc.fillColor(DARK).fontSize(9).font("Helvetica").text(formatFecha(pres.fechaEmision), c2, y + 20);
@@ -417,7 +434,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
     const th = y + 6;
     doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
     doc.text("CANT. HABS", cols.habs, th, { width: Ws.habs, align: "right" });
-    doc.text("CANTIDAD", cols.noches, th, { width: Ws.noches, align: "right" });
+     doc.text(getPresupuestoQuantityLabel(items), cols.noches, th, { width: Ws.noches, align: "right" });
     doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
     doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
     y += 22;
@@ -469,6 +486,7 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
+  const recipientDetails = getRecipientDetails(pres);
 
   // ── PAGE 1: Cover letter ─────────────────────────────────────────────────
   drawPageBg(doc, imgPath, W, H);
@@ -487,6 +505,9 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   doc.roundedRect(M, y, contentW, 70, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARA", M + 12, y + 9, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(13).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 240 });
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 240 });
+  }
   const c2 = M + 280, c3 = M + 395;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c2, y + 9, { characterSpacing: 0.5 });
   doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text(pres.fechaEvento ? formatFecha(pres.fechaEvento) : "A confirmar", c2, y + 21);
@@ -539,6 +560,9 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   doc.roundedRect(M, y, contentW, infoH2, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 240 });
+  }
   const c2e = M + 280, c3e = M + 390;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c2e, y + 8, { characterSpacing: 0.5 });
   doc.fillColor(NAVY).fontSize(9).font("Helvetica-Bold").text(pres.fechaEvento ? formatFecha(pres.fechaEvento) : "A confirmar", c2e, y + 20);
@@ -610,7 +634,7 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
       doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
       const th = y + 6;
       doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
-      doc.text("CANT.", cols.noches, th, { width: Ws.noches, align: "right" });
+       doc.text("CANT.", cols.noches, th, { width: Ws.noches, align: "right" });
       doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
       doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
       y += 22;
@@ -680,6 +704,7 @@ const SPA_LIGHT  = "#f0f7f9";
 function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | null) {
   const W = 595, H = 842;
   const page2Path = assetPath("spa-page2.jpg");
+  const recipientDetails = getRecipientDetails(pres);
 
   // ── PAGE 2+: Mix — foto SPA a la derecha, contenido limpio a la izquierda ──
   // (La portada full-bleed spa-cover.jpg es aplicada por el route handler antes de llamar esta función)
@@ -740,8 +765,8 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
   y = 100;
 
   // ── Bloque cliente ─────────────────────────────────────────────────────────
-  doc.rect(M, y, CW, 56).fill(SPA_LIGHT);
-  doc.rect(M, y, 4, 56).fill(SPA_TEAL);
+  doc.rect(M, y, CW, 72).fill(SPA_LIGHT);
+  doc.rect(M, y, 4, 72).fill(SPA_TEAL);
   doc.fillColor(SPA_TEAL).fontSize(6.5).font("Helvetica-Bold")
      .text("PRESUPUESTO PARA", M + 12, y + 8, { characterSpacing: 1, width: CW - 16 });
   doc.fillColor(SPA_NAVY).fontSize(16).font("Helvetica-Bold")
@@ -754,7 +779,11 @@ function generateSpaPdf(doc: any, pres: any, items: any[], conditions: string | 
   if (pres.empresa) metaParts.push(pres.empresa);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica")
      .text(metaParts.join("   ·   "), M + 12, metaY, { width: CW - 16 });
-  y += 66;
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(6.5).font("Helvetica")
+       .text(recipientDetails, M + 12, y + 50, { width: CW - 16 });
+  }
+  y += 82;
 
   // ── Tabla de servicios ─────────────────────────────────────────────────────
   // Columnas dentro de M=30, CW=310 (right edge = 340)
@@ -851,6 +880,7 @@ function generateCatalogSimplePdf(doc: any, pres: any, catalogItems: any[], cond
   const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
+  const recipientDetails = getRecipientDetails(pres);
 
   drawPageBg(doc, imgPath, W, H);
   let y = headerH + 16;
@@ -869,10 +899,13 @@ function generateCatalogSimplePdf(doc: any, pres: any, catalogItems: any[], cond
   doc.moveTo(M, y).lineTo(M + contentW, y).strokeColor(BORDER).lineWidth(0.5).stroke();
   y += 10;
 
-  const infoH = 50;
+  const infoH = 68;
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("PARA", M + 12, y + 9, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 265 });
+  }
   if (pres.fechaEvento) {
     doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA", M + 300, y + 9, { characterSpacing: 0.5 });
     doc.fillColor(NAVY).fontSize(10).font("Helvetica-Bold").text(formatFecha(pres.fechaEvento), M + 300, y + 20);
@@ -933,6 +966,7 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
   const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
   const contentW = W - M * 2;
+  const recipientDetails = getRecipientDetails(pres);
 
   drawPageBg(doc, imgPath, W, H);
   let y = headerH + 16;
@@ -951,10 +985,13 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
   doc.moveTo(M, y).lineTo(M + contentW, y).strokeColor(BORDER).lineWidth(0.5).stroke();
   y += 10;
 
-  const infoH = 62;
+  const infoH = 70;
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 10, { characterSpacing: 1 });
   doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 22, { width: 250 });
+  if (recipientDetails) {
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 40, { width: 250 });
+  }
   const c2x = M + 295, c3x = M + 395;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EMISIÓN", c2x, y + 10, { characterSpacing: 0.5 });
   doc.fillColor(DARK).fontSize(9.5).font("Helvetica").text(formatFecha(pres.fechaEmision), c2x, y + 22);
@@ -983,7 +1020,7 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
     const thY = y + 6;
     doc.text("SECTOR", cols6.sector + 6, thY, { width: W6.sector });
     doc.text("DESCRIPCIÓN", cols6.desc, thY, { width: W6.desc });
-    doc.text("CANT", cols6.cant, thY, { width: W6.cant, align: "right" });
+    doc.text(getPresupuestoQuantityLabel(items), cols6.cant, thY, { width: W6.cant, align: "right" });
     doc.text("PRECIO RACK", cols6.precioRack, thY, { width: W6.precioRack, align: "right" });
     doc.text("TARIFA C/DTO.", cols6.tarifaDto, thY, { width: W6.tarifaDto, align: "right" });
     doc.text("SUBTOTAL", cols6.sub, thY, { width: W6.sub, align: "right" });
@@ -1017,7 +1054,7 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
     const thY = y + 6;
     doc.text("SECTOR", cols5.sector + 6, thY, { width: W5.sector });
     doc.text("DESCRIPCIÓN", cols5.desc, thY, { width: W5.desc });
-    doc.text("CANT", cols5.cant, thY, { width: W5.cant, align: "right" });
+    doc.text(getPresupuestoQuantityLabel(items), cols5.cant, thY, { width: W5.cant, align: "right" });
     doc.text("PRECIO", cols5.precio, thY, { width: W5.precio, align: "right" });
     doc.text("SUBTOTAL", cols5.sub, thY, { width: W5.sub, align: "right" });
     y += 22;

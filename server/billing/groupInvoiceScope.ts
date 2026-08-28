@@ -288,7 +288,7 @@ export async function assertGroupPaymentInvoiceEligibility(
   if (payment.has_active_claim) {
     throw Object.assign(new Error("Este cobro grupal ya tiene una factura vinculada."), { status: 409 });
   }
-  if (cents(payment.amount) !== cents(invoiceTotal)) {
-    throw Object.assign(new Error("El importe de la factura debe coincidir exactamente con el cobro grupal."), { status: 400 });
+  if (Number.isNaN(invoiceTotal)) {
+    throw Object.assign(new Error("El importe fiscal informado no es válido."), { status: 400 });
   }
 }

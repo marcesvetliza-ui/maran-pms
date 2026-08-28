@@ -43,7 +43,7 @@ vi.mock("wouter", async () => {
   };
 });
 
-import GroupDetailPage from "./group-detail";
+import GroupDetailPage, { buildGroupInvoiceRecipientInitialValues } from "./group-detail";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -70,6 +70,24 @@ const GROUP_FIXTURE = {
   billingEntityId: null,
   masterFolioConfig: "accommodation",
 };
+
+describe("group invoice recipient handoff", () => {
+  it("keeps a guest DNI/passport when opening the fiscal invoice dialog", () => {
+    expect(buildGroupInvoiceRecipientInitialValues({
+      razonSocial: "Sophie Martin",
+      fallbackName: "Grupo Internacional",
+      cuit: "",
+      dni: "FR-789012",
+      condicionIva: "consumidor_final",
+      domicilio: "15 Rue de Paris",
+    })).toMatchObject({
+      razonSocial: "Sophie Martin",
+      dni: "FR-789012",
+      condicionIva: "consumidor_final",
+      domicilio: "15 Rue de Paris",
+    });
+  });
+});
 
 const FOLIO_FIXTURE = {
   group: GROUP_FIXTURE,
@@ -145,7 +163,12 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
       if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(GROUP_FIXTURE);
       if (url.endsWith("/api/bed-types")) return jsonResponse([]);
       if (url.endsWith("/api/billing/config")) return jsonResponse({});
-      if (url.endsWith("/api/companies")) return jsonResponse([]);
+      if (url.endsWith("/api/companies")) return jsonResponse([{
+        id: "company-receiver-1",
+        razonSocial: "Empresa Receptora SA",
+        cuilCuit: "30712345678",
+        condicionIva: "Responsable Inscripto",
+      }]);
       if (url.endsWith("/api/agencies")) return jsonResponse([]);
       if (url.endsWith("/api/pos-configs")) return jsonResponse([]);
       if (url.endsWith("/api/charge-types")) return jsonResponse([]);
@@ -191,6 +214,12 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
 
     await user.click(await screen.findByTestId("button-group-payment"));
 
+    // Receiver-first rule: every collection, including an Anticipo, must keep
+    // an immutable payer snapshot before payment fields become editable.
+    const receiverSearch = await screen.findByTestId("input-group-entity-search");
+    await user.type(receiverSearch, "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Receptora SA/i }));
+
     // 3. Destino del cobro — send it to the Folio Maestro, not distributed
     // across rooms, so there is no real room to attach the retención to.
     await user.click(await screen.findByTestId("button-group-destino-master"));
@@ -198,6 +227,7 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     const amountInput = await screen.findByTestId("input-group-payment-amount-0");
     await user.clear(amountInput);
     await user.type(amountInput, "6.00");
+    await user.type(await screen.findByTestId("input-group-payment-reference-0"), "REC-0001");
 
     await user.click(await screen.findByTestId("button-group-add-retencion-0"));
     const retentionAmountInput = await screen.findByTestId("input-group-retencion-monto-0");

@@ -805,6 +805,30 @@ export function AssignBlockDialog({
   );
 }
 
+export function buildGroupInvoiceRecipientInitialValues({
+  razonSocial,
+  fallbackName,
+  cuit,
+  dni,
+  condicionIva,
+  domicilio,
+}: {
+  razonSocial: string;
+  fallbackName?: string | null;
+  cuit: string;
+  dni: string;
+  condicionIva: string;
+  domicilio: string;
+}) {
+  return {
+    razonSocial: razonSocial || fallbackName || "",
+    cuit: cuit ? cuit.replace(/-/g, "") : undefined,
+    dni: dni || undefined,
+    condicionIva: condicionIva || undefined,
+    domicilio: domicilio || undefined,
+  };
+}
+
 export default function GroupDetailPage() {
   const params = useParams();
   const groupId = params.id as string;
@@ -834,6 +858,8 @@ export default function GroupDetailPage() {
   const [groupPaymentReceptorType, setGroupPaymentReceptorType] = useState<"guest" | "company" | "agency">("company");
   const [groupPaymentReceptorLocked, setGroupPaymentReceptorLocked] = useState(false);
   const [groupPaymentGuestId, setGroupPaymentGuestId] = useState<string | null>(null);
+  const [groupPaymentGuestNationality, setGroupPaymentGuestNationality] = useState("");
+  const [groupPaymentGuestNationalityCode, setGroupPaymentGuestNationalityCode] = useState("");
   // POS-style receptor fields for Pago Grupal
   const [groupPaymentEntitySearch, setGroupPaymentEntitySearch] = useState("");
   const [groupPaymentShowEntityDropdown, setGroupPaymentShowEntityDropdown] = useState(false);
@@ -867,6 +893,8 @@ export default function GroupDetailPage() {
     setGroupPaymentReceptorType("company");
     setGroupPaymentReceptorLocked(false);
     setGroupPaymentGuestId(null);
+    setGroupPaymentGuestNationality("");
+    setGroupPaymentGuestNationalityCode("");
     setGroupPaymentEntitySearch("");
     setGroupPaymentShowEntityDropdown(false);
     setGroupPaymentRazonSocial("");
@@ -973,6 +1001,8 @@ export default function GroupDetailPage() {
     setGroupPaymentCcEntityType(entityType);
     setGroupPaymentCcEntityId(entityId);
     setGroupPaymentGuestId(null);
+    setGroupPaymentGuestNationality("");
+    setGroupPaymentGuestNationalityCode("");
     setGroupPaymentReceptorLocked(true);
     return true;
   }
@@ -1003,6 +1033,29 @@ export default function GroupDetailPage() {
       return res.json();
     },
   });
+
+  // FT is a document exclusively for an accommodation-only Folio Maestro.
+  // Reset a stale persisted/UI choice immediately when either prerequisite
+  // changes; never leave a choice visible that cannot be emitted.
+  useEffect(() => {
+    const nationality = groupPaymentGuestNationality.trim().toLowerCase();
+    const nationalityCode = groupPaymentGuestNationalityCode.trim().toLowerCase();
+    const isForeignGuest = groupPaymentReceptorType === "guest"
+      && !!(nationality || nationalityCode)
+      && !["arg", "ar", "200"].includes(nationalityCode)
+      && !["argentina", "argentino", "argentina/a", "argentine"].includes(nationality);
+    if (groupPaymentReceiptType === "factura_t" &&
+      (groupPaymentDestino !== "master" || masterFolio?.config !== "accommodation" || !isForeignGuest)) {
+      setGroupPaymentReceiptType("factura_b");
+    }
+  }, [
+    groupPaymentReceiptType,
+    groupPaymentDestino,
+    masterFolio?.config,
+    groupPaymentReceptorType,
+    groupPaymentGuestNationality,
+    groupPaymentGuestNationalityCode,
+  ]);
 
   const { data: directInvoices = [] } = useQuery<any[]>({
     queryKey: ["/api/groups", groupId, "direct-invoices"],
@@ -1200,8 +1253,15 @@ export default function GroupDetailPage() {
   const groupPaymentMutation = useMutation({
     mutationFn: async () => {
       const validRows = groupPaymentRows.filter(r => parseFloat(r.amount || "0") > 0);
+      if (!groupPaymentReceptorLocked) {
+        throw new Error("Seleccioná y confirmá el receptor antes de registrar el pago.");
+      }
       if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a") {
         throw new Error("Ingresá al menos un monto");
+      }
+      if (!["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType)
+        && validRows.some(row => !row.reference.trim())) {
+        throw new Error("El Anticipo requiere una referencia para cada medio de pago.");
       }
       const rowsPayload = (validRows.length > 0 ? validRows : [{ method: groupPaymentRows[0].method, amount: "0", reference: "" }])
         .map((r) => ({
@@ -1212,6 +1272,17 @@ export default function GroupDetailPage() {
             ? { tipo: r.retencionTipo, monto: parseFloat(r.retencionMonto || "0") }
             : undefined,
         }));
+      const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+      const concepts = isFiscal
+        ? groupPaymentItems
+            .filter((item) => item.descripcion.trim() && item.subtotal > 0)
+            .map((item) => ({ description: item.descripcion.trim(), amount: item.subtotal }))
+        : [{
+            description: `Anticipo grupo ${group?.name || groupId}`,
+            amount: validRows.reduce((sum, row) =>
+              sum + (parseFloat(row.amount || "0") || 0)
+              + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0),
+          }];
       const receiverDetails = {
         razonSocial: groupPaymentRazonSocial || undefined,
         cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
@@ -1226,6 +1297,7 @@ export default function GroupDetailPage() {
           billingEntityType: groupPaymentCcEntityType,
           billingEntityId: groupPaymentCcEntityId || undefined,
           receiverDetails,
+          concepts,
         });
       }
       return apiRequest("POST", `/api/groups/${groupId}/payment`, {
@@ -1236,6 +1308,7 @@ export default function GroupDetailPage() {
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
         receiverDetails,
+        concepts,
       });
     },
     onSuccess: async (res) => {
@@ -1249,11 +1322,9 @@ export default function GroupDetailPage() {
       });
 
       const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
-      const needsVoucher = groupPaymentReceiptType === "cierre_habitacion";
-      const needsTicket = groupPaymentReceiptType === "ticket";
       const isMaster = groupPaymentDestino === "master";
 
-      if (needsFactura || needsVoucher) {
+      if (needsFactura) {
         // Close the payment dialog and open the invoice dialog with the payment ID
         setShowGroupPaymentDialog(false);
         if (isMaster) {
@@ -1264,11 +1335,6 @@ export default function GroupDetailPage() {
           setShowGroupFacturaDialog(true);
         }
         return;
-      }
-
-      if (needsTicket) {
-        // Abrir el folio maestro del grupo como comprobante interno de respaldo
-        window.open(`/api/groups/${groupId}/master-folio/pdf`, "_blank");
       }
 
       if (groupPaymentCloseAll) {
@@ -1605,7 +1671,7 @@ export default function GroupDetailPage() {
   <div class="footer">
     Maran Suites &amp; Towers &mdash; Documento interno de uso operativo
   </div>
-  <script>window.onload = function() { window.print(); };<\/script>
+  ${"<" + "script>window.onload = function() { window.print(); };" + "<" + "/script>"}
 </body>
 </html>`;
 
@@ -1659,11 +1725,24 @@ export default function GroupDetailPage() {
   const groupPaymentRowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
   const groupPaymentItemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
-  const groupPaymentItemsVsPaymentDiff = Math.round((groupPaymentItemsTotal - (groupPaymentRowsTotal + groupPaymentRetentionsTotal)) * 100) / 100;
-  const groupPaymentItemsMismatch = groupPaymentIsFiscal && Math.abs(groupPaymentItemsVsPaymentDiff) > 0.01;
+  const groupPaymentFiscalAvailable = Number(groupInvoiceSnapshot?.totals?.available ?? 0);
+  // A fiscal document is backed by the invoice snapshot, not by the cash rows:
+  // an earlier advance can leave cash balance at zero while accommodation is
+  // still available to document.
+  const groupPaymentItemsMismatch = groupPaymentIsFiscal && (
+    groupPaymentItemsTotal <= 0 || groupPaymentItemsTotal > groupPaymentFiscalAvailable + 0.01
+  );
+  const groupPaymentHasRequiredReferences = groupPaymentIsFiscal || groupPaymentRows
+    .filter(r => parseFloat(r.amount || "0") > 0)
+    .every(r => !!r.reference.trim());
   const groupPaymentCanSubmit = !groupPaymentMutation.isPending
-    && (groupPaymentIsMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+    && (groupPaymentIsFiscal
+      ? (groupPaymentFiscalAvailable > 0 || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+      : groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+    // A receiver is never optional, including an Anticipo.
+    && groupPaymentReceptorLocked
     && (!groupPaymentEntityRequired || groupPaymentHasEntityData)
+    && groupPaymentHasRequiredReferences
     && !groupPaymentItemsMismatch;
 
   return (
@@ -2278,7 +2357,7 @@ export default function GroupDetailPage() {
                             {masterFolio.config === "accommodation" ? "Alojamiento + Cargos grupales" : "Todo incluido"}
                           </Badge>
                         </CardTitle>
-                        <CardDescription>Lo que paga el organizador del grupo</CardDescription>
+                          <CardDescription>Destino del cobro del organizador del grupo</CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
                         <Button
@@ -2294,7 +2373,7 @@ export default function GroupDetailPage() {
                             prefillGroupReceptorFromBillingEntity();
                             setShowGroupPaymentDialog(true);
                           }}
-                          disabled={masterFolio.masterBalance <= 0.01}
+                          disabled={masterFolio.masterBalance <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01}
                           data-testid="button-master-payment"
                         >
                           <CreditCard className="h-4 w-4 mr-1" />
@@ -2428,7 +2507,7 @@ export default function GroupDetailPage() {
                               : null;
                             // Bug 8: for non-electronic payments, show receipt type as badge
                             const receiptLabel = invoiceBadge ? null
-                              : (!gp.receiptType || gp.receiptType === "none") ? `Adelanto Grupos #${gpIdx + 1}`
+                              : (!gp.receiptType || gp.receiptType === "none") ? `Anticipo #${gpIdx + 1}`
                               : gp.receiptType === "factura_a" ? "Factura A"
                               : gp.receiptType === "factura_b" ? "Factura B"
                               : gp.receiptType === "factura_t" ? "Factura T"
@@ -2566,7 +2645,11 @@ export default function GroupDetailPage() {
                       Folios Individuales por Habitación
                     </CardTitle>
                     {masterFolio.config === "none" && (
-                      <Button size="sm" variant="outline" onClick={() => setShowFolioPaymentDialog(true)} data-testid="button-folio-payment">
+                      <Button size="sm" variant="outline" onClick={() => {
+                        resetGroupPaymentDialogFields();
+                        setGroupPaymentDestino("distribute");
+                        setShowGroupPaymentDialog(true);
+                      }} data-testid="button-folio-payment">
                         <CreditCard className="h-4 w-4 mr-1" /> Pago grupal distribuido
                       </Button>
                     )}
@@ -2605,7 +2688,7 @@ export default function GroupDetailPage() {
                               <Badge variant="outline" className="text-xs">{r.nights} noche(s)</Badge>
                               {hasExtras && masterFolio.config !== "none" && (
                                 <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 text-xs">
-                                  ${r.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })} en extras
+                                  ${r.extras.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en extras
                                 </Badge>
                               )}
                             </div>
@@ -2856,7 +2939,7 @@ export default function GroupDetailPage() {
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Total extras</p>
-                          <p className="font-bold">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
+                          <p className="font-bold">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         </div>
                         <div>
                           <p className="text-xs text-muted-foreground">Total pagos</p>
@@ -3374,7 +3457,7 @@ export default function GroupDetailPage() {
               Pago Grupal
             </DialogTitle>
             <DialogDescription>
-              El pago se distribuirá entre las reservas activas del grupo
+              Seleccioná primero el receptor y luego definí el cobro o la documentación fiscal
             </DialogDescription>
           </DialogHeader>
 
@@ -3396,17 +3479,22 @@ export default function GroupDetailPage() {
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
             const condicionSupportsFA = isRI;
             const receiptTypeLabels: Record<string, string> = {
-              ticket: "Ticket",
               factura_a: "Factura A",
               factura_b: "Factura B",
               factura_mipyme_a: "Factura MiPyme A",
               factura_t: "Factura T",
-              cierre_habitacion: "Voucher Habitaciones",
             };
             // Factura T ("solo alojamiento") is only fiscally valid when the master folio is
             // configured to cover accommodation exclusively — a config="all" master folio
             // also covers extras/cargos grupales, which Factura T cannot legally document.
-            const allowFT = !isMaster || masterFolio?.config === "accommodation";
+            const isAccommodationOnlyMaster = isMaster && masterFolio?.config === "accommodation";
+            const normalizedNationality = groupPaymentGuestNationality.trim().toLowerCase();
+            const normalizedNationalityCode = groupPaymentGuestNationalityCode.trim().toLowerCase();
+            const isForeignGuest = groupPaymentReceptorType === "guest"
+              && !!(normalizedNationality || normalizedNationalityCode)
+              && !["arg", "ar", "200"].includes(normalizedNationalityCode)
+              && !["argentina", "argentino", "argentina/a", "argentine"].includes(normalizedNationality);
+            const allowFT = isAccommodationOnlyMaster && isForeignGuest;
             const { other: _excl, ...methodsWithoutOther } = PAYMENT_METHOD_LABELS;
             const allowedMethods = groupPaymentReceiptType === "factura_t"
               ? { credit_card: "Tarjeta Crédito", debit_card: "Tarjeta Débito", cuenta_corriente: "Cuenta Corriente" }
@@ -3414,16 +3502,14 @@ export default function GroupDetailPage() {
             const hasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
             const entityRequired = (isFiscal && !isMipyme) || hasCuentaCorriente;
             const hasEntityData = !!groupPaymentRazonSocial.trim();
-            // "Conceptos" (the invoice line items) must add up to exactly what's being
-            // collected in "Forma de pago" (rows + retenciones) — this holds for all
-            // three quick-fill modes (Sin desglose/Totalizados/Detallados) and for
-            // manually edited items alike, or the emitted comprobante's total silently
-            // diverges from the money actually received.
+            // Fiscal concepts are limited by the source snapshot, independently
+            // from what is collected now.
             const itemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
-            const itemsVsPaymentDiff = Math.round((itemsTotal - (rowsTotal + retentionsTotal)) * 100) / 100;
-            const itemsMismatch = isFiscal && Math.abs(itemsVsPaymentDiff) > 0.01;
+            const fiscalAvailable = Number(groupInvoiceSnapshot?.totals?.available ?? 0);
+            const itemsMismatch = isFiscal && (itemsTotal <= 0 || itemsTotal > fiscalAvailable + 0.01);
             const canSubmit = !groupPaymentMutation.isPending
-              && (isMipyme || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+              && (isFiscal ? fiscalAvailable > 0 || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0) : groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+              && groupPaymentReceptorLocked
               && (!entityRequired || hasEntityData)
               && !itemsMismatch;
 
@@ -3449,10 +3535,10 @@ export default function GroupDetailPage() {
             const applyStrictComprobanteForCondicion = (condicion: string) => {
               const supportsFA = condicion === "Responsable Inscripto" || condicion === "Exento";
               setGroupPaymentReceiptType(prev => {
-                if (prev === "sin_comprobante" || prev === "cierre_habitacion" || prev === "factura_t") return prev;
+                if (prev === "sin_comprobante" || prev === "factura_t") return prev;
                 const prevIsFAFamily = prev === "factura_a" || prev === "factura_mipyme_a";
                 if (supportsFA && !prevIsFAFamily) return "factura_a";
-                if (!supportsFA && prevIsFAFamily) return "ticket";
+                if (!supportsFA && prevIsFAFamily) return "factura_b";
                 return prev;
               });
             };
@@ -3480,6 +3566,8 @@ export default function GroupDetailPage() {
               setGroupPaymentDomicilio("");
               setGroupPaymentCcEntityId("");
               setGroupPaymentGuestId(null);
+              setGroupPaymentGuestNationality("");
+              setGroupPaymentGuestNationalityCode("");
               setGroupPaymentReceptorLocked(false);
             };
 
@@ -3489,16 +3577,16 @@ export default function GroupDetailPage() {
               <div className="space-y-5">
                 <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">Saldo previo</p>
+                    <p className="text-xs text-muted-foreground">Cobrar ahora</p>
                     <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">A aplicar ahora</p>
-                    <p className="font-semibold text-primary">{fmtMoney(rowsTotal + retentionsTotal)}</p>
+                    <p className="text-xs text-muted-foreground">Disponible para facturar</p>
+                    <p className="font-semibold text-primary">{fmtMoney(Number(groupInvoiceSnapshot?.totals?.available ?? 0))}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Saldo restante</p>
-                    <p className={priorBalance - rowsTotal - retentionsTotal > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance - rowsTotal - retentionsTotal)}</p>
+                    <p className="text-xs text-muted-foreground">Total cobrado ahora</p>
+                    <p className="font-semibold">{fmtMoney(rowsTotal + retentionsTotal)}</p>
                   </div>
                 </div>
                 {/* 1. RECEPTOR */}
@@ -3540,6 +3628,8 @@ export default function GroupDetailPage() {
                           const res = await apiRequest("GET", `/api/guests/${guest.id}`);
                           const full = await res.json();
                           if (full?.direccion) setGroupPaymentDomicilio(full.direccion);
+                           setGroupPaymentGuestNationality(String(full?.nationality || ""));
+                           setGroupPaymentGuestNationalityCode(String(full?.nationalityCode || ""));
                           if (full?.vatCondition) {
                             // Guests store condición IVA as a lowercase snake_case enum
                             // (e.g. "responsable_inscripto"), not the Title-Case labels
@@ -3652,6 +3742,12 @@ export default function GroupDetailPage() {
                   )}
                 </div>
 
+                {!groupPaymentReceptorLocked && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" /> Seleccioná un receptor para habilitar las siguientes secciones.
+                  </p>
+                )}
+                <fieldset disabled={!groupPaymentReceptorLocked} className={!groupPaymentReceptorLocked ? "opacity-50" : ""}>
                 <div className="border-t" />
 
                 {/* 2. COMPROBANTE */}
@@ -3668,8 +3764,15 @@ export default function GroupDetailPage() {
                       onClick={() => {
                         setGroupPaymentEmitirComprobante(true);
                         if (groupPaymentReceiptType === "sin_comprobante") {
-                          setGroupPaymentReceiptType(condicionSupportsFA ? "factura_a" : "ticket");
+                          setGroupPaymentReceiptType(condicionSupportsFA ? "factura_a" : "factura_b");
                         }
+                        // Fiscal lines always originate in the immutable invoice
+                        // snapshot, rather than from the amount being collected.
+                        const sources = (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => Number(source.available) > 0);
+                        setGroupPaymentItems(gItemsFromSimple(sources.map((source: any) => ({
+                          descripcion: `${source.destination} — ${source.concept}`,
+                          precioUnitario: Number(source.available),
+                        }))));
                       }}
                       className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                       data-testid="button-group-con-comprobante">
@@ -3684,14 +3787,11 @@ export default function GroupDetailPage() {
                           <SelectValue placeholder="Seleccionar comprobante..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {/* Strict split by Condición IVA: RI/Exento only see A/MiPyme A,
-                              everyone else only sees Ticket/B — never both families at once. */}
-                          {!condicionSupportsFA && <SelectItem value="ticket">Ticket</SelectItem>}
+                           {/* Grupos only issues fiscal documents; advances have no receipt. */}
                           {condicionSupportsFA && <SelectItem value="factura_a">Factura A</SelectItem>}
                           {!condicionSupportsFA && <SelectItem value="factura_b">Factura B</SelectItem>}
                           {condicionSupportsFA && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
                           {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
-                          <SelectItem value="cierre_habitacion">Voucher Habitaciones</SelectItem>
                         </SelectContent>
                       </Select>
                       {isFiscal && !isMipyme && (
@@ -3711,7 +3811,6 @@ export default function GroupDetailPage() {
                     </div>
                   )}
                 </div>
-
                 {/* 3. DESTINO DEL COBRO */}
                 {masterAvailable && (
                   <>
@@ -3731,7 +3830,7 @@ export default function GroupDetailPage() {
                             setGroupPaymentDestino("master");
                             // Factura T only covers accommodation-only master folios.
                             if (groupPaymentReceiptType === "factura_t" && masterFolio?.config !== "accommodation") {
-                              setGroupPaymentReceiptType("ticket");
+                              setGroupPaymentReceiptType("factura_b");
                             }
                           }}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
@@ -3772,10 +3871,10 @@ export default function GroupDetailPage() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label className="text-sm font-semibold">5. Conceptos</Label>
-                        <Button variant="outline" size="sm" type="button"
+                        {!isAccommodationOnlyMaster && <Button variant="outline" size="sm" type="button"
                           onClick={() => setGroupPaymentItems(p => [...p, gNewItem()])}>
                           <Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem
-                        </Button>
+                        </Button>}
                       </div>
                       <p className="text-xs text-muted-foreground">Ingrese precios con IVA incluido</p>
 
@@ -3787,8 +3886,28 @@ export default function GroupDetailPage() {
                         </div>
                       )}
 
+                      {/* An accommodation-only master can only document the
+                          source-backed accommodation lines. */}
+                      {isAccommodationOnlyMaster && (
+                        <div className="rounded-lg border bg-muted/20 p-3 text-sm space-y-2">
+                          <p className="font-medium">Alojamiento del grupo</p>
+                          <p className="text-xs text-muted-foreground">Los conceptos se generan desde los cargos de alojamiento disponibles; no se admiten extras ni conceptos manuales.</p>
+                          <Button type="button" size="sm" variant="outline" onClick={() => {
+                            const sources = (groupInvoiceSnapshot?.sources ?? []).filter((source: any) =>
+                              Number(source.available) > 0 && /alojamiento/i.test(`${source.concept ?? ""} ${source.destination ?? ""}`)
+                            );
+                            setGroupInvoiceDistribution("none");
+                            setGroupPaymentItems(gItemsFromSimple(sources.map((source: any) => ({
+                              descripcion: source.concept || `Alojamiento grupo ${group?.name ?? ""}`,
+                              precioUnitario: Number(source.available),
+                            }))));
+                          }}>
+                            Generar detalle de alojamiento
+                          </Button>
+                        </div>
+                      )}
                       {/* Quick fill from folio */}
-                      {!isMipyme && folio && (
+                      {!isMipyme && folio && !isAccommodationOnlyMaster && (
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Completar desde folio:</Label>
                           <div className="grid grid-cols-3 gap-2">
@@ -3831,7 +3950,7 @@ export default function GroupDetailPage() {
                       )}
 
                       {/* Editable items */}
-                      <div className="space-y-2">
+                      {!isAccommodationOnlyMaster && <div className="space-y-2">
                         {groupPaymentItems.map((item, idx) => (
                           <div key={idx} className="border rounded-lg p-3 space-y-2">
                             <div className="grid grid-cols-12 gap-2">
@@ -3881,7 +4000,7 @@ export default function GroupDetailPage() {
                             </div>
                           </div>
                         ))}
-                      </div>
+                      </div>}
 
                       {/* Total preview */}
                       <div className="bg-muted/30 rounded-lg p-3 text-sm flex justify-between font-semibold">
@@ -3891,7 +4010,7 @@ export default function GroupDetailPage() {
                       {itemsMismatch && (
                         <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-items-payment-mismatch">
                           <AlertTriangle className="h-3 w-3 shrink-0" />
-                          Los Conceptos ({fmtMoney(itemsTotal)}) no coinciden con la Forma de pago ({fmtMoney(rowsTotal + retentionsTotal)}). Diferencia: {fmtMoney(Math.abs(itemsVsPaymentDiff))}.
+                          Los conceptos superan el disponible para facturar ({fmtMoney(fiscalAvailable)}). Ajustá los conceptos de origen.
                         </p>
                       )}
                     </div>
@@ -3929,14 +4048,14 @@ export default function GroupDetailPage() {
                             value={row.amount}
                             onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
                             data-testid={`input-group-payment-amount-${idx}`} />
-                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground shrink-0"
-                            title="Referencia / N° comprobante"
-                            onClick={() => {
-                              const ref = prompt("Referencia / N° comprobante:", row.reference);
-                              if (ref !== null) setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: ref} : r));
-                            }}>
-                            <FileText className="h-4 w-4" />
-                          </Button>
+                          <Input
+                            value={row.reference}
+                            placeholder={isFiscal ? "Referencia" : "Referencia *"}
+                            aria-label={`Referencia del medio de pago ${idx + 1}`}
+                            className="h-9 min-w-0"
+                            onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, reference: e.target.value} : r))}
+                            data-testid={`input-group-payment-reference-${idx}`}
+                          />
                           {groupPaymentRows.length > 1 ? (
                             <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-destructive/70 hover:text-destructive shrink-0"
                               onClick={() => setGroupPaymentRows(prev => prev.filter((_, i) => i !== idx))}>
@@ -3944,7 +4063,9 @@ export default function GroupDetailPage() {
                             </Button>
                           ) : <div className="w-9" />}
                         </div>
-                        {row.reference && <p className="text-xs text-muted-foreground pl-1">Ref: {row.reference}</p>}
+                        {!isFiscal && parseFloat(row.amount || "0") > 0 && !row.reference.trim() && (
+                          <p className="text-xs text-destructive pl-1">La referencia es obligatoria para registrar un Anticipo.</p>
+                        )}
                         {row.method !== "cuenta_corriente" ? (
                           !row.retencionEnabled ? (
                             <button type="button" className="text-xs text-muted-foreground underline pl-1"
@@ -3983,7 +4104,7 @@ export default function GroupDetailPage() {
                     ))}
                     {groupPaymentRows.length > 1 && (
                       <div className="flex justify-end text-sm font-semibold border-t pt-2">
-                        Total: <span className="ml-1">{fmtMoney(rowsTotal)}</span>
+                        Total cubierto: <span className="ml-1">{fmtMoney(rowsTotal + retentionsTotal)}</span>
                       </div>
                     )}
                   </div>
@@ -4053,6 +4174,7 @@ export default function GroupDetailPage() {
                     <div className="flex justify-between gap-2 border-t pt-1 font-semibold"><span>Total cubierto</span><span>{fmtMoney(rowsTotal + retentionsTotal)}</span></div>
                   </div>
                 </div>
+                </fieldset>
               </div>
             );
           })()}
@@ -4062,7 +4184,18 @@ export default function GroupDetailPage() {
               Cancelar
             </Button>
             <Button
-              onClick={() => groupPaymentMutation.mutate()}
+              onClick={() => {
+                // Documentation of already-collected accommodation must not
+                // manufacture a second, zero-value cash collection.
+                if (groupPaymentIsFiscal && groupPaymentRowsTotal <= 0 && groupPaymentFiscalAvailable > 0) {
+                  setPendingGroupPaymentId("");
+                  setGroupFacturaFromResumen(true);
+                  setShowGroupPaymentDialog(false);
+                  setShowGroupFacturaDialog(true);
+                  return;
+                }
+                groupPaymentMutation.mutate();
+              }}
               disabled={!groupPaymentCanSubmit}
               data-testid="button-confirm-group-payment"
             >
@@ -4087,15 +4220,18 @@ export default function GroupDetailPage() {
             groupPaymentReceiptType === "factura_a" ? ["FA"] :
             groupPaymentReceiptType === "factura_t" ? ["FT"] :
             groupPaymentReceiptType === "factura_mipyme_a" ? ["FM"] :
-            groupPaymentReceiptType === "cierre_habitacion" ? ["cierre_habitacion"] :
             ["FB"]
           }
           compactMode={!groupFacturaFromResumen}
           initialValues={{
-            razonSocial: groupPaymentRazonSocial || group?.name || "",
-            cuit: groupPaymentCuit ? groupPaymentCuit.replace(/-/g, "") : undefined,
-            condicionIva: groupPaymentCondicionIva || undefined,
-            domicilio: groupPaymentDomicilio || undefined,
+            ...buildGroupInvoiceRecipientInitialValues({
+              razonSocial: groupPaymentRazonSocial,
+              fallbackName: group?.name,
+              cuit: groupPaymentCuit,
+              dni: groupPaymentDni,
+              condicionIva: groupPaymentCondicionIva,
+              domicilio: groupPaymentDomicilio,
+            }),
             items: groupPaymentItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
               descripcion: it.descripcion || `Pago grupal — ${group?.name ?? ""}`,
               precioUnitario: it.precioUnitario * it.cantidad,
@@ -4104,8 +4240,16 @@ export default function GroupDetailPage() {
           groupPaymentId={pendingGroupPaymentId || undefined}
           groupPaymentGroupId={pendingGroupPaymentId ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
-          groupInvoiceSources={groupInvoiceSnapshot?.sources}
+          groupInvoiceSources={groupPaymentDestino === "master" && masterFolio?.config === "accommodation"
+            ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
+            : groupInvoiceSnapshot?.sources}
           groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
+          groupFolioContext={groupPaymentReceiptType === "factura_t" ? {
+            billingTarget: "guest",
+            nationality: groupPaymentGuestNationality || undefined,
+            nationalityCode: groupPaymentGuestNationalityCode || undefined,
+            hasAccommodation: true,
+          } : undefined}
           lockItems={groupFacturaFromResumen}
           hideAddItems={groupFacturaFromResumen}
           onSuccess={() => {
@@ -4153,10 +4297,14 @@ export default function GroupDetailPage() {
             allowedTipos={allowedTiposMap[groupPaymentReceiptType] ?? ["FB"]}
             compactMode={true}
             initialValues={{
-              razonSocial: groupPaymentRazonSocial || group?.name || "",
-              cuit: groupPaymentCuit ? groupPaymentCuit.replace(/-/g, "") : undefined,
-              condicionIva: groupPaymentCondicionIva || undefined,
-              domicilio: groupPaymentDomicilio || undefined,
+              ...buildGroupInvoiceRecipientInitialValues({
+                razonSocial: groupPaymentRazonSocial,
+                fallbackName: group?.name,
+                cuit: groupPaymentCuit,
+                dni: groupPaymentDni,
+                condicionIva: groupPaymentCondicionIva,
+                domicilio: groupPaymentDomicilio,
+              }),
               items: groupPaymentItems.filter(it => it.descripcion.trim() || it.precioUnitario > 0).map(it => ({
                 descripcion: it.descripcion || defaultDescripcion,
                 precioUnitario: it.precioUnitario * it.cantidad,
@@ -4164,8 +4312,16 @@ export default function GroupDetailPage() {
             }}
             groupPaymentId={pendingMasterPaymentId || undefined}
             groupPaymentGroupId={pendingMasterPaymentId ? groupId : undefined}
-            groupInvoiceSources={groupInvoiceSnapshot?.sources}
+            groupInvoiceSources={masterFolio?.config === "accommodation"
+              ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
+              : groupInvoiceSnapshot?.sources}
             groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
+            groupFolioContext={groupPaymentReceiptType === "factura_t" ? {
+              billingTarget: "guest",
+              nationality: groupPaymentGuestNationality || undefined,
+              nationalityCode: groupPaymentGuestNationalityCode || undefined,
+              hasAccommodation: true,
+            } : undefined}
             onSuccess={() => {
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");

@@ -76,6 +76,10 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
         body: JSON.stringify({
           amount: "500",
           method: "efectivo",
+          reference: "REC-V2-001",
+          receiptType: "none",
+          receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+          concepts: [{ description: "Anticipo grupal", amount: 500 }],
           distribution: "equal",
         }),
       });
@@ -93,7 +97,7 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
         "500",
         "income",
         "tester",
-        "sin_comprobante",
+        "none",
         "group-payment-1",
       );
     });
@@ -107,6 +111,10 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
         body: JSON.stringify({
           amount: "300",
           method: "cuenta_corriente",
+          reference: "REC-V2-002",
+          receiptType: "none",
+          receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+          concepts: [{ description: "Anticipo grupal", amount: 300 }],
           distribution: "equal",
         }),
       });

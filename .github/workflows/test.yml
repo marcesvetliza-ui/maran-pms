@@ -35,6 +35,16 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
+      - name: Validar URLs del lockfile npm
+        run: |
+          # GitHub Actions cannot reach Replit's internal package proxy. Fail before
+          # setup/install so a regenerated lockfile does not waste CI time.
+          if grep -Fq "package-firewall.replit.local" package-lock.json; then
+            echo "::error file=package-lock.json::El lockfile contiene URLs del proxy interno package-firewall.replit.local, inaccesibles desde GitHub Actions."
+            echo "Regenera el lockfile usando registry.npmjs.org antes de volver a ejecutar CI."
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

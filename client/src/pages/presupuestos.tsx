@@ -90,12 +90,17 @@ function defaultAreaForRole(role?: string): AreaOrigen {
   return "grupos";
 }
 
+export function getPresupuestoQuantityLabel(items: Array<Pick<ItemRow, "sector">>): "Noches" | "Cantidad" {
+  return items.length > 0 && items.every(item => item.sector === "alojamiento") ? "Noches" : "Cantidad";
+}
+
 // ─── Item Row Component ───────────────────────────────────────────────────────
-function ItemRowEdit({ item, idx, onChange, onRemove, roomTypes }: {
+function ItemRowEdit({ item, idx, onChange, onRemove, roomTypes, quantityLabel }: {
   item: ItemRow; idx: number;
   onChange: (idx: number, field: keyof ItemRow, value: string) => void;
   onRemove: (idx: number) => void;
   roomTypes: RoomType[];
+  quantityLabel: "Noches" | "Cantidad";
 }) {
   const update = (field: keyof ItemRow, value: string) => onChange(idx, field, value);
   const updateCalc = (field: "cantidad" | "cantidadHabitaciones" | "precioUnitario" | "descuento", value: string) => {
@@ -159,7 +164,7 @@ function ItemRowEdit({ item, idx, onChange, onRemove, roomTypes }: {
         </div>
       </TableCell>
       <TableCell className="p-1 w-20">
-        <Input className="h-8 text-xs text-right" value={item.cantidad} onChange={e => updateCalc("cantidad", e.target.value)} data-testid={`input-item-qty-${idx}`} title="Cantidad de noches" />
+        <Input className="h-8 text-xs text-right" value={item.cantidad} onChange={e => updateCalc("cantidad", e.target.value)} data-testid={`input-item-qty-${idx}`} title={quantityLabel} />
       </TableCell>
       <TableCell className="p-1 w-28">
         <div className="relative">
@@ -194,6 +199,9 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
 
   const [area, setArea] = useState<AreaOrigen>((presupuesto as any)?.areaOrigen || defaultAreaForRole(user?.role));
   const [para, setPara] = useState(presupuesto?.para || "");
+  const [cuit, setCuit] = useState((presupuesto as any)?.cuit || "");
+  const [direccion, setDireccion] = useState((presupuesto as any)?.direccion || "");
+  const [contacto, setContacto] = useState((presupuesto as any)?.contacto || "");
   const [fechaEmision, setFechaEmision] = useState(presupuesto?.fechaEmision || today);
   const [fechaVencimiento, setFechaVencimiento] = useState(presupuesto?.fechaVencimiento || "");
   const [fechaEvento, setFechaEvento] = useState(presupuesto?.fechaEvento || "");
@@ -209,6 +217,41 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
       ? presupuesto.items.map(it => ({ id: it.id, sector: it.sector as Sector, descripcion: it.descripcion, detalle: it.detalle || "", cantidad: String(it.cantidad), cantidadHabitaciones: String((it as any).cantidadHabitaciones ?? "1"), precioUnitario: String(it.precioUnitario), descuento: String(it.descuento), subtotal: String(it.subtotal) }))
       : [emptyItem()]
   );
+  useEffect(() => {
+    if (presupuesto) {
+      setArea((presupuesto as any).areaOrigen || defaultAreaForRole(user?.role));
+      setPara(presupuesto.para || "");
+      setCuit(presupuesto.cuit || "");
+      setDireccion(presupuesto.direccion || "");
+      setContacto(presupuesto.contacto || "");
+      setFechaEmision(presupuesto.fechaEmision || today);
+      setFechaVencimiento(presupuesto.fechaVencimiento || "");
+      setFechaEvento(presupuesto.fechaEvento || "");
+      setFechaFin((presupuesto as any).fechaFin || "");
+      setParticipantes((presupuesto as any).participantes ? String((presupuesto as any).participantes) : "");
+      setNotas(presupuesto.notas || "");
+      setCondiciones(presupuesto.condiciones || "");
+      setCondLoaded(true);
+      setDescuentoGlobal(String(presupuesto.descuentoGlobal || "0"));
+      setItems(presupuesto.items?.length
+        ? presupuesto.items.map(it => ({
+            id: it.id,
+            sector: it.sector as Sector,
+            descripcion: it.descripcion,
+            detalle: it.detalle || "",
+            cantidad: String(it.cantidad),
+            cantidadHabitaciones: String((it as any).cantidadHabitaciones ?? "1"),
+            precioUnitario: String(it.precioUnitario),
+            descuento: String(it.descuento),
+            subtotal: String(it.subtotal),
+          }))
+        : [emptyItem()]);
+    } else if (open) {
+      setCuit("");
+      setDireccion("");
+      setContacto("");
+    }
+  }, [presupuesto?.id, open, user?.role]);
 
   const { data: roomTypes = [] } = useQuery<RoomType[]>({ queryKey: ["/api/room-types"] });
   const useItems = AREA_CONFIG[area]?.useItems ?? true;
@@ -282,6 +325,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   }, [area, isEdit, condLoaded, condiciones]);
 
   const subtotalSuma = useItems ? items.reduce((acc, it) => acc + toNum(it.subtotal), 0) : 0;
+  const quantityLabel = getPresupuestoQuantityLabel(items);
   const descuentoMonto = subtotalSuma * toNum(descuentoGlobal) / 100;
   const totalFinal = subtotalSuma - descuentoMonto;
 
@@ -295,6 +339,9 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
 
   const buildPayload = () => ({
     para: para.trim(),
+    cuit: cuit.trim() || null,
+    direccion: direccion.trim() || null,
+    contacto: contacto.trim() || null,
     fechaEmision,
     fechaVencimiento: fechaVencimiento || null,
     fechaEvento: fechaEvento || null,
@@ -388,6 +435,18 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
             <div className="col-span-2 md:col-span-3">
               <Label>Para (dirigido a) *</Label>
               <Input value={para} onChange={e => setPara(e.target.value)} placeholder="Nombre del cliente, empresa o agencia..." className="mt-1" data-testid="input-para" />
+            </div>
+            <div>
+              <Label>CUIT</Label>
+              <Input value={cuit} onChange={e => setCuit(e.target.value)} placeholder="30-12345678-9" className="mt-1" data-testid="input-cuit" />
+            </div>
+            <div className="col-span-2">
+              <Label>Dirección</Label>
+              <Input value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dirección del destinatario" className="mt-1" data-testid="input-direccion" />
+            </div>
+            <div className="col-span-2 md:col-span-1">
+              <Label>Contacto</Label>
+              <Input value={contacto} onChange={e => setContacto(e.target.value)} placeholder="Nombre, teléfono o email" className="mt-1" data-testid="input-contacto" />
             </div>
 
             <div>
@@ -492,7 +551,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
                     <TableRow className="bg-muted/50">
                       <TableHead className="text-xs w-32">Sector</TableHead>
                       <TableHead className="text-xs">Descripción</TableHead>
-                      <TableHead className="text-xs w-20 text-right">Cant.</TableHead>
+                       <TableHead className="text-xs w-20 text-right">{quantityLabel}</TableHead>
                       <TableHead className="text-xs w-28 text-right">Precio unit.</TableHead>
                       <TableHead className="text-xs w-20 text-right">Dto%</TableHead>
                       <TableHead className="text-xs w-28 text-right">Subtotal</TableHead>
@@ -507,7 +566,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
                         </TableCell>
                       </TableRow>
                     ) : items.map((item, idx) => (
-                      <ItemRowEdit key={idx} item={item} idx={idx} onChange={handleItemChange} onRemove={handleRemoveItem} roomTypes={roomTypes} />
+                       <ItemRowEdit key={idx} item={item} idx={idx} onChange={handleItemChange} onRemove={handleRemoveItem} roomTypes={roomTypes} quantityLabel={quantityLabel} />
                     ))}
                   </TableBody>
                 </Table>
@@ -607,7 +666,11 @@ export default function PresupuestosPage() {
   const filtered = lista.filter(p => {
     if (areaFilter !== "todos" && (p as any).areaOrigen !== areaFilter) return false;
     if (estadoFilter !== "todos" && p.estado !== estadoFilter) return false;
-    if (search) { const q = search.toLowerCase(); return p.numero.toLowerCase().includes(q) || p.para.toLowerCase().includes(q); }
+    if (search) {
+      const q = search.toLowerCase();
+      return [p.numero, p.para, p.cuit, p.direccion, p.contacto]
+        .some(value => value?.toLowerCase().includes(q));
+    }
     return true;
   });
 
@@ -730,7 +793,14 @@ export default function PresupuestosPage() {
                         {areaCfg?.label || pArea}
                       </span>
                     </TableCell>
-                    <TableCell className="font-medium max-w-[180px] truncate">{p.para}</TableCell>
+                    <TableCell className="max-w-[240px]">
+                      <div className="font-medium truncate">{p.para}</div>
+                      {(p.cuit || p.direccion || p.contacto) && (
+                        <div className="text-xs text-muted-foreground truncate" title={[p.cuit, p.direccion, p.contacto].filter(Boolean).join(" · ")}>
+                          {[p.cuit && `CUIT ${p.cuit}`, p.direccion, p.contacto].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{fmtDate(p.fechaEmision)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {p.fechaEvento ? fmtDate(p.fechaEvento) : <span className="opacity-30">—</span>}

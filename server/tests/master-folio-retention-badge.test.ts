@@ -173,6 +173,9 @@ describe("Folio Maestro retention badge keeps surfacing through the real HTTP ro
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          receiptType: "none",
+          receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+          concepts: [{ description: "Anticipo grupo de prueba", amount: 10.01 }],
           paymentRows: [
             { method: "efectivo", amount: "6.00", reference: "cash-retencion", retention: { tipo: "iibb", monto: 4.01 } },
           ],
@@ -218,9 +221,12 @@ describe("Folio Maestro retention badge keeps surfacing through the real HTTP ro
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          receiptType: "none",
+          receiverDetails: { razonSocial: "Empresa Receptora SA", cuit: "30712345678" },
+          concepts: [{ description: "Anticipo grupo de prueba", amount: 12 }],
           // Gross (cash + retención) = 12.00, but the master balance is only 10.01.
           paymentRows: [
-            { method: "efectivo", amount: "6.00", retention: { tipo: "iibb", monto: 6.00 } },
+            { method: "efectivo", amount: "6.00", reference: "cash-overflow", retention: { tipo: "iibb", monto: 6.00 } },
           ],
         }),
       });

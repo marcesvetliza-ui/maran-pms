@@ -10,7 +10,7 @@ import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionD
 import { requireAuth, requireRole } from "../auth";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
-import { assertGroupInvoiceAllocation, assertGroupPaymentInvoiceEligibility } from "./groupInvoiceScope";
+import { assertGroupInvoiceAllocation, assertGroupPaymentInvoiceEligibility, assertMasterFacturaTAllowed } from "./groupInvoiceScope";
 import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
@@ -785,8 +785,59 @@ export function registerBillingRoutes(app: Express) {
       if (tipoComprobante === "FB" && ["responsable_inscripto", "exento"].includes(vatCondition)) {
         return res.status(400).json({ error: "Factura B no corresponde a receptores Responsable Inscripto o Exento" });
       }
-      if (tipoComprobante === "FT" && (!isForeignGuest || !folioContext?.hasAccommodation)) {
+      if (tipoComprobante === "FT" && !groupId && (!isForeignGuest || !folioContext?.hasAccommodation)) {
         return res.status(400).json({ error: "Factura T solo puede emitirse a un huésped extranjero por alojamiento" });
+      }
+      if (tipoComprobante === "FT" && groupId) {
+        const group = await storage.getGroup(groupId);
+        if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+        assertMasterFacturaTAllowed("factura_t", (group as any).masterFolioConfig || "accommodation");
+        if (!normalizedSourceChargeIds.length || normalizedSourceChargeIds.some((id) => !id.endsWith(":accommodation"))) {
+          return res.status(400).json({ error: "Factura T grupal solo puede incluir conceptos de alojamiento del Folio Maestro." });
+        }
+        const normalizeDocument = (value: unknown) =>
+          String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const invoiceDocument = normalizeDocument(cliente?.dni || cliente?.cuit);
+        if (!invoiceDocument) {
+          return res.status(400).json({ error: "Factura T grupal requiere el documento del huésped extranjero." });
+        }
+        const trustedGuest = await db.execute(sql`
+          SELECT g.id, g.nationality, g.nationality_code
+          FROM group_reservation_links l
+          JOIN reservations r ON r.id = l.reservation_id
+          JOIN guests g ON g.id = r.guest_id
+          WHERE l.group_id = ${groupId}
+            AND r.status <> 'cancelled'
+            AND (
+              regexp_replace(upper(COALESCE(g.document_number, '')), '[^A-Z0-9]', '', 'g') = ${invoiceDocument}
+              OR regexp_replace(upper(COALESCE(g.cuil_cuit, '')), '[^A-Z0-9]', '', 'g') = ${invoiceDocument}
+            )
+          LIMIT 1
+        `);
+        const guest = trustedGuest.rows[0] as any;
+        const trustedNationality = String(guest?.nationality || "").trim().toLowerCase();
+        const trustedNationalityCode = String(guest?.nationality_code || "").trim().toLowerCase();
+        const trustedForeignGuest = !!guest
+          && !!(trustedNationality || trustedNationalityCode)
+          && !["arg", "ar", "200"].includes(trustedNationalityCode)
+          && !["argentina", "argentino", "argentina/a", "argentine"].includes(trustedNationality);
+        if (!trustedForeignGuest) {
+          return res.status(400).json({ error: "Factura T grupal solo puede emitirse a un huésped extranjero alojado en el grupo." });
+        }
+        if (groupPaymentId) {
+          const paymentResult = await db.execute(sql`
+            SELECT destination, billing_entity_id, receiver_details
+            FROM group_payments
+            WHERE id = ${groupPaymentId} AND group_id = ${groupId}
+            LIMIT 1
+          `);
+          const payment = paymentResult.rows[0] as any;
+          const receiver = payment?.receiver_details || {};
+          const receiverDocument = normalizeDocument(receiver.dni || receiver.cuit);
+          if (!payment || payment.destination !== "master_folio" || payment.billing_entity_id || receiverDocument !== invoiceDocument) {
+            return res.status(400).json({ error: "Factura T debe vincularse a un cobro del Folio Maestro del mismo huésped extranjero." });
+          }
+        }
       }
 
       const emitInvoice = async () => {
@@ -868,30 +919,20 @@ export function registerBillingRoutes(app: Express) {
         // first invoice before it can consume the same available concept.
         if (groupId) {
           const itemsTotal = calcularMontos(items, tipoComprobante).montoTotal;
+          const amountIds = Object.keys(sanitizedSourceChargeAmounts);
+          const hasSameSources = amountIds.length === normalizedSourceChargeIds.length
+            && amountIds.every((id) => normalizedSourceChargeIds.includes(id));
+          if (!hasSameSources) {
+            throw new FolioInvoiceValidationError(
+              "Las facturas grupales deben incluir el importe de cada concepto seleccionado."
+            );
+          }
+          // Source amounts remain exact even when the operator chooses a
+          // valid aggregate "Sin desglose" line. The source map, not the
+          // number of visible fiscal rows, restores availability after an NC.
+          await assertGroupInvoiceAllocation(groupId, sanitizedSourceChargeAmounts, itemsTotal);
           if (groupPaymentId) {
             await assertGroupPaymentInvoiceEligibility(groupId, groupPaymentId, itemsTotal);
-          } else {
-            const amountIds = Object.keys(sanitizedSourceChargeAmounts);
-            const hasSameSources = amountIds.length === normalizedSourceChargeIds.length
-              && amountIds.every((id) => normalizedSourceChargeIds.includes(id));
-            if (!hasSameSources) {
-              throw new FolioInvoiceValidationError(
-                "Las facturas grupales deben incluir el importe de cada concepto seleccionado."
-              );
-            }
-            // Preserve a durable source → fiscal-line relation. The credit
-            // note flow can then reuse the original item's tax treatment
-            // without guessing from an edited or aggregated item list.
-            if (items.length !== normalizedSourceChargeIds.length ||
-              normalizedSourceChargeIds.some((sourceId: string, index: number) =>
-                Math.round((Number(items[index]?.subtotal) || 0) * 100) !==
-                Math.round((Number(sanitizedSourceChargeAmounts[sourceId]) || 0) * 100)
-              )) {
-              throw new FolioInvoiceValidationError(
-                "Cada concepto grupal debe conservar un renglón fiscal con el mismo importe."
-              );
-            }
-            await assertGroupInvoiceAllocation(groupId, sanitizedSourceChargeAmounts, itemsTotal);
           }
         }
 
@@ -921,7 +962,10 @@ export function registerBillingRoutes(app: Express) {
       const user = (req as any).user;
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
-      if (cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
+      // A group invoice documents sources only. Its collection was (or will
+      // be) recorded through the group payment endpoints, so it must never
+      // create a second Caja/CC movement.
+      if (!groupId && cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
         const total = parseFloat(String((factura as any).montoTotal || "0"));
         if (total > 0) {
           const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
@@ -936,7 +980,7 @@ export function registerBillingRoutes(app: Express) {
             createdBy: user?.id || null,
           } as any);
         }
-      } else if (cashArea && cashFormaPago) {
+      } else if (!groupId && cashArea && cashFormaPago) {
         // Registrar movimiento de caja si se especificó un área
         try {
           const total = parseFloat(String((factura as any).montoTotal || "0"));
@@ -1399,11 +1443,15 @@ export function registerBillingRoutes(app: Express) {
       }
 
       sourceItemById = new Map<string, any>();
-      for (const [index, sourceId] of normalizedSourceIds.entries()) {
-        if (!sourceItemById.has(sourceId) && originalItems[index]) sourceItemById.set(sourceId, originalItems[index]);
-      }
-      if (normalizedSourceIds.length === 1 && originalItems[0]) {
-        sourceItemById.set(normalizedSourceIds[0], originalItems[0]);
+      if (originalItems.length === 1 && originalItems[0]) {
+        // "Sin desglose" intentionally keeps one visible fiscal line while
+        // source_charge_amounts retains every exact folio source. Reuse that
+        // line's tax treatment for each source selected in a later NC.
+        for (const sourceId of normalizedSourceIds) sourceItemById.set(sourceId, originalItems[0]);
+      } else {
+        for (const [index, sourceId] of normalizedSourceIds.entries()) {
+          if (!sourceItemById.has(sourceId) && originalItems[index]) sourceItemById.set(sourceId, originalItems[index]);
+        }
       }
 
       sourceChargeAmounts = {};
@@ -1505,7 +1553,7 @@ export function registerBillingRoutes(app: Express) {
 
       // A reservation NC changes the fiscal amount and Folio balance only. It
       // must not create a cash outflow while its payments remain active.
-      if (!original.reserva_id) {
+      if (!original.reserva_id && !original.group_id) {
         try {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
           const pvArea = (pvRow.rows[0] as any)?.area || "restaurant";

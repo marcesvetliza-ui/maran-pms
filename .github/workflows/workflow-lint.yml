@@ -1,0 +1,24 @@
+name: Workflow Lint
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/**"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/**"
+
+jobs:
+  actionlint:
+    name: Check workflow syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Validar workflows de GitHub Actions
+        uses: raven-actions/actionlint@v2
