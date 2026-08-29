@@ -529,6 +529,8 @@ export function registerBillingRoutes(app: Express) {
 
       const rows = await db.execute(sql`
         SELECT si.*, pc.area AS area_name,
+               g.name AS group_name,
+               g.group_code AS group_code,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
                orig.punto_venta      AS original_punto_venta,
@@ -540,6 +542,7 @@ export function registerBillingRoutes(app: Express) {
                orig.estado           AS original_estado
         FROM sales_invoices si
         LEFT JOIN pos_configs pc ON pc.numero = si.punto_venta
+        LEFT JOIN groups g ON g.id = si.group_id
         LEFT JOIN sales_invoices orig
                ON orig.id = si.nota_credito_id
               AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
@@ -751,6 +754,9 @@ export function registerBillingRoutes(app: Express) {
         : String(reservaId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
+      if (groupPaymentId && !groupId) {
+        return res.status(400).json({ error: "groupPaymentId requiere un groupId del mismo cobro grupal" });
+      }
       const normalizedSourceChargeIds = Array.isArray(sourceChargeIds)
         ? [...new Set(sourceChargeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0))]
         : [];

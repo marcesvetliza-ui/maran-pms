@@ -154,6 +154,7 @@ import {
 } from "@shared/schema";
 import { assertFinancialSchemaReady } from "./migrate";
 import { getGroupInvoiceSnapshot } from "./billing/groupInvoiceScope";
+import { computeGroupOperationalLedger } from "./billing/groupOperationalLedger";
 
 export class DatabaseStorage implements IStorage {
 
@@ -1685,6 +1686,7 @@ export class DatabaseStorage implements IStorage {
     distributionDetail: Record<string, number>;
     receivedBy?: string | null;
     notes?: string | null;
+    cashLabel?: string | null;
     receiptType?: string | null;
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;
@@ -1736,6 +1738,58 @@ export class DatabaseStorage implements IStorage {
         throw invalid("Seleccione la empresa o agencia para el pago por cuenta corriente.");
       }
 
+      if (input.destination === "group_distribution") {
+        // Recheck the aggregate operational debt while holding the group lock.
+        // Parent group payments are receipts; their room rows are allocations,
+        // so only direct/unparented room payments are added separately.
+        const operational = await tx.execute(sql`
+          SELECT
+            COALESCE((
+              SELECT SUM(r.total_room_amount::numeric)
+              FROM reservations r
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              WHERE l.group_id = ${input.groupId} AND r.status <> 'cancelled'
+            ), 0) AS accommodation,
+            COALESCE((
+              SELECT SUM(c.amount::numeric)
+              FROM charges c
+              JOIN reservations r ON r.id = c.reservation_id
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              WHERE l.group_id = ${input.groupId}
+                AND r.status <> 'cancelled'
+                AND c.status <> 'anulado'
+            ), 0) AS extras,
+            COALESCE((
+              SELECT SUM(c.amount::numeric)
+              FROM group_charges c
+              WHERE c.group_id = ${input.groupId}
+            ), 0) AS group_charges,
+            COALESCE((
+              SELECT SUM(gp.amount::numeric)
+              FROM group_payments gp
+              WHERE gp.group_id = ${input.groupId}
+            ), 0) AS parent_paid,
+            COALESCE((
+              SELECT SUM(p.amount::numeric)
+              FROM payments p
+              JOIN reservations r ON r.id = p.reservation_id
+              JOIN group_reservation_links l ON l.reservation_id = r.id
+              LEFT JOIN group_payments gp
+                ON gp.id = p.group_payment_id AND gp.group_id = ${input.groupId}
+              WHERE l.group_id = ${input.groupId}
+                AND r.status <> 'cancelled'
+                AND p.status <> 'anulado'
+                AND gp.id IS NULL
+            ), 0) AS direct_paid
+        `);
+        const totals = operational.rows[0] as any;
+        const debtCents = cents(totals.accommodation) + cents(totals.extras) + cents(totals.group_charges)
+          - cents(totals.parent_paid) - cents(totals.direct_paid);
+        if (receivedCents > debtCents) {
+          throw invalid(`El cobro supera el saldo grupal disponible de $${Math.max(0, debtCents) / 100}.`);
+        }
+      }
+
       if (input.destination === "master_folio") {
         // This calculation must live under the group row lock. Route-level
         // previews are helpful for the UI but cannot safely decide whether a
@@ -1770,23 +1824,40 @@ export class DatabaseStorage implements IStorage {
                 AND (p.destination = 'master_folio' OR p.distribution = 'master_folio')
             ), 0) AS master_parent_paid,
             COALESCE((
-              SELECT SUM(p.amount::numeric)
-              FROM payments p
-              JOIN group_reservation_links l ON l.reservation_id = p.reservation_id
-              LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
-              WHERE l.group_id = ${input.groupId}
-                AND (gp.id IS NULL OR (gp.destination IS DISTINCT FROM 'master_folio' AND gp.distribution IS DISTINCT FROM 'master_folio'))
-                AND (p.status IS NULL OR p.status = 'active')
+              SELECT SUM(value) FROM (
+                SELECT p.amount::numeric AS value
+                FROM payments p
+                JOIN group_reservation_links l ON l.reservation_id = p.reservation_id
+                WHERE l.group_id = ${input.groupId}
+                  AND p.group_payment_id IS NULL
+                  AND p.status <> 'anulado'
+                UNION ALL
+                SELECT gp.amount::numeric AS value
+                FROM group_payments gp
+                WHERE gp.group_id = ${input.groupId}
+                  AND gp.destination IS DISTINCT FROM 'master_folio'
+                  AND gp.distribution IS DISTINCT FROM 'master_folio'
+              ) financial_receipts
             ), 0) AS direct_all_paid,
             COALESCE((
               SELECT SUM(LEAST(r.total_room_amount::numeric, GREATEST(0,
                 COALESCE((
                   SELECT SUM(p.amount::numeric)
                   FROM payments p
-                  LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
                   WHERE p.reservation_id = r.id
-                    AND (p.status IS NULL OR p.status = 'active')
-                    AND (gp.id IS NULL OR (gp.destination IS DISTINCT FROM 'master_folio' AND gp.distribution IS DISTINCT FROM 'master_folio'))
+                    AND p.status <> 'anulado'
+                    AND p.group_payment_id IS NULL
+                ), 0) + COALESCE((
+                  SELECT SUM(
+                    CASE WHEN gp.distribution_detail ? r.id
+                      THEN (gp.distribution_detail ->> r.id)::numeric
+                      ELSE 0
+                    END
+                  )
+                  FROM group_payments gp
+                  WHERE gp.group_id = ${input.groupId}
+                    AND gp.destination IS DISTINCT FROM 'master_folio'
+                    AND gp.distribution IS DISTINCT FROM 'master_folio'
                 ), 0) - COALESCE((
                   SELECT SUM(c.amount::numeric)
                   FROM charges c
@@ -1905,7 +1976,7 @@ export class DatabaseStorage implements IStorage {
                    SELECT SUM(p.amount::numeric)
                    FROM payments p
                    WHERE p.reservation_id = r.id
-                     AND (p.status IS NULL OR p.status = 'active')
+                     AND p.status <> 'anulado'
                  ), 0) AS paid
           FROM reservations r
           JOIN group_reservation_links l ON l.reservation_id = r.id
@@ -1962,6 +2033,42 @@ export class DatabaseStorage implements IStorage {
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
       } as any).returning();
+
+      // Caja is part of the same economic event as the parent receipt. Do not
+      // commit a group payment and attempt this later: a failed movement would
+      // otherwise leave an invisible collection. Retentions are not cash and
+      // Cuenta Corriente is represented by account_movements, so neither gets
+      // a cash_movements row.
+      const cashRows = rows.filter((row) => row.method !== "cuenta_corriente" && cents(row.amount) > 0);
+      if (cashRows.length > 0) {
+        const openShift = await tx.execute(sql`
+          SELECT id FROM cash_shifts
+          WHERE area = 'reception' AND status = 'open'
+          ORDER BY opened_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `);
+        const shiftId = (openShift.rows[0] as any)?.id;
+        if (!shiftId) {
+          throw Object.assign(new Error("No hay un turno de recepción abierto para registrar el cobro."), { statusCode: 409 });
+        }
+        for (const row of cashRows) {
+          await tx.insert(cashMovements).values({
+            id: randomUUID(),
+            shiftId,
+            area: "reception",
+            sourceType: "group_payment",
+            sourceId: input.groupId,
+            sourceLabel: input.cashLabel || input.reference || "Pago grupal",
+            paymentMethod: row.method,
+            amount: (cents(row.amount) / 100).toFixed(2),
+            movementType: "income",
+            registeredBy: input.receivedBy || null,
+            receiptType: input.receiptType || null,
+            paymentId: groupPayment.id,
+          } as any).returning();
+        }
+      }
 
       const reservationPayments: Payment[] = [];
       for (const [allocationIndex, allocation] of allocations.entries()) {
@@ -2172,23 +2279,11 @@ export class DatabaseStorage implements IStorage {
     }
     const voidMovementsTotal = voidMovementsWithContext.reduce((s, vm) => s + parseFloat(vm.amount), 0);
 
-    const groupChargesTotal = gCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
-    const groupPaymentsTotal = gPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
-
-    let accommodationTotal = 0;
-    let extrasTotal = 0;
-    let indivPaymentsTotal = 0;
-    const groupPaymentIds = new Set(gPayments.map((payment) => payment.id));
+    const operational = computeGroupOperationalLedger(ledgerLines, gCharges, gPayments);
+    const groupChargesTotal = operational.groupCharges;
+    const groupPaymentsTotal = gPayments.reduce((s, p) => s + Math.round(Number(p.amount) * 100), 0) / 100;
 
     const resRows = ledgerLines.map((line) => {
-      accommodationTotal += line.accommodationTotal;
-      extrasTotal += line.extrasTotal;
-      // Payments linked to a group payment are allocations, not a second
-      // receipt. Legacy/direct room payments remain independent receipts.
-      indivPaymentsTotal += line.payments
-        .filter((payment: any) => !payment.groupPaymentId || !groupPaymentIds.has(payment.groupPaymentId))
-        .reduce((s: number, payment: any) => s + parseFloat(payment.amount), 0);
-
       return {
         reservationId: line.reservationId,
         guestName: line.guestName,
@@ -2201,12 +2296,6 @@ export class DatabaseStorage implements IStorage {
       };
     });
 
-    // Parent group payments are the receipt source of truth. Their linked room
-    // payments are intentionally excluded above so every received peso is
-    // counted once, including the portion applied to group-only charges.
-    const totalPayments = indivPaymentsTotal + groupPaymentsTotal;
-    const balance = accommodationTotal + extrasTotal + groupChargesTotal - totalPayments;
-
     return {
       group,
       groupCharges: gCharges,
@@ -2217,12 +2306,12 @@ export class DatabaseStorage implements IStorage {
       voidMovements: voidMovementsWithContext,
       voidMovementsTotal,
       totals: {
-        accommodation: accommodationTotal,
+        accommodation: operational.accommodation,
         groupCharges: groupChargesTotal,
-        extras: extrasTotal,
-        payments: totalPayments,
+        extras: operational.extras,
+        payments: operational.payments,
         voids: voidMovementsTotal,
-        balance,
+        balance: operational.balance,
       },
       billing,
     };
@@ -5443,62 +5532,98 @@ export class DatabaseStorage implements IStorage {
   }
 
   async bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
-    const links = await db.select().from(groupReservationLinks)
+    return db.transaction(async (tx) => {
+      // Same group-row lock used by recordGroupPayment. Once acquired, the
+      // operational snapshot below cannot race a new collection.
+      const lock = await tx.execute(sql`SELECT id FROM groups WHERE id = ${groupId} FOR UPDATE`);
+      if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+    // Keep this snapshot on the locked transaction connection. Calling the
+    // storage helpers here would issue reads through the global DB client
+    // while the group lock is held, which can see a different snapshot (and
+    // caused checkout failures with real parent/child group payments).
+    const totalsResult = await tx.execute(sql`
+      SELECT
+        COALESCE((
+          SELECT SUM(r.total_room_amount::numeric)
+          FROM reservations r
+          JOIN group_reservation_links l ON l.reservation_id = r.id
+          WHERE l.group_id = ${groupId} AND r.status <> 'cancelled'
+        ), 0) AS accommodation,
+        COALESCE((
+          SELECT SUM(c.amount::numeric)
+          FROM charges c
+          JOIN reservations r ON r.id = c.reservation_id
+          JOIN group_reservation_links l ON l.reservation_id = r.id
+          WHERE l.group_id = ${groupId}
+            AND r.status <> 'cancelled' AND c.status <> 'anulado'
+        ), 0) AS extras,
+        COALESCE((SELECT SUM(c.amount::numeric) FROM group_charges c WHERE c.group_id = ${groupId}), 0) AS group_charges,
+        COALESCE((SELECT SUM(gp.amount::numeric) FROM group_payments gp WHERE gp.group_id = ${groupId}), 0) AS parent_paid,
+        COALESCE((
+          SELECT SUM(p.amount::numeric)
+          FROM payments p
+          JOIN reservations r ON r.id = p.reservation_id
+          JOIN group_reservation_links l ON l.reservation_id = r.id
+          LEFT JOIN group_payments gp ON gp.id = p.group_payment_id AND gp.group_id = ${groupId}
+          WHERE l.group_id = ${groupId}
+            AND r.status <> 'cancelled' AND p.status <> 'anulado' AND gp.id IS NULL
+        ), 0) AS direct_paid
+    `);
+    const totals = totalsResult.rows[0] as any;
+    const operationalBalance = (
+      Math.round(Number(totals?.accommodation || 0) * 100)
+      + Math.round(Number(totals?.extras || 0) * 100)
+      + Math.round(Number(totals?.group_charges || 0) * 100)
+      - Math.round(Number(totals?.parent_paid || 0) * 100)
+      - Math.round(Number(totals?.direct_paid || 0) * 100)
+    ) / 100;
+    const links = await tx.select().from(groupReservationLinks)
       .where(eq(groupReservationLinks.groupId, groupId));
 
     let processed = 0;
     let skipped = 0;
     const pendingBalance: Array<{ room: string; guestName: string; balance: number }> = [];
 
-    const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
+    const [group] = await tx.select().from(groups).where(eq(groups.id, groupId));
 
     for (const link of links) {
-      const [reservation] = await db.select().from(reservations)
+      const [reservation] = await tx.select().from(reservations)
         .where(eq(reservations.id, link.reservationId));
 
       if (!reservation || reservation.status !== "checked_in") continue;
 
-      const chargesList = await db.select().from(charges)
-        .where(eq(charges.reservationId, reservation.id));
-      const paymentsList = await db.select().from(payments)
-        .where(eq(payments.reservationId, reservation.id));
-
-      const totalCharges = chargesList.reduce((sum, c) => sum + parseFloat(c.amount || "0"), 0);
-      const totalPayments = paymentsList.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
-      const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-      const balance = roomTotal + totalCharges - totalPayments;
-
-      const [room] = await db.select().from(rooms)
+      const [room] = await tx.select().from(rooms)
         .where(eq(rooms.id, reservation.roomId));
 
-      if (balance > 0.01) {
+      if (Math.round(operationalBalance * 100) > 0) {
         skipped++;
-        const [guest] = await db.select().from(guests)
+        const [guest] = await tx.select().from(guests)
           .where(eq(guests.id, reservation.guestId));
         pendingBalance.push({
           room: room?.roomNumber || reservation.roomId,
           guestName: guest ? `${guest.lastName} ${guest.firstName}` : "Sin nombre",
-          balance,
+          balance: operationalBalance,
         });
         continue;
       }
 
-      await db.update(reservations)
+      await tx.update(reservations)
         .set({ status: "checked_out" })
         .where(eq(reservations.id, reservation.id));
 
-      await db.update(rooms)
+      await tx.update(rooms)
         .set({ status: "dirty" })
         .where(eq(rooms.id, reservation.roomId));
 
       try {
-        await db.insert(housekeepingTasks).values({
+        await tx.insert(housekeepingTasks).values({
           id: randomUUID(),
           roomId: reservation.roomId,
-          type: "checkout_clean",
+          taskType: "checkout_clean",
           priority: "high",
           status: "pending",
           notes: `Check-out grupal — ${group?.name || groupId}`,
+          scheduledDate: getArgentinaToday(),
           createdAt: new Date(),
         } as any);
       } catch {}
@@ -5506,21 +5631,22 @@ export class DatabaseStorage implements IStorage {
       processed++;
     }
 
-    const allLinks = await db.select().from(groupReservationLinks)
+    const allLinks = await tx.select().from(groupReservationLinks)
       .where(eq(groupReservationLinks.groupId, groupId));
     let allDone = true;
     for (const l of allLinks) {
-      const [r] = await db.select().from(reservations).where(eq(reservations.id, l.reservationId));
+      const [r] = await tx.select().from(reservations).where(eq(reservations.id, l.reservationId));
       if (r && r.status !== "checked_out" && r.status !== "cancelled") {
         allDone = false;
         break;
       }
     }
     if (allDone && allLinks.length > 0) {
-      await db.update(groups).set({ status: "finished" as any }).where(eq(groups.id, groupId));
+      await tx.update(groups).set({ status: "finished" as any }).where(eq(groups.id, groupId));
     }
 
     return { processed, skipped, pendingBalance };
+    });
   }
   // ==================== Cash Register Module ====================
 

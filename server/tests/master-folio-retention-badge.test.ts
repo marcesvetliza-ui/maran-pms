@@ -29,6 +29,7 @@ const GROUP_ID = "group-retention-badge-001";
 
 const state = {
   groupPayment: null as Record<string, any> | null,
+  cashMovements: [] as Record<string, any>[],
   nextId: 0,
 };
 
@@ -60,19 +61,23 @@ function makeTransaction() {
         // Group row lock.
         return { rows: [{ id: GROUP_ID }] };
       }
-      // Master-folio totals recomputed under the lock, inside
-      // recordGroupPayment's own destination === "master_folio" branch.
-      return {
-        rows: [{
-          accommodation: "0",
-          group_charges: GROUP_CHARGE.amount,
-          extras: "0",
-          master_parent_paid: "0",
-          direct_all_paid: "0",
-          direct_accommodation_paid: "0",
-          config: "accommodation",
-        }],
-      };
+      if (executeCount === 2) {
+        // Master-folio totals recomputed under the lock, inside
+        // recordGroupPayment's own destination === "master_folio" branch.
+        return {
+          rows: [{
+            accommodation: "0",
+            group_charges: GROUP_CHARGE.amount,
+            extras: "0",
+            master_parent_paid: "0",
+            direct_all_paid: "0",
+            direct_accommodation_paid: "0",
+            config: "accommodation",
+          }],
+        };
+      }
+      // Atomic Caja persistence requires a currently open reception shift.
+      return { rows: [{ id: "reception-shift-open" }] };
     },
     insert: (_table: unknown) => ({
       values: (value: Record<string, any>) => ({
@@ -81,6 +86,11 @@ function makeTransaction() {
             const groupPayment = { id: nextId("group-payment"), ...value };
             state.groupPayment = groupPayment;
             return [groupPayment];
+          }
+          if ("shiftId" in value && "paymentId" in value) {
+            const movement = { id: nextId("cash-movement"), ...value };
+            state.cashMovements.push(movement);
+            return [movement];
           }
           return [{ id: nextId("row"), ...value }];
         },
@@ -159,6 +169,7 @@ async function startApp() {
 describe("Folio Maestro retention badge keeps surfacing through the real HTTP routes", () => {
   beforeEach(() => {
     state.groupPayment = null;
+    state.cashMovements = [];
     state.nextId = 0;
   });
 
@@ -189,6 +200,12 @@ describe("Folio Maestro retention badge keeps surfacing through the real HTTP ro
       // The retención landed on the group_payments row itself.
       expect(state.groupPayment?.amount).toBe("10.01");
       expect(state.groupPayment?.retentionDetail).toEqual([{ tipo: "iibb", monto: 4.01 }]);
+      expect(state.cashMovements).toEqual([expect.objectContaining({
+        shiftId: "reception-shift-open",
+        paymentId: state.groupPayment?.id,
+        amount: "6.00",
+        paymentMethod: "efectivo",
+      })]);
 
       // 2) Read it back exactly the way client/src/pages/group-detail.tsx
       // does (masterFolio.groupPayments[].retentionDetail) and the way the

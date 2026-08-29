@@ -10,3 +10,9 @@ A single group payment (Pago Grupal / Pagar Folio Maestro) can simultaneously: (
 **How to apply:** when adding a new cash/report aggregate that reads both individual-reservation payments and group payments, explicitly exclude reservation-payment rows that are tagged as belonging to a group payment (or otherwise pick one canonical source), then verify with a distributed (multi-room) group payment specifically — a master-folio-only payment won't expose the bug since it has no room-level rows to duplicate.
 
 Separately: a payment type that never produces a cash-register movement (as group payments didn't, unlike individual reservation payments) silently excludes itself from daily cash reconciliation even though real money changed hands. When adding a new payment flow, check whether it needs to register a cash movement the same way existing flows do. A withheld retención is not itself a cash movement — it's a non-cash deduction, so only the actually-collected amount should register.
+
+Group-payment persistence is atomic: the parent receipt, child room allocations, and cash-only Caja movements must commit or roll back together, and cash-bearing rows require an open reception shift.
+
+**Why:** a best-effort Caja write after the payment commit can reduce operational debt while silently omitting the money from Caja. Also, PostgreSQL leaves a transaction aborted after any failed statement even if application code catches the exception; later statements then fail and can hide the original cause.
+
+**How to apply:** keep every representation of one group collection in the same database transaction and lock scope. Do not catch a SQL error inside that transaction and continue unless using a savepoint; validate optional writes up front or let the whole operation roll back.

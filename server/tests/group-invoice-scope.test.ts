@@ -2,8 +2,67 @@ import { describe, expect, it } from "vitest";
 import { parseGroupInvoiceSourceAmounts } from "../billing/groupInvoiceScope";
 import { calcularMontos } from "../billing/invoiceService";
 import { allocateGroupInvoiceSources, grossItemsTotal } from "../../client/src/lib/group-invoice-allocation";
+import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 
 describe("group invoice source availability", () => {
+  it("separates operational debt from fiscal availability for partial group collections", () => {
+    const accommodationSource = "reservation:r-1:accommodation";
+    const lines = [{
+      reservationId: "r-1",
+      reservationCode: "R-1",
+      guestName: "Huésped",
+      roomNumber: "101",
+      status: "checked_in",
+      nights: 1,
+      accommodationTotal: 360_000,
+      charges: [],
+      extrasTotal: 0,
+      payments: [
+        { id: "allocation-advance", groupPaymentId: "advance", amount: "60000.00", status: "active" },
+        { id: "allocation-fiscal", groupPaymentId: "fiscal", amount: "30000.00", status: "active" },
+      ],
+      paymentsTotal: 90_000,
+    }] as any;
+    const parents = [
+      { id: "advance", amount: "60000.00" },
+      { id: "fiscal", amount: "30000.00" },
+    ] as any;
+    const invoice = {
+      monto_total: "30000.00",
+      monto_acreditado: "0.00",
+      source_charge_amounts: { [accommodationSource]: 30_000 },
+    };
+
+    const operational = computeGroupOperationalLedger(lines, [], parents);
+    const invoiced = Object.values(parseGroupInvoiceSourceAmounts(invoice))
+      .reduce((sum, amount) => sum + amount, 0);
+
+    expect(operational).toMatchObject({
+      accommodation: 360_000,
+      payments: 90_000,
+      balance: 270_000,
+    });
+    expect({
+      eligible: 360_000,
+      invoiced,
+      available: 360_000 - invoiced,
+    }).toEqual({
+      eligible: 360_000,
+      invoiced: 30_000,
+      available: 330_000,
+    });
+
+    lines[0].payments.push({
+      id: "allocation-final",
+      groupPaymentId: "final",
+      amount: "270000.00",
+      status: "active",
+    });
+    lines[0].paymentsTotal = 360_000;
+    parents.push({ id: "final", amount: "270000.00" });
+    expect(computeGroupOperationalLedger(lines, [], parents).balance).toBe(0);
+  });
+
   it("keeps a partial invoice allocation by concept", () => {
     expect(parseGroupInvoiceSourceAmounts({
       monto_total: "100.00",

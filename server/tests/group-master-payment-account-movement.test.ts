@@ -60,6 +60,7 @@ function queryResult(rows: any[]) {
 
 function makeTransaction() {
   let transactionExecuteCount = 0;
+  const recordingPayment = !state.groupPayment;
   let ownsCargoLock = false;
   let deleteCount = 0;
 
@@ -67,32 +68,36 @@ function makeTransaction() {
     execute: async () => {
       transactionExecuteCount += 1;
 
-      if (transactionExecuteCount === 1) {
-        if (!state.groupPayment) return { rows: [{ id: GROUP_ID }] };
+      if (recordingPayment) {
+        if (transactionExecuteCount === 1) return { rows: [{ id: GROUP_ID }] };
+        if (transactionExecuteCount === 2) {
+          return {
+            rows: [{
+              accommodation: "0",
+              group_charges: "10.01",
+              extras: "0",
+              master_parent_paid: "0",
+              direct_all_paid: "0",
+              direct_accommodation_paid: "0",
+              config: "accommodation",
+            }],
+          };
+        }
+        // Atomic cash movement: recordGroupPayment requires an open reception
+        // shift before it can commit the parent receipt.
+        return { rows: [{ id: "reception-shift-open" }] };
+      }
 
-        // Both the allocation and reversal paths use this same simulated
-        // row lock. The reversal is distinguished from the group-payment
-        // balance query by the fact that a group payment already exists.
+      if (transactionExecuteCount === 1) return { rows: [{ id: GROUP_ID }] };
+      if (transactionExecuteCount === 2 || transactionExecuteCount === 3) return { rows: [] };
+      if (transactionExecuteCount === 4) {
+        // The reversal locks its CC cargos after group/advisory/fiscal locks.
         await acquireCargoLock();
         ownsCargoLock = true;
         return {
           rows: state.accountMovements
             .filter((movement) => movement.type === "cargo")
             .map(({ id, amount }) => ({ id, amount })),
-        };
-      }
-
-      if (!state.groupPayment) {
-        return {
-          rows: [{
-            accommodation: "0",
-            group_charges: "10.01",
-            extras: "0",
-            master_parent_paid: "0",
-            direct_all_paid: "0",
-            direct_accommodation_paid: "0",
-            config: "accommodation",
-          }],
         };
       }
 

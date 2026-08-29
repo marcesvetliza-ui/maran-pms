@@ -131,6 +131,7 @@ function makeMasterFolio(groupPayments: any[]) {
 // mocked POST so the post-invalidation refetch reflects the new payment —
 // exactly like the real API would after task #396's fix.
 let masterFolioState: ReturnType<typeof makeMasterFolio>;
+let invoiceSnapshotState: any;
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -153,12 +154,13 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     vi.clearAllMocks();
     queryClient.clear();
     masterFolioState = makeMasterFolio([]);
+    invoiceSnapshotState = {};
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith(`/api/groups/${GROUP_ID}/folio`)) return jsonResponse(FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(masterFolioState);
-      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse({});
+      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(invoiceSnapshotState);
       if (url.endsWith(`/api/groups/${GROUP_ID}/direct-invoices`)) return jsonResponse([]);
       if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(GROUP_FIXTURE);
       if (url.endsWith("/api/bed-types")) return jsonResponse([]);
@@ -253,5 +255,55 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
 
     const badge = await screen.findByTestId("badge-retention-master-group-payment-badge-1-0");
     expect(badge).toHaveTextContent("Ret. IIBB: $4,01");
+  });
+
+  it("does not show an availability warning when fiscal concepts open empty", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("text-group-name");
+    await user.click(screen.getByTestId("button-group-payment"));
+    await user.type(await screen.findByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Receptora SA/i }));
+    await user.click(screen.getByTestId("button-group-con-comprobante"));
+
+    expect(screen.queryByTestId("text-items-payment-mismatch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
+  });
+
+  it("matches fiscal concepts against cash plus retentions to the cent", async () => {
+    invoiceSnapshotState = {
+      sources: [
+        { id: "room:101:accommodation", destination: "Hab. 101", concept: "Alojamiento", available: 300000 },
+        { id: "group-charge:1", destination: "Grupo", concept: "Salón", available: 30000 },
+      ],
+      totals: { eligible: 360000, invoiced: 30000, available: 330000 },
+    };
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("text-group-name");
+    await user.click(screen.getByTestId("button-group-payment"));
+    await user.type(await screen.findByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Receptora SA/i }));
+    await user.click(screen.getByTestId("button-group-con-comprobante"));
+
+    // Documentation of a previously collected advance has no new payment row.
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeEnabled();
+
+    const cash = screen.getByTestId("input-group-payment-amount-0");
+    await user.type(cash, "300000");
+    await user.click(screen.getByTestId("button-group-add-retencion-0"));
+    const retention = screen.getByTestId("input-group-retencion-monto-0");
+    await user.type(retention, "30000");
+
+    expect(screen.queryByTestId("text-concepts-payment-mismatch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeEnabled();
+
+    await user.clear(retention);
+    await user.type(retention, "29999.99");
+    expect(await screen.findByTestId("text-concepts-payment-mismatch")).toHaveTextContent(
+      /debe coincidir exactamente/i,
+    );
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
+    expect(screen.queryByTestId("text-items-payment-mismatch")).not.toBeInTheDocument();
   });
 });

@@ -44,6 +44,13 @@ function fDate(d: string | undefined | null) {
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
 }
 
+function fCreatedTime(d: string | undefined | null) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return dt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function padNum(n: number | undefined, len: number) {
   return String(n ?? 0).padStart(len, "0");
 }
@@ -339,7 +346,7 @@ export default function BillingPage() {
                       <thead>
                         <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
                           <th className="px-3 py-2 text-left">Tipo / N°</th>
-                          <th className="px-3 py-2 text-left">Área</th>
+                          <th className="px-3 py-2 text-left">Origen</th>
                           <th className="px-3 py-2 text-left">Fecha</th>
                           <th className="px-3 py-2 text-left">Cliente</th>
                           <th className="px-3 py-2 text-right">Total</th>
@@ -360,13 +367,26 @@ export default function BillingPage() {
                                 </div>
                               </td>
                               <td className="px-3 py-2">
-                                {f.area_name ? (
+                                {f.group_id ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <Badge variant="outline" className="text-[10px] px-1.5 w-fit bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                                      Grupo
+                                    </Badge>
+                                    <span className="text-xs font-medium max-w-[180px] truncate" title={f.group_name || f.group_code}>
+                                      {f.group_name || f.group_code || f.group_id}
+                                      {f.group_name && f.group_code ? ` (${f.group_code})` : ""}
+                                    </span>
+                                  </div>
+                                ) : f.area_name ? (
                                   <Badge variant="outline" className={`text-[10px] px-1.5 ${AREA_LABELS[f.area_name]?.color || "bg-gray-100 text-gray-700"}`}>
                                     {AREA_LABELS[f.area_name]?.label || f.area_name}
                                   </Badge>
                                 ) : <span className="text-xs text-muted-foreground">—</span>}
                               </td>
-                              <td className="px-3 py-2 text-xs">{fDate(f.fecha_emision)}</td>
+                              <td className="px-3 py-2 text-xs whitespace-nowrap">
+                                <div><span className="text-muted-foreground">Fiscal:</span> {fDate(f.fecha_emision)}</div>
+                                <div><span className="text-muted-foreground">Creado:</span> {fCreatedTime(f.created_at)}</div>
+                              </td>
                               <td className="px-3 py-2">
                                 <div className="font-medium text-xs truncate max-w-[160px]">{f.cliente_razon_social}</div>
                                 <div className="text-xs text-muted-foreground">{f.cliente_cuit || f.cliente_dni || f.cliente_condicion_iva}</div>

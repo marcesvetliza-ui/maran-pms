@@ -104,6 +104,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import {
+  availableGroupInvoiceTotal,
+  buildGroupInvoiceItems,
+  exceedsGroupInvoiceAvailable,
+  groupInvoicePaymentMatchesConcepts,
+} from "@/lib/group-invoice-allocation";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import type { 
   GroupWithDetails, 
@@ -1034,6 +1040,14 @@ export default function GroupDetailPage() {
     },
   });
 
+  const refreshGroupBillingState = async () => {
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"], exact: true }),
+      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "folio"], exact: true }),
+      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "master-folio"], exact: true }),
+    ]);
+  };
+
   // FT is a document exclusively for an accommodation-only Folio Maestro.
   // Reset a stale persisted/UI choice immediately when either prerequisite
   // changes; never leave a choice visible that cannot be emitted.
@@ -1320,6 +1334,9 @@ export default function GroupDetailPage() {
       queryClient.invalidateQueries({ predicate: (q) =>
         Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning"
       });
+      // The follow-up invoice must use the post-payment source balances, never
+      // the snapshot that happened to be cached while the payment was entered.
+      await refreshGroupBillingState();
 
       const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
       const isMaster = groupPaymentDestino === "master";
@@ -1712,38 +1729,42 @@ export default function GroupDetailPage() {
     );
   }
 
-  // Hoisted out of the "Pago Grupal" dialog's inline render block so the
-  // DialogFooter's confirm button (rendered as a JSX sibling, outside that
-  // block's lexical scope) can actually gate submission on it — a mismatch
-  // between "Conceptos" (invoice items) and "Forma de pago" must block the
-  // Registrar Pago button itself, not just show a warning.
+  // Keep the three financial validations independent: collection media,
+  // fiscal concepts, and source availability represent different ledgers.
   const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
   const groupPaymentIsMipyme = groupPaymentReceiptType === "factura_mipyme_a";
   const groupPaymentHasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
   const groupPaymentEntityRequired = (groupPaymentIsFiscal && !groupPaymentIsMipyme) || groupPaymentHasCuentaCorriente;
   const groupPaymentHasEntityData = !!groupPaymentRazonSocial.trim();
   const groupPaymentRowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
+  const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) =>
+    s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
+  const groupPaymentGrossPaymentTotal = groupPaymentRowsTotal + groupPaymentRetentionsTotal;
   const groupPaymentItemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
-  const groupPaymentFiscalAvailable = Number(groupInvoiceSnapshot?.totals?.available ?? 0);
+  const groupPaymentFiscalAvailable = availableGroupInvoiceTotal(groupInvoiceSnapshot?.sources ?? []);
   // A fiscal document is backed by the invoice snapshot, not by the cash rows:
   // an earlier advance can leave cash balance at zero while accommodation is
   // still available to document.
-  const groupPaymentItemsMismatch = groupPaymentIsFiscal && (
-    groupPaymentItemsTotal <= 0 || groupPaymentItemsTotal > groupPaymentFiscalAvailable + 0.01
-  );
+  const groupPaymentHasConcepts = !groupPaymentIsFiscal || groupPaymentItemsTotal > 0;
+  const groupPaymentHasRequiredPaymentSum = groupPaymentIsFiscal || groupPaymentRowsTotal > 0;
+  const groupPaymentExceedsFiscalAvailable = groupPaymentIsFiscal
+    && exceedsGroupInvoiceAvailable(groupPaymentItemsTotal, groupPaymentFiscalAvailable);
+  const groupPaymentConceptsMismatchPayment = groupPaymentIsFiscal
+    && groupPaymentItemsTotal > 0
+    && !groupInvoicePaymentMatchesConcepts(groupPaymentGrossPaymentTotal, groupPaymentItemsTotal);
   const groupPaymentHasRequiredReferences = groupPaymentIsFiscal || groupPaymentRows
     .filter(r => parseFloat(r.amount || "0") > 0)
     .every(r => !!r.reference.trim());
   const groupPaymentCanSubmit = !groupPaymentMutation.isPending
-    && (groupPaymentIsFiscal
-      ? (groupPaymentFiscalAvailable > 0 || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-      : groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
+    && groupPaymentHasRequiredPaymentSum
+    && (!groupPaymentIsFiscal || groupPaymentFiscalAvailable > 0)
     // A receiver is never optional, including an Anticipo.
     && groupPaymentReceptorLocked
     && (!groupPaymentEntityRequired || groupPaymentHasEntityData)
     && groupPaymentHasRequiredReferences
-    && !groupPaymentItemsMismatch;
+    && groupPaymentHasConcepts
+    && !groupPaymentConceptsMismatchPayment
+    && !groupPaymentExceedsFiscalAvailable;
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -1794,7 +1815,8 @@ export default function GroupDetailPage() {
           
           <Button
             variant="default"
-            onClick={() => {
+            onClick={async () => {
+              await refreshGroupBillingState();
               resetGroupPaymentDialogFields();
               prefillGroupReceptorFromBillingEntity();
               setShowGroupPaymentDialog(true);
@@ -2362,7 +2384,8 @@ export default function GroupDetailPage() {
                       <div className="flex items-center gap-3">
                         <Button
                           size="sm"
-                          onClick={() => {
+                            onClick={async () => {
+                             await refreshGroupBillingState();
                             // "Pagar Folio Maestro" opens the unified "Pago Grupal" dialog
                             // pre-set to destino="master" (Aplicar al Folio Maestro) — the
                             // dedicated legacy dialog was retired in favor of this toggle.
@@ -3212,10 +3235,13 @@ export default function GroupDetailPage() {
               Imprimir
             </Button>
             <Button
-              onClick={() => {
-                const billableSources = (invoiceData?.billing?.sources ?? groupInvoiceSnapshot?.sources ?? [])
+              onClick={async () => {
+                await refreshGroupBillingState();
+                const freshSnapshot = queryClient.getQueryData<any>(["/api/groups", groupId, "invoice-snapshot"]);
+                const billableSources = (freshSnapshot?.sources ?? [])
                   .filter((source: any) => Number(source.available) > 0);
-                const available = Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0);
+                const available = availableGroupInvoiceTotal(billableSources);
+                resetGroupPaymentDialogFields();
                 setGroupPaymentReceiptType("factura_b");
                 setGroupPaymentRows([{method: "cash", amount: String(available), reference: ""}]);
                 setGroupPaymentItems(gItemsFromSimple(billableSources.map((source: any) => ({
@@ -3505,13 +3531,11 @@ export default function GroupDetailPage() {
             // Fiscal concepts are limited by the source snapshot, independently
             // from what is collected now.
             const itemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
-            const fiscalAvailable = Number(groupInvoiceSnapshot?.totals?.available ?? 0);
-            const itemsMismatch = isFiscal && (itemsTotal <= 0 || itemsTotal > fiscalAvailable + 0.01);
-            const canSubmit = !groupPaymentMutation.isPending
-              && (isFiscal ? fiscalAvailable > 0 || groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0) : groupPaymentRows.some(r => parseFloat(r.amount || "0") > 0))
-              && groupPaymentReceptorLocked
-              && (!entityRequired || hasEntityData)
-              && !itemsMismatch;
+            const fiscalAvailable = availableGroupInvoiceTotal(groupInvoiceSnapshot?.sources ?? []);
+            const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
+            const conceptsMismatchPayment = isFiscal
+              && itemsTotal > 0
+              && !groupInvoicePaymentMatchesConcepts(rowsTotal + retentionsTotal, itemsTotal);
 
             // Entity search autocomplete
             const entitySearchResults: any[] = groupPaymentEntitySearch.length >= 2
@@ -3907,7 +3931,7 @@ export default function GroupDetailPage() {
                         </div>
                       )}
                       {/* Quick fill from folio */}
-                      {!isMipyme && folio && !isAccommodationOnlyMaster && (
+                      {!isMipyme && !isAccommodationOnlyMaster && (
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Completar desde folio:</Label>
                           <div className="grid grid-cols-3 gap-2">
@@ -3917,28 +3941,13 @@ export default function GroupDetailPage() {
                               { value: "detallados", label: "Detallados", desc: "Ítem por hab. y cargo" },
                             ] as const).map(opt => (
                               <button key={opt.value} type="button"
-                                onClick={() => {
+                                  onClick={() => {
                                   setGroupInvoiceDistribution(opt.value);
-                                  if (opt.value === "none") {
-                                    setGroupPaymentItems([{ ...gNewItem(), descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal, subtotal: rowsTotal, subtotalNeto: Number((rowsTotal / 1.21).toFixed(2)) }]);
-                                  } else if (opt.value === "totalizados") {
-                                    const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
-                                    if ((folio.totals.accommodation ?? 0) > 0) simples.push({ descripcion: "Alojamiento Grupal", precioUnitario: folio.totals.accommodation });
-                                    const extrasTotal = (folio.totals.extras ?? 0) + (folio.groupChargesTotal ?? 0);
-                                    if (extrasTotal > 0) simples.push({ descripcion: "Consumos y Extras", precioUnitario: extrasTotal });
-                                    if (simples.length === 0) simples.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                                    setGroupPaymentItems(gItemsFromSimple(simples));
-                                  } else {
-                                    const simples: Array<{ descripcion: string; precioUnitario: number }> = [];
-                                    (folio.reservations ?? []).forEach((r: any) => {
-                                      const extrasAmt = parseFloat(r.extrasTotal) || 0;
-                                      const extrasLabel = extrasAmt > 0 ? ` (+ extras ${fmtMoney(extrasAmt)})` : "";
-                                      simples.push({ descripcion: `Hab. ${r.roomNumber} — ${r.guestName}${extrasLabel}`, precioUnitario: (parseFloat(r.accommodationTotal) || 0) + extrasAmt });
-                                    });
-                                    (folio.groupCharges ?? []).forEach((gc: any) => { simples.push({ descripcion: gc.description || "Cargo grupal", precioUnitario: parseFloat(gc.amount) || 0 }); });
-                                    if (simples.length === 0) simples.push({ descripcion: `Pago grupal — ${group?.name ?? ""}`, precioUnitario: rowsTotal });
-                                    setGroupPaymentItems(gItemsFromSimple(simples));
-                                  }
+                                   setGroupPaymentItems(gItemsFromSimple(buildGroupInvoiceItems(
+                                     groupInvoiceSnapshot?.sources ?? [],
+                                     opt.value,
+                                     group?.name ?? "",
+                                   )));
                                 }}
                                 className={`rounded-md border px-2 py-2 text-left transition-colors text-xs ${groupInvoiceDistribution === opt.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}>
                                 <p className="font-semibold">{opt.label}</p>
@@ -3954,23 +3963,23 @@ export default function GroupDetailPage() {
                         {groupPaymentItems.map((item, idx) => (
                           <div key={idx} className="border rounded-lg p-3 space-y-2">
                             <div className="grid grid-cols-12 gap-2">
-                              <div className="col-span-6 space-y-1">
+                              <div className="col-span-5 space-y-1 min-w-0">
                                 <Label className="text-xs">Descripción *</Label>
                                 <Input value={item.descripcion}
                                   onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "descripcion", e.target.value))}
                                   placeholder="Hospedaje habitación..." className="h-8 text-sm" />
                               </div>
-                              <div className="col-span-2 space-y-1">
+                              <div className="col-span-2 space-y-1 min-w-0">
                                 <Label className="text-xs">Cant.</Label>
                                 <Input type="number" min="1" value={item.cantidad}
                                   onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "cantidad", parseFloat(e.target.value) || 1))}
                                   className="h-8 text-sm" />
                               </div>
-                              <div className="col-span-2 space-y-1">
+                              <div className="col-span-3 space-y-1 min-w-0">
                                 <Label className="text-xs">P. Unit.</Label>
                                 <Input type="number" step="0.01" value={item.precioUnitario || ""}
                                   onChange={e => setGroupPaymentItems(p => gUpdateItem(p, idx, "precioUnitario", parseFloat(e.target.value) || 0))}
-                                  placeholder="0.00" className="h-8 text-sm" />
+                                  placeholder="0.00" className="h-8 text-sm min-w-0 tabular-nums" />
                               </div>
                               <div className="col-span-2 space-y-1">
                                 <Label className="text-xs">Alíc. IVA</Label>
@@ -4007,10 +4016,16 @@ export default function GroupDetailPage() {
                         <span>TOTAL ítems:</span>
                         <span>{fmtMoney(itemsTotal)}</span>
                       </div>
-                      {itemsMismatch && (
+                      {exceedsFiscalAvailable && (
                         <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-items-payment-mismatch">
                           <AlertTriangle className="h-3 w-3 shrink-0" />
                           Los conceptos superan el disponible para facturar ({fmtMoney(fiscalAvailable)}). Ajustá los conceptos de origen.
+                        </p>
+                      )}
+                      {conceptsMismatchPayment && (
+                        <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-concepts-payment-mismatch">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          El total de conceptos ({fmtMoney(itemsTotal)}) debe coincidir exactamente con el total cubierto por los medios de pago y retenciones ({fmtMoney(rowsTotal + retentionsTotal)}).
                         </p>
                       )}
                     </div>
@@ -4034,7 +4049,7 @@ export default function GroupDetailPage() {
                     </div>
                     {groupPaymentRows.map((row, idx) => (
                       <div key={idx} className="space-y-1 border rounded-md p-2">
-                        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
+                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,1fr)_minmax(0,1fr)_auto] gap-2 items-center">
                           <Select value={row.method}
                             onValueChange={v => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, method: v, ...(v === "cuenta_corriente" ? { retencionEnabled: false, retencionMonto: "" } : {})} : r))}>
                             <SelectTrigger data-testid={`select-group-payment-method-${idx}`}><SelectValue /></SelectTrigger>
@@ -4044,9 +4059,10 @@ export default function GroupDetailPage() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <Input type="number" step="0.01" min={0} placeholder="Monto"
+                          <Input type="number" inputMode="decimal" step="0.01" min={0} placeholder="Monto"
                             value={row.amount}
                             onChange={e => setGroupPaymentRows(prev => prev.map((r, i) => i === idx ? {...r, amount: e.target.value} : r))}
+                            className="min-w-0 tabular-nums"
                             data-testid={`input-group-payment-amount-${idx}`} />
                           <Input
                             value={row.reference}
@@ -4180,7 +4196,10 @@ export default function GroupDetailPage() {
           })()}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGroupPaymentDialog(false)}>
+            <Button variant="outline" onClick={() => {
+              setShowGroupPaymentDialog(false);
+              resetGroupPaymentDialogFields();
+            }}>
               Cancelar
             </Button>
             <Button
@@ -4252,7 +4271,8 @@ export default function GroupDetailPage() {
           } : undefined}
           lockItems={groupFacturaFromResumen}
           hideAddItems={groupFacturaFromResumen}
-          onSuccess={() => {
+          onSuccess={async () => {
+            await refreshGroupBillingState();
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
@@ -4322,7 +4342,8 @@ export default function GroupDetailPage() {
               nationalityCode: groupPaymentGuestNationalityCode || undefined,
               hasAccommodation: true,
             } : undefined}
-            onSuccess={() => {
+            onSuccess={async () => {
+              await refreshGroupBillingState();
               setShowMasterFacturaDialog(false);
               setPendingMasterPaymentId("");
               resetGroupPaymentDialogFields();

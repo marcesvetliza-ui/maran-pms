@@ -17,11 +17,17 @@ type State = {
   cashMovements: Record<string, any>[];
 };
 
-const state: State = { groupPayment: null, cashMovements: [] };
+const state: State & { activeFiscalInvoice: boolean } = { groupPayment: null, cashMovements: [], activeFiscalInvoice: false };
 
 function makeTransaction() {
+  let executeCount = 0;
   return {
-    execute: async () => ({ rows: [] }), // no current-account cargos locked
+    execute: async () => {
+      executeCount += 1;
+      if (executeCount === 1) return { rows: [{ id: GROUP_ID }] };
+      if (executeCount === 3 && state.activeFiscalInvoice) return { rows: [{ id: 901 }] };
+      return { rows: [] }; // advisory/fiscal checks and no CC cargos
+    },
     select: () => ({
       from: (table: unknown) => ({
         where: () => ({
@@ -116,6 +122,7 @@ describe("deleting a master-folio group payment anulas its linked cash movements
         anulado: false,
       },
     ];
+    state.activeFiscalInvoice = false;
   });
 
   it("marks the linked cash_movements row as anulado and preserves its audit trail", async () => {
@@ -155,6 +162,22 @@ describe("deleting a master-folio group payment anulas its linked cash movements
       });
       const unrelated = state.cashMovements.find((m) => m.id === "cash-movement-unrelated");
       expect(unrelated?.anulado).toBe(false);
+    } finally {
+      app.close();
+    }
+  });
+
+  it("rejects reversal when an emitted invoice is linked before invoiceRef is patched", async () => {
+    state.activeFiscalInvoice = true;
+    const app = await startApp();
+    try {
+      const response = await fetch(`${app.baseUrl}/api/groups/${GROUP_ID}/master-payments/${PAYMENT_ID}`, {
+        method: "DELETE",
+      });
+      expect(response.status).toBe(400);
+      expect((await response.json() as any).error).toMatch(/factura electrónica/i);
+      expect(state.groupPayment).not.toBeNull();
+      expect(state.cashMovements[0].anulado).toBe(false);
     } finally {
       app.close();
     }

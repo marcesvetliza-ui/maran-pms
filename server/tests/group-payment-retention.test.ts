@@ -22,6 +22,7 @@ let reservationRows: ReservationRow[] = [];
 const state = {
   groupPayment: null as Record<string, any> | null,
   payments: [] as Record<string, any>[],
+  cashMovements: [] as Record<string, any>[],
   nextId: 0,
 };
 
@@ -39,8 +40,23 @@ function makeTransaction() {
         // Group row lock.
         return { rows: [{ id: GROUP_ID }] };
       }
-      // Reservation balances for the room allocations under payment.
-      return { rows: reservationRows };
+      if (executeCount === 2) {
+        // Aggregate operational-debt recheck under that lock.
+        return { rows: [{
+          accommodation: reservationRows.reduce((sum, row) => sum + Number(row.accommodation), 0).toFixed(2),
+          extras: "0.00",
+          group_charges: "0.00",
+          parent_paid: "0.00",
+          direct_paid: "0.00",
+        }] };
+      }
+      if (executeCount === 3) {
+        // Reservation balances for the room allocations under payment.
+        return { rows: reservationRows };
+      }
+      // Cash is mandatory and is created in the same transaction against the
+      // receptionist's open shift.
+      return { rows: [{ id: "reception-shift-open" }] };
     },
     insert: (_table: unknown) => ({
       values: (value: Record<string, any>) => ({
@@ -54,6 +70,11 @@ function makeTransaction() {
             const payment = { id: nextId("payment"), ...value };
             state.payments.push(payment);
             return [payment];
+          }
+          if ("shiftId" in value && "paymentId" in value) {
+            const movement = { id: nextId("cash-movement"), ...value };
+            state.cashMovements.push(movement);
+            return [movement];
           }
           return [{ id: nextId("row"), ...value }];
         },
@@ -130,6 +151,7 @@ describe("group payment retentions settle the debt they claim to cover", () => {
   beforeEach(() => {
     state.groupPayment = null;
     state.payments = [];
+    state.cashMovements = [];
     state.nextId = 0;
     reservationRows = [];
   });
@@ -160,6 +182,12 @@ describe("group payment retentions settle the debt they claim to cover", () => {
     expect(payment.reservationId).toBe(ROOM_A);
     const notes = JSON.parse(payment.notes as string);
     expect(notes.retencion).toEqual({ tipo: "iibb", monto: 10, neto: 90 });
+    expect(state.cashMovements).toEqual([expect.objectContaining({
+      shiftId: "reception-shift-open",
+      paymentId: recorded.groupPayment.id,
+      amount: "90.00",
+      paymentMethod: "transferencia",
+    })]);
   });
 
   it("splits a row's retention proportionally when its gross amount is distributed across multiple rooms", async () => {

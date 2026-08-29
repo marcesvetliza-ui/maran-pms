@@ -46,6 +46,56 @@ import { registerPosConfigsRoutes } from "./routes/pos-configs";
 import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-centers";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 
+async function enrichGroupCashMovements<T extends { id: string; sourceType: string }>(
+  movements: T[],
+  shiftId: string,
+): Promise<Array<T & Record<string, unknown>>> {
+  if (!movements.some((movement) => movement.sourceType === "group_payment")) return movements;
+
+  const result = await db.execute(sql`
+    SELECT cm.id,
+           g.name AS "groupName",
+           g.group_code AS "groupCode",
+           gp.destination AS "groupDestination",
+           COALESCE(NULLIF(gp.receiver_details->>'razonSocial', ''), NULLIF(invoice.cliente_razon_social, '')) AS "recipientName",
+           gp.amount AS "economicTotal",
+           CASE WHEN detail.retention_total > 0
+             THEN detail.retention_total
+             ELSE COALESCE(stored.retention_total, 0)
+           END AS "retentionTotal",
+           invoice.tipo_comprobante AS "invoiceType",
+           invoice.punto_venta AS "invoicePointOfSale",
+           invoice.numero AS "invoiceNumber"
+    FROM cash_movements cm
+    JOIN group_payments gp ON gp.id = cm.payment_id
+    JOIN groups g ON g.id = gp.group_id
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(
+        CASE WHEN item->'retention'->>'monto' ~ '^[0-9]+([.][0-9]+)?$'
+          THEN (item->'retention'->>'monto')::numeric ELSE 0 END
+      ), 0) AS retention_total
+      FROM jsonb_array_elements(COALESCE(gp.payment_method_detail, '[]'::jsonb)) item
+    ) detail ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(
+        CASE WHEN item->>'monto' ~ '^[0-9]+([.][0-9]+)?$'
+          THEN (item->>'monto')::numeric ELSE 0 END
+      ), 0) AS retention_total
+      FROM jsonb_array_elements(COALESCE(gp.retention_detail, '[]'::jsonb)) item
+    ) stored ON true
+    LEFT JOIN LATERAL (
+      SELECT si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social
+      FROM sales_invoices si
+      WHERE si.id = gp.invoice_id OR si.group_payment_id = gp.id
+      ORDER BY CASE WHEN si.id = gp.invoice_id THEN 0 ELSE 1 END, si.created_at DESC
+      LIMIT 1
+    ) invoice ON true
+    WHERE cm.shift_id = ${shiftId} AND cm.source_type = 'group_payment'
+  `);
+  const details = new Map((result.rows as Array<Record<string, unknown>>).map((row) => [String(row.id), row]));
+  return movements.map((movement) => ({ ...movement, ...(details.get(String(movement.id)) || {}) }));
+}
+
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
@@ -2084,7 +2134,7 @@ export async function registerRoutes(
   app.get("/api/cash/shifts/:id", requireAuth, async (req, res) => {
     try {
       const detail = await storage.getShiftDetail(req.params.id);
-      res.json(detail);
+      res.json({ ...detail, movements: await enrichGroupCashMovements(detail.movements, req.params.id) });
     } catch (error: any) {
       res.status(404).json({ error: error.message || "Shift not found" });
     }
@@ -2095,7 +2145,7 @@ export async function registerRoutes(
       const { shiftId } = req.query as { shiftId: string };
       if (!shiftId) return res.status(400).json({ error: "shiftId is required" });
       const movements = await storage.getCashMovements(shiftId);
-      res.json(movements);
+      res.json(await enrichGroupCashMovements(movements, shiftId));
     } catch (error) {
       res.status(500).json({ error: "Error fetching movements" });
     }

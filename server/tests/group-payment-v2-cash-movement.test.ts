@@ -3,17 +3,12 @@ import type { Server } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Regression test for the legacy `/api/groups/:groupId/payment/v2` entry
-// point: it must register exactly one cash movement per distributed
-// payment, the same way the unified Pago Grupal / Folio Maestro flows do.
-// Before this fix, payments made through this dialog never called
-// registerCashMovement at all, so they were invisible in Caja while still
-// counted by the unified group-payments report — an inconsistent view.
+// point: it must pass the Caja metadata into the atomic storage operation.
 
 const mockStorage = {
   distributeGroupPayment: vi.fn(),
   recordGroupPayment: vi.fn(),
   getGroup: vi.fn(),
-  registerCashMovement: vi.fn(),
 };
 
 vi.mock("../db-storage", () => ({
@@ -57,7 +52,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
   }
 }
 
-describe("legacy /payment/v2 route registers a cash movement", () => {
+describe("legacy /payment/v2 route supplies atomic cash metadata", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockStorage.distributeGroupPayment.mockResolvedValue({ "room-1": 500 });
@@ -68,7 +63,7 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
     mockStorage.getGroup.mockResolvedValue({ id: "group-1", name: "Test Group" });
   });
 
-  it("calls registerCashMovement exactly once for a distributed cash payment", async () => {
+  it("delegates the cash movement to recordGroupPayment's transaction", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/groups/group-1/payment/v2`, {
         method: "POST",
@@ -87,23 +82,14 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
 
       expect(response.status).toBe(200);
       expect(body.success).toBe(true);
-      expect(mockStorage.registerCashMovement).toHaveBeenCalledTimes(1);
-      expect(mockStorage.registerCashMovement).toHaveBeenCalledWith(
-        "reception",
-        "group_payment",
-        "group-1",
-        expect.stringContaining("Test Group"),
-        "efectivo",
-        "500",
-        "income",
-        "tester",
-        "none",
-        "group-payment-1",
-      );
+      expect(mockStorage.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        groupId: "group-1",
+        cashLabel: expect.stringContaining("group-1"),
+      }));
     });
   });
 
-  it("does not register a cash movement for a cuenta_corriente distributed payment", async () => {
+  it("still delegates cuenta corriente without creating cash in the route", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/groups/group-1/payment/v2`, {
         method: "POST",
@@ -119,7 +105,10 @@ describe("legacy /payment/v2 route registers a cash movement", () => {
         }),
       });
       expect(response.status).toBe(200);
-      expect(mockStorage.registerCashMovement).not.toHaveBeenCalled();
+      expect(mockStorage.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        groupId: "group-1",
+        paymentRows: [expect.objectContaining({ method: "cuenta_corriente" })],
+      }));
     });
   });
 });

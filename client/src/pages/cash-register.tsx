@@ -101,6 +101,15 @@ type CashMovement = {
   createdAt: string;
   anulado?: boolean;
   motivoAnulacion?: string;
+  groupName?: string | null;
+  groupCode?: string | null;
+  groupDestination?: string | null;
+  recipientName?: string | null;
+  economicTotal?: number | string | null;
+  retentionTotal?: number | string | null;
+  invoiceType?: string | null;
+  invoicePointOfSale?: number | null;
+  invoiceNumber?: number | null;
 };
 
 type ShiftDetail = {
@@ -171,7 +180,12 @@ function formatShiftLabel(shift: CashShift): string {
 }
 
 function formatCurrency(value: number): string {
-  return "$ " + Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function formatTime(dateStr: string): string {
@@ -187,12 +201,15 @@ function formatDate(dateStr: string): string {
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
-  const isCurrentYear = d.getFullYear() === new Date().getFullYear();
-  const datepart = isCurrentYear
-    ? d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })
-    : d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const datepart = d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
   const timepart = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
   return `${datepart} ${timepart}`;
+}
+
+function formatInvoiceReference(movement: CashMovement): string | null {
+  if (movement.invoicePointOfSale == null || movement.invoiceNumber == null) return null;
+  const number = `${String(movement.invoicePointOfSale).padStart(4, "0")}-${String(movement.invoiceNumber).padStart(8, "0")}`;
+  return movement.invoiceType ? `${movement.invoiceType} ${number}` : number;
 }
 
 const METHOD_ALIASES: Record<string, string> = {
@@ -827,7 +844,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                     {movements.map((m) => (
                       <>
                       <TableRow key={m.id} data-testid={`movement-row-${m.id}`} className={`${m.anulado ? "opacity-40" : ""} cursor-pointer hover:bg-muted/40`} onClick={() => setExpandedMovId(expandedMovId === m.id ? null : m.id)}>
-                        <TableCell className={`text-xs tabular-nums ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatDateTime(m.createdAt)}</TableCell>
+                        <TableCell className={`text-sm tabular-nums whitespace-nowrap ${m.anulado ? "line-through text-muted-foreground" : ""}`}>{formatDateTime(m.createdAt)}</TableCell>
                         <TableCell>
                           {m.anulado ? (
                             <Badge variant="destructive" className="text-xs">ANULADO</Badge>
@@ -883,6 +900,29 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                               )}
                               {m.sourceLabel && m.sourceLabel !== m.description && (
                                 <div><span className="font-medium text-foreground">Referencia:</span> {m.sourceLabel}</div>
+                              )}
+                              {m.sourceType === "group_payment" && (
+                                <>
+                                  <div>
+                                    <span className="font-medium text-foreground">Grupo:</span>{" "}
+                                    {m.groupName || m.groupCode || m.sourceLabel || "—"}
+                                    {m.groupName && m.groupCode ? ` (${m.groupCode})` : ""}
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-foreground">Destinatario:</span>{" "}
+                                    {m.recipientName || (m.groupDestination === "master_folio" ? "Folio Maestro" : "Habitaciones del grupo")}
+                                  </div>
+                                  <div><span className="font-medium text-foreground">Monto efectivo recibido:</span> {formatCurrency(Number(m.amount) || 0)}</div>
+                                  {m.economicTotal != null && (
+                                    <div><span className="font-medium text-foreground">Total económico/fiscal:</span> {formatCurrency(Number(m.economicTotal) || 0)}</div>
+                                  )}
+                                  {Number(m.retentionTotal || 0) > 0 && (
+                                    <div><span className="font-medium text-foreground">Retención:</span> {formatCurrency(Number(m.retentionTotal))}</div>
+                                  )}
+                                  {formatInvoiceReference(m) && (
+                                    <div><span className="font-medium text-foreground">Comprobante:</span> {formatInvoiceReference(m)}</div>
+                                  )}
+                                </>
                               )}
                               {m.proveedor && (
                                 <div><span className="font-medium text-foreground">Proveedor:</span> {m.proveedor}</div>
