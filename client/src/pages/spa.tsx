@@ -2773,7 +2773,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <SelectTrigger data-testid="select-appointment-settlement">
                       <SelectValue placeholder="Seleccionar una opción de cobro" />
                     </SelectTrigger>
-                    <SelectContent>
+                     <SelectContent position="item-aligned" collisionPadding={8}>
                       <SelectItem value="room_charge">Cargo a habitación</SelectItem>
                       <SelectItem value="invoice">Factura</SelectItem>
                       <SelectItem value="voucher">Voucher SPA — no fiscal</SelectItem>
@@ -2794,7 +2794,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         <SelectTrigger data-testid="select-appointment-room-charge">
                           <SelectValue placeholder="Seleccionar habitación y huésped" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent position="item-aligned" collisionPadding={8}>
                           {[...checkedInReservations]
                             .filter((reservation) => reservation.id)
                             .sort((a, b) => {
@@ -2830,7 +2830,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         <SelectTrigger data-testid="select-appointment-voucher-payment">
                           <SelectValue placeholder="Seleccionar forma de pago" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent position="item-aligned" collisionPadding={8}>
                           <SelectItem value="cash">Efectivo</SelectItem>
                           <SelectItem value="debit_card">Tarjeta Débito</SelectItem>
                           <SelectItem value="credit_card">Tarjeta Crédito</SelectItem>
