@@ -21,6 +21,7 @@ import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
+import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { 
@@ -200,6 +201,23 @@ type SpaAccount = {
   chargedTo: string | null;
   invoiceId?: number | null;
   ncId?: number | null;
+  pendingInvoice?: {
+    id: number;
+    tipoComprobante: string;
+    puntoVenta: number;
+    numero: number;
+    montoTotal: string;
+    cashFormaPago: string | null;
+  } | null;
+  pendingAuthorization?: {
+    id: number;
+    tipoComprobante: string;
+    puntoVenta: number;
+    numero: number;
+    montoTotal: string;
+    cashFormaPago: string | null;
+    reconciliationError: string | null;
+  } | null;
   items: SpaAccountItem[];
   payments: SpaPayment[];
 };
@@ -210,7 +228,17 @@ type Reservation = {
   roomId: string;
   status: string;
   companyId?: string | null;
-  guest?: { firstName: string; lastName: string; phone?: string | null; email?: string | null };
+  guest?: {
+    id?: string;
+    firstName: string;
+    lastName: string;
+    phone?: string | null;
+    email?: string | null;
+    documentNumber?: string | null;
+    cuilCuit?: string | null;
+    vatCondition?: string | null;
+    direccion?: string | null;
+  };
   room?: { roomNumber: string };
 };
 
@@ -220,6 +248,19 @@ type Company = {
   razonSocial?: string;
   nombreFantasia?: string | null;
   cuilCuit?: string | null;
+  condicionIva?: string | null;
+  domicilio?: string | null;
+  direccion?: string | null;
+};
+
+type NewAppointmentSettlement = "" | "room_charge" | "invoice" | "voucher";
+
+type PendingSpaInvoice = {
+  accountId: string;
+  initialValues: EmitirFacturaInitialValues;
+  billingEntityType?: "company";
+  billingEntityId?: string;
+  recipientProfile?: { type: "guest" | "company"; id: string; firstName?: string; lastName?: string };
 };
 
 type WeeklySummaryItem = {
@@ -419,6 +460,10 @@ export default function SpaPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [newAppointmentSettlement, setNewAppointmentSettlement] = useState<NewAppointmentSettlement>("");
+  const [newAppointmentRoomId, setNewAppointmentRoomId] = useState("");
+  const [newAppointmentVoucherMethod, setNewAppointmentVoucherMethod] = useState("");
+  const [pendingSpaInvoice, setPendingSpaInvoice] = useState<PendingSpaInvoice | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
@@ -540,6 +585,10 @@ export default function SpaPage() {
 
   const { data: companies = [] } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
+  });
+
+  const { data: billingConfig } = useQuery<any>({
+    queryKey: ["/api/billing/config"],
   });
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
@@ -739,6 +788,11 @@ export default function SpaPage() {
           resourceReservations: selectedTreatment?.isCircuit
             ? circuitBookings.map(({ templateResourceId, cabinId, startTime }) => ({ templateResourceId, cabinId, startTime }))
             : [],
+          ...(newAppointmentSettlement === "room_charge"
+            ? { settlement: { type: "room_charge", reservationId: newAppointmentRoomId } }
+            : newAppointmentSettlement === "voucher"
+              ? { settlement: { type: "voucher", paymentMethod: newAppointmentVoucherMethod } }
+              : {}),
         }),
       });
       
@@ -748,20 +802,85 @@ export default function SpaPage() {
       }
       return res.json();
     },
-    onSuccess: (createdApt: SpaAppointment) => {
+    onSuccess: (createdApt: SpaAppointment & {
+      accountId: string;
+      accountItems?: Array<{ id: string; description: string; amount: string }>;
+      settlementType?: string | null;
+    }, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
-      toast({ title: "Turno creado — imprimiendo comanda..." });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      if (createdApt.settlementType === "room_charge") {
+        toast({ title: "Turno creado y cargado al folio de la habitación" });
+      } else if (createdApt.settlementType === "voucher") {
+        toast({ title: "Turno creado y Voucher SPA registrado" });
+      } else if (newAppointmentSettlement === "invoice") {
+        toast({ title: "Turno creado", description: "Completá la factura y la forma de pago." });
+      } else {
+        toast({ title: "Turno creado — imprimiendo comanda..." });
+      }
+
+      if (newAppointmentSettlement === "invoice" && createdApt.accountId) {
+        const linkedReservation = variables.reservationId
+          ? allReservations.find((reservation) => reservation.id === variables.reservationId)
+          : null;
+        const linkedCompany = linkedReservation?.companyId
+          ? companies.find((company) => company.id === linkedReservation.companyId)
+          : null;
+        const spaGuest = variables.guestId
+          ? spaClients.find((client) => client.id === variables.guestId)
+          : null;
+        const reservationGuest = linkedReservation?.guest;
+        const fullName = `${variables.guestLastName || ""} ${variables.guestName}`.trim();
+        const recipientName = linkedCompany?.razonSocial
+          || linkedCompany?.nombreFantasia
+          || spaGuest?.razonSocial
+          || fullName;
+
+        setPendingSpaInvoice({
+          accountId: createdApt.accountId,
+          initialValues: {
+            razonSocial: recipientName,
+            cuit: linkedCompany?.cuilCuit || spaGuest?.cuilCuit || reservationGuest?.cuilCuit || undefined,
+            dni: reservationGuest?.documentNumber || undefined,
+            condicionIva: linkedCompany?.condicionIva || reservationGuest?.vatCondition || "Consumidor Final",
+            domicilio: linkedCompany?.domicilio || linkedCompany?.direccion || reservationGuest?.direccion || "",
+            items: (createdApt.accountItems || []).map((item) => ({
+              descripcion: item.description,
+              precioUnitario: parseFloat(item.amount),
+            })),
+          },
+          billingEntityType: linkedCompany ? "company" : undefined,
+          billingEntityId: linkedCompany?.id,
+          recipientProfile: linkedCompany
+            ? { type: "company", id: linkedCompany.id }
+            : reservationGuest?.id
+              ? {
+                  type: "guest",
+                  id: reservationGuest.id,
+                  firstName: reservationGuest.firstName,
+                  lastName: reservationGuest.lastName,
+                }
+              : undefined,
+        });
+      }
+
       setIsNewDialogOpen(false);
       setSelectedSpaGuest(null);
       setCircuitBookings([]);
       setCircuitDraftTreatmentId(null);
       setEditingAppointmentResources([]);
+      setNewAppointmentSettlement("");
+      setNewAppointmentRoomId("");
+      setNewAppointmentVoucherMethod("");
       form.reset({
         cabinId: "", treatmentId: "", professionalId: "", guestId: null, guestName: "", guestLastName: "",
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
         startTime: "", reservationId: "", notes: "",
       });
       setTimeout(() => printComandaTermica(createdApt), 300);
+      if (createdApt.settlementType === "voucher") {
+        setTimeout(() => window.open(`/api/spa/accounts/${createdApt.accountId}/receipt-pdf`, "_blank"), 500);
+      }
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -964,6 +1083,57 @@ export default function SpaPage() {
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  const retrySpaInvoiceLinkMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      if (!selectedAccount) throw new Error("Folio SPA no disponible");
+      const res = await apiRequest("POST", `/api/spa/accounts/${selectedAccount.id}/link-invoice`, { invoiceId });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo vincular la factura");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+      refetchAccount();
+      toast({ title: "Factura vinculada", description: "El folio SPA quedó cerrado y conciliado." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "No se pudo vincular la factura", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resumeSpaInvoiceMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedAccount) throw new Error("Folio SPA no disponible");
+      const resumeRes = await apiRequest("POST", `/api/spa/accounts/${selectedAccount.id}/resume-invoice`, {});
+      if (!resumeRes.ok) {
+        const body = await resumeRes.json().catch(() => ({}));
+        throw new Error(body.error || "No se pudo reanudar la autorización");
+      }
+      const { invoice } = await resumeRes.json();
+      const linkRes = await apiRequest("POST", `/api/spa/accounts/${selectedAccount.id}/link-invoice`, {
+        invoiceId: invoice.id,
+      });
+      if (!linkRes.ok) {
+        const body = await linkRes.json().catch(() => ({}));
+        throw new Error(body.error || "La factura se autorizó pero no se pudo vincular");
+      }
+      return linkRes.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+      refetchAccount();
+      toast({ title: "Factura autorizada y vinculada", description: "El folio SPA quedó cerrado y conciliado." });
+    },
+    onError: (error: Error) => {
+      refetchAccount();
+      toast({ title: "No se pudo reanudar la factura", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1367,6 +1537,14 @@ export default function SpaPage() {
     if (isEditMode && editingAppointmentId) {
       editAppointmentMutation.mutate({ ...data, id: editingAppointmentId });
     } else {
+      if (newAppointmentSettlement === "room_charge" && !newAppointmentRoomId) {
+        toast({ title: "Seleccioná una habitación ocupada", variant: "destructive" });
+        return;
+      }
+      if (newAppointmentSettlement === "voucher" && !newAppointmentVoucherMethod) {
+        toast({ title: "Seleccioná la forma de pago del voucher", variant: "destructive" });
+        return;
+      }
       createAppointmentMutation.mutate(data);
     }
   };
@@ -2341,7 +2519,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); } }}>
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Editar Turno" : "Nuevo Turno SPA"}</DialogTitle>
@@ -2554,6 +2732,120 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </FormItem>
               )} />
 
+              {!isEditMode && (
+                <div className="rounded-lg border bg-muted/20 p-4 space-y-3" data-testid="appointment-settlement-section">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <Label>Cobro al crear el turno (opcional)</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Si no elegís una opción, el folio SPA queda abierto para cobrarlo después.
+                      </p>
+                    </div>
+                    {newAppointmentSettlement && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          setNewAppointmentSettlement("");
+                          setNewAppointmentRoomId("");
+                          setNewAppointmentVoucherMethod("");
+                        }}
+                        data-testid="button-clear-appointment-settlement"
+                      >
+                        Dejar abierto
+                      </Button>
+                    )}
+                  </div>
+                  <Select
+                    value={newAppointmentSettlement || undefined}
+                    onValueChange={(value: NewAppointmentSettlement) => {
+                      setNewAppointmentSettlement(value);
+                      if (value === "room_charge") {
+                        setNewAppointmentRoomId(form.getValues("reservationId") || "");
+                      } else {
+                        setNewAppointmentRoomId("");
+                      }
+                      if (value !== "voucher") setNewAppointmentVoucherMethod("");
+                    }}
+                  >
+                    <SelectTrigger data-testid="select-appointment-settlement">
+                      <SelectValue placeholder="Seleccionar una opción de cobro" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="room_charge">Cargo a habitación</SelectItem>
+                      <SelectItem value="invoice">Factura</SelectItem>
+                      <SelectItem value="voucher">Voucher SPA — no fiscal</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {newAppointmentSettlement === "room_charge" && (
+                    <div className="space-y-1.5">
+                      <Label>Habitación ocupada</Label>
+                      <Select
+                        value={newAppointmentRoomId || undefined}
+                        onValueChange={(reservationId) => {
+                          setNewAppointmentRoomId(reservationId);
+                          form.setValue("reservationId", reservationId);
+                          handleReservationAutoFill(reservationId);
+                        }}
+                      >
+                        <SelectTrigger data-testid="select-appointment-room-charge">
+                          <SelectValue placeholder="Seleccionar habitación y huésped" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[...checkedInReservations]
+                            .filter((reservation) => reservation.id)
+                            .sort((a, b) => {
+                              const roomComparison = (parseInt(a.room?.roomNumber || "0") || 0)
+                                - (parseInt(b.room?.roomNumber || "0") || 0);
+                              if (roomComparison !== 0) return roomComparison;
+                              return `${a.guest?.lastName || ""} ${a.guest?.firstName || ""}`
+                                .localeCompare(`${b.guest?.lastName || ""} ${b.guest?.firstName || ""}`, "es");
+                            })
+                            .map((reservation) => (
+                              <SelectItem key={reservation.id} value={reservation.id}>
+                                Hab. {reservation.room?.roomNumber} — {reservation.guest?.lastName} {reservation.guest?.firstName}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Se agrega al folio de la habitación y no genera efectivo en Caja SPA.
+                      </p>
+                    </div>
+                  )}
+
+                  {newAppointmentSettlement === "invoice" && (
+                    <div className="rounded-md border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300">
+                      Después de crear el turno se abrirá Emitir Comprobante con los datos del huésped, el servicio y el importe precargados.
+                    </div>
+                  )}
+
+                  {newAppointmentSettlement === "voucher" && (
+                    <div className="space-y-1.5">
+                      <Label>Forma de pago</Label>
+                      <Select value={newAppointmentVoucherMethod || undefined} onValueChange={setNewAppointmentVoucherMethod}>
+                        <SelectTrigger data-testid="select-appointment-voucher-payment">
+                          <SelectValue placeholder="Seleccionar forma de pago" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cash">Efectivo</SelectItem>
+                          <SelectItem value="debit_card">Tarjeta Débito</SelectItem>
+                          <SelectItem value="credit_card">Tarjeta Crédito</SelectItem>
+                          <SelectItem value="transfer">Transferencia</SelectItem>
+                          <SelectItem value="mercadopago">MercadoPago</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Se cerrará el folio, se registrará en Caja SPA y se imprimirá un comprobante no fiscal.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => { setIsNewDialogOpen(false); setIsEditMode(false); }}>Cancelar</Button>
                 <Button type="submit" disabled={createAppointmentMutation.isPending || editAppointmentMutation.isPending} data-testid="button-submit-appointment">
@@ -2565,6 +2857,31 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           </Form>
         </DialogContent>
       </Dialog>
+
+      {pendingSpaInvoice && (
+        <EmitirFacturaDialog
+          open={!!pendingSpaInvoice}
+          onClose={() => setPendingSpaInvoice(null)}
+          config={billingConfig}
+          initialValues={pendingSpaInvoice.initialValues}
+          allowedTipos={["FA", "FB"]}
+          cashArea="spa"
+          allowCuentaCorriente={false}
+          requiresEmission
+          spaAccountId={pendingSpaInvoice.accountId}
+          hideAddItems
+          lockItems
+          billingEntityType={pendingSpaInvoice.billingEntityType}
+          billingEntityId={pendingSpaInvoice.billingEntityId}
+          recipientProfile={pendingSpaInvoice.recipientProfile}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+            toast({ title: "Factura emitida y cobro SPA registrado" });
+            setPendingSpaInvoice(null);
+          }}
+        />
+      )}
 
       {/* Appointment Detail Dialog */}
       <Dialog open={!!selectedAppointment && !isFolioOpen} onOpenChange={() => setSelectedAppointment(null)}>
@@ -3083,6 +3400,54 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
                 {selectedAccount.status === "open" && (
                   <div className="border-t pt-4 space-y-3">
+                    {selectedAccount.pendingAuthorization && (
+                      <div className="rounded-md border border-red-300 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/20">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-200">
+                          Autorización ARCA pendiente
+                        </p>
+                        <p className="text-xs text-red-800 dark:text-red-300 mt-1">
+                          El número y los datos quedaron reservados. Reanudá este comprobante para consultar ARCA sin emitir otro.
+                        </p>
+                        {selectedAccount.pendingAuthorization.reconciliationError && (
+                          <p className="text-xs text-red-700 dark:text-red-400 mt-1">
+                            {selectedAccount.pendingAuthorization.reconciliationError}
+                          </p>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => resumeSpaInvoiceMutation.mutate()}
+                          disabled={resumeSpaInvoiceMutation.isPending}
+                          data-testid="button-resume-spa-invoice"
+                        >
+                          {resumeSpaInvoiceMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Reanudar autorización y cerrar
+                        </Button>
+                      </div>
+                    )}
+                    {selectedAccount.pendingInvoice && (
+                      <div className="rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
+                        <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                          Factura emitida pendiente de vincular
+                        </p>
+                        <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+                          {selectedAccount.pendingInvoice.tipoComprobante} {String(selectedAccount.pendingInvoice.puntoVenta).padStart(4, "0")}-{String(selectedAccount.pendingInvoice.numero).padStart(8, "0")}
+                          {" · "}${parseFloat(selectedAccount.pendingInvoice.montoTotal).toLocaleString()}
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => retrySpaInvoiceLinkMutation.mutate(selectedAccount.pendingInvoice!.id)}
+                          disabled={retrySpaInvoiceLinkMutation.isPending}
+                          data-testid="button-retry-spa-invoice-link"
+                        >
+                          {retrySpaInvoiceLinkMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Vincular y cerrar folio
+                        </Button>
+                      </div>
+                    )}
                     {selectedAccount.payments.some(p => p.method === "room_charge") ? (
                       <p className="text-sm text-muted-foreground text-center">Cargo a habitación. Se emitirá Voucher automáticamente.</p>
                     ) : (
@@ -3228,7 +3593,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <Button
                       className="w-full"
                       disabled={
-                        (receiptType !== "cargo_habitacion" && accountBalance > 0) ||
+                        (receiptType !== "cargo_habitacion" && !["factura_a", "factura_b"].includes(receiptType) && accountBalance > 0) ||
+                        (["factura_a", "factura_b"].includes(receiptType) && accountPaid > 0) ||
                         (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) ||
                         (receiptType === "cargo_habitacion" && !folioRoomChargeId) ||
                         (["factura_a", "factura_c"].includes(receiptType) && !invoiceCustomerCuit.trim()) ||
@@ -3244,6 +3610,20 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             method: "room_charge",
                             isAdvance: false,
                             reservationId: folioRoomChargeId,
+                          });
+                        } else if (["factura_a", "factura_b"].includes(receiptType)) {
+                          setPendingSpaInvoice({
+                            accountId: selectedAccount.id,
+                            initialValues: {
+                              razonSocial: invoiceCustomerName || selectedAccount.guestName,
+                              cuit: invoiceCustomerCuit || undefined,
+                              dni: invoiceCustomerDni || undefined,
+                              condicionIva: receiptType === "factura_a" ? "Responsable Inscripto" : "Consumidor Final",
+                              items: selectedAccount.items.map((item) => ({
+                                descripcion: item.description,
+                                precioUnitario: parseFloat(item.subtotal),
+                              })),
+                            },
                           });
                         } else {
                           closeAccountMutation.mutate({

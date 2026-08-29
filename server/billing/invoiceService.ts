@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { salesInvoices, invoiceCounters } from "@shared/schema";
 import { getBillingConfig } from "./billingConfig";
 import { generateFakeCAE } from "./fakeArca";
@@ -36,6 +36,8 @@ export interface NewInvoiceData {
   groupId?: string;
   /** Parent group collection being invoiced, if any. */
   groupPaymentId?: string;
+  /** SPA folio claimed by this invoice at issuance time. */
+  spaAccountId?: string;
   restaurantOrderId?: string;
   folioId?: number;
   facturaOriginalId?: number; // para NC
@@ -193,6 +195,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
   const recoverableCreditNote = Boolean(data.recoverableCreditNote || data.recoveryInvoiceId);
+  const recoverableBeforeAuthorization = recoverableCreditNote || Boolean(data.spaAccountId);
 
   const puntoVenta =
     data.puntoVentaOverride ??
@@ -230,6 +233,9 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       modoFicticio,
       estado: "autorizacion_pendiente",
       reservaId: data.reservaId || null,
+      groupId: data.groupId || null,
+      groupPaymentId: data.groupPaymentId || null,
+      spaAccountId: data.spaAccountId || null,
       restaurantOrderId: data.restaurantOrderId || null,
       folioId: data.folioId || null,
       notaCreditoId: data.facturaOriginalId || null,
@@ -303,7 +309,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     // The draft must exist before the outbound ARCA call. If the process stops
     // after ARCA authorizes it, the original invoice, its exact charge mapping
     // and a resolvable pending NC are already stored locally.
-    if (recoverableCreditNote && !pendingInvoice) {
+    if (recoverableBeforeAuthorization && !pendingInvoice) {
       await insertPendingInvoice();
     }
 
@@ -357,7 +363,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     // Modo ficticio: usa contador local, CAE simulado
     if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
     modoFicticio = true;
-    if (recoverableCreditNote && !pendingInvoice) {
+    if (recoverableBeforeAuthorization && !pendingInvoice) {
       await insertPendingInvoice();
     }
     const fake = generateFakeCAE();
@@ -367,18 +373,15 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
 
   const today = getArgentinaToday();
   if (pendingInvoice) {
-    const result = await db.execute(sql`
-      UPDATE sales_invoices
-      SET cae = ${cae},
-          cae_fecha_vto = ${caeFechaVto ? caeFechaVto.toISOString().split("T")[0] : null},
-          modo_ficticio = ${modoFicticio},
-          estado = 'emitida',
-          reconciliation_error = NULL,
-          reconciliation_updated_at = now()
-      WHERE id = ${pendingInvoice.id}
-      RETURNING *
-    `);
-    return result.rows[0] as typeof salesInvoices.$inferSelect;
+    const [finalized] = await db.update(salesInvoices).set({
+      cae,
+      caeFechaVto: caeFechaVto ? caeFechaVto.toISOString().split("T")[0] : null,
+      modoFicticio,
+      estado: "emitida",
+      reconciliationError: null,
+      reconciliationUpdatedAt: new Date(),
+    }).where(eq(salesInvoices.id, pendingInvoice.id)).returning();
+    return finalized;
   }
 
   const [factura] = await db.insert(salesInvoices).values({
@@ -404,6 +407,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     reservaId: data.reservaId || null,
     groupId: data.groupId || null,
     groupPaymentId: data.groupPaymentId || null,
+    spaAccountId: data.spaAccountId || null,
     restaurantOrderId: data.restaurantOrderId || null,
     folioId: data.folioId || null,
     notaCreditoId: data.facturaOriginalId || null,

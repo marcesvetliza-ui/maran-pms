@@ -1664,7 +1664,7 @@ export const insertTreatmentSupplySchema = createInsertSchema(treatmentSupplies)
 export type InsertTreatmentSupply = z.infer<typeof insertTreatmentSupplySchema>;
 export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
 
-export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge";
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente";
 
 export const spaPayments = pgTable("spa_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2443,6 +2443,9 @@ export const salesInvoices = pgTable("sales_invoices", {
   // A group payment can fund at most one fiscal document. Kept separately
   // from group_payments.invoice_id so the claim exists before the UI link.
   groupPaymentId: varchar("group_payment_id"),
+  // SPA account that owns this invoice. Persisted at issuance so the later
+  // account link cannot attach an unrelated same-value invoice.
+  spaAccountId: varchar("spa_account_id"),
   folioId: integer("folio_id"),
   notaCreditoId: integer("nota_credito_id"),
   restaurantOrderId: varchar("restaurant_order_id"),

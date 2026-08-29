@@ -575,7 +575,7 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, requiresEmission, paymentId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -585,8 +585,11 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   cashArea?: string;
   /** Show the payment method without registering another cash movement. */
   showPaymentMethod?: boolean;
+  allowCuentaCorriente?: boolean;
   requiresEmission?: boolean;
   paymentId?: string;
+  /** SPA folio that must be closed and linked after invoice emission. */
+  spaAccountId?: string;
   /** When set, the emitted invoice will be automatically linked to the group folio (for invoices emitted from the Resumen del Grupo without a payment) */
   groupId?: string;
   /** Parent receipt for a group payment; unlike paymentId it works even when no room allocation exists. */
@@ -945,6 +948,26 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           try { await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData: data }); } catch {}
           queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
         }
+      } else if (spaAccountId) {
+        setEmittedInvoiceData(data);
+        setLinkPending(true);
+        try {
+          const linkRes = await apiRequest("POST", `/api/spa/accounts/${spaAccountId}/link-invoice`, {
+            invoiceId: data.id,
+          });
+          setLinkPending(false);
+          if (linkRes.ok) {
+            queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+            onSuccess?.(data);
+            onClose(); resetForm();
+          } else {
+            setLinkError(true);
+          }
+        } catch {
+          setLinkPending(false);
+          setLinkError(true);
+        }
       } else if (groupPaymentId && groupPaymentGroupId) {
         setEmittedInvoiceData(data);
         setLinkPending(true);
@@ -1028,7 +1051,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   async function handleRetryLink() {
-    if (!emittedInvoiceData || (!paymentId && !groupId && !(groupPaymentId && groupPaymentGroupId))) return;
+    if (!emittedInvoiceData || (!paymentId && !spaAccountId && !groupId && !(groupPaymentId && groupPaymentGroupId))) return;
     setLinkRetrying(true);
     try {
       if (paymentId) {
@@ -1040,6 +1063,19 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           onClose(); resetForm();
         } else {
           toast({ title: "Reintento fallido", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
+        }
+      } else if (spaAccountId) {
+        const linkRes = await apiRequest("POST", `/api/spa/accounts/${spaAccountId}/link-invoice`, {
+          invoiceId: emittedInvoiceData.id,
+        });
+        if (linkRes.ok) {
+          queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+          toast({ title: "Vínculo exitoso", description: "La factura quedó vinculada al folio SPA." });
+          onSuccess?.(emittedInvoiceData);
+          onClose(); resetForm();
+        } else {
+          toast({ title: "Reintento fallido", description: "No se pudo vincular la factura al folio SPA.", variant: "destructive" });
         }
       } else if (groupPaymentId && groupPaymentGroupId) {
         const linkRes = await apiRequest(
@@ -1155,6 +1191,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         sourceChargeAmounts: groupSourceAmounts,
         ...(groupFolioContext ? { folioContext: groupFolioContext } : {}),
       } : {}),
+      ...(spaAccountId ? { spaAccountId } : {}),
       ...((cashArea || showPaymentMethod)
         ? {
             ...(cashArea ? { cashArea } : {}),
@@ -1457,7 +1494,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
                 <SelectItem value="transferencia">Transferencia</SelectItem>
                 <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    {allowCuentaCorriente && <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>}
               </SelectContent>
             </Select>
             {cashArea && cashFormaPago === "cuenta_corriente" && (

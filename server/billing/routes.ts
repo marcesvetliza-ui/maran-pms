@@ -23,6 +23,8 @@ import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceCom
 import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
+const SPA_INVOICE_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"];
+const SPA_INVOICE_PAYMENT_METHODS = ["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"];
 
 // ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
 let _logoCache: Buffer | null | undefined = undefined; // undefined = no intentado
@@ -324,6 +326,19 @@ async function withReservationInvoiceLock<T>(reservationId: string, action: () =
 async function withGroupInvoiceLock<T>(groupId: string, action: () => Promise<T>): Promise<T> {
   const client = await pool.connect();
   const lockKey = `group-invoice:${groupId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
+}
+
+/** Serializes SPA account validation and invoice persistence across app instances. */
+async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `spa-invoice:${spaAccountId}`;
   try {
     await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
     return await action();
@@ -790,7 +805,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -803,8 +818,18 @@ export function registerBillingRoutes(app: Express) {
         : String(reservaId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
+      const spaAccountId = rawSpaAccountId === undefined || rawSpaAccountId === null ? "" : String(rawSpaAccountId).trim();
       if (groupPaymentId && !groupId) {
         return res.status(400).json({ error: "groupPaymentId requiere un groupId del mismo cobro grupal" });
+      }
+      if (spaAccountId && (cashArea !== "spa" || !cashFormaPago)) {
+        return res.status(400).json({ error: "La factura SPA requiere área y forma de pago SPA" });
+      }
+      if (spaAccountId && !SPA_INVOICE_PAYMENT_METHODS.includes(String(cashFormaPago))) {
+        return res.status(400).json({ error: "La forma de pago de la factura SPA no es válida" });
+      }
+      if (spaAccountId && !SPA_INVOICE_ROLES.includes(String((req as any).user?.role || ""))) {
+        return res.status(403).json({ error: "No tenés permisos para facturar un folio SPA" });
       }
       const normalizedSourceChargeIds = Array.isArray(sourceChargeIds)
         ? [...new Set(sourceChargeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0))]
@@ -970,6 +995,8 @@ export function registerBillingRoutes(app: Express) {
         }
 
         let persistedItems = items;
+        let persistedCliente = cliente;
+        let spaRecoveryInvoiceId: number | undefined;
         // Group fiscal sources are claimed when the invoice is created, not in
         // the later UI link request. This makes a second open tab see the
         // first invoice before it can consume the same available concept.
@@ -996,14 +1023,86 @@ export function registerBillingRoutes(app: Express) {
           persistedItems = attachGroupInvoiceCompositionSources(items, compositionSources);
         }
 
+        if (spaAccountId) {
+          const spaRows = await db.execute(sql`
+            SELECT
+              sa.id,
+              sa.status,
+              sa.invoice_id,
+              COALESCE(SUM(sai.subtotal::numeric), 0) AS total,
+              EXISTS (
+                SELECT 1
+                FROM spa_payments sp
+                WHERE sp.account_id = sa.id
+                  AND sp.status = 'active'
+                  AND sp.amount::numeric > 0
+              ) AS has_payments,
+              (
+                SELECT si.id
+                FROM sales_invoices si
+                WHERE si.spa_account_id = sa.id
+                ORDER BY si.created_at DESC, si.id DESC
+                LIMIT 1
+              ) AS existing_invoice_id
+            FROM spa_accounts sa
+            LEFT JOIN spa_account_items sai ON sai.account_id = sa.id
+            WHERE sa.id = ${spaAccountId}
+            GROUP BY sa.id, sa.status, sa.invoice_id
+          `);
+          const spaAccount = spaRows.rows[0] as any;
+          if (!spaAccount) {
+            throw new FolioInvoiceValidationError("El folio SPA no existe", 404);
+          }
+          if (spaAccount.status !== "open" || spaAccount.invoice_id) {
+            throw new FolioInvoiceValidationError("El folio SPA ya está cerrado o facturado", 409);
+          }
+          if (spaAccount.has_payments) {
+            throw new FolioInvoiceValidationError("El folio SPA ya tiene pagos registrados", 409);
+          }
+          const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
+          if (Math.abs(Number(spaAccount.total) - invoiceTotal) > 0.02) {
+            throw new FolioInvoiceValidationError("El total de la factura no coincide con el folio SPA", 409);
+          }
+          if (spaAccount.existing_invoice_id) {
+            const existingRows = await db.execute(sql`
+              SELECT *
+              FROM sales_invoices
+              WHERE id = ${Number(spaAccount.existing_invoice_id)}
+                AND spa_account_id = ${spaAccountId}
+              LIMIT 1
+            `);
+            const existing = existingRows.rows[0] as any;
+            if (!existing || existing.estado !== "autorizacion_pendiente") {
+              throw new FolioInvoiceValidationError("El folio SPA ya tiene una factura emitida pendiente de vincular", 409);
+            }
+            if (
+              existing.tipo_comprobante !== tipoComprobante
+              || existing.cash_forma_pago !== cashFormaPago
+              || Math.abs(Number(existing.monto_total) - invoiceTotal) > 0.02
+            ) {
+              throw new FolioInvoiceValidationError("La reanudación no coincide con la factura SPA pendiente", 409);
+            }
+            spaRecoveryInvoiceId = Number(existing.id);
+            persistedItems = Array.isArray(existing.items) ? existing.items : items;
+            persistedCliente = {
+              razonSocial: existing.cliente_razon_social,
+              cuit: existing.cliente_cuit || undefined,
+              dni: existing.cliente_dni || undefined,
+              condicionIva: existing.cliente_condicion_iva,
+              domicilio: existing.cliente_domicilio || undefined,
+            };
+          }
+        }
+
         const user = (req as any).user;
         return emitirFactura({
           tipoComprobante,
-          cliente,
+          cliente: persistedCliente,
           items: persistedItems,
           reservaId: reservationId || undefined,
           groupId: groupId || undefined,
           groupPaymentId: groupPaymentId || undefined,
+          spaAccountId: spaAccountId || undefined,
           folioId,
           operador: user?.fullName || user?.username,
           puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
@@ -1011,6 +1110,7 @@ export function registerBillingRoutes(app: Express) {
           sourceChargeIds: normalizedSourceChargeIds.length > 0 ? normalizedSourceChargeIds : undefined,
           sourceChargeAmounts: Object.keys(sanitizedSourceChargeAmounts).length > 0 ? sanitizedSourceChargeAmounts : undefined,
           observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
+          recoveryInvoiceId: spaRecoveryInvoiceId,
         } as NewInvoiceData);
       };
 
@@ -1018,7 +1118,9 @@ export function registerBillingRoutes(app: Express) {
         ? await withReservationInvoiceLock(reservationId, emitInvoice)
         : groupId
           ? await withGroupInvoiceLock(groupId, emitInvoice)
-          : await emitInvoice();
+          : spaAccountId
+            ? await withSpaInvoiceLock(spaAccountId, emitInvoice)
+            : await emitInvoice();
       const user = (req as any).user;
 
       // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
@@ -1040,7 +1142,7 @@ export function registerBillingRoutes(app: Express) {
             createdBy: user?.id || null,
           } as any);
         }
-      } else if (!groupId && cashArea && cashFormaPago) {
+      } else if (!groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área
         try {
           const total = parseFloat(String((factura as any).montoTotal || "0"));

@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
-import { db } from "../db";
+import { db, pool } from "../db";
 import {
   spaPayments,
   spaProfessionals,
@@ -15,8 +15,12 @@ import {
   spaTreatmentResources,
   spaAppointmentResources,
   spaCabins,
+  reservations,
+  charges,
+  cashMovements,
+  folios,
 } from "@shared/schema";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
@@ -51,6 +55,28 @@ const ACTIVE_SPA_STATUSES = ["pending", "confirmed", "in_progress"] as const;
 const ALL_SPA_STATUSES = ["pending", "confirmed", "in_progress", "completed", "cancelled", "no_show"] as const;
 const SPA_OPEN_MINUTES = 8 * 60;
 const SPA_CLOSE_MINUTES = 22 * 60;
+const SPA_ACCESS_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"] as [string, ...string[]];
+const SPA_DIRECT_PAYMENT_METHODS = ["cash", "debit_card", "credit_card", "transfer", "mercadopago"] as const;
+const INVOICE_TO_SPA_PAYMENT_METHOD: Record<string, string> = {
+  efectivo: "cash",
+  tarjeta_debito: "debit_card",
+  tarjeta_credito: "credit_card",
+  transferencia: "transfer",
+  mercadopago: "mercadopago",
+  cuenta_corriente: "cuenta_corriente",
+};
+
+async function withSpaInvoiceAuthorizationLock<T>(accountId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `spa-invoice:${accountId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
+}
 
 function isValidSpaTime(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -592,7 +618,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/appointments", requireAuth, async (req, res) => {
+  app.post("/api/spa/appointments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
       const {
         cabinId,
@@ -610,6 +636,7 @@ export function registerSpaRoutes(app: Express) {
         status,
         notes,
         resourceReservations,
+        settlement,
       } = req.body;
 
       if (!cabinId || !treatmentId || !guestName || !appointmentDate || !startTime || !endTime) {
@@ -625,6 +652,22 @@ export function registerSpaRoutes(app: Express) {
       if (!isValidSpaTime(startTime) || !isValidSpaTime(endTime) || startTime >= endTime) {
         return res.status(400).json({ error: "El horario del turno no es válido" });
       }
+      if (settlement !== undefined && !["room_charge", "voucher"].includes(settlement?.type)) {
+        return res.status(400).json({ error: "La modalidad de cobro no es válida" });
+      }
+      if (settlement?.type === "room_charge" && !settlement.reservationId) {
+        return res.status(400).json({ error: "Seleccione una habitación ocupada" });
+      }
+      if (
+        settlement?.type === "voucher"
+        && !(SPA_DIRECT_PAYMENT_METHODS as readonly string[]).includes(settlement.paymentMethod)
+      ) {
+        return res.status(400).json({ error: "Seleccione una forma de pago válida para el voucher" });
+      }
+
+      const voucherCashShift = settlement?.type === "voucher"
+        ? await storage.getOrCreateActiveTurno("spa")
+        : null;
 
       const appointment = await db.transaction(async (tx) => {
         const [treatment] = await tx.select().from(spaTreatments).where(eq(spaTreatments.id, treatmentId));
@@ -686,7 +729,7 @@ export function registerSpaRoutes(app: Express) {
           chargedTo: null,
         }).returning();
 
-        await tx.insert(spaAccountItems).values({
+        const [accountItem] = await tx.insert(spaAccountItems).values({
           accountId: account.id,
           description: treatment.name,
           quantity: 1,
@@ -695,6 +738,24 @@ export function registerSpaRoutes(app: Express) {
           itemType: "treatment",
           notes: null,
           createdAt: new Date(),
+        }).returning();
+        const [spaFolio] = await tx.insert(folios).values({
+          codigo: `SP-${account.id}`,
+          entityType: "spa_account",
+          entityId: account.id,
+          status: "open",
+          totalCharges: treatmentPrice,
+          totalPayments: "0",
+          balance: treatmentPrice,
+        }).returning();
+        await tx.insert(folioMovements).values({
+          folioId: spaFolio.id,
+          type: "charge",
+          amount: treatmentPrice,
+          description: treatment.name,
+          sourceType: "spa_account_item",
+          sourceId: accountItem.id,
+          registeredBy: (req as any).user?.username || null,
         });
 
         if (normalizedResources.length > 0) {
@@ -708,8 +769,119 @@ export function registerSpaRoutes(app: Express) {
           })));
         }
 
-        return createdAppointment;
+        let settlementPaymentId: string | null = null;
+        let settlementCashMovementId: string | null = null;
+        if (settlement?.type === "room_charge" || settlement?.type === "voucher") {
+          const settlementReservationId = settlement.type === "room_charge" ? String(settlement.reservationId) : null;
+          if (settlementReservationId) {
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"reservation-finance:" + settlementReservationId}))`);
+            const lockedReservation = await tx.execute(sql`
+              SELECT id, status
+              FROM reservations
+              WHERE id = ${settlementReservationId}
+              FOR UPDATE
+            `);
+            const occupiedReservation = lockedReservation.rows[0] as { id: string; status: string } | undefined;
+            if (!occupiedReservation || occupiedReservation.status !== "checked_in") {
+              throw Object.assign(new Error("La habitación seleccionada ya no está ocupada."), { statusCode: 409 });
+            }
+          }
+
+          const paymentMethod = settlement.type === "room_charge"
+            ? "room_charge"
+            : String(settlement.paymentMethod);
+          const [payment] = await tx.insert(spaPayments).values({
+            accountId: account.id,
+            amount: treatmentPrice,
+            method: paymentMethod as any,
+            isAdvance: "false",
+            appointmentId: createdAppointment.id,
+            reservationId: settlementReservationId,
+            notes: settlement.type === "room_charge"
+              ? "Transferido al folio de habitación al crear el turno"
+              : "Voucher SPA cobrado al crear el turno",
+            createdAt: new Date(),
+          }).returning();
+          settlementPaymentId = payment.id;
+
+          if (settlement.type === "room_charge" && settlementReservationId) {
+            await tx.insert(charges).values({
+              reservationId: settlementReservationId,
+              category: "spa",
+              description: `SPA - ${treatment.name}`,
+              amount: treatmentPrice,
+              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+              createdBy: (req as any).user?.id || null,
+            } as any);
+          } else if (settlement.type === "voucher" && voucherCashShift) {
+            const [cashMovement] = await tx.insert(cashMovements).values({
+              shiftId: voucherCashShift.id,
+              area: "spa",
+              sourceType: "spa_account",
+              sourceId: account.id,
+              sourceLabel: `Voucher SPA — ${fullName}`,
+              paymentMethod,
+              amount: treatmentPrice,
+              movementType: "income",
+              receiptType: "cierre_spa",
+              registeredBy: (req as any).user?.fullName || (req as any).user?.username || null,
+              paymentId: payment.id,
+            }).returning();
+            settlementCashMovementId = cashMovement.id;
+          }
+
+          await tx.insert(folioMovements).values({
+            folioId: spaFolio.id,
+            type: "payment",
+            amount: treatmentPrice,
+            description: settlement.type === "room_charge" ? "SPA - Cargo a habitación" : "SPA - Voucher",
+            sourceType: "spa_payment",
+            sourceId: payment.id,
+            paymentMethod,
+            cashMovementId: settlementCashMovementId,
+            registeredBy: (req as any).user?.username || null,
+            receiptType: "cierre_spa",
+          });
+          await tx.update(folios).set({
+            status: "closed",
+            totalCharges: treatmentPrice,
+            totalPayments: treatmentPrice,
+            balance: "0.00",
+            closedAt: new Date(),
+            closedBy: (req as any).user?.username || null,
+          }).where(eq(folios.id, spaFolio.id));
+
+          await tx.update(spaAccounts).set({
+            status: "closed",
+            subtotal: treatmentPrice,
+            total: treatmentPrice,
+            totalPaid: treatmentPrice,
+            receiptType: "cierre_spa",
+            chargedTo: settlement.type === "room_charge" ? `room:${settlementReservationId}` : "direct",
+            closedAt: new Date(),
+            closedBy: (req as any).user?.fullName || (req as any).user?.username || null,
+          }).where(eq(spaAccounts.id, account.id));
+        }
+
+        return {
+          ...createdAppointment,
+          accountId: account.id,
+          accountItems: [{
+            id: accountItem.id,
+            description: accountItem.description,
+            amount: accountItem.subtotal,
+          }],
+          settlementType: settlement?.type ?? null,
+          settlementPaymentId,
+          settlementCashMovementId,
+        };
       });
+
+      if (appointment.settlementPaymentId) {
+        storage.deductStockFromSpaAccount(appointment.accountId).catch((error: any) =>
+          console.warn("[SPA] Error deducting stock after initial settlement:", error)
+        );
+      }
 
       res.status(201).json(appointment);
     } catch (error: any) {
@@ -879,7 +1051,46 @@ export function registerSpaRoutes(app: Express) {
     try {
       const account = await storage.getSpaAccount(req.params.id);
       if (!account) return res.status(404).json({ error: "Account not found" });
-      res.json(account);
+      const [pendingInvoice] = account.status === "open"
+        ? await db.select({
+            id: salesInvoices.id,
+            tipoComprobante: salesInvoices.tipoComprobante,
+            puntoVenta: salesInvoices.puntoVenta,
+            numero: salesInvoices.numero,
+            montoTotal: salesInvoices.montoTotal,
+            cashFormaPago: salesInvoices.cashFormaPago,
+          })
+            .from(salesInvoices)
+            .where(and(
+              eq(salesInvoices.spaAccountId, account.id),
+              eq(salesInvoices.estado, "emitida"),
+            ))
+            .orderBy(desc(salesInvoices.createdAt))
+            .limit(1)
+        : [];
+      const [pendingAuthorization] = account.status === "open"
+        ? await db.select({
+            id: salesInvoices.id,
+            tipoComprobante: salesInvoices.tipoComprobante,
+            puntoVenta: salesInvoices.puntoVenta,
+            numero: salesInvoices.numero,
+            montoTotal: salesInvoices.montoTotal,
+            cashFormaPago: salesInvoices.cashFormaPago,
+            reconciliationError: salesInvoices.reconciliationError,
+          })
+            .from(salesInvoices)
+            .where(and(
+              eq(salesInvoices.spaAccountId, account.id),
+              eq(salesInvoices.estado, "autorizacion_pendiente"),
+            ))
+            .orderBy(desc(salesInvoices.createdAt))
+            .limit(1)
+        : [];
+      res.json({
+        ...account,
+        pendingInvoice: pendingInvoice || null,
+        pendingAuthorization: pendingAuthorization || null,
+      });
     } catch (error) {
       res.status(500).json({ error: "Error fetching spa account" });
     }
@@ -889,7 +1100,46 @@ export function registerSpaRoutes(app: Express) {
     try {
       const account = await storage.getSpaAccountByAppointment(req.params.appointmentId);
       if (!account) return res.status(404).json({ error: "Account not found" });
-      res.json(account);
+      const [pendingInvoice] = account.status === "open"
+        ? await db.select({
+            id: salesInvoices.id,
+            tipoComprobante: salesInvoices.tipoComprobante,
+            puntoVenta: salesInvoices.puntoVenta,
+            numero: salesInvoices.numero,
+            montoTotal: salesInvoices.montoTotal,
+            cashFormaPago: salesInvoices.cashFormaPago,
+          })
+            .from(salesInvoices)
+            .where(and(
+              eq(salesInvoices.spaAccountId, account.id),
+              eq(salesInvoices.estado, "emitida"),
+            ))
+            .orderBy(desc(salesInvoices.createdAt))
+            .limit(1)
+        : [];
+      const [pendingAuthorization] = account.status === "open"
+        ? await db.select({
+            id: salesInvoices.id,
+            tipoComprobante: salesInvoices.tipoComprobante,
+            puntoVenta: salesInvoices.puntoVenta,
+            numero: salesInvoices.numero,
+            montoTotal: salesInvoices.montoTotal,
+            cashFormaPago: salesInvoices.cashFormaPago,
+            reconciliationError: salesInvoices.reconciliationError,
+          })
+            .from(salesInvoices)
+            .where(and(
+              eq(salesInvoices.spaAccountId, account.id),
+              eq(salesInvoices.estado, "autorizacion_pendiente"),
+            ))
+            .orderBy(desc(salesInvoices.createdAt))
+            .limit(1)
+        : [];
+      res.json({
+        ...account,
+        pendingInvoice: pendingInvoice || null,
+        pendingAuthorization: pendingAuthorization || null,
+      });
     } catch (error) {
       res.status(500).json({ error: "Error fetching spa account" });
     }
@@ -932,12 +1182,17 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/close", requireAuth, async (req, res) => {
+  app.post("/api/spa/accounts/:id/close", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
       const { chargedTo, receiptType, customerRazonSocial, customerCuit, customerDni, vatCondition, pvOverride } = req.body;
 
       if (!chargedTo || !receiptType) {
         return res.status(400).json({ error: "chargedTo and receiptType are required" });
+      }
+      if (["factura_a", "factura_b", "factura_c"].includes(receiptType)) {
+        return res.status(409).json({
+          error: "Las facturas SPA deben emitirse con el diálogo fiscal y vincularse al folio",
+        });
       }
 
       if (["factura_a", "factura_c"].includes(receiptType) && !customerCuit?.trim()) {
@@ -965,53 +1220,276 @@ export function registerSpaRoutes(app: Express) {
         console.warn("[SPA] Error deducting stock:", err)
       );
 
-      // Emitir factura AFIP si se solicitó un comprobante fiscal
-      let invoiceId: number | undefined;
-      if (["factura_a", "factura_b", "factura_c"].includes(receiptType || "")) {
-        try {
-          const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
-          const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
-
-          const invoiceItems: { descripcion: string; cantidad: number; precioUnitario: number; alicuotaIva: "21"; subtotalNeto: number; subtotal: number }[] = [];
-          for (const item of accountData.items) {
-            const gross = parseFloat(item.subtotal);
-            if (gross <= 0.001) continue;
-            const qty = item.quantity || 1;
-            const grossUnit = parseFloat((gross / qty).toFixed(2));
-            const netUnit = parseFloat((grossUnit / 1.21).toFixed(4));
-            const netTotal = parseFloat((netUnit * qty).toFixed(4));
-            const grossTotal = parseFloat((grossUnit * qty).toFixed(2));
-            invoiceItems.push({ descripcion: item.description, cantidad: qty, precioUnitario: netUnit, alicuotaIva: "21" as const, subtotalNeto: netTotal, subtotal: grossTotal });
-          }
-          if (invoiceItems.length === 0) {
-            const gross = parseFloat(totalAmount.toFixed(2));
-            const net = parseFloat((gross / 1.21).toFixed(4));
-            invoiceItems.push({ descripcion: "Servicios SPA", cantidad: 1, precioUnitario: net, alicuotaIva: "21" as const, subtotalNeto: net, subtotal: gross });
-          }
-
-          const invoice = await emitirFactura({
-            tipoComprobante: tipo as "FA" | "FB" | "FC",
-            cliente: {
-              razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
-              cuit: customerCuit || undefined,
-              dni: customerDni || undefined,
-              condicionIva: condicion,
-            },
-            items: invoiceItems,
-            operador: (req as any).user?.fullName || (req as any).user?.username,
-            puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
-          });
-          invoiceId = invoice.id;
-          // Persist the invoice link on the account record
-          await storage.updateSpaAccount(req.params.id, { invoiceId } as any);
-        } catch (e) {
-          console.error("[Billing] Error emitiendo factura SPA:", e);
-        }
-      }
-
-      res.json({ ...account, invoiceId });
+      res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Error closing spa account" });
+    }
+  });
+
+  app.post("/api/spa/accounts/:id/link-invoice", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+    try {
+      const invoiceId = Number(req.body.invoiceId);
+      if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+        return res.status(400).json({ error: "Factura inválida" });
+      }
+      const [claimedInvoice] = await db.select({
+        spaAccountId: salesInvoices.spaAccountId,
+        cashFormaPago: salesInvoices.cashFormaPago,
+      }).from(salesInvoices).where(eq(salesInvoices.id, invoiceId));
+      if (!claimedInvoice || claimedInvoice.spaAccountId !== req.params.id) {
+        return res.status(409).json({ error: "La factura no fue emitida para este folio SPA" });
+      }
+      const invoicePaymentMethod = String(claimedInvoice.cashFormaPago || "");
+      const spaPaymentMethod = INVOICE_TO_SPA_PAYMENT_METHOD[invoicePaymentMethod];
+      if (!spaPaymentMethod) {
+        return res.status(409).json({ error: "La factura no tiene una forma de pago SPA válida" });
+      }
+      const invoiceCashShift = spaPaymentMethod === "cuenta_corriente"
+        ? null
+        : await storage.getOrCreateActiveTurno("spa");
+
+      const linked = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM sales_invoices WHERE id = ${invoiceId} FOR UPDATE`);
+        await tx.execute(sql`SELECT id FROM spa_accounts WHERE id = ${req.params.id} FOR UPDATE`);
+        const [invoice] = await tx.select().from(salesInvoices).where(eq(salesInvoices.id, invoiceId));
+        const [account] = await tx.select().from(spaAccounts).where(eq(spaAccounts.id, req.params.id));
+        if (!invoice) throw Object.assign(new Error("Factura no encontrada"), { statusCode: 404 });
+        if (!account) throw Object.assign(new Error("Folio SPA no encontrado"), { statusCode: 404 });
+        if (invoice.spaAccountId !== account.id || invoice.cashFormaPago !== invoicePaymentMethod) {
+          throw Object.assign(new Error("La factura no pertenece a este folio SPA"), { statusCode: 409 });
+        }
+        if (!["FA", "FB"].includes(invoice.tipoComprobante)) {
+          throw Object.assign(new Error("El comprobante no es una Factura A/B válida"), { statusCode: 400 });
+        }
+        if (invoice.estado !== "emitida") {
+          throw Object.assign(new Error("La factura todavía no está autorizada para vincular"), { statusCode: 409 });
+        }
+        if (account.invoiceId === invoiceId && account.status === "closed") {
+          const [existingPayment] = await tx
+            .select()
+            .from(spaPayments)
+            .where(and(eq(spaPayments.accountId, account.id), eq(spaPayments.status, "active")))
+            .limit(1);
+          const [existingCashMovement] = await tx
+            .select({ id: cashMovements.id })
+            .from(cashMovements)
+            .where(and(
+              eq(cashMovements.area, "spa"),
+              eq(cashMovements.sourceType, "comprobante"),
+              eq(cashMovements.sourceId, String(invoice.id)),
+              eq(cashMovements.anulado, false),
+            ))
+            .limit(1);
+          return {
+            account,
+            payment: existingPayment,
+            cashMovementId: existingCashMovement?.id || null,
+            alreadyLinked: true,
+          };
+        }
+        if (account.status !== "open") {
+          throw Object.assign(new Error("El folio SPA ya está cerrado"), { statusCode: 409 });
+        }
+        if (account.invoiceId) {
+          throw Object.assign(new Error("El folio SPA ya tiene otra factura vinculada"), { statusCode: 409 });
+        }
+        const [usedInvoice] = await tx
+          .select({ id: spaAccounts.id })
+          .from(spaAccounts)
+          .where(eq(spaAccounts.invoiceId, invoiceId))
+          .limit(1);
+        if (usedInvoice) {
+          throw Object.assign(new Error("La factura ya está vinculada a otro folio SPA"), { statusCode: 409 });
+        }
+
+        const items = await tx.select().from(spaAccountItems).where(eq(spaAccountItems.accountId, account.id));
+        const total = items.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
+        const invoiceTotal = parseFloat(String(invoice.montoTotal || "0"));
+        if (Math.abs(total - invoiceTotal) > 0.02) {
+          throw Object.assign(new Error("El total de la factura no coincide con el folio SPA"), { statusCode: 409 });
+        }
+        const existingPayments = await tx
+          .select()
+          .from(spaPayments)
+          .where(and(eq(spaPayments.accountId, account.id), eq(spaPayments.status, "active")));
+        if (existingPayments.some((payment) => parseFloat(payment.amount) > 0.001)) {
+          throw Object.assign(new Error("El folio SPA ya tiene pagos registrados"), { statusCode: 409 });
+        }
+
+        const [payment] = await tx.insert(spaPayments).values({
+          accountId: account.id,
+          amount: total.toFixed(2),
+          method: spaPaymentMethod as any,
+          isAdvance: "false",
+          appointmentId: account.appointmentId,
+          reservationId: account.reservationId,
+          notes: `${invoice.tipoComprobante} ${String(invoice.puntoVenta).padStart(4, "0")}-${String(invoice.numero).padStart(8, "0")}`,
+          createdAt: new Date(),
+        }).returning();
+
+        let cashMovementId: string | null = null;
+        if (invoiceCashShift) {
+          const [existingCashMovement] = await tx
+            .select()
+            .from(cashMovements)
+            .where(and(
+              eq(cashMovements.area, "spa"),
+              eq(cashMovements.sourceType, "comprobante"),
+              eq(cashMovements.sourceId, String(invoice.id)),
+              eq(cashMovements.anulado, false),
+            ))
+            .limit(1);
+          if (existingCashMovement) {
+            cashMovementId = existingCashMovement.id;
+            await tx.update(cashMovements)
+              .set({ paymentId: payment.id })
+              .where(eq(cashMovements.id, existingCashMovement.id));
+          } else {
+            const [cashMovement] = await tx.insert(cashMovements).values({
+              shiftId: invoiceCashShift.id,
+              area: "spa",
+              sourceType: "comprobante",
+              sourceId: String(invoice.id),
+              sourceLabel: `${invoice.tipoComprobante} ${String(invoice.puntoVenta).padStart(4, "0")}-${String(invoice.numero).padStart(8, "0")} — ${account.guestName}`,
+              paymentMethod: invoicePaymentMethod,
+              amount: total.toFixed(2),
+              movementType: "income",
+              receiptType: invoice.tipoComprobante,
+              registeredBy: (req as any).user?.fullName || (req as any).user?.username || null,
+              paymentId: payment.id,
+            }).returning();
+            cashMovementId = cashMovement.id;
+          }
+        }
+
+        let [spaFolio] = await tx
+          .select()
+          .from(folios)
+          .where(and(eq(folios.entityType, "spa_account"), eq(folios.entityId, account.id)))
+          .limit(1);
+        if (!spaFolio) {
+          [spaFolio] = await tx.insert(folios).values({
+            codigo: `SP-${account.id}`,
+            entityType: "spa_account",
+            entityId: account.id,
+            status: "open",
+            totalCharges: total.toFixed(2),
+            totalPayments: "0",
+            balance: total.toFixed(2),
+          }).returning();
+          if (items.length > 0) {
+            await tx.insert(folioMovements).values(items.map((item) => ({
+              folioId: spaFolio.id,
+              type: "charge" as const,
+              amount: item.subtotal,
+              description: item.description,
+              sourceType: "spa_account_item",
+              sourceId: item.id,
+              registeredBy: (req as any).user?.username || null,
+            })));
+          }
+        }
+        await tx.insert(folioMovements).values({
+          folioId: spaFolio.id,
+          type: "payment",
+          amount: total.toFixed(2),
+          description: "SPA - Factura cobrada",
+          sourceType: "spa_payment",
+          sourceId: payment.id,
+          paymentMethod: spaPaymentMethod,
+          cashMovementId,
+          registeredBy: (req as any).user?.username || null,
+          receiptType: invoice.tipoComprobante === "FA" ? "factura_a" : "factura_b",
+        });
+        await tx.update(folios).set({
+          status: "closed",
+          totalCharges: total.toFixed(2),
+          totalPayments: total.toFixed(2),
+          balance: "0.00",
+          closedAt: new Date(),
+          closedBy: (req as any).user?.username || null,
+        }).where(eq(folios.id, spaFolio.id));
+
+        const receiptType = invoice.tipoComprobante === "FA" ? "factura_a" : "factura_b";
+        const [closedAccount] = await tx.update(spaAccounts).set({
+          status: "closed",
+          subtotal: total.toFixed(2),
+          total: total.toFixed(2),
+          totalPaid: total.toFixed(2),
+          receiptType,
+          chargedTo: "direct",
+          invoiceId: invoice.id,
+          closedAt: new Date(),
+          closedBy: (req as any).user?.fullName || (req as any).user?.username || null,
+        }).where(eq(spaAccounts.id, account.id)).returning();
+
+        return { account: closedAccount, payment, cashMovementId, alreadyLinked: false };
+      });
+
+      if (!linked.alreadyLinked) {
+        storage.deductStockFromSpaAccount(req.params.id).catch((error: any) =>
+          console.warn("[SPA] Error deducting stock after invoice:", error)
+        );
+      }
+
+      res.json(linked);
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error vinculando factura al folio SPA" });
+    }
+  });
+
+  app.post("/api/spa/accounts/:id/resume-invoice", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+    try {
+      const invoice = await withSpaInvoiceAuthorizationLock(req.params.id, async () => {
+        const [account] = await db.select().from(spaAccounts).where(eq(spaAccounts.id, req.params.id));
+        if (!account) throw Object.assign(new Error("Folio SPA no encontrado"), { statusCode: 404 });
+        if (account.status !== "open" || account.invoiceId) {
+          throw Object.assign(new Error("El folio SPA ya está cerrado o facturado"), { statusCode: 409 });
+        }
+
+        const [pending] = await db.select().from(salesInvoices).where(and(
+          eq(salesInvoices.spaAccountId, account.id),
+          eq(salesInvoices.estado, "autorizacion_pendiente"),
+        )).orderBy(desc(salesInvoices.createdAt)).limit(1);
+        if (!pending) {
+          throw Object.assign(new Error("No hay una autorización ARCA pendiente para este folio"), { statusCode: 404 });
+        }
+        if (!pending.cashFormaPago || !INVOICE_TO_SPA_PAYMENT_METHOD[pending.cashFormaPago]) {
+          throw Object.assign(new Error("La factura pendiente no tiene una forma de pago válida"), { statusCode: 409 });
+        }
+        if (!Array.isArray(pending.items) || pending.items.length === 0) {
+          throw Object.assign(new Error("La factura pendiente no conserva sus conceptos"), { statusCode: 409 });
+        }
+
+        const accountItems = await db.select().from(spaAccountItems).where(eq(spaAccountItems.accountId, account.id));
+        const accountTotal = accountItems.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
+        if (Math.abs(accountTotal - parseFloat(pending.montoTotal)) > 0.02) {
+          throw Object.assign(new Error("El folio SPA ya no coincide con la factura pendiente"), { statusCode: 409 });
+        }
+
+        const finalized = await emitirFactura({
+          tipoComprobante: pending.tipoComprobante as any,
+          cliente: {
+            razonSocial: pending.clienteRazonSocial,
+            cuit: pending.clienteCuit || undefined,
+            dni: pending.clienteDni || undefined,
+            condicionIva: pending.clienteCondicionIva,
+            domicilio: pending.clienteDomicilio || undefined,
+          },
+          items: pending.items as any,
+          puntoVentaOverride: pending.puntoVenta,
+          operador: pending.operador || (req as any).user?.fullName || (req as any).user?.username,
+          cashFormaPago: pending.cashFormaPago,
+          spaAccountId: account.id,
+          recoveryInvoiceId: pending.id,
+          observaciones: pending.observaciones || undefined,
+        });
+
+        return finalized;
+      });
+      res.json({ invoice });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "No se pudo reanudar la autorización ARCA" });
     }
   });
 
@@ -1024,7 +1502,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/payments", requireAuth, async (req, res) => {
+  app.post("/api/spa/accounts/:id/payments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
       const { amount, method, isAdvance, appointmentId, reservationId, notes } = req.body;
 
@@ -1055,11 +1533,13 @@ export function registerSpaRoutes(app: Express) {
       }
 
       try {
-        const label = `SPA - Pago ${isAdvance ? "(Seña)" : ""} - Cuenta ${req.params.id}`;
-        await storage.registerCashMovement(
-          "spa", "spa_account", req.params.id, label,
-          method, String(amount), "income"
-        );
+        if (method !== "room_charge") {
+          const label = `SPA - Pago ${isAdvance ? "(Seña)" : ""} - Cuenta ${req.params.id}`;
+          await storage.registerCashMovement(
+            "spa", "spa_account", req.params.id, label,
+            method, String(amount), "income"
+          );
+        }
       } catch (e) {
         console.error("Error registrando movimiento de caja:", e);
       }
@@ -1079,7 +1559,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/spa/payments/:id/anular", requireAuth, async (req, res) => {
+  app.patch("/api/spa/payments/:id/anular", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
       const { motivoAnulacion } = req.body;
       if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
@@ -1098,7 +1578,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/payments/:id", requireAuth, async (req, res) => {
+  app.delete("/api/spa/payments/:id", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/spa/payments/${req.params.id} — usar PATCH /anular`);
     try {
       await storage.deleteSpaPayment(req.params.id);

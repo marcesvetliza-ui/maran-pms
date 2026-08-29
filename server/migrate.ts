@@ -1714,6 +1714,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // A fiscal invoice emitted from SPA claims its account before ARCA issuance.
+  // The unique partial index prevents two browser tabs from invoicing the same
+  // SPA account independently.
+  await withTimeout("sales_invoices.spa_account_scope", T, () =>
+    db.execute(sql`
+      ALTER TABLE sales_invoices
+        ADD COLUMN IF NOT EXISTS spa_account_id varchar;
+      CREATE UNIQUE INDEX IF NOT EXISTS sales_invoices_spa_account_id_unique
+        ON sales_invoices (spa_account_id)
+        WHERE spa_account_id IS NOT NULL;
+    `)
+  );
+
   // Clean up 9 orphaned spa_accounts from March 2026 whose parent appointments
   // were deleted. Mark as 'cancelled' (not DELETE) to preserve payment history.
   // The 3 closed accounts have room_charge payments already applied to folios.

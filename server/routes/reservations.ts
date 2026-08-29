@@ -5,7 +5,7 @@ import path from "path";
 import { assetPath } from "../utils/assetPath";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { emitirFactura } from "../billing/invoiceService";
@@ -1190,7 +1190,9 @@ export function registerReservationsRoutes(app: Express) {
 
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", async (req, res) => {
+    const reservationLockClient = await pool.connect();
     try {
+      await reservationLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [`reservation-finance:${req.params.id}`]);
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
@@ -1353,6 +1355,9 @@ export function registerReservationsRoutes(app: Express) {
     } catch (error: any) {
       console.error("[check-out] error:", error?.message || error, error?.stack || "");
       res.status(500).json({ error: "Error processing check-out", detail: error?.message || String(error) });
+    } finally {
+      await reservationLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [`reservation-finance:${req.params.id}`]).catch(() => undefined);
+      reservationLockClient.release();
     }
   });
 
