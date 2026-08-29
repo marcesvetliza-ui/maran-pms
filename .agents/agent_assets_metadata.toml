@@ -88,3 +88,17 @@ uri = "file://docs/analisis-cloudbeds-vs-maran.pdf"
 type = "pdf"
 title = "Análisis Cloudbeds vs Maran — PDF"
 description = "Versión PDF del informe comparativo Cloudbeds vs Maran, lista para guardar o compartir."
+
+[[outputs]]
+id = "uTKnnupaRSx5svs_JgxE8"
+uri = "file://docs/analisis-pxsol-vs-maran.docx"
+type = "word_document"
+title = "Análisis Pexsol vs Maran — Word"
+description = "Informe editable sobre el tipo de sistema Pexsol, comparación funcional, brechas, fortalezas de Maran y roadmap sugerido."
+
+[[outputs]]
+id = "_zbljSaGyusfpP_5i0NHV"
+uri = "file://docs/analisis-pxsol-vs-maran.pdf"
+type = "pdf"
+title = "Análisis Pexsol vs Maran — PDF"
+description = "Versión PDF del informe comparativo Pexsol vs Maran, lista para guardar o compartir."
