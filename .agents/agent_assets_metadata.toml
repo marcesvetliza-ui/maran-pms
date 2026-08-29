@@ -74,3 +74,17 @@ uri = "file://docs/analisis-opera-cloud-vs-maran.pdf"
 type = "pdf"
 title = "Análisis OPERA Cloud vs Maran — PDF"
 description = "Versión PDF del informe comparativo, lista para guardar o compartir."
+
+[[outputs]]
+id = "gPSAS6XJYSBeWuHnYP4q2"
+uri = "file://docs/analisis-cloudbeds-vs-maran.docx"
+type = "word_document"
+title = "Análisis Cloudbeds vs Maran — Word"
+description = "Informe editable sobre el tipo de sistema Cloudbeds, comparación funcional, brechas y roadmap sugerido frente a Maran."
+
+[[outputs]]
+id = "OAfUTkEWntgE7l3HKLixw"
+uri = "file://docs/analisis-cloudbeds-vs-maran.pdf"
+type = "pdf"
+title = "Análisis Cloudbeds vs Maran — PDF"
+description = "Versión PDF del informe comparativo Cloudbeds vs Maran, lista para guardar o compartir."
