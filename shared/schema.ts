@@ -1472,6 +1472,7 @@ export const spaCabins = pgTable("spa_cabins", {
   name: text("name").notNull(),
   description: text("description"),
   isActive: text("is_active").default("true"),
+  resourceType: text("resource_type"),
 });
 
 export const insertSpaCabinSchema = createInsertSchema(spaCabins).omit({ id: true });
@@ -1499,11 +1500,26 @@ export const spaTreatments = pgTable("spa_treatments", {
   durationMinutes: integer("duration_minutes").notNull().default(60),
   price: decimal("price", { precision: 10, scale: 2 }).notNull().default("0"),
   isActive: text("is_active").default("true"),
+  isCircuit: boolean("is_circuit").notNull().default(false),
 });
 
 export const insertSpaTreatmentSchema = createInsertSchema(spaTreatments).omit({ id: true });
 export type InsertSpaTreatment = z.infer<typeof insertSpaTreatmentSchema>;
 export type SpaTreatment = typeof spaTreatments.$inferSelect;
+
+// Default resource slots required by a circuit. Staff may adjust the cabin
+// and time when booking, while duration and ordering come from this template.
+export const spaTreatmentResources = pgTable("spa_treatment_resources", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  treatmentId: varchar("treatment_id").notNull().references(() => spaTreatments.id, { onDelete: "cascade" }),
+  defaultCabinId: varchar("default_cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  durationMinutes: integer("duration_minutes").notNull().default(30),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const insertSpaTreatmentResourceSchema = createInsertSchema(spaTreatmentResources).omit({ id: true });
+export type InsertSpaTreatmentResource = z.infer<typeof insertSpaTreatmentResourceSchema>;
+export type SpaTreatmentResource = typeof spaTreatmentResources.$inferSelect;
 
 // SPA Professionals
 export const spaProfessionals = pgTable("spa_professionals", {
@@ -1567,9 +1583,27 @@ export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).om
 export type InsertSpaAppointment = z.infer<typeof insertSpaAppointmentSchema>;
 export type SpaAppointment = typeof spaAppointments.$inferSelect;
 
+// Concrete resource reservations created for a circuit appointment.
+// They do not create charges: the parent appointment remains the financial source.
+export const spaAppointmentResources = pgTable("spa_appointment_resources", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  appointmentId: varchar("appointment_id").notNull().references(() => spaAppointments.id, { onDelete: "cascade" }),
+  cabinId: varchar("cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  durationMinutes: integer("duration_minutes").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSpaAppointmentResourceSchema = createInsertSchema(spaAppointmentResources).omit({ id: true, createdAt: true });
+export type InsertSpaAppointmentResource = z.infer<typeof insertSpaAppointmentResourceSchema>;
+export type SpaAppointmentResource = typeof spaAppointmentResources.$inferSelect;
+
 export type SpaAppointmentWithDetails = SpaAppointment & {
   cabin: SpaCabin;
   treatment: SpaTreatment;
+  resourceReservations?: Array<SpaAppointmentResource & { cabin?: SpaCabin }>;
 };
 
 // SPA Account (Cuenta SPA - similar to restaurant orders)

@@ -131,6 +131,7 @@ import {
   orderSplits, recipes, recipeIngredients,
   itemCategories, suppliers, inventoryItems, stockMovements, warehouseStock,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
+  spaTreatmentResources, spaAppointmentResources,
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
   eventRooms, events, eventChargeTypes, eventCharges, eventPayments,
   eventTables, eventTableCharges, eventTablePayments,
@@ -3743,7 +3744,8 @@ export class DatabaseStorage implements IStorage {
     const apptIds = appointments.map(a => a.id);
     const idsSql = sql.join(apptIds.map(id => sql`${id}`), sql`, `);
 
-    const result = await db.execute(sql`
+    const [result, resourceRows] = await Promise.all([
+      db.execute(sql`
       SELECT
         sa.id AS "appointmentId",
         -- MAX(jsonb) no existe en PostgreSQL; castear a text para el agregado y volver a jsonb.
@@ -3760,16 +3762,58 @@ export class DatabaseStorage implements IStorage {
           'description',     st.description,
           'durationMinutes', st.duration_minutes,
           'price',           st.price,
-          'isActive',        st.is_active
+          'isActive',        st.is_active,
+          'isCircuit',       st.is_circuit
         )::text END)::jsonb AS treatment
       FROM spa_appointments sa
       LEFT JOIN spa_cabins     sc ON sc.id = sa.cabin_id
       LEFT JOIN spa_treatments st ON st.id = sa.treatment_id
       WHERE sa.id IN (${idsSql})
       GROUP BY sa.id
-    `);
+      `),
+      db
+        .select({
+          id: spaAppointmentResources.id,
+          appointmentId: spaAppointmentResources.appointmentId,
+          cabinId: spaAppointmentResources.cabinId,
+          startTime: spaAppointmentResources.startTime,
+          endTime: spaAppointmentResources.endTime,
+          durationMinutes: spaAppointmentResources.durationMinutes,
+          sortOrder: spaAppointmentResources.sortOrder,
+          createdAt: spaAppointmentResources.createdAt,
+          cabinName: spaCabins.name,
+          cabinDescription: spaCabins.description,
+          cabinIsActive: spaCabins.isActive,
+        })
+        .from(spaAppointmentResources)
+        .leftJoin(spaCabins, eq(spaCabins.id, spaAppointmentResources.cabinId))
+        .where(inArray(spaAppointmentResources.appointmentId, apptIds)),
+    ]);
 
     const rowMap = new Map((result.rows as any[]).map(r => [r.appointmentId, r]));
+    const resourcesMap = new Map<string, any[]>();
+    for (const resource of resourceRows) {
+      if (!resourcesMap.has(resource.appointmentId)) resourcesMap.set(resource.appointmentId, []);
+      resourcesMap.get(resource.appointmentId)!.push({
+        id: resource.id,
+        appointmentId: resource.appointmentId,
+        cabinId: resource.cabinId,
+        startTime: resource.startTime,
+        endTime: resource.endTime,
+        durationMinutes: resource.durationMinutes,
+        sortOrder: resource.sortOrder,
+        createdAt: resource.createdAt,
+        cabin: resource.cabinName ? {
+          id: resource.cabinId,
+          name: resource.cabinName,
+          description: resource.cabinDescription,
+          isActive: resource.cabinIsActive,
+        } : undefined,
+      });
+    }
+    for (const resources of resourcesMap.values()) {
+      resources.sort((a, b) => a.sortOrder - b.sortOrder || a.startTime.localeCompare(b.startTime));
+    }
 
     return appointments.map(a => {
       const row = rowMap.get(a.id) as any;
@@ -3777,6 +3821,7 @@ export class DatabaseStorage implements IStorage {
         ...a,
         cabin:     (row?.cabin     as any) ?? undefined,
         treatment: (row?.treatment as any) ?? undefined,
+        resourceReservations: resourcesMap.get(a.id) ?? [],
       };
     });
   }
@@ -3798,7 +3843,12 @@ export class DatabaseStorage implements IStorage {
     if (!appt) return undefined;
     const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, appt.cabinId));
     const [treatment] = await db.select().from(spaTreatments).where(eq(spaTreatments.id, appt.treatmentId));
-    return { ...appt, cabin, treatment };
+    const resourceReservations = await db
+      .select()
+      .from(spaAppointmentResources)
+      .where(eq(spaAppointmentResources.appointmentId, id))
+      .orderBy(spaAppointmentResources.sortOrder);
+    return { ...appt, cabin, treatment, resourceReservations };
   }
 
   async getSpaAppointmentsByCabin(cabinId: string, date: string): Promise<SpaAppointment[]> {
@@ -3835,6 +3885,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteSpaAppointment(id: string): Promise<boolean> {
+    await db.delete(spaAppointmentResources).where(eq(spaAppointmentResources.appointmentId, id));
     const result = await db.delete(spaAppointments).where(eq(spaAppointments.id, id));
     return (result.rowCount ?? 0) > 0;
   }

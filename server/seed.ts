@@ -324,9 +324,9 @@ export async function seedDatabase() {
     { id: "cab2", name: "Fuego", description: "Gabinete Fuego", isActive: "true" },
     { id: "cab3", name: "Aire", description: "Gabinete Aire", isActive: "true" },
     { id: "cab4", name: "Tierra", description: "Gabinete Tierra", isActive: "true" },
-    { id: "cab5", name: "Hidromasaje", description: "Gabinete Hidromasaje", isActive: "true" },
-    { id: "cab6", name: "Sauna H", description: "Sauna Hombres", isActive: "true" },
-    { id: "cab7", name: "Sauna M", description: "Sauna Mujeres", isActive: "true" },
+    { id: "cab5", name: "Hidromasaje", description: "Gabinete Hidromasaje", isActive: "true", resourceType: "hidromasaje" },
+    { id: "cab6", name: "Sauna H", description: "Sauna Hombres", isActive: "true", resourceType: "sauna" },
+    { id: "cab7", name: "Sauna M", description: "Sauna Mujeres", isActive: "true", resourceType: "sauna" },
   ]);
 
   console.log("Seeding SPA treatment categories...");
@@ -350,8 +350,8 @@ export async function seedDatabase() {
     { id: "st8", categoryId: "stc3", name: "Exfoliacion Corporal", description: "Exfoliacion con sales marinas", durationMinutes: 45, price: "13000.00", isActive: "true" },
     { id: "st9", categoryId: "stc3", name: "Envoltura de Chocolate", description: "Tratamiento hidratante con cacao", durationMinutes: 60, price: "18000.00", isActive: "true" },
     { id: "st10", categoryId: "stc3", name: "Reductor Modelador", description: "Tratamiento reductivo con vendas frias", durationMinutes: 90, price: "24000.00", isActive: "true" },
-    { id: "st11", categoryId: "stc4", name: "Circuito de Aguas", description: "Acceso a piscinas termales, sauna y jacuzzi", durationMinutes: 120, price: "10000.00", isActive: "true" },
-    { id: "st12", categoryId: "stc4", name: "Circuito Premium", description: "Circuito de aguas + te y frutas", durationMinutes: 150, price: "15000.00", isActive: "true" },
+    { id: "st11", categoryId: "stc4", name: "Circuito de Aguas", description: "Acceso a piscinas termales, sauna y jacuzzi", durationMinutes: 120, price: "10000.00", isActive: "true", isCircuit: true },
+    { id: "st12", categoryId: "stc4", name: "Circuito Premium", description: "Circuito de aguas + te y frutas", durationMinutes: 150, price: "15000.00", isActive: "true", isCircuit: true },
     { id: "st13", categoryId: "stc5", name: "Dia de Spa Completo", description: "Circuito + masaje + facial + almuerzo", durationMinutes: 300, price: "45000.00", isActive: "true" },
     { id: "st14", categoryId: "stc5", name: "Experiencia en Pareja", description: "Circuito + masaje para dos personas", durationMinutes: 180, price: "55000.00", isActive: "true" },
   ]);

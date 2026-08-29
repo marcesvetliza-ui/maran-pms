@@ -856,6 +856,108 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS codigo_postal text`);
   });
 
+  // ── SPA circuit resources ─────────────────────────────────────────────────
+  // Additive model: existing appointments keep their single cabin, while
+  // circuits may reserve extra cabins through linked resource rows.
+  await withTimeout("spa_treatments.is_circuit", T, async () => {
+    await db.execute(sql`
+      ALTER TABLE spa_cabins
+      ADD COLUMN IF NOT EXISTS resource_type text
+    `);
+    await db.execute(sql`
+      UPDATE spa_cabins
+      SET resource_type = CASE
+        WHEN LOWER(name) LIKE '%sauna%' THEN 'sauna'
+        WHEN LOWER(name) LIKE '%hidro%' THEN 'hidromasaje'
+        ELSE resource_type
+      END
+      WHERE resource_type IS NULL
+        AND (LOWER(name) LIKE '%sauna%' OR LOWER(name) LIKE '%hidro%')
+    `);
+    await db.execute(sql`
+      ALTER TABLE spa_treatments
+      ADD COLUMN IF NOT EXISTS is_circuit boolean NOT NULL DEFAULT false
+    `);
+    await db.execute(sql`
+      UPDATE spa_treatments t
+      SET is_circuit = true
+      WHERE t.is_circuit = false
+        AND EXISTS (
+          SELECT 1
+          FROM spa_treatment_categories c
+          WHERE c.id = t.category_id
+            AND LOWER(c.name) = 'circuitos'
+        )
+    `);
+  });
+  await withTimeout("spa_treatment_resources", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spa_treatment_resources (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        treatment_id varchar NOT NULL,
+        default_cabin_id varchar NOT NULL,
+        duration_minutes integer NOT NULL DEFAULT 30,
+        sort_order integer NOT NULL DEFAULT 0
+      )
+    `)
+  );
+  await withTimeout("spa_appointment_resources", T, () =>
+    db.execute(sql`
+      CREATE TABLE IF NOT EXISTS spa_appointment_resources (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        appointment_id varchar NOT NULL,
+        cabin_id varchar NOT NULL,
+        start_time text NOT NULL,
+        end_time text NOT NULL,
+        duration_minutes integer NOT NULL,
+        sort_order integer NOT NULL DEFAULT 0,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)
+  );
+  await withTimeout("spa circuit resource foreign keys", T, async () => {
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_treatment_resources_treatment_fk') THEN
+          ALTER TABLE spa_treatment_resources
+          ADD CONSTRAINT spa_treatment_resources_treatment_fk
+          FOREIGN KEY (treatment_id) REFERENCES spa_treatments(id) ON DELETE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_treatment_resources_cabin_fk') THEN
+          ALTER TABLE spa_treatment_resources
+          ADD CONSTRAINT spa_treatment_resources_cabin_fk
+          FOREIGN KEY (default_cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_appointment_resources_appointment_fk') THEN
+          ALTER TABLE spa_appointment_resources
+          ADD CONSTRAINT spa_appointment_resources_appointment_fk
+          FOREIGN KEY (appointment_id) REFERENCES spa_appointments(id) ON DELETE CASCADE;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_appointment_resources_cabin_fk') THEN
+          ALTER TABLE spa_appointment_resources
+          ADD CONSTRAINT spa_appointment_resources_cabin_fk
+          FOREIGN KEY (cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
+        END IF;
+      END
+      $$
+    `);
+  });
+  await withTimeout("spa circuit resource indexes", T, async () => {
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_spa_treatment_resources_treatment
+      ON spa_treatment_resources (treatment_id, sort_order)
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_spa_appointment_resources_appointment
+      ON spa_appointment_resources (appointment_id)
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_spa_appointment_resources_cabin
+      ON spa_appointment_resources (cabin_id, start_time, end_time)
+    `);
+  });
+
   // ── Web check-in — solicitud Factura A ────────────────────────────────────
   await withTimeout("web_checkins request_factura_a column", T, async () => {
     await db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS request_factura_a boolean DEFAULT false`);

@@ -68,6 +68,7 @@ type SpaCabin = {
   name: string;
   description: string | null;
   isActive: string | null;
+  resourceType?: string | null;
 };
 
 type SpaTreatment = {
@@ -78,7 +79,39 @@ type SpaTreatment = {
   durationMinutes: number;
   price: string;
   isActive: string | null;
+  isCircuit?: boolean;
 };
+
+type SpaTreatmentResource = {
+  id: string;
+  treatmentId: string;
+  defaultCabinId: string;
+  durationMinutes: number;
+  sortOrder: number;
+  cabinName?: string | null;
+  cabinResourceType?: string | null;
+};
+
+type SpaAppointmentResource = {
+  id: string;
+  appointmentId: string;
+  cabinId: string;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  sortOrder: number;
+  cabin?: SpaCabin;
+};
+
+type CircuitBookingDraft = {
+  templateResourceId: string;
+  cabinId: string;
+  startTime: string;
+  durationMinutes: number;
+  sortOrder: number;
+};
+
+const EMPTY_SPA_TREATMENT_RESOURCES: SpaTreatmentResource[] = [];
 
 type SpaProfessional = {
   id: string;
@@ -121,6 +154,9 @@ type SpaAppointment = {
   treatment?: SpaTreatment;
   invoiceId?: number | null;
   ncId?: number | null;
+  resourceReservations?: SpaAppointmentResource[];
+  displayedAsResource?: boolean;
+  parentAppointment?: SpaAppointment;
 };
 
 type SpaPayment = {
@@ -259,6 +295,101 @@ function timeToMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function addMinutesToTime(time: string, durationMinutes: number): string {
+  const total = timeToMinutes(time) + durationMinutes;
+  return `${Math.floor(total / 60).toString().padStart(2, "0")}:${(total % 60).toString().padStart(2, "0")}`;
+}
+
+function CircuitResourceBookingRow({
+  index,
+  draft,
+  cabins,
+  appointmentDate,
+  excludeAppointmentId,
+  onChange,
+}: {
+  index: number;
+  draft: CircuitBookingDraft;
+  cabins: SpaCabin[];
+  appointmentDate: string;
+  excludeAppointmentId: string | null;
+  onChange: (patch: Partial<CircuitBookingDraft>) => void;
+}) {
+  const availabilityQuery = useQuery<{ slots: string[] }>({
+    queryKey: [
+      "/api/spa/resource-availability",
+      appointmentDate,
+      draft.cabinId,
+      draft.durationMinutes,
+      excludeAppointmentId,
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        date: appointmentDate,
+        cabinId: draft.cabinId,
+        durationMinutes: String(draft.durationMinutes),
+      });
+      if (excludeAppointmentId) params.set("excludeAppointmentId", excludeAppointmentId);
+      const response = await fetch(`/api/spa/resource-availability?${params}`, { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudo consultar la disponibilidad");
+      return response.json();
+    },
+    enabled: !!appointmentDate && !!draft.cabinId,
+    staleTime: 10_000,
+  });
+
+  const selectedCabin = cabins.find((cabin) => cabin.id === draft.cabinId);
+  return (
+    <div className="rounded-lg border bg-background p-3 space-y-2" data-testid={`circuit-resource-${index}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">Recurso {index + 1}</p>
+          <p className="text-xs text-muted-foreground">{draft.durationMinutes} minutos</p>
+        </div>
+        {selectedCabin?.resourceType && (
+          <Badge variant="outline" className="text-[10px] capitalize">{selectedCabin.resourceType}</Badge>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-muted-foreground">Recurso a reservar</label>
+          <Select value={draft.cabinId} onValueChange={(value) => onChange({ cabinId: value, startTime: "" })}>
+            <SelectTrigger data-testid={`select-circuit-resource-${index}`}>
+              <SelectValue placeholder="Seleccionar" />
+            </SelectTrigger>
+            <SelectContent>
+              {cabins.filter((cabin) => cabin.id).map((cabin) => (
+                <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Horario disponible</label>
+          <Select value={draft.startTime} onValueChange={(value) => onChange({ startTime: value })} disabled={!draft.cabinId || availabilityQuery.isLoading}>
+            <SelectTrigger data-testid={`select-circuit-time-${index}`}>
+              <SelectValue placeholder={availabilityQuery.isLoading ? "Consultando..." : "Seleccionar"} />
+            </SelectTrigger>
+            <SelectContent>
+              {(availabilityQuery.data?.slots ?? []).map((time) => (
+                <SelectItem key={time} value={time}>
+                  {time}–{addMinutesToTime(time, draft.durationMinutes)}
+                </SelectItem>
+              ))}
+              {!availabilityQuery.isLoading && (availabilityQuery.data?.slots?.length ?? 0) === 0 && (
+                <SelectItem value="__no_slots__" disabled>Sin horarios disponibles</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      {availabilityQuery.isError && (
+        <p className="text-xs text-destructive">No se pudo consultar la disponibilidad.</p>
+      )}
+    </div>
+  );
+}
+
 type SpaTreatmentCategory = {
   id: string;
   name: string;
@@ -311,6 +442,10 @@ export default function SpaPage() {
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
+  const [circuitBookings, setCircuitBookings] = useState<CircuitBookingDraft[]>([]);
+  const [circuitDraftTreatmentId, setCircuitDraftTreatmentId] = useState<string | null>(null);
+  const [editingAppointmentResources, setEditingAppointmentResources] = useState<SpaAppointmentResource[]>([]);
+  const [treatmentResourceDrafts, setTreatmentResourceDrafts] = useState<Array<{ defaultCabinId: string; durationMinutes: number }>>([]);
   const [supplyItemId, setSupplyItemId] = useState("");
   const [supplyQty, setSupplyQty] = useState("1");
   const [cabinDialogOpen, setCabinDialogOpen] = useState(false);
@@ -507,6 +642,51 @@ export default function SpaPage() {
     },
   });
 
+  const selectedTreatmentId = form.watch("treatmentId");
+  const selectedAppointmentDate = form.watch("appointmentDate");
+  const selectedTreatment = treatments.find((treatment) => treatment.id === selectedTreatmentId);
+  const resourceCabins = activeCabins.filter((cabin) => !!cabin.resourceType);
+
+  const { data: selectedCircuitTemplates = EMPTY_SPA_TREATMENT_RESOURCES, isFetching: isFetchingCircuitTemplates } = useQuery<SpaTreatmentResource[]>({
+    queryKey: ["/api/spa/treatments", selectedTreatmentId, "resources"],
+    queryFn: async () => {
+      const response = await fetch(`/api/spa/treatments/${selectedTreatmentId}/resources`, { credentials: "include" });
+      if (!response.ok) throw new Error("Error al cargar recursos del circuito");
+      return response.json();
+    },
+    enabled: !!selectedTreatmentId && !!selectedTreatment?.isCircuit && isNewDialogOpen,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (!selectedTreatment?.isCircuit) {
+      setCircuitBookings([]);
+      setCircuitDraftTreatmentId(null);
+      return;
+    }
+    if (isFetchingCircuitTemplates || circuitDraftTreatmentId === selectedTreatment.id) return;
+
+    const editingByOrder = new Map(editingAppointmentResources.map((resource) => [resource.sortOrder, resource]));
+    setCircuitBookings(selectedCircuitTemplates.map((template) => {
+      const existing = editingByOrder.get(template.sortOrder);
+      return {
+        templateResourceId: template.id,
+        cabinId: existing?.cabinId || template.defaultCabinId,
+        startTime: existing?.startTime || "",
+        durationMinutes: template.durationMinutes,
+        sortOrder: template.sortOrder,
+      };
+    }));
+    setCircuitDraftTreatmentId(selectedTreatment.id);
+  }, [
+    selectedTreatment?.id,
+    selectedTreatment?.isCircuit,
+    selectedCircuitTemplates,
+    isFetchingCircuitTemplates,
+    circuitDraftTreatmentId,
+    editingAppointmentResources,
+  ]);
+
   // Pre-fill company name and CUIT when the folio dialog opens with a receipt
   // type already selected (e.g. re-opening a partially-filled close dialog).
   // The onValueChange handler covers the case where staff changes the type;
@@ -556,6 +736,9 @@ export default function SpaPage() {
           guestId: data.guestId || null,
           endTime,
           status: "confirmed",
+          resourceReservations: selectedTreatment?.isCircuit
+            ? circuitBookings.map(({ templateResourceId, cabinId, startTime }) => ({ templateResourceId, cabinId, startTime }))
+            : [],
         }),
       });
       
@@ -570,6 +753,9 @@ export default function SpaPage() {
       toast({ title: "Turno creado — imprimiendo comanda..." });
       setIsNewDialogOpen(false);
       setSelectedSpaGuest(null);
+      setCircuitBookings([]);
+      setCircuitDraftTreatmentId(null);
+      setEditingAppointmentResources([]);
       form.reset({
         cabinId: "", treatmentId: "", professionalId: "", guestId: null, guestName: "", guestLastName: "",
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
@@ -609,6 +795,9 @@ export default function SpaPage() {
           endTime,
           reservationId: data.reservationId || null,
           notes: data.notes || null,
+          resourceReservations: selectedTreatment?.isCircuit
+            ? circuitBookings.map(({ templateResourceId, cabinId, startTime }) => ({ templateResourceId, cabinId, startTime }))
+            : [],
         }),
       });
       if (!res.ok) {
@@ -625,6 +814,9 @@ export default function SpaPage() {
       setEditingAppointmentId(null);
       setSelectedAppointment(null);
       setSelectedSpaGuest(null);
+      setCircuitBookings([]);
+      setCircuitDraftTreatmentId(null);
+      setEditingAppointmentResources([]);
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -829,22 +1021,38 @@ export default function SpaPage() {
       durationMinutes: 60,
       price: "",
       isActive: "true",
+      isCircuit: false,
     },
   });
 
   const createTreatmentMutation = useMutation({
     mutationFn: async (data: any) => {
-      return apiRequest(editingTreatment ? "PATCH" : "POST",
+      const response = await apiRequest(editingTreatment ? "PATCH" : "POST",
         editingTreatment ? `/api/spa/treatments/${editingTreatment.id}` : "/api/spa/treatments",
         data
       );
+      return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (savedTreatment: SpaTreatment, variables: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments"] });
-      toast({ title: editingTreatment ? "Tratamiento actualizado" : "Tratamiento creado" });
+      if (!editingTreatment && variables.isCircuit) {
+        setEditingTreatment(savedTreatment);
+        treatmentForm.reset({
+          name: savedTreatment.name,
+          description: savedTreatment.description || "",
+          categoryId: savedTreatment.categoryId || "",
+          durationMinutes: savedTreatment.durationMinutes,
+          price: savedTreatment.price,
+          isActive: savedTreatment.isActive || "true",
+          isCircuit: true,
+        });
+        toast({ title: "Circuito creado", description: "Ahora configurá los recursos incluidos." });
+        return;
+      }
+      toast({ title: editingTreatment ? "Servicio actualizado" : "Tratamiento creado" });
       setIsTreatmentDialogOpen(false);
       setEditingTreatment(null);
-      treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true" });
+      treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true", isCircuit: false });
     },
     onError: () => {
       toast({ title: "Error al guardar tratamiento", variant: "destructive" });
@@ -873,6 +1081,50 @@ export default function SpaPage() {
       return res.json();
     },
     enabled: !!editingTreatment?.id,
+  });
+
+  const { data: editingTreatmentResources = EMPTY_SPA_TREATMENT_RESOURCES, isFetching: isFetchingTreatmentResources } = useQuery<SpaTreatmentResource[]>({
+    queryKey: ["/api/spa/treatments", editingTreatment?.id, "resources"],
+    queryFn: async () => {
+      if (!editingTreatment?.id) return [];
+      const response = await fetch(`/api/spa/treatments/${editingTreatment.id}/resources`, { credentials: "include" });
+      if (!response.ok) throw new Error("Error al cargar recursos");
+      return response.json();
+    },
+    enabled: !!editingTreatment?.id && !!editingTreatment?.isCircuit,
+  });
+
+  useEffect(() => {
+    if (!editingTreatment?.isCircuit || isFetchingTreatmentResources) {
+      if (!editingTreatment?.isCircuit) setTreatmentResourceDrafts([]);
+      return;
+    }
+    setTreatmentResourceDrafts(editingTreatmentResources.map((resource) => ({
+      defaultCabinId: resource.defaultCabinId,
+      durationMinutes: resource.durationMinutes,
+    })));
+  }, [editingTreatment?.id, editingTreatment?.isCircuit, editingTreatmentResources, isFetchingTreatmentResources]);
+
+  const saveTreatmentResourcesMutation = useMutation({
+    mutationFn: async () => {
+      if (!editingTreatment) throw new Error("Primero guardá el circuito");
+      const response = await fetch(`/api/spa/treatments/${editingTreatment.id}/resources`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resources: treatmentResourceDrafts }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Error al guardar los recursos");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments", editingTreatment?.id, "resources"] });
+      toast({ title: "Recursos del circuito guardados" });
+    },
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   });
 
   const addSupplyMutation = useMutation({
@@ -935,7 +1187,8 @@ export default function SpaPage() {
 
   const handleNewTreatment = () => {
     setEditingTreatment(null);
-    treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true" });
+    setTreatmentResourceDrafts([]);
+    treatmentForm.reset({ name: "", description: "", categoryId: "", durationMinutes: 60, price: "", isActive: "true", isCircuit: false });
     setIsTreatmentDialogOpen(true);
   };
 
@@ -948,6 +1201,7 @@ export default function SpaPage() {
       durationMinutes: t.durationMinutes,
       price: t.price,
       isActive: t.isActive || "true",
+      isCircuit: !!t.isCircuit,
     });
     setIsTreatmentDialogOpen(true);
   };
@@ -1010,6 +1264,9 @@ export default function SpaPage() {
   const handleCellClick = (cabinId: string, time: string) => {
     setIsEditMode(false);
     setEditingAppointmentId(null);
+    setEditingAppointmentResources([]);
+    setCircuitBookings([]);
+    setCircuitDraftTreatmentId(null);
     form.reset({
       cabinId, treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
       guestPhone: "", guestEmail: "", appointmentDate: dateStr,
@@ -1021,6 +1278,9 @@ export default function SpaPage() {
   const handleEditAppointment = (apt: SpaAppointment) => {
     setIsEditMode(true);
     setEditingAppointmentId(apt.id);
+    setEditingAppointmentResources(apt.resourceReservations ?? []);
+    setCircuitBookings([]);
+    setCircuitDraftTreatmentId(null);
     form.reset({
       cabinId: apt.cabinId,
       treatmentId: apt.treatmentId,
@@ -1059,21 +1319,34 @@ export default function SpaPage() {
   const getAppointmentForSlot = (cabinId: string, slotTime: string): SpaAppointment | null => {
     const slotMinutes = timeToMinutes(slotTime);
     for (const apt of appointments) {
-      if (apt.cabinId !== cabinId) continue;
       if (apt.appointmentDate.slice(0, 10) !== dateStr) continue;
-      const startMinutes = timeToMinutes(apt.startTime);
-      const endMinutes = timeToMinutes(apt.endTime);
-      if (slotMinutes >= startMinutes && slotMinutes < endMinutes) return apt;
+      if (apt.cabinId === cabinId) {
+        const startMinutes = timeToMinutes(apt.startTime);
+        const endMinutes = timeToMinutes(apt.endTime);
+        if (slotMinutes >= startMinutes && slotMinutes < endMinutes) return apt;
+      }
+      for (const resource of apt.resourceReservations ?? []) {
+        if (resource.cabinId !== cabinId) continue;
+        const startMinutes = timeToMinutes(resource.startTime);
+        const endMinutes = timeToMinutes(resource.endTime);
+        if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
+          return {
+            ...apt,
+            cabinId: resource.cabinId,
+            startTime: resource.startTime,
+            endTime: resource.endTime,
+            displayedAsResource: true,
+            parentAppointment: apt,
+          };
+        }
+      }
     }
     return null;
   };
 
   const isSlotStart = (cabinId: string, slotTime: string): boolean => {
-    return appointments.some(apt => 
-      apt.cabinId === cabinId && 
-      apt.startTime === slotTime &&
-      apt.appointmentDate.slice(0, 10) === dateStr
-    );
+    const planningAppointment = getAppointmentForSlot(cabinId, slotTime);
+    return planningAppointment?.startTime === slotTime;
   };
 
   const getAppointmentColSpan = (appointment: SpaAppointment): number => {
@@ -1083,6 +1356,14 @@ export default function SpaPage() {
   };
 
   const onSubmit = (data: AppointmentFormValues) => {
+    if (selectedTreatment?.isCircuit && selectedCircuitTemplates.length > 0) {
+      const incomplete = circuitBookings.length !== selectedCircuitTemplates.length
+        || circuitBookings.some((booking) => !booking.cabinId || !booking.startTime);
+      if (incomplete) {
+        toast({ title: "Completá todos los recursos y horarios del circuito", variant: "destructive" });
+        return;
+      }
+    }
     if (isEditMode && editingAppointmentId) {
       editAppointmentMutation.mutate({ ...data, id: editingAppointmentId });
     } else {
@@ -1398,6 +1679,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 <Button onClick={() => {
                   setIsEditMode(false);
                   setEditingAppointmentId(null);
+                  setEditingAppointmentResources([]);
+                  setCircuitBookings([]);
+                  setCircuitDraftTreatmentId(null);
                   form.reset({
                     cabinId: "", treatmentId: "", guestName: "", guestLastName: "",
                     guestPhone: "", guestEmail: "", appointmentDate: dateStr,
@@ -1456,9 +1740,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                     <td key={slotIdx} colSpan={colSpan} className="border-b border-r p-0.5 h-14">
                                       <div
                                         className={`h-full rounded px-2 py-1 flex flex-col justify-center ${isPast ? "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 opacity-50 cursor-default" : `cursor-pointer ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}`}
-                                        onClick={isPast ? undefined : () => setSelectedAppointment(appointment)}
-                                        title={`${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
-                                        data-testid={`appointment-${appointment.id}`}
+                                        onClick={isPast ? undefined : () => setSelectedAppointment(appointment.parentAppointment || appointment)}
+                                        title={`${appointment.displayedAsResource ? "Recurso del circuito · " : ""}${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
+                                        data-testid={`appointment-${appointment.id}${appointment.displayedAsResource ? "-resource" : ""}`}
                                       >
                                         <div className="flex items-center gap-1 min-w-0">
                                           <span className="text-xs font-medium truncate">
@@ -1475,6 +1759,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                           )}
                                         </div>
                                         <div className="text-[10px] truncate opacity-75">
+                                          {appointment.displayedAsResource ? "Recurso · " : ""}
                                           {treatments.find(t => t.id === appointment.treatmentId)?.name}
                                         </div>
                                         <div className="text-[10px] opacity-60">
@@ -2056,8 +2341,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); } }}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); } }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Editar Turno" : "Nuevo Turno SPA"}</DialogTitle>
           </DialogHeader>
@@ -2104,20 +2389,76 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
               <FormField control={form.control} name="treatmentId" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Tratamiento</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl><SelectTrigger data-testid="select-treatment"><SelectValue placeholder="Seleccionar tratamiento" /></SelectTrigger></FormControl>
+                  <FormLabel>Servicio SPA</FormLabel>
+                  <Select onValueChange={(value) => {
+                    field.onChange(value);
+                    setCircuitBookings([]);
+                    setCircuitDraftTreatmentId(null);
+                    setEditingAppointmentResources([]);
+                  }} value={field.value}>
+                    <FormControl><SelectTrigger data-testid="select-treatment"><SelectValue placeholder="Seleccionar tratamiento o circuito" /></SelectTrigger></FormControl>
                     <SelectContent>
-                      {treatments.filter(t => t.isActive === "true" && t.id).map((treatment) => (
-                        <SelectItem key={treatment.id} value={treatment.id}>
-                          {treatment.name} - ${parseFloat(treatment.price).toLocaleString()} ({treatment.durationMinutes}min)
-                        </SelectItem>
-                      ))}
+                      <SelectGroup>
+                        <SelectLabel>Tratamientos</SelectLabel>
+                        {treatments.filter(t => t.isActive === "true" && !t.isCircuit && t.id).map((treatment) => (
+                          <SelectItem key={treatment.id} value={treatment.id}>
+                            {treatment.name} · ${parseFloat(treatment.price).toLocaleString()} · {treatment.durationMinutes} min
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      <SelectSeparator />
+                      <SelectGroup>
+                        <SelectLabel>Circuitos</SelectLabel>
+                        {treatments.filter(t => t.isActive === "true" && t.isCircuit && t.id).map((treatment) => (
+                          <SelectItem key={treatment.id} value={treatment.id}>
+                            Circuito · {treatment.name} · ${parseFloat(treatment.price).toLocaleString()}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {selectedTreatment?.isCircuit && (
+                <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4 space-y-3" data-testid="circuit-resources-section">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-primary/15 text-primary hover:bg-primary/15">Circuito</Badge>
+                        <p className="font-semibold">{selectedTreatment.name}</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Los recursos se reservan para la misma persona y no generan cargos adicionales.
+                      </p>
+                    </div>
+                    {isFetchingCircuitTemplates && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                  </div>
+
+                  {!isFetchingCircuitTemplates && selectedCircuitTemplates.length === 0 ? (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+                      Este circuito todavía no tiene recursos configurados. Podés reservar el turno principal y completar la configuración desde Tratamientos.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {circuitBookings.map((booking, index) => (
+                        <CircuitResourceBookingRow
+                          key={booking.templateResourceId}
+                          index={index}
+                          draft={booking}
+                          cabins={resourceCabins}
+                          appointmentDate={selectedAppointmentDate}
+                          excludeAppointmentId={editingAppointmentId}
+                          onChange={(patch) => setCircuitBookings((current) => current.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, ...patch } : item
+                          )))}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <FormField control={form.control} name="professionalId" render={({ field }) => (
                 <FormItem>
@@ -2294,6 +2635,30 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   )}
                 </div>
               </div>
+
+              {(selectedAppointment.resourceReservations?.length ?? 0) > 0 && (
+                <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-3 space-y-2" data-testid="appointment-circuit-resources">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-primary/15 text-primary hover:bg-primary/15">Circuito</Badge>
+                    <p className="text-sm font-semibold">Recursos reservados</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {selectedAppointment.resourceReservations!.map((resource) => (
+                      <div key={resource.id} className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+                        <span className="font-medium">
+                          {resource.cabin?.name || cabins.find((cabin) => cabin.id === resource.cabinId)?.name || "Recurso SPA"}
+                        </span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {resource.startTime}–{resource.endTime} · {resource.durationMinutes} min
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Todas las reservas corresponden a {selectedAppointment.guestName} {selectedAppointment.guestLastName || ""}.
+                  </p>
+                </div>
+              )}
 
               {selectedAccount && selectedAccount.items.length > 0 && (
                 <div className="border-t pt-4">
@@ -3086,9 +3451,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       <Dialog open={isTreatmentDialogOpen} onOpenChange={(open) => { if (!open) { setIsTreatmentDialogOpen(false); setEditingTreatment(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingTreatment ? "Editar Tratamiento" : "Nuevo Tratamiento"}</DialogTitle>
+            <DialogTitle>{editingTreatment ? "Editar Servicio SPA" : "Nuevo Servicio SPA"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={treatmentForm.handleSubmit((data) => createTreatmentMutation.mutate(data))} className="space-y-4">
             <div>
@@ -3110,6 +3475,22 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <label className="text-sm font-medium">Tipo de servicio</label>
+              <Select
+                value={treatmentForm.watch("isCircuit") ? "circuit" : "treatment"}
+                onValueChange={(value) => treatmentForm.setValue("isCircuit", value === "circuit")}
+              >
+                <SelectTrigger data-testid="select-treatment-kind"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="treatment">Tratamiento normal</SelectItem>
+                  <SelectItem value="circuit">Circuito con recursos</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Un circuito puede reservar Sauna e Hidromasaje además del gabinete principal.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">Duración (min) *</label>
@@ -3130,6 +3511,113 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </SelectContent>
               </Select>
             </div>
+
+            {treatmentForm.watch("isCircuit") && (
+              <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-3 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">Recursos incluidos en el circuito</p>
+                    <p className="text-xs text-muted-foreground">
+                      Definí el recurso sugerido y su duración. El recurso y el horario podrán ajustarse al reservar.
+                    </p>
+                  </div>
+                  <Badge variant="outline">Configuración base</Badge>
+                </div>
+
+                {!editingTreatment?.isCircuit ? (
+                  <p className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                    Guardá primero el servicio como circuito. El formulario permanecerá abierto para que agregues sus recursos.
+                  </p>
+                ) : (
+                  <>
+                    {isFetchingTreatmentResources ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Cargando recursos...
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {treatmentResourceDrafts.map((resource, index) => (
+                          <div key={index} className="grid grid-cols-[1fr_130px_36px] gap-2 items-end rounded-md border bg-background p-2">
+                            <div>
+                              <label className="text-xs text-muted-foreground">Recurso {index + 1}</label>
+                              <Select
+                                value={resource.defaultCabinId}
+                                onValueChange={(value) => setTreatmentResourceDrafts((current) => current.map((row, rowIndex) => (
+                                  rowIndex === index ? { ...row, defaultCabinId: value } : row
+                                )))}
+                              >
+                                <SelectTrigger data-testid={`select-template-resource-${index}`}>
+                                  <SelectValue placeholder="Sauna o Hidromasaje" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {resourceCabins.filter((cabin) => cabin.id).map((cabin) => (
+                                    <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground">Duración (min)</label>
+                              <Input
+                                type="number"
+                                min="15"
+                                max="240"
+                                step="5"
+                                value={resource.durationMinutes}
+                                onChange={(event) => setTreatmentResourceDrafts((current) => current.map((row, rowIndex) => (
+                                  rowIndex === index ? { ...row, durationMinutes: Number(event.target.value) } : row
+                                )))}
+                                data-testid={`input-template-duration-${index}`}
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => setTreatmentResourceDrafts((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                              aria-label={`Eliminar recurso ${index + 1}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                        {treatmentResourceDrafts.length === 0 && (
+                          <p className="rounded-md border border-dashed bg-background p-3 text-center text-xs text-muted-foreground">
+                            Sin recursos configurados. El circuito seguirá funcionando como un turno normal.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={treatmentResourceDrafts.length >= 6}
+                        onClick={() => setTreatmentResourceDrafts((current) => [
+                          ...current,
+                          { defaultCabinId: resourceCabins[0]?.id || "", durationMinutes: 30 },
+                        ])}
+                        data-testid="button-add-circuit-resource"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Agregar recurso
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={saveTreatmentResourcesMutation.isPending || treatmentResourceDrafts.some((resource) => !resource.defaultCabinId)}
+                        onClick={() => saveTreatmentResourcesMutation.mutate()}
+                        data-testid="button-save-circuit-resources"
+                      >
+                        {saveTreatmentResourcesMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                        Guardar recursos
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {editingTreatment && (
               <div className="border rounded-lg p-3 space-y-3">
                 <p className="text-sm font-semibold flex items-center gap-2">
