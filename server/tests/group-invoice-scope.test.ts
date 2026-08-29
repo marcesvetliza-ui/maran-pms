@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseGroupInvoiceSourceAmounts } from "../billing/groupInvoiceScope";
+import {
+  attachGroupInvoiceCompositionSources,
+  getPersistedGroupInvoiceCompositionSources,
+  parseGroupInvoiceSourceAmounts,
+} from "../billing/groupInvoiceScope";
 import { calcularMontos } from "../billing/invoiceService";
 import { allocateGroupInvoiceSources, grossItemsTotal } from "../../client/src/lib/group-invoice-allocation";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
+import { buildGroupInvoiceComposition } from "../../shared/groupInvoiceComposition";
 
 describe("group invoice source availability", () => {
   it("separates operational debt from fiscal availability for partial group collections", () => {
@@ -134,6 +139,63 @@ describe("group invoice source availability", () => {
     expect(allocateGroupInvoiceSources([{ id: "group-charge:g-1", available: 0.03 }], total))
       .toEqual({ "group-charge:g-1": 0.03 });
     expect(calcularMontos(items, "FB").montoTotal).toBe(total);
+  });
+
+  it("groups exact fiscal cents into accommodation, room charges and group charges", () => {
+    const composition = buildGroupInvoiceComposition([
+      {
+        id: "reservation:r-1:accommodation",
+        kind: "accommodation",
+        concept: "Alojamiento",
+        destination: "Habitación 101",
+      },
+      {
+        id: "reservation:r-1:charge:c-1",
+        kind: "room_charge",
+        concept: "Minibar",
+        destination: "Habitación 101",
+      },
+      {
+        id: "group-charge:g-1",
+        kind: "group_charge",
+        concept: "Salón",
+        destination: "Grupo",
+      },
+    ], {
+      "reservation:r-1:accommodation": 100.01,
+      "reservation:r-1:charge:c-1": 20.02,
+      "group-charge:g-1": 30.03,
+    });
+
+    expect(composition.sections.map((section) => [section.label, section.total])).toEqual([
+      ["Alojamiento", 100.01],
+      ["Consumos por habitación", 20.02],
+      ["Cargos grupales", 30.03],
+    ]);
+    expect(composition.total).toBe(150.06);
+  });
+
+  it("persists immutable source labels inside invoice items without changing fiscal amounts", () => {
+    const items = [{
+      descripcion: "Servicios grupales",
+      cantidad: 1,
+      precioUnitario: 150.06,
+      alicuotaIva: "21" as const,
+      subtotalNeto: 124.02,
+      subtotal: 150.06,
+    }];
+    const sources = [{
+      id: "reservation:r-1:accommodation",
+      kind: "accommodation" as const,
+      concept: "Alojamiento",
+      destination: "Habitación 101",
+      reservationCode: "R-1",
+      roomNumber: "101",
+    }];
+
+    const persisted = attachGroupInvoiceCompositionSources(items, sources);
+    expect(calcularMontos(persisted, "FB").montoTotal).toBe(150.06);
+    expect(getPersistedGroupInvoiceCompositionSources(persisted)).toEqual(sources);
   });
 
   it.each([

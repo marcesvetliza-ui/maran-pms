@@ -10,7 +10,16 @@ import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionD
 import { requireAuth, requireRole } from "../auth";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
-import { assertGroupInvoiceAllocation, assertGroupPaymentInvoiceEligibility, assertMasterFacturaTAllowed } from "./groupInvoiceScope";
+import {
+  assertGroupInvoiceAllocation,
+  assertGroupPaymentInvoiceEligibility,
+  assertMasterFacturaTAllowed,
+  attachGroupInvoiceCompositionSources,
+  getGroupInvoiceComposition,
+  getGroupInvoiceCompositionSources,
+  getPersistedGroupInvoiceCompositionSources,
+} from "./groupInvoiceScope";
+import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
@@ -96,6 +105,27 @@ function getNotaCreditoAdjustmentSourceId(description: unknown): string | null {
 function parseStoredJson(value: unknown): any {
   if (typeof value !== "string") return value;
   try { return JSON.parse(value); } catch { return null; }
+}
+
+async function findLegacyInvoiceGroupId(invoiceId: number): Promise<string | null> {
+  try {
+    if (typeof (pool as any).query === "function") {
+      const result = await (pool as any).query(
+        "SELECT group_id FROM group_invoices WHERE sales_invoice_id = $1 LIMIT 1",
+        [invoiceId],
+      );
+      return String(result?.rows?.[0]?.group_id || "") || null;
+    }
+    const result = await db.execute(sql`
+      SELECT group_id
+      FROM group_invoices
+      WHERE sales_invoice_id = ${invoiceId}
+      LIMIT 1
+    `);
+    return String((result.rows[0] as any)?.group_id || "") || null;
+  } catch {
+    return null;
+  }
 }
 
 function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
@@ -732,7 +762,26 @@ export function registerBillingRoutes(app: Express) {
         WHERE si.id = ${id}
       `);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
-      res.json(row.rows[0]);
+      const invoice = row.rows[0] as any;
+      const sourceAmounts = parseStoredJson(invoice.source_charge_amounts);
+      let compositionGroupId = invoice.group_id;
+      if (!compositionGroupId) {
+        compositionGroupId = await findLegacyInvoiceGroupId(Number(invoice.id));
+      }
+      const hasSourceAmounts = sourceAmounts
+        && typeof sourceAmounts === "object"
+        && !Array.isArray(sourceAmounts)
+        && Object.keys(sourceAmounts).length > 0;
+      const composition = compositionGroupId
+        ? hasSourceAmounts
+          ? await getGroupInvoiceComposition(
+              compositionGroupId,
+              sourceAmounts,
+              getPersistedGroupInvoiceCompositionSources(invoice.items),
+            )
+          : buildUnavailableGroupInvoiceComposition(invoice.monto_total)
+        : undefined;
+      res.json({ ...invoice, ...(composition ? { groupComposition: composition } : {}) });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -920,6 +969,7 @@ export function registerBillingRoutes(app: Express) {
         }
         }
 
+        let persistedItems = items;
         // Group fiscal sources are claimed when the invoice is created, not in
         // the later UI link request. This makes a second open tab see the
         // first invoice before it can consume the same available concept.
@@ -940,13 +990,17 @@ export function registerBillingRoutes(app: Express) {
           if (groupPaymentId) {
             await assertGroupPaymentInvoiceEligibility(groupId, groupPaymentId, itemsTotal);
           }
+          const selectedIds = new Set(amountIds);
+          const compositionSources = (await getGroupInvoiceCompositionSources(groupId))
+            .filter((source) => selectedIds.has(source.id));
+          persistedItems = attachGroupInvoiceCompositionSources(items, compositionSources);
         }
 
         const user = (req as any).user;
         return emitirFactura({
           tipoComprobante,
           cliente,
-          items,
+          items: persistedItems,
           reservaId: reservationId || undefined,
           groupId: groupId || undefined,
           groupPaymentId: groupPaymentId || undefined,
@@ -1201,7 +1255,25 @@ export function registerBillingRoutes(app: Express) {
       }
 
       const logoBuffer = await loadLogoBuffer((config as any).logoUrl);
-      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData, logoBuffer, retenciones);
+      const sourceAmounts = parseStoredJson(factura.source_charge_amounts);
+      let compositionGroupId = factura.group_id;
+      if (!compositionGroupId) {
+        compositionGroupId = await findLegacyInvoiceGroupId(Number(factura.id));
+      }
+      const hasSourceAmounts = sourceAmounts
+        && typeof sourceAmounts === "object"
+        && !Array.isArray(sourceAmounts)
+        && Object.keys(sourceAmounts).length > 0;
+      const groupComposition = compositionGroupId
+        ? hasSourceAmounts
+          ? await getGroupInvoiceComposition(
+              compositionGroupId,
+              sourceAmounts,
+              getPersistedGroupInvoiceCompositionSources(factura.items),
+            )
+          : buildUnavailableGroupInvoiceComposition(factura.monto_total)
+        : undefined;
+      const pdfBuf = await generarFacturaPDF(factura, config, notaCreditoInfo, guestData, logoBuffer, retenciones, groupComposition);
       const pv = String(factura.punto_venta ?? 1).padStart(4, "0");
       const nro = String(factura.numero ?? 0).padStart(8, "0");
       res.setHeader("Content-Type", "application/pdf");
@@ -1252,6 +1324,11 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       let original = row.rows[0] as any;
+      let legacyGroupId: string | null = null;
+      if (!original.group_id && !original.reserva_id) {
+        legacyGroupId = await findLegacyInvoiceGroupId(id);
+        if (legacyGroupId) original = { ...original, group_id: legacyGroupId };
+      }
 
       // Serialize every invoice/NC operation for a reservation or group across app
       // instances. Re-read after acquiring the lock so a second request sees
@@ -1264,7 +1341,10 @@ export function registerBillingRoutes(app: Express) {
         await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
         const lockedRow = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
         if (!lockedRow.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
-        original = lockedRow.rows[0] as any;
+        original = {
+          ...(lockedRow.rows[0] as any),
+          ...(legacyGroupId ? { group_id: legacyGroupId } : {}),
+        };
       }
 
       if (original.estado === "anulada") {
@@ -1346,10 +1426,11 @@ export function registerBillingRoutes(app: Express) {
       let montoNC = 0;
       let esParcial = false;
 
-      // A group payment is a fiscal destination, not a collection of service
-      // sources. It keeps the standard monetary NC flow. Only direct group
-      // invoices (group_id without group_payment_id) carry exact source maps.
-      const isMappedGroupInvoice = Boolean(original.group_id && !original.group_payment_id);
+      // Every current group invoice carries exact service-source amounts,
+      // regardless of whether it is direct or linked to a group payment.
+      // Historical payment-linked rows without a source map retain the generic
+      // monetary NC path because their source allocation cannot be reconstructed.
+      const isMappedGroupInvoice = Boolean(original.group_id && original.source_charge_amounts);
       if (!original.reserva_id && !isMappedGroupInvoice) {
         // Keep the existing generic NC behavior for Restaurant, SPA and Events.
         // Reservation invoices use the stricter per-charge contract below.
@@ -1498,6 +1579,14 @@ export function registerBillingRoutes(app: Express) {
       esParcial = montoNC < saldoPendiente - 0.009;
       }
 
+      const originalCompositionSources = getPersistedGroupInvoiceCompositionSources(original.items);
+      const selectedCompositionIds = new Set(Object.keys(sourceChargeAmounts));
+      const persistedNcItems = isMappedGroupInvoice
+        ? attachGroupInvoiceCompositionSources(
+            ncItems,
+            originalCompositionSources.filter((source) => selectedCompositionIds.has(source.id)),
+          )
+        : ncItems;
       const nc = await emitirFactura({
         tipoComprobante: tipoNC as any,
         cliente: {
@@ -1507,7 +1596,7 @@ export function registerBillingRoutes(app: Express) {
           condicionIva: original.cliente_condicion_iva,
           domicilio: original.cliente_domicilio,
         },
-        items: ncItems,
+        items: persistedNcItems,
         facturaOriginalId: original.id,
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
@@ -1824,6 +1913,10 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       const original = row.rows[0] as any;
+      let groupId = original.group_id ? String(original.group_id) : null;
+      if (!groupId) {
+        groupId = await findLegacyInvoiceGroupId(id);
+      }
 
       if (original.estado === "anulada") {
         return res.status(400).json({ error: "No se puede emitir una ND sobre una factura anulada" });
@@ -1864,14 +1957,20 @@ export function registerBillingRoutes(app: Express) {
       const montoParsed = parseFloat(monto);
       const nroOriginal = `${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}`;
 
-      const ndItems = [{
+      const groupDebitSourceId = groupId ? `group-debit:${original.id}` : null;
+      const ndItems = attachGroupInvoiceCompositionSources([{
         descripcion: `${String(motivo).trim()} — s/${nroOriginal}`,
         cantidad: 1,
         precioUnitario: montoParsed,
         alicuotaIva: "no_gravado" as const,
         subtotalNeto: 0,
         subtotal: montoParsed,
-      }];
+      }], groupDebitSourceId ? [{
+        id: groupDebitSourceId,
+        kind: "group_charge",
+        concept: String(motivo).trim(),
+        destination: "Grupo",
+      }] : []);
 
       const nd = await emitirFactura({
         tipoComprobante: tipoND as "NDA" | "NDB" | "NDT" | "NDM" | "NDC",
@@ -1884,10 +1983,13 @@ export function registerBillingRoutes(app: Express) {
         },
         items: ndItems,
         reservaId: original.reserva_id || undefined,
+        groupId: groupId || undefined,
         folioId: original.folio_id || undefined,
         facturaOriginalId: original.id,
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
+        sourceChargeIds: groupDebitSourceId ? [groupDebitSourceId] : undefined,
+        sourceChargeAmounts: groupDebitSourceId ? { [groupDebitSourceId]: montoParsed } : undefined,
       } as any);
 
       // Register cash movement (income) in the corresponding area

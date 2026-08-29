@@ -1,10 +1,19 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import {
+  buildGroupInvoiceComposition,
+  type GroupInvoiceComposition,
+  type GroupInvoiceCompositionKind,
+  type GroupInvoiceCompositionSource,
+} from "@shared/groupInvoiceComposition";
 
 export type GroupInvoiceSource = {
   id: string;
+  kind: GroupInvoiceCompositionKind;
   concept: string;
   destination: string;
+  reservationCode?: string | null;
+  roomNumber?: string | null;
   eligible: number;
   invoiced: number;
   available: number;
@@ -30,6 +39,120 @@ export type GroupInvoiceSnapshot = {
 
 const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
 const money = (value: number) => value / 100;
+const COMPOSITION_SNAPSHOT_KEY = "groupCompositionSources";
+
+function parseStoredJson(value: unknown): any {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+export function getPersistedGroupInvoiceCompositionSources(items: unknown): GroupInvoiceCompositionSource[] {
+  const parsedItems = parseStoredJson(items);
+  if (!Array.isArray(parsedItems)) return [];
+  for (const item of parsedItems) {
+    const sources = item?.[COMPOSITION_SNAPSHOT_KEY];
+    if (!Array.isArray(sources)) continue;
+    return sources
+      .filter((source: any) =>
+        source
+        && typeof source.id === "string"
+        && ["accommodation", "room_charge", "group_charge"].includes(source.kind)
+      )
+      .map((source: any) => ({
+        id: source.id,
+        kind: source.kind,
+        concept: String(source.concept || ""),
+        destination: String(source.destination || ""),
+        reservationCode: source.reservationCode == null ? null : String(source.reservationCode),
+        roomNumber: source.roomNumber == null ? null : String(source.roomNumber),
+      }));
+  }
+  return [];
+}
+
+export function attachGroupInvoiceCompositionSources<T extends Record<string, any>>(
+  items: T[],
+  sources: GroupInvoiceCompositionSource[],
+): T[] {
+  if (!items.length || !sources.length) return items;
+  return items.map((item, index) =>
+    index === 0
+      ? { ...item, [COMPOSITION_SNAPSHOT_KEY]: sources }
+      : item
+  );
+}
+
+export async function getGroupInvoiceCompositionSources(groupId: string): Promise<GroupInvoiceCompositionSource[]> {
+  const [reservationRows, chargeRows, groupChargeRows] = await Promise.all([
+    db.execute(sql`
+      SELECT r.id, r.reservation_code, rm.room_number
+      FROM reservations r
+      JOIN group_reservation_links l ON l.reservation_id = r.id
+      LEFT JOIN rooms rm ON rm.id = r.room_id
+      WHERE l.group_id = ${groupId}
+    `),
+    db.execute(sql`
+      SELECT c.id, c.reservation_id, c.description, r.reservation_code, rm.room_number
+      FROM charges c
+      JOIN group_reservation_links l ON l.reservation_id = c.reservation_id
+      JOIN reservations r ON r.id = c.reservation_id
+      LEFT JOIN rooms rm ON rm.id = r.room_id
+      WHERE l.group_id = ${groupId}
+    `),
+    db.execute(sql`
+      SELECT id, description
+      FROM group_charges
+      WHERE group_id = ${groupId}
+    `),
+  ]);
+
+  const roomLabel = (roomNumber: unknown, reservationCode: unknown, reservationId: unknown) =>
+    roomNumber
+      ? `Habitación ${roomNumber}`
+      : `Reserva ${reservationCode || reservationId}`;
+
+  return [
+    ...(reservationRows.rows as any[]).map((reservation) => ({
+      id: `reservation:${reservation.id}:accommodation`,
+      kind: "accommodation" as const,
+      concept: "Alojamiento",
+      destination: roomLabel(reservation.room_number, reservation.reservation_code, reservation.id),
+      reservationCode: reservation.reservation_code,
+      roomNumber: reservation.room_number,
+    })),
+    ...(chargeRows.rows as any[]).map((charge) => ({
+      id: `reservation:${charge.reservation_id}:charge:${charge.id}`,
+      kind: "room_charge" as const,
+      concept: charge.description || "Consumo",
+      destination: roomLabel(charge.room_number, charge.reservation_code, charge.reservation_id),
+      reservationCode: charge.reservation_code,
+      roomNumber: charge.room_number,
+    })),
+    ...(groupChargeRows.rows as any[]).map((charge) => ({
+      id: `group-charge:${charge.id}`,
+      kind: "group_charge" as const,
+      concept: charge.description || "Cargo grupal",
+      destination: "Grupo",
+    })),
+  ];
+}
+
+export async function getGroupInvoiceComposition(
+  groupId: string,
+  sourceAmounts: Record<string, number>,
+  persistedSources: GroupInvoiceCompositionSource[] = [],
+): Promise<GroupInvoiceComposition> {
+  return buildGroupInvoiceComposition(
+    persistedSources.length > 0
+      ? persistedSources
+      : await getGroupInvoiceCompositionSources(groupId),
+    sourceAmounts,
+  );
+}
 
 export function assertGroupPaymentInvoiceScope(invoice: any, payment: any, groupId: string): void {
   if (invoice?.groupId !== groupId || invoice?.groupPaymentId !== payment?.id) {
@@ -143,15 +266,29 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
   ]);
 
   const sourceCents = new Map<string, Omit<GroupInvoiceSource, "eligible" | "invoiced" | "available"> & { eligibleCents: number }>();
-  const addSource = (id: string, concept: string, destination: string, amount: unknown) => {
+  const addSource = (
+    id: string,
+    kind: GroupInvoiceCompositionKind,
+    concept: string,
+    destination: string,
+    amount: unknown,
+    metadata: Pick<GroupInvoiceSource, "reservationCode" | "roomNumber"> = {},
+  ) => {
     const amountCents = cents(amount);
     if (amountCents <= 0) return;
-    sourceCents.set(id, { id, concept, destination, eligibleCents: amountCents });
+    sourceCents.set(id, { id, kind, concept, destination, ...metadata, eligibleCents: amountCents });
   };
 
   for (const reservation of reservationRows.rows as any[]) {
     const room = reservation.room_number ? `Habitación ${reservation.room_number}` : `Reserva ${reservation.reservation_code || reservation.id}`;
-    addSource(`reservation:${reservation.id}:accommodation`, "Alojamiento", room, reservation.total_room_amount);
+    addSource(
+      `reservation:${reservation.id}:accommodation`,
+      "accommodation",
+      "Alojamiento",
+      room,
+      reservation.total_room_amount,
+      { reservationCode: reservation.reservation_code, roomNumber: reservation.room_number },
+    );
   }
 
   const chargeRows = await db.execute(sql`
@@ -168,10 +305,17 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
   `);
   for (const charge of chargeRows.rows as any[]) {
     const room = charge.room_number ? `Habitación ${charge.room_number}` : `Reserva ${charge.reservation_code || charge.reservation_id}`;
-    addSource(`reservation:${charge.reservation_id}:charge:${charge.id}`, charge.description || "Consumo", room, charge.amount);
+    addSource(
+      `reservation:${charge.reservation_id}:charge:${charge.id}`,
+      "room_charge",
+      charge.description || "Consumo",
+      room,
+      charge.amount,
+      { reservationCode: charge.reservation_code, roomNumber: charge.room_number },
+    );
   }
   for (const charge of groupChargeRows.rows as any[]) {
-    addSource(`group-charge:${charge.id}`, charge.description || "Cargo grupal", "Grupo", charge.amount);
+    addSource(`group-charge:${charge.id}`, "group_charge", charge.description || "Cargo grupal", "Grupo", charge.amount);
   }
 
   const invoicedBySource = new Map<string, number>();
@@ -185,9 +329,7 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
     .map((source) => {
       const invoiced = Math.min(source.eligibleCents, invoicedBySource.get(source.id) || 0);
       return {
-        id: source.id,
-        concept: source.concept,
-        destination: source.destination,
+        ...source,
         eligible: money(source.eligibleCents),
         invoiced: money(invoiced),
         available: money(Math.max(0, source.eligibleCents - invoiced)),

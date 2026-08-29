@@ -847,6 +847,7 @@ export default function GroupDetailPage() {
   const [deleteBlockId, setDeleteBlockId] = useState<string | null>(null);
   const [showInvoiceDialog, setShowInvoiceDialog] = useState(false);
   const [invoiceData, setInvoiceData] = useState<any>(null);
+  const [expandedGroupInvoiceId, setExpandedGroupInvoiceId] = useState<number | null>(null);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
   const [showRoomingListDialog, setShowRoomingListDialog] = useState(false);
   const [showCheckInConfirm, setShowCheckInConfirm] = useState(false);
@@ -1045,6 +1046,7 @@ export default function GroupDetailPage() {
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"], exact: true }),
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "folio"], exact: true }),
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "master-folio"], exact: true }),
+      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "invoices"], exact: true }),
     ]);
   };
 
@@ -1071,10 +1073,10 @@ export default function GroupDetailPage() {
     groupPaymentGuestNationalityCode,
   ]);
 
-  const { data: directInvoices = [] } = useQuery<any[]>({
-    queryKey: ["/api/groups", groupId, "direct-invoices"],
+  const { data: groupFiscalInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "invoices"],
     queryFn: async () => {
-      const res = await fetch(`/api/groups/${groupId}/direct-invoices`, { credentials: "include" });
+      const res = await fetch(`/api/groups/${groupId}/invoices`, { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
@@ -2909,41 +2911,99 @@ export default function GroupDetailPage() {
                     </div>
                   )}
 
-                  {/* Facturas directas del grupo (emitidas desde el Resumen sin pago asociado) */}
-                  {directInvoices.length > 0 && (
+                  {/* Todos los comprobantes fiscales del grupo, con la misma
+                      composición exacta que se agrega al PDF fiscal. */}
+                  {groupFiscalInvoices.length > 0 && (
                     <div className="mt-3">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
                         <Receipt className="h-3.5 w-3.5 text-emerald-500" />
-                        Comprobantes emitidos para el grupo
+                        Comprobantes grupales emitidos
                       </p>
                       <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 divide-y divide-emerald-100 dark:divide-emerald-900 overflow-hidden">
-                        {directInvoices.map((inv: any) => {
-                          const parsed = (() => { try { return JSON.parse(inv.invoiceRef); } catch { return null; } })();
-                          // invoiceRef is the camelCase Drizzle salesInvoices record returned by emitirFactura
-                          const badge = parsed
-                            ? `${parsed.tipoComprobante ?? "FAC"} ${String(parsed.puntoVenta ?? "").padStart(4, "0")}-${String(parsed.numero ?? "").padStart(8, "0")}`
-                            : "Comprobante";
-                          const total = parsed?.montoTotal ?? null;
-                          const cae = parsed?.cae;
+                        {groupFiscalInvoices.map((inv: any) => {
+                          const badge = `${inv.tipoComprobante ?? "FAC"} ${String(inv.puntoVenta ?? "").padStart(4, "0")}-${String(inv.numero ?? "").padStart(8, "0")}`;
+                          const isExpanded = expandedGroupInvoiceId === inv.id;
+                          const isCreditNote = String(inv.tipoComprobante || "").startsWith("NC");
+                          const isDebitNote = String(inv.tipoComprobante || "").startsWith("ND");
                           return (
-                            <div key={inv.id} className="flex items-center justify-between px-3 py-2 text-sm bg-emerald-50/50 dark:bg-emerald-950/10" data-testid={`row-direct-invoice-${inv.id}`}>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-muted-foreground text-xs">{new Date(inv.createdAt).toLocaleDateString("es-AR")}</span>
-                                <Badge variant="outline" className="text-xs font-mono gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
-                                  <Receipt className="h-3 w-3" />
-                                  {badge}
-                                </Badge>
-                                {cae && (
-                                  <span className="text-xs text-muted-foreground font-mono">CAE: {cae}</span>
-                                )}
-                                {inv.notes && (
-                                  <span className="text-xs text-muted-foreground italic">{inv.notes}</span>
-                                )}
+                            <div key={inv.id} className="bg-emerald-50/50 dark:bg-emerald-950/10" data-testid={`row-group-invoice-${inv.id}`}>
+                              <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                                <button
+                                  type="button"
+                                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                  onClick={() => setExpandedGroupInvoiceId(isExpanded ? null : inv.id)}
+                                  aria-expanded={isExpanded}
+                                  data-testid={`button-group-invoice-detail-${inv.id}`}
+                                >
+                                  {isExpanded ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                                  <span className="text-muted-foreground text-xs">{new Date(inv.createdAt).toLocaleDateString("es-AR")}</span>
+                                  <Badge variant="outline" className={`text-xs font-mono gap-1 ${isCreditNote ? "border-orange-300 text-orange-700 dark:border-orange-700 dark:text-orange-400" : "border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400"}`}>
+                                    {isCreditNote ? <FileX className="h-3 w-3" /> : <Receipt className="h-3 w-3" />}
+                                    {badge}
+                                  </Badge>
+                                  {isCreditNote ? (
+                                    <Badge variant="secondary" className="text-[10px]">Nota de crédito</Badge>
+                                  ) : isDebitNote ? (
+                                    <Badge variant="secondary" className="text-[10px]">Nota de débito</Badge>
+                                  ) : inv.groupPaymentId ? (
+                                    <Badge variant="secondary" className="text-[10px]">Asociado a cobro grupal</Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="text-[10px]">Factura directa</Badge>
+                                  )}
+                                  {inv.cae && <span className="truncate text-xs text-muted-foreground font-mono">CAE: {inv.cae}</span>}
+                                </button>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2"
+                                    onClick={() => window.open(`/api/billing/invoices/${inv.id}/pdf`, "_blank")}
+                                    data-testid={`button-group-invoice-pdf-${inv.id}`}
+                                  >
+                                    <FileDown className="mr-1 h-3.5 w-3.5" />
+                                    PDF
+                                  </Button>
+                                  <span className={`font-semibold tabular-nums whitespace-nowrap ${isCreditNote ? "text-orange-700 dark:text-orange-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                                    ${Number(inv.montoTotal || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                  </span>
+                                </div>
                               </div>
-                              {total != null && (
-                                <span className="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">
-                                  ${parseFloat(total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                                </span>
+                              {isExpanded && (
+                                <div className="border-t border-emerald-100 px-4 py-3 dark:border-emerald-900" data-testid={`group-invoice-composition-${inv.id}`}>
+                                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Composición del comprobante</p>
+                                  {inv.groupComposition?.sections?.length > 0 ? (
+                                    <div className="space-y-3">
+                                      {inv.groupComposition.sections.map((section: any) => (
+                                        <div key={section.kind} className="rounded-md border bg-background/70 p-2">
+                                          <div className="mb-1 flex justify-between text-xs font-semibold">
+                                            <span>{section.label}</span>
+                                            <span>${Number(section.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                          </div>
+                                          {section.lines.map((line: any) => (
+                                            <div key={line.id} className="flex justify-between gap-3 py-0.5 pl-2 text-xs text-muted-foreground">
+                                              <span>{line.destination} · {stripTransferTags(line.concept)}</span>
+                                              <span className="shrink-0 tabular-nums">${Number(line.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ))}
+                                      <div className="flex justify-between border-t pt-2 text-sm font-bold">
+                                        <span>Total fiscal desglosado</span>
+                                        <span>${Number(inv.groupComposition.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <p className="text-xs text-muted-foreground">
+                                        {inv.groupComposition?.unavailableReason || "Este comprobante histórico no tiene un mapa de fuentes disponible."}
+                                      </p>
+                                      <div className="flex justify-between border-t pt-2 text-sm font-bold">
+                                        <span>Total del comprobante</span>
+                                        <span>${Number(inv.groupComposition?.total ?? inv.montoTotal ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
                           );
@@ -4277,7 +4337,7 @@ export default function GroupDetailPage() {
             setGroupFacturaFromResumen(false);
             setPendingGroupPaymentId("");
             resetGroupPaymentDialogFields();
-            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoices"] });
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
             if (showInvoiceDialog) {
               loadInvoice();
@@ -4349,6 +4409,7 @@ export default function GroupDetailPage() {
               resetGroupPaymentDialogFields();
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoices"] });
               toast({ title: "Pago al Folio Maestro registrado exitosamente" });
             }}
           />

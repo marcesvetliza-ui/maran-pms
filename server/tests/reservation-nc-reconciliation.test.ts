@@ -388,3 +388,204 @@ describe("reservation credit notes from Administración", () => {
     expect(state.emittedCalls).toHaveLength(0);
   });
 });
+
+describe("group-payment credit notes", () => {
+  it("preserves the exact source map and immutable composition labels", async () => {
+    const compositionSources = [
+      {
+        id: "reservation:r-1:accommodation",
+        kind: "accommodation",
+        concept: "Alojamiento",
+        destination: "Habitación 101",
+        reservationCode: "R-1",
+        roomNumber: "101",
+      },
+      {
+        id: "group-charge:g-1",
+        kind: "group_charge",
+        concept: "Salón",
+        destination: "Grupo",
+      },
+    ];
+    const groupPaymentInvoice = {
+      ...multiChargeInvoice,
+      reserva_id: null,
+      group_id: "group-1",
+      group_payment_id: "payment-1",
+      monto_total: "80.00",
+      source_charge_ids: JSON.stringify([
+        "reservation:r-1:accommodation",
+        "group-charge:g-1",
+      ]),
+      source_charge_amounts: JSON.stringify({
+        "reservation:r-1:accommodation": 50,
+        "group-charge:g-1": 30,
+      }),
+      items: JSON.stringify([{
+        descripcion: "Servicios grupales",
+        subtotal: 80,
+        alicuotaIva: "21",
+        groupCompositionSources: compositionSources,
+      }]),
+    };
+    state.responses = [
+      { rows: [groupPaymentInvoice] },
+      { rows: [groupPaymentInvoice] },
+      { rows: [] },
+      { rows: [] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          motivo: "Corrección de salón",
+          monto: 30,
+          items: [{ sourceId: "group-charge:g-1", amount: 30 }],
+        }),
+      });
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emittedCalls).toHaveLength(1);
+    expect(state.emittedCalls[0]).toMatchObject({
+      groupId: "group-1",
+      sourceChargeIds: ["group-charge:g-1"],
+      sourceChargeAmounts: { "group-charge:g-1": 30 },
+    });
+    expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
+      expect.objectContaining(compositionSources[1]),
+    ]);
+  });
+
+  it("keeps a legacy linked group invoice and its credit note in the same group history", async () => {
+    const compositionSources = [{
+      id: "group-charge:legacy-1",
+      kind: "group_charge",
+      concept: "Salón histórico",
+      destination: "Grupo",
+    }];
+    const legacyInvoice = {
+      ...multiChargeInvoice,
+      reserva_id: null,
+      group_id: null,
+      group_payment_id: null,
+      monto_total: "30.00",
+      source_charge_ids: JSON.stringify(["group-charge:legacy-1"]),
+      source_charge_amounts: JSON.stringify({ "group-charge:legacy-1": 30 }),
+      items: JSON.stringify([{
+        descripcion: "Salón histórico",
+        subtotal: 30,
+        alicuotaIva: "21",
+        groupCompositionSources: compositionSources,
+      }]),
+    };
+    state.responses = [
+      { rows: [legacyInvoice] },
+      { rows: [{ group_id: "legacy-group-1" }] },
+      { rows: [legacyInvoice] },
+      { rows: [] },
+      { rows: [] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          motivo: "Corrección histórica",
+          items: [{ sourceId: "group-charge:legacy-1", amount: 30 }],
+        }),
+      });
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emittedCalls[0]).toMatchObject({
+      groupId: "legacy-group-1",
+      sourceChargeIds: ["group-charge:legacy-1"],
+      sourceChargeAmounts: { "group-charge:legacy-1": 30 },
+    });
+    expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
+      expect.objectContaining(compositionSources[0]),
+    ]);
+  });
+
+  it("keeps a pre-map legacy credit note group-owned without inventing source details", async () => {
+    const legacyInvoiceWithoutMap = {
+      ...multiChargeInvoice,
+      reserva_id: null,
+      group_id: null,
+      group_payment_id: null,
+      source_charge_ids: null,
+      source_charge_amounts: null,
+      items: JSON.stringify([{ descripcion: "Servicios históricos", subtotal: 180, alicuotaIva: "21" }]),
+    };
+    state.responses = [
+      { rows: [legacyInvoiceWithoutMap] },
+      { rows: [{ group_id: "legacy-group-1" }] },
+      { rows: [legacyInvoiceWithoutMap] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Anulación histórica" }),
+      });
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emittedCalls[0]).toMatchObject({
+      groupId: "legacy-group-1",
+      sourceChargeIds: undefined,
+      sourceChargeAmounts: undefined,
+    });
+  });
+});
+
+describe("group debit notes", () => {
+  it("persists a group-charge composition for the added debit", async () => {
+    const groupInvoice = {
+      ...multiChargeInvoice,
+      reserva_id: null,
+      group_id: "group-1",
+      group_payment_id: null,
+      monto_total: "80.00",
+    };
+    state.responses = [
+      { rows: [groupInvoice] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/12/nota-debito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          motivo: "Diferencia de servicio",
+          monto: 12.34,
+        }),
+      });
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emittedCalls).toHaveLength(1);
+    expect(state.emittedCalls[0]).toMatchObject({
+      tipoComprobante: "NDB",
+      groupId: "group-1",
+      sourceChargeIds: ["group-debit:12"],
+      sourceChargeAmounts: { "group-debit:12": 12.34 },
+    });
+    expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
+      expect.objectContaining({
+        id: "group-debit:12",
+        kind: "group_charge",
+        concept: "Diferencia de servicio",
+        destination: "Grupo",
+      }),
+    ]);
+  });
+});

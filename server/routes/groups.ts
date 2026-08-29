@@ -7,9 +7,10 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
-import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupInvoiceSnapshot } from "../billing/groupInvoiceScope";
+import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupInvoiceCompositionSources, getGroupInvoiceSnapshot, getPersistedGroupInvoiceCompositionSources } from "../billing/groupInvoiceScope";
 import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
+import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -38,6 +39,23 @@ function parseGroupPaymentRetentions(retentionDetail: unknown): Array<{ tipo: st
   return retentionDetail
     .map((r: any) => ({ tipo: String(r?.tipo || ""), monto: Number(r?.monto) || 0 }))
     .filter((r) => r.monto > 0);
+}
+
+function parseSourceAmountMap(value: unknown): Record<string, number> {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.fromEntries(
+    Object.entries(parsed)
+      .filter(([sourceId, amount]) => sourceId && Number.isFinite(Number(amount)) && Number(amount) > 0)
+      .map(([sourceId, amount]) => [sourceId, Number(amount)]),
+  );
 }
 
 function distributeCents(
@@ -1183,6 +1201,56 @@ export function registerGroupsRoutes(app: Express) {
     } catch (error: any) {
       console.error("[group-direct-invoices] GET Error:", error);
       res.status(500).json({ error: "Error al obtener facturas del grupo" });
+    }
+  });
+
+  // Every fiscal document issued for the group, including payment-linked
+  // invoices, direct invoices, credit notes and reissues. The composition is
+  // always rebuilt from the document's persisted source map, never from the
+  // current operational balance.
+  app.get("/api/groups/:groupId/invoices", requireAuth, async (req, res) => {
+    try {
+      const [ownedRows, linkedRows] = await Promise.all([
+        db
+          .select()
+          .from(salesInvoicesTable)
+          .where(eq(salesInvoicesTable.groupId, req.params.groupId)),
+        db
+          .select({ invoice: salesInvoicesTable })
+          .from(groupInvoicesTable)
+          .innerJoin(salesInvoicesTable, eq(groupInvoicesTable.salesInvoiceId, salesInvoicesTable.id))
+          .where(eq(groupInvoicesTable.groupId, req.params.groupId)),
+      ]);
+      const invoiceById = new Map(ownedRows.map((invoice) => [invoice.id, invoice]));
+      for (const linked of linkedRows) invoiceById.set(linked.invoice.id, linked.invoice);
+      const rows = [...invoiceById.values()].sort((a, b) =>
+        Number(b.createdAt || 0) - Number(a.createdAt || 0) || b.id - a.id
+      );
+      const compositionSources = await getGroupInvoiceCompositionSources(req.params.groupId);
+      const fiscalTypes = new Set([
+        "FA", "FB", "FC", "FT", "FM",
+        "NCA", "NCB", "NCC", "NCT", "NCM",
+        "NDA", "NDB", "NDC", "NDT", "NDM",
+      ]);
+      const invoices = rows
+        .filter((invoice) => fiscalTypes.has(invoice.tipoComprobante))
+        .map((invoice) => {
+          const sourceAmounts = parseSourceAmountMap(invoice.sourceChargeAmounts);
+          const persistedSources = getPersistedGroupInvoiceCompositionSources(invoice.items);
+          return {
+            ...invoice,
+            groupComposition: Object.keys(sourceAmounts).length > 0
+              ? buildGroupInvoiceComposition(
+                  persistedSources.length > 0 ? persistedSources : compositionSources,
+                  sourceAmounts,
+                )
+              : buildUnavailableGroupInvoiceComposition(invoice.montoTotal),
+          };
+        });
+      res.json(invoices);
+    } catch (error: any) {
+      console.error("[group-invoices] GET Error:", error);
+      res.status(500).json({ error: "Error al obtener los comprobantes del grupo" });
     }
   });
 

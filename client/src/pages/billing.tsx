@@ -5,6 +5,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { allocateGroupInvoiceSources, grossItemsTotal } from "@/lib/group-invoice-allocation";
+import { buildGroupInvoiceComposition, type GroupInvoiceCompositionKind } from "@shared/groupInvoiceComposition";
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
@@ -555,8 +556,11 @@ type RecipientProfile = {
 
 type GroupInvoiceSourcePreview = {
   id: string;
+  kind?: GroupInvoiceCompositionKind;
   concept: string;
   destination: string;
+  reservationCode?: string | null;
+  roomNumber?: string | null;
   eligible: number;
   invoiced: number;
   available: number;
@@ -1164,6 +1168,23 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     });
   }
 
+  const groupCompositionPreview = (() => {
+    const resolvedGroupId = groupId || groupPaymentGroupId;
+    if (!resolvedGroupId || !groupInvoiceSources?.length) return null;
+    return buildGroupInvoiceComposition(
+      groupInvoiceSources.map((source) => ({
+        ...source,
+        kind: source.kind
+          ?? (source.id.startsWith("group-charge:")
+            ? "group_charge"
+            : source.id.endsWith(":accommodation")
+              ? "accommodation"
+              : "room_charge"),
+      })),
+      allocateGroupInvoiceSources(groupInvoiceSources, grossItemsTotal(items)),
+    );
+  })();
+
   return (
     <>
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
@@ -1290,6 +1311,31 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 {domicilio && <div className="text-xs text-muted-foreground">{domicilio}</div>}
               </div>
               <Separator />
+              {groupCompositionPreview && groupCompositionPreview.sections.length > 0 && (
+                <div className="space-y-3 rounded-md border border-blue-200 bg-white/70 p-3 dark:border-blue-800 dark:bg-background/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200">
+                    Composición del comprobante
+                  </p>
+                  {groupCompositionPreview.sections.map((section) => (
+                    <div key={section.kind} className="space-y-1">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span>{section.label}</span>
+                        <span>${fPeso(section.total)}</span>
+                      </div>
+                      {section.lines.map((line) => (
+                        <div key={line.id} className="flex justify-between gap-3 pl-3 text-xs text-muted-foreground">
+                          <span>{line.destination} · {line.concept}</span>
+                          <span className="shrink-0 tabular-nums">${fPeso(line.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t pt-2 text-sm font-bold">
+                    <span>Total fiscal desglosado</span>
+                    <span>${fPeso(groupCompositionPreview.total)}</span>
+                  </div>
+                </div>
+              )}
               <div className="space-y-1">
                 {items.map((it, i) => (
                   <div key={i} className="flex justify-between text-sm">

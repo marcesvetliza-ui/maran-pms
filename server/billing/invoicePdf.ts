@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import type { GroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 
 const $n = (v: any) => parseFloat(String(v ?? 0)) || 0;
 
@@ -110,6 +111,7 @@ export async function generarFacturaPDF(
   guestData?: InvoiceGuestData,
   logoBuffer?: Buffer,
   retenciones?: FacturaRetenciones,
+  groupComposition?: GroupInvoiceComposition,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4" });
@@ -635,6 +637,72 @@ export async function generarFacturaPDF(
     doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
        .text(`Generado el ${_ts} | ${cfgRazonSocial}`, x0, y + 4, { align: "center", width: W })
        .fillColor("#000");
+
+    if (groupComposition) {
+      doc.addPage();
+      let detailY = 42;
+      doc.font("Helvetica-Bold").fontSize(14).fillColor("#111827")
+        .text("COMPOSICIÓN DEL COMPROBANTE GRUPAL", x0, detailY, { width: W });
+      detailY += 22;
+      doc.font("Helvetica").fontSize(8).fillColor("#4b5563")
+        .text(
+          `Anexo de ${tipo.nombre} ${tipo.letra} ${PV}-${NRO}. Los importes corresponden exactamente a las fuentes fiscales asignadas al comprobante.`,
+          x0,
+          detailY,
+          { width: W },
+        );
+      detailY += 28;
+
+      if (groupComposition.unavailableReason) {
+        doc.rect(x0, detailY, W, 42).fillColor("#fff7ed").fill();
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#9a3412")
+          .text("Desglose histórico no disponible", x0 + 8, detailY + 7, { width: W - 16 });
+        doc.font("Helvetica").fontSize(8).fillColor("#7c2d12")
+          .text(groupComposition.unavailableReason, x0 + 8, detailY + 21, { width: W - 16 });
+        detailY += 54;
+      }
+
+      for (const section of groupComposition.sections) {
+        if (detailY > 730) {
+          doc.addPage();
+          detailY = 42;
+        }
+        doc.rect(x0, detailY, W, 20).fillColor("#f3f4f6").fill();
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#111827")
+          .text(section.label, x0 + 7, detailY + 6, { width: W - 130 })
+          .text(`$${fPeso(section.total)}`, x0 + W - 115, detailY + 6, { width: 108, align: "right" });
+        detailY += 24;
+
+        for (const line of section.lines) {
+          const concept = `${line.destination} — ${line.concept}`;
+          const rowHeight = Math.max(16, doc.heightOfString(concept, { width: W - 130 }) + 6);
+          if (detailY + rowHeight > 770) {
+            doc.addPage();
+            detailY = 42;
+          }
+          doc.font("Helvetica").fontSize(8).fillColor("#374151")
+            .text(concept, x0 + 8, detailY + 3, { width: W - 130 })
+            .text(`$${fPeso(line.amount)}`, x0 + W - 115, detailY + 3, { width: 108, align: "right" });
+          doc.moveTo(x0 + 8, detailY + rowHeight - 1)
+            .lineTo(x0 + W - 8, detailY + rowHeight - 1)
+            .lineWidth(0.25)
+            .strokeColor("#d1d5db")
+            .stroke();
+          detailY += rowHeight;
+        }
+        detailY += 8;
+      }
+
+      if (detailY > 748) {
+        doc.addPage();
+        detailY = 42;
+      }
+      doc.moveTo(x0, detailY).lineTo(x0 + W, detailY).lineWidth(1).strokeColor("#111827").stroke();
+      detailY += 8;
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#111827")
+        .text(groupComposition.unavailableReason ? "TOTAL DEL COMPROBANTE" : "TOTAL FISCAL DESGLOSADO", x0, detailY, { width: W - 130 })
+        .text(`$${fPeso(groupComposition.total)}`, x0 + W - 115, detailY, { width: 108, align: "right" });
+    }
 
     doc.end();
   });
