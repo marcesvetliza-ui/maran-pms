@@ -266,6 +266,18 @@ type SpaTreatmentCategory = {
   sortOrder: number | null;
 };
 
+type SpaRoomChargeType = {
+  id: string;
+  label: string;
+  description: string;
+  defaultAmount: string;
+  category: string;
+  active: boolean;
+  sortOrder: number;
+  allowPriceEdit: boolean;
+  allowRecurring: boolean;
+};
+
 type ViewMode = "daily" | "weekly";
 type SpaTab = "agenda" | "tratamientos" | "insumos" | "configuracion";
 
@@ -289,7 +301,7 @@ export default function SpaPage() {
   const [chargeDescription, setChargeDescription] = useState("");
   const [chargePrice, setChargePrice] = useState("");
   const [chargeQuantity, setChargeQuantity] = useState("1");
-  const [chargeType, setChargeType] = useState("service");
+  const [chargeType, setChargeType] = useState("");
   const [receiptType, setReceiptType] = useState("");
   const [folioRoomChargeId, setFolioRoomChargeId] = useState("");
   const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
@@ -336,6 +348,12 @@ export default function SpaPage() {
 
   const { data: treatments = [] } = useQuery<SpaTreatment[]>({
     queryKey: ["/api/spa/treatments"],
+  });
+
+  // Los cargos adicionales del folio usan el mismo catálogo que
+  // "Cargos en habitaciones". Los tratamientos sólo se cargan mediante turnos.
+  const { data: roomChargeTypes = [] } = useQuery<SpaRoomChargeType[]>({
+    queryKey: ["/api/charge-types"],
   });
 
   const { data: treatmentCategories = [] } = useQuery<SpaTreatmentCategory[]>({
@@ -642,7 +660,7 @@ export default function SpaPage() {
       setChargeDescription("");
       setChargePrice("");
       setChargeQuantity("1");
-      setChargeType("service");
+      setChargeType("");
     },
   });
 
@@ -2887,46 +2905,76 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </div>
           )}
           {/* Add Charge Dialog — nested inside Folio dialog to avoid Radix aria-hidden blocking inputs on desktop */}
-          <Dialog open={isAddChargeOpen} onOpenChange={setIsAddChargeOpen}>
+          <Dialog
+            open={isAddChargeOpen}
+            onOpenChange={(open) => {
+              setIsAddChargeOpen(open);
+              if (!open) {
+                setChargeType("");
+                setChargeDescription("");
+                setChargePrice("");
+                setChargeQuantity("1");
+              }
+            }}
+          >
             <DialogContent className="max-w-sm">
               <DialogHeader>
                 <DialogTitle>Agregar Cargo</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium">Servicio / Concepto</label>
+                  <label className="text-sm font-medium">Cargo / Concepto</label>
                   <Select value={chargeType} onValueChange={(val) => {
                     setChargeType(val);
                     if (val === "cargo_editable") {
                       setChargeDescription("");
                       setChargePrice("");
                     } else {
-                      const treatment = treatments.find(t => t.id === val);
-                      if (treatment) {
-                        setChargeDescription(treatment.name);
-                        setChargePrice(treatment.price);
+                      const roomCharge = roomChargeTypes.find(ct => ct.id === val);
+                      if (roomCharge) {
+                        setChargeDescription(roomCharge.label);
+                        setChargePrice(String(roomCharge.defaultAmount));
                       }
                     }
                   }}>
                     <SelectTrigger data-testid="select-charge-type">
-                      <SelectValue placeholder="Seleccionar servicio..." />
+                      <SelectValue placeholder="Seleccionar cargo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {treatments.filter(t => t.id && t.isActive === "true").map(t => (
-                        <SelectItem key={t.id} value={t.id}>{t.name} — ${fmtMoney(t.price)}</SelectItem>
+                      {roomChargeTypes.filter(ct => ct.id && ct.active).map(ct => (
+                        <SelectItem key={ct.id} value={ct.id}>
+                          {ct.label} — ${fmtMoney(String(ct.defaultAmount))}
+                          {ct.allowPriceEdit ? " (variable)" : ""}
+                        </SelectItem>
                       ))}
                       <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Los tratamientos se agregan creando un nuevo turno.
+                  </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium">Descripción</label>
-                  <Input value={chargeDescription} onChange={(e) => setChargeDescription(e.target.value)} placeholder="Ej: Toalla extra" disabled={chargeType !== "cargo_editable"} data-testid="input-charge-description" />
+                  <Input
+                    value={chargeDescription}
+                    onChange={(e) => setChargeDescription(e.target.value)}
+                    placeholder="Ej: Toalla extra"
+                    disabled={chargeType !== "cargo_editable"}
+                    data-testid="input-charge-description"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium">Precio Unit.</label>
-                    <Input type="number" step="0.01" value={chargePrice} onChange={(e) => setChargePrice(e.target.value)} disabled={chargeType !== "cargo_editable"} data-testid="input-charge-price" />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={chargePrice}
+                      onChange={(e) => setChargePrice(e.target.value)}
+                      disabled={chargeType !== "cargo_editable" && !roomChargeTypes.find(ct => ct.id === chargeType)?.allowPriceEdit}
+                      data-testid="input-charge-price"
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium">Cantidad</label>
@@ -2944,7 +2992,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           description: chargeDescription,
                           quantity: parseInt(chargeQuantity) || 1,
                           unitPrice: chargePrice,
-                          itemType: chargeType === "cargo_editable" ? "extra" : "service",
+                          itemType: "extra",
                         });
                       }
                     }}
