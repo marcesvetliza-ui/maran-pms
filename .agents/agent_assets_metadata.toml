@@ -60,3 +60,17 @@ id = "_c7gIHlg2Sbm66XtHxLUh"
 uri = "file://test-confirmacion.pdf"
 type = "pdf"
 title = "Confirmación Evento - Test"
+
+[[outputs]]
+id = "4iRmsPy-6_CxF1WV5TOO-"
+uri = "file://docs/analisis-opera-cloud-vs-maran.docx"
+type = "word_document"
+title = "Análisis OPERA Cloud vs Maran — Word"
+description = "Informe editable con la comparación funcional, brechas, fortalezas de Maran y prioridades sugeridas."
+
+[[outputs]]
+id = "Zd83G_2xJH4ESzHqKefci"
+uri = "file://docs/analisis-opera-cloud-vs-maran.pdf"
+type = "pdf"
+title = "Análisis OPERA Cloud vs Maran — PDF"
+description = "Versión PDF del informe comparativo, lista para guardar o compartir."
