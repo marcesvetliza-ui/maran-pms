@@ -102,3 +102,17 @@ uri = "file://docs/analisis-pxsol-vs-maran.pdf"
 type = "pdf"
 title = "Análisis Pexsol vs Maran — PDF"
 description = "Versión PDF del informe comparativo Pexsol vs Maran, lista para guardar o compartir."
+
+[[outputs]]
+id = "OmbNUyBKWLxLJIRpXmr0J"
+uri = "file://docs/recomendacion-estrategica-maran-ia-y-multihotel.docx"
+type = "word_document"
+title = "Recomendación estratégica Maran — Word"
+description = "Informe editable con prioridades de evolución, herramientas de IA, controles de seguridad y camino hacia multihotel."
+
+[[outputs]]
+id = "ldkDFk7ObwkesMRU0eh8I"
+uri = "file://docs/recomendacion-estrategica-maran-ia-y-multihotel.pdf"
+type = "pdf"
+title = "Recomendación estratégica Maran — PDF"
+description = "Versión PDF de 6 páginas del informe estratégico basado en los análisis de OPERA Cloud, Cloudbeds y Pexsol."
