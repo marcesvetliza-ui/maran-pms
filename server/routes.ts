@@ -62,7 +62,7 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
            g.group_code AS "groupCode",
            gp.destination AS "groupDestination",
            COALESCE(NULLIF(gp.receiver_details->>'razonSocial', ''), NULLIF(invoice.cliente_razon_social, '')) AS "recipientName",
-           gp.amount AS "economicTotal",
+           COALESCE(invoice.monto_total, gp.amount) AS "economicTotal",
            CASE WHEN detail.retention_total > 0
              THEN detail.retention_total
              ELSE COALESCE(stored.retention_total, 0)
@@ -88,7 +88,7 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
       FROM jsonb_array_elements(COALESCE(gp.retention_detail, '[]'::jsonb)) item
     ) stored ON true
     LEFT JOIN LATERAL (
-      SELECT si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social
+      SELECT si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social, si.monto_total
       FROM sales_invoices si
       WHERE si.id = gp.invoice_id OR si.group_payment_id = gp.id
       ORDER BY CASE WHEN si.id = gp.invoice_id THEN 0 ELSE 1 END, si.created_at DESC

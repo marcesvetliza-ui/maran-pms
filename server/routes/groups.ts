@@ -11,6 +11,7 @@ import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupIn
 import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
+import { groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -39,6 +40,10 @@ function parseGroupPaymentRetentions(retentionDetail: unknown): Array<{ tipo: st
   return retentionDetail
     .map((r: any) => ({ tipo: String(r?.tipo || ""), monto: Number(r?.monto) || 0 }))
     .filter((r) => r.monto > 0);
+}
+
+function isFiscalGroupReceipt(receiptType: string): boolean {
+  return receiptType !== "sin_comprobante" && receiptType !== "none";
 }
 
 function parseSourceAmountMap(value: unknown): Record<string, number> {
@@ -1075,10 +1080,11 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       const today = getArgentinaToday();
-      const [ledgerLines, groupChargesList, groupPaymentsList] = await Promise.all([
+      const [ledgerLines, groupChargesList, groupPaymentsList, invoiceSnapshot] = await Promise.all([
         storage.getGroupReservationLedger(req.params.groupId),
         storage.getGroupCharges(req.params.groupId),
         storage.getGroupPayments(req.params.groupId),
+        getGroupInvoiceSnapshot(req.params.groupId),
       ]);
       const operational = computeGroupOperationalLedger(ledgerLines, groupChargesList, groupPaymentsList);
       const activeIds = new Set(activeReservations.map((reservation: any) => reservation.id));
@@ -1089,6 +1095,33 @@ export function registerGroupsRoutes(app: Express) {
           balance: Math.max(0, Math.round((line.accommodationTotal + line.extrasTotal - line.paymentsTotal) * 100) / 100),
         }));
       const totalBalance = Math.max(0, operational.balance);
+      if (isFiscalGroupReceipt(evidence.receiptType)) {
+        const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
+        const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
+        const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
+        if (Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
+          return res.status(400).json({
+            error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
+          });
+        }
+        const requiredCollection = requiredGroupInvoiceCollection(
+          conceptsTotal,
+          nonFiscalAdvances,
+        );
+        if (!groupInvoiceCollectionMatches({
+          newCollection: totalAmount,
+          conceptsTotal,
+          nonFiscalAdvances,
+          closeAllRooms: !!closeAllRooms,
+          operationalBalance: totalBalance,
+        })) {
+          return res.status(400).json({
+            error: closeAllRooms
+              ? `Para cerrar el grupo, el cobro nuevo debe cubrir el saldo operativo de $${totalBalance.toFixed(2)} e incluir al menos $${requiredCollection.toFixed(2)} para la factura.`
+              : `El cobro nuevo debe ser $${requiredCollection.toFixed(2)}; la diferencia se cubre con adelantos no fiscalizados.`,
+          });
+        }
+      }
       if (Math.round(totalAmount * 100) > Math.round(totalBalance * 100)) {
         return res.status(400).json({ error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo grupal disponible de $${totalBalance.toFixed(2)}.` });
       }
@@ -1797,6 +1830,26 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({
           error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo del Folio Maestro de $${Math.max(0, masterBalance).toFixed(2)}.`,
         });
+      }
+      if (isFiscalGroupReceipt(evidence.receiptType)) {
+        const invoiceSnapshot = await getGroupInvoiceSnapshot(req.params.groupId);
+        const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
+        const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
+        const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
+        if (Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
+          return res.status(400).json({
+            error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
+          });
+        }
+        const requiredCollection = requiredGroupInvoiceCollection(
+          conceptsTotal,
+          nonFiscalAdvances,
+        );
+        if (Math.round(totalAmount * 100) !== Math.round(requiredCollection * 100)) {
+          return res.status(400).json({
+            error: `El cobro nuevo debe ser $${requiredCollection.toFixed(2)}; la diferencia se cubre con adelantos no fiscalizados.`,
+          });
+        }
       }
 
       const allocationEntries = activeRes

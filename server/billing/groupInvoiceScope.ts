@@ -6,6 +6,7 @@ import {
   type GroupInvoiceCompositionKind,
   type GroupInvoiceCompositionSource,
 } from "@shared/groupInvoiceComposition";
+import { buildGroupFinancialSnapshot, type GroupFinancialSnapshot } from "@shared/groupFinancial";
 
 export type GroupInvoiceSource = {
   id: string;
@@ -26,6 +27,7 @@ export type GroupInvoiceSnapshot = {
     invoiced: number;
     available: number;
   };
+  financial: GroupFinancialSnapshot;
   paymentDestinations: Array<{
     id: string;
     concept: string;
@@ -216,9 +218,15 @@ export function parseGroupInvoiceSourceAmounts(invoice: any): Record<string, num
 }
 
 export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInvoiceSnapshot> {
-  const [reservationRows, groupChargeRows, invoiceRows, paymentRows] = await Promise.all([
+  const [reservationRows, groupChargeRows, invoiceRows, paymentRows, directPaymentRows] = await Promise.all([
     db.execute(sql`
-      SELECT r.id, r.reservation_code, r.total_room_amount, rm.room_number
+      SELECT r.id, r.reservation_code, r.total_room_amount, rm.room_number,
+             COALESCE((
+               SELECT SUM(c.amount::numeric)
+               FROM charges c
+               WHERE c.reservation_id = r.id
+                 AND c.status <> 'anulado'
+             ), 0) AS operational_charges
       FROM reservations r
       JOIN group_reservation_links l ON l.reservation_id = r.id
       LEFT JOIN rooms rm ON rm.id = r.room_id
@@ -262,6 +270,16 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
       ) si ON true
       WHERE gp.group_id = ${groupId}
       ORDER BY gp.created_at, gp.id
+    `),
+    db.execute(sql`
+      SELECT COALESCE(SUM(p.amount::numeric), 0) AS amount
+      FROM payments p
+      JOIN group_reservation_links l ON l.reservation_id = p.reservation_id
+      JOIN reservations r ON r.id = p.reservation_id
+      WHERE l.group_id = ${groupId}
+        AND r.status <> 'cancelled'
+        AND p.status <> 'anulado'
+        AND p.group_payment_id IS NULL
     `),
   ]);
 
@@ -360,6 +378,15 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
     invoiced: totals.invoiced + cents(source.invoiced),
     available: totals.available + cents(source.available),
   }), { eligible: 0, invoiced: 0, available: 0 });
+  const operationalCents =
+    (reservationRows.rows as any[]).reduce(
+      (sum, reservation) => sum + cents(reservation.total_room_amount) + cents(reservation.operational_charges),
+      0,
+    )
+    + (groupChargeRows.rows as any[]).reduce((sum, charge) => sum + cents(charge.amount), 0);
+  const collectedCents =
+    (paymentRows.rows as any[]).reduce((sum, payment) => sum + cents(payment.amount), 0)
+    + cents((directPaymentRows.rows[0] as any)?.amount);
 
   return {
     sources,
@@ -368,6 +395,12 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
       invoiced: money(totalsCents.invoiced),
       available: money(totalsCents.available),
     },
+    financial: buildGroupFinancialSnapshot({
+      operationalTotal: money(operationalCents),
+      collected: money(collectedCents),
+      invoiced: money(totalsCents.invoiced),
+      fiscalAvailable: money(totalsCents.available),
+    }),
     paymentDestinations,
   };
 }

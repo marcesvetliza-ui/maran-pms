@@ -109,6 +109,7 @@ import {
   buildGroupInvoiceItems,
   exceedsGroupInvoiceAvailable,
   groupInvoicePaymentMatchesConcepts,
+  requiredGroupInvoiceCollection,
 } from "@/lib/group-invoice-allocation";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import type { 
@@ -1744,6 +1745,14 @@ export default function GroupDetailPage() {
   const groupPaymentGrossPaymentTotal = groupPaymentRowsTotal + groupPaymentRetentionsTotal;
   const groupPaymentItemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
   const groupPaymentFiscalAvailable = availableGroupInvoiceTotal(groupInvoiceSnapshot?.sources ?? []);
+  const groupPaymentNonFiscalAdvances = Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0);
+  const groupPaymentRequiredCollection = requiredGroupInvoiceCollection(
+    groupPaymentItemsTotal,
+    groupPaymentNonFiscalAdvances,
+  );
+  const groupPaymentOperationalBalance = Number(
+    groupInvoiceSnapshot?.financial?.operationalBalance ?? folio?.totals?.balance ?? 0,
+  );
   // A fiscal document is backed by the invoice snapshot, not by the cash rows:
   // an earlier advance can leave cash balance at zero while accommodation is
   // still available to document.
@@ -1753,7 +1762,15 @@ export default function GroupDetailPage() {
     && exceedsGroupInvoiceAvailable(groupPaymentItemsTotal, groupPaymentFiscalAvailable);
   const groupPaymentConceptsMismatchPayment = groupPaymentIsFiscal
     && groupPaymentItemsTotal > 0
-    && !groupInvoicePaymentMatchesConcepts(groupPaymentGrossPaymentTotal, groupPaymentItemsTotal);
+    && !groupInvoicePaymentMatchesConcepts(
+      groupPaymentGrossPaymentTotal,
+      groupPaymentItemsTotal,
+      groupPaymentNonFiscalAdvances,
+      {
+        enabled: groupPaymentDestino === "distribute" && groupPaymentCloseAll,
+        operationalBalance: groupPaymentOperationalBalance,
+      },
+    );
   const groupPaymentHasRequiredReferences = groupPaymentIsFiscal || groupPaymentRows
     .filter(r => parseFloat(r.amount || "0") > 0)
     .every(r => !!r.reference.trim());
@@ -1961,28 +1978,42 @@ export default function GroupDetailPage() {
       {groupInvoiceSnapshot?.totals && Number(groupInvoiceSnapshot.totals.eligible) > 0 && (
         <Card className="border-violet-200 dark:border-violet-800">
           <CardContent className="pt-4 pb-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Receipt className="h-4 w-4" />
-                <span>Estado de facturación del grupo</span>
+                <span>Snapshot financiero del grupo</span>
               </div>
-              <div className="flex flex-wrap gap-6 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
                 <div>
-                  <p className="text-xs text-muted-foreground">Elegible</p>
-                  <p className="font-semibold" data-testid="text-billing-status-eligible">${fmtMoney(groupInvoiceSnapshot.totals.eligible)}</p>
+                  <p className="text-xs text-muted-foreground">Total operativo</p>
+                  <p className="font-semibold" data-testid="text-financial-operational-total">${fmtMoney(groupInvoiceSnapshot.financial?.operationalTotal ?? groupInvoiceSnapshot.totals.eligible)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Ya facturado</p>
+                  <p className="text-xs text-muted-foreground">Cobros</p>
+                  <p className="font-semibold text-green-600" data-testid="text-financial-collected">${fmtMoney(groupInvoiceSnapshot.financial?.collected ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Adelantos no fiscalizados</p>
+                  <p className="font-semibold text-amber-600" data-testid="text-financial-advances">${fmtMoney(groupInvoiceSnapshot.financial?.nonFiscalAdvances ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Saldo operativo</p>
+                  <p className="font-semibold text-red-600" data-testid="text-financial-operational-balance">${fmtMoney(groupInvoiceSnapshot.financial?.operationalBalance ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Facturado</p>
                   <p className="font-semibold text-orange-600" data-testid="text-billing-status-invoiced">${fmtMoney(groupInvoiceSnapshot.totals.invoiced)}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Disponible</p>
+                  <p className="text-xs text-muted-foreground">Disponible fiscal</p>
                   <p className="font-semibold text-emerald-600" data-testid="text-billing-status-available">${fmtMoney(groupInvoiceSnapshot.totals.available)}</p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={loadInvoice} disabled={isLoadingInvoice} data-testid="button-billing-status-details">
-                Ver detalle
-              </Button>
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={loadInvoice} disabled={isLoadingInvoice} data-testid="button-billing-status-details">
+                  Ver detalle
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -2532,7 +2563,7 @@ export default function GroupDetailPage() {
                               : null;
                             // Bug 8: for non-electronic payments, show receipt type as badge
                             const receiptLabel = invoiceBadge ? null
-                              : (!gp.receiptType || gp.receiptType === "none") ? `Anticipo #${gpIdx + 1}`
+                              : (!gp.receiptType || gp.receiptType === "none" || gp.receiptType === "sin_comprobante") ? `ADELANTO #${gpIdx + 1}`
                               : gp.receiptType === "factura_a" ? "Factura A"
                               : gp.receiptType === "factura_b" ? "Factura B"
                               : gp.receiptType === "factura_t" ? "Factura T"
@@ -3123,10 +3154,13 @@ export default function GroupDetailPage() {
                     <CardDescription>Total elegible, ya facturado y disponible por concepto y destino.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <div className="grid grid-cols-3 gap-3 text-sm">
-                      <div><p className="text-xs text-muted-foreground">Elegible</p><p className="font-semibold">{fmtMoney(invoiceData.billing.totals.eligible)}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Ya facturado</p><p className="font-semibold text-orange-600">{fmtMoney(invoiceData.billing.totals.invoiced)}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Disponible</p><p className="font-semibold text-emerald-600">{fmtMoney(invoiceData.billing.totals.available)}</p></div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                      <div><p className="text-xs text-muted-foreground">Total operativo</p><p className="font-semibold">{fmtMoney(invoiceData.billing.financial?.operationalTotal ?? invoiceData.billing.totals.eligible)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Cobros</p><p className="font-semibold text-green-600">{fmtMoney(invoiceData.billing.financial?.collected ?? invoiceData.totals.payments)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Adelantos no fiscalizados</p><p className="font-semibold text-amber-600">{fmtMoney(invoiceData.billing.financial?.nonFiscalAdvances ?? 0)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Saldo operativo</p><p className="font-semibold text-red-600">{fmtMoney(invoiceData.billing.financial?.operationalBalance ?? invoiceData.totals.balance)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Facturado</p><p className="font-semibold text-orange-600">{fmtMoney(invoiceData.billing.totals.invoiced)}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Disponible fiscal</p><p className="font-semibold text-emerald-600">{fmtMoney(invoiceData.billing.totals.available)}</p></div>
                     </div>
                     <div className="max-h-52 overflow-y-auto rounded-md border">
                       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
@@ -3301,9 +3335,15 @@ export default function GroupDetailPage() {
                 const billableSources = (freshSnapshot?.sources ?? [])
                   .filter((source: any) => Number(source.available) > 0);
                 const available = availableGroupInvoiceTotal(billableSources);
+                const operationalBalance = Number(freshSnapshot?.financial?.operationalBalance ?? 0);
                 resetGroupPaymentDialogFields();
+                setGroupPaymentEmitirComprobante(true);
                 setGroupPaymentReceiptType("factura_b");
-                setGroupPaymentRows([{method: "cash", amount: String(available), reference: ""}]);
+                setGroupPaymentRows([{
+                  method: "cash",
+                  amount: operationalBalance > 0 ? String(operationalBalance) : "",
+                  reference: "",
+                }]);
                 setGroupPaymentItems(gItemsFromSimple(billableSources.map((source: any) => ({
                   descripcion: `${source.destination} — ${source.concept}`,
                   precioUnitario: Number(source.available),
@@ -3314,8 +3354,14 @@ export default function GroupDetailPage() {
                   setGroupPaymentCcEntityType("company");
                 }
                 setPendingGroupPaymentId("");
-                setGroupFacturaFromResumen(true);
-                setShowGroupFacturaDialog(true);
+                if (operationalBalance > 0.009) {
+                  setGroupFacturaFromResumen(false);
+                  setGroupPaymentDestino("distribute");
+                  setShowGroupPaymentDialog(true);
+                } else {
+                  setGroupFacturaFromResumen(true);
+                  setShowGroupFacturaDialog(true);
+                }
               }}
               disabled={!invoiceData || Number(invoiceData?.billing?.totals?.available ?? groupInvoiceSnapshot?.totals?.available ?? 0) <= 0}
               data-testid="button-emitir-factura-resumen"
@@ -3592,10 +3638,24 @@ export default function GroupDetailPage() {
             // from what is collected now.
             const itemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
             const fiscalAvailable = availableGroupInvoiceTotal(groupInvoiceSnapshot?.sources ?? []);
+            const nonFiscalAdvances = Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0);
+            const requiredCollection = requiredGroupInvoiceCollection(itemsTotal, nonFiscalAdvances);
+            const automaticAdvance = Math.max(0, itemsTotal - requiredCollection);
+            const closeCollection = isMaster
+              ? requiredCollection
+              : Number(groupInvoiceSnapshot?.financial?.operationalBalance ?? priorBalance);
             const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
             const conceptsMismatchPayment = isFiscal
               && itemsTotal > 0
-              && !groupInvoicePaymentMatchesConcepts(rowsTotal + retentionsTotal, itemsTotal);
+              && !groupInvoicePaymentMatchesConcepts(
+                rowsTotal + retentionsTotal,
+                itemsTotal,
+                nonFiscalAdvances,
+                {
+                  enabled: !isMaster && groupPaymentCloseAll,
+                  operationalBalance: closeCollection,
+                },
+              );
 
             // Entity search autocomplete
             const entitySearchResults: any[] = groupPaymentEntitySearch.length >= 2
@@ -3659,7 +3719,7 @@ export default function GroupDetailPage() {
 
             return (
               <div className="space-y-5">
-                <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">Cobrar ahora</p>
                     <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
@@ -3667,6 +3727,10 @@ export default function GroupDetailPage() {
                   <div>
                     <p className="text-xs text-muted-foreground">Disponible para facturar</p>
                     <p className="font-semibold text-primary">{fmtMoney(Number(groupInvoiceSnapshot?.totals?.available ?? 0))}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Adelantos no fiscalizados</p>
+                    <p className="font-semibold text-amber-600">{fmtMoney(nonFiscalAdvances)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Total cobrado ahora</p>
@@ -4085,7 +4149,7 @@ export default function GroupDetailPage() {
                       {conceptsMismatchPayment && (
                         <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-concepts-payment-mismatch">
                           <AlertTriangle className="h-3 w-3 shrink-0" />
-                          El total de conceptos ({fmtMoney(itemsTotal)}) debe coincidir exactamente con el total cubierto por los medios de pago y retenciones ({fmtMoney(rowsTotal + retentionsTotal)}).
+                          El cobro nuevo debe ser {fmtMoney(!isMaster && groupPaymentCloseAll ? closeCollection : requiredCollection)}. Se aplican automáticamente {fmtMoney(automaticAdvance)} de adelantos no fiscalizados a la factura de {fmtMoney(itemsTotal)}.
                         </p>
                       )}
                     </div>
@@ -4242,6 +4306,17 @@ export default function GroupDetailPage() {
                     )}
                     {isFiscal && (
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Conceptos</span><span className="font-medium">{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span></div>
+                    )}
+                    {isFiscal && automaticAdvance > 0 && (
+                      <div className="flex justify-between gap-2 text-amber-700 dark:text-amber-400"><span>Adelantos aplicados</span><span className="font-medium">-{fmtMoney(automaticAdvance)}</span></div>
+                    )}
+                    {isFiscal && (
+                      <>
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobro nuevo requerido</span><span className="font-medium">{fmtMoney(!isMaster && groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
+                        {!isMaster && groupPaymentCloseAll && closeCollection > requiredCollection + 0.009 && (
+                          <div className="flex justify-between gap-2 text-xs"><span className="text-muted-foreground">Porción fiscal del cobro</span><span>{fmtMoney(requiredCollection)}</span></div>
+                        )}
+                      </>
                     )}
                     <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Medios de pago</span><span className="font-medium text-right">{groupPaymentRows.filter(r => parseFloat(r.amount || "0") > 0).map(r => `${PAYMENT_METHOD_LABELS[r.method] || r.method} ${fmtMoney(parseFloat(r.amount) || 0)}`).join(" + ") || "—"}</span></div>
                     {retentionsTotal > 0 && (

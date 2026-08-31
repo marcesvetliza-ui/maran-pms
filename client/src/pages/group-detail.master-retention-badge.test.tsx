@@ -277,6 +277,14 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
         { id: "group-charge:1", destination: "Grupo", concept: "Salón", available: 30000 },
       ],
       totals: { eligible: 360000, invoiced: 30000, available: 330000 },
+      financial: {
+        operationalTotal: 360000,
+        collected: 90000,
+        nonFiscalAdvances: 60000,
+        operationalBalance: 270000,
+        invoiced: 30000,
+        fiscalAvailable: 330000,
+      },
     };
     const user = userEvent.setup();
     renderPage();
@@ -286,11 +294,12 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     await user.click(await screen.findByRole("button", { name: /Empresa Receptora SA/i }));
     await user.click(screen.getByTestId("button-group-con-comprobante"));
 
-    // Documentation of a previously collected advance has no new payment row.
-    expect(screen.getByTestId("button-confirm-group-payment")).toBeEnabled();
+    // A $60,000 non-fiscal advance is applied to the $330,000 invoice, so the
+    // new collection must cover the exact $270,000 operational balance.
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
 
     const cash = screen.getByTestId("input-group-payment-amount-0");
-    await user.type(cash, "300000");
+    await user.type(cash, "240000");
     await user.click(screen.getByTestId("button-group-add-retencion-0"));
     const retention = screen.getByTestId("input-group-retencion-monto-0");
     await user.type(retention, "30000");
@@ -301,7 +310,7 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     await user.clear(retention);
     await user.type(retention, "29999.99");
     expect(await screen.findByTestId("text-concepts-payment-mismatch")).toHaveTextContent(
-      /debe coincidir exactamente/i,
+      /cobro nuevo debe ser/i,
     );
     expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
     expect(screen.queryByTestId("text-items-payment-mismatch")).not.toBeInTheDocument();

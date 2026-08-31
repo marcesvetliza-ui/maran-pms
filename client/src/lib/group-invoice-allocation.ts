@@ -1,3 +1,7 @@
+import { groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
+
+export { requiredGroupInvoiceCollection } from "@shared/groupFinancial";
+
 export type GroupInvoiceAvailableSource = {
   id: string;
   available: number;
@@ -63,13 +67,22 @@ export function exceedsGroupInvoiceAvailable(conceptsTotal: number, available: n
 }
 
 /**
- * A zero-value collection documents a previous advance and therefore does not
- * constrain concept total. When money is collected now, both gross totals
- * (cash/card/etc. plus retentions) must match to the cent.
+ * Existing non-fiscal advances are applied first. The new collection
+ * (cash/card/etc. plus retentions) must cover the remainder to the cent.
  */
-export function groupInvoicePaymentMatchesConcepts(paymentGross: number, conceptsTotal: number): boolean {
-  const paymentCents = cents(paymentGross);
-  return paymentCents === 0 || paymentCents === cents(conceptsTotal);
+export function groupInvoicePaymentMatchesConcepts(
+  paymentGross: number,
+  conceptsTotal: number,
+  nonFiscalAdvances = 0,
+  closeAll?: { enabled: boolean; operationalBalance: number },
+): boolean {
+  return groupInvoiceCollectionMatches({
+    newCollection: paymentGross,
+    conceptsTotal,
+    nonFiscalAdvances,
+    closeAllRooms: closeAll?.enabled,
+    operationalBalance: closeAll?.operationalBalance,
+  });
 }
 
 /** The approved invoice amount is the exact sum of gross line cents. */

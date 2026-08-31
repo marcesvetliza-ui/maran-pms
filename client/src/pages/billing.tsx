@@ -982,6 +982,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "folio"] });
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "master-folio"] });
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "invoice-snapshot"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
             onSuccess?.(data);
             onClose(); resetForm();
           } else {

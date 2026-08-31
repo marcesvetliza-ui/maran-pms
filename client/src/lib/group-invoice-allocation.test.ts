@@ -5,6 +5,7 @@ import {
   buildGroupInvoiceItems,
   exceedsGroupInvoiceAvailable,
   groupInvoicePaymentMatchesConcepts,
+  requiredGroupInvoiceCollection,
 } from "./group-invoice-allocation";
 
 const sources = [
@@ -35,9 +36,27 @@ describe("group invoice concepts from snapshot availability", () => {
     expect(exceedsGroupInvoiceAvailable(330000.01, 330000)).toBe(true);
   });
 
-  it("matches cash plus retentions to concepts in exact cents", () => {
-    expect(groupInvoicePaymentMatchesConcepts(300000 + 30000, 330000)).toBe(true);
-    expect(groupInvoicePaymentMatchesConcepts(300000 + 29999.99, 330000)).toBe(false);
-    expect(groupInvoicePaymentMatchesConcepts(0, 330000)).toBe(true);
+  it("applies the existing advance and requires only the operational collection", () => {
+    expect(requiredGroupInvoiceCollection(330000, 60000)).toBe(270000);
+    expect(groupInvoicePaymentMatchesConcepts(270000, 330000, 60000)).toBe(true);
+    expect(groupInvoicePaymentMatchesConcepts(269999.99, 330000, 60000)).toBe(false);
+    expect(groupInvoicePaymentMatchesConcepts(270000.01, 330000, 60000)).toBe(false);
+    expect(groupInvoicePaymentMatchesConcepts(0, 330000, 60000)).toBe(false);
+    expect(groupInvoicePaymentMatchesConcepts(0, 60000, 60000)).toBe(true);
+  });
+
+  it("allows a full close to collect a larger operational balance than the fiscal portion", () => {
+    expect(groupInvoicePaymentMatchesConcepts(
+      310000,
+      330000,
+      60000,
+      { enabled: true, operationalBalance: 310000 },
+    )).toBe(true);
+    expect(groupInvoicePaymentMatchesConcepts(
+      270000,
+      330000,
+      60000,
+      { enabled: true, operationalBalance: 310000 },
+    )).toBe(false);
   });
 });

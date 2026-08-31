@@ -8,6 +8,7 @@ import { calcularMontos } from "../billing/invoiceService";
 import { allocateGroupInvoiceSources, grossItemsTotal } from "../../client/src/lib/group-invoice-allocation";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 import { buildGroupInvoiceComposition } from "../../shared/groupInvoiceComposition";
+import { buildGroupFinancialSnapshot, requiredGroupInvoiceCollection } from "../../shared/groupFinancial";
 
 describe("group invoice source availability", () => {
   it("separates operational debt from fiscal availability for partial group collections", () => {
@@ -56,6 +57,20 @@ describe("group invoice source availability", () => {
       invoiced: 30_000,
       available: 330_000,
     });
+    const financial = buildGroupFinancialSnapshot({
+      operationalTotal: 360_000,
+      collected: 90_000,
+      invoiced: 30_000,
+    });
+    expect(financial).toEqual({
+      operationalTotal: 360_000,
+      collected: 90_000,
+      nonFiscalAdvances: 60_000,
+      operationalBalance: 270_000,
+      invoiced: 30_000,
+      fiscalAvailable: 330_000,
+    });
+    expect(requiredGroupInvoiceCollection(financial.fiscalAvailable, financial.nonFiscalAdvances)).toBe(270_000);
 
     lines[0].payments.push({
       id: "allocation-final",
@@ -66,6 +81,15 @@ describe("group invoice source availability", () => {
     lines[0].paymentsTotal = 360_000;
     parents.push({ id: "final", amount: "270000.00" });
     expect(computeGroupOperationalLedger(lines, [], parents).balance).toBe(0);
+    expect(buildGroupFinancialSnapshot({
+      operationalTotal: 360_000,
+      collected: 360_000,
+      invoiced: 360_000,
+    })).toMatchObject({
+      operationalBalance: 0,
+      nonFiscalAdvances: 0,
+      fiscalAvailable: 0,
+    });
   });
 
   it("keeps a partial invoice allocation by concept", () => {

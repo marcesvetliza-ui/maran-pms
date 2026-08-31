@@ -46,7 +46,7 @@ export function GroupPaymentHistoryRow({
     ? `${ncRefParsed.tipo_comprobante ?? "NC"} ${String(ncRefParsed.punto_venta ?? "").padStart(4, "0")}-${String(ncRefParsed.numero ?? "").padStart(8, "0")}`
     : null;
   const receiptLabel = invoiceBadge ? null
-    : (!gp.receiptType || gp.receiptType === "none" || gp.receiptType === "sin_comprobante") ? "Anticipo"
+    : (!gp.receiptType || gp.receiptType === "none" || gp.receiptType === "sin_comprobante") ? "ADELANTO"
     : gp.receiptType === "factura_a" ? "Factura A"
     : gp.receiptType === "factura_b" ? "Factura B"
     : gp.receiptType === "factura_t" ? "Factura T"
