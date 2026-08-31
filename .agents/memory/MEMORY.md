@@ -46,7 +46,7 @@
 - [Group payment dialogs & retención support](group-payment-dialogs-retention-support.md) — group-detail.tsx has one payment dialog now ("Pago Grupal", destino=master); the legacy "Pago al Folio Maestro" dialog was retired.
 - [Cost centers, chart of accounts, and departmental reports](cost-center-accounting-reports.md) — "Costos por Departamento" groups by accounting_accounts.codigo prefix, not centro_costo text field; seed.ts + migrate.ts both need new account rows.
 - [Admin CRUD role enforcement](admin-crud-role-enforcement.md) — sidebar `roles` gating is client-side only; new admin write endpoints (and `?all=1`-style reads) must add matching `requireRole([...])` server-side, not just `requireAuth`.
-- [Purchase invoice retention sign convention](purchase-invoice-retention-sign.md) — retentions on a purchase invoice SUBTRACT from its total (they're withholdings the hotel applies to the supplier); don't flip the sign without a full accounting-balance redesign.
+- [Purchase invoice retention sign convention](purchase-invoice-retention-sign.md) — supplier retentions subtract; LIQ-TARJETA retentions are suffered by the hotel, add to total, and debit tax-credit accounts.
 - [dist/ folder was tracked in git](dist-folder-git-tracking.md) — caused mass rename/rename merge conflicts on divergent history; now gitignored/untracked.
 - [Condición IVA → comprobante split](condicion-iva-comprobante-split.md) — RI/Exento→Factura A/MiPyme A; everyone else→Ticket/Factura B. One rule, two places to keep in sync.
 - [Group payment cash movements](group-payment-cash-movements.md) — every payment-collecting flow (incl. legacy entry points) must register a cash movement, or Caja silently excludes real money collected.

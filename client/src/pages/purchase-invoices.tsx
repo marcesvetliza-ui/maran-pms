@@ -36,6 +36,12 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Link } from "wouter";
 import { getLocalToday, fmtMoney, getArgentinaToday } from "@/lib/utils";
+import {
+  calculatePurchaseInvoiceAmountsFromNetLines,
+  calculatePurchaseInvoiceTotal,
+  isCardSettlement,
+  mapPurchaseInvoiceAmountFields,
+} from "@shared/purchaseInvoiceTotals";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -153,20 +159,7 @@ function camelInvoice(r: any): Invoice {
     fechaEmision: r.fecha_emision,
     periodo: r.periodo,
     condicionPago: r.condicion_pago,
-    montoNeto: r.monto_neto || "0",
-    montoIva21: r.monto_iva21 || "0",
-    montoIva105: r.monto_iva105 || "0",
-    montoIva27: r.monto_iva27 || "0",
-    percepcionIibb: r.percepcion_iibb || "0",
-    percepcionIva: r.percepcion_iva || "0",
-    percepcionGanancias: r.percepcion_ganancias || "0",
-    retencionIibb: r.retencion_iibb || "0",
-    retencionGanancias: r.retencion_ganancias || "0",
-    retencionIva: r.retencion_iva || "0",
-    retencionSuss: r.retencion_suss || "0",
-    impuestosInternos: r.impuestos_internos || "0",
-    ley25413: r.ley_25413 || "0",
-    montoTotal: r.monto_total || "0",
+    ...mapPurchaseInvoiceAmountFields(r),
     estado: r.estado,
     centroCosto: r.centro_costo,
     observaciones: r.observaciones,
@@ -246,27 +239,6 @@ const ALL_IVA_FIELDS = { montoIva5: "", montoIva25: "", montoIva105: "", montoIv
 type NetoLine = { neto: string; alicuota: string };
 const emptyNetoLine = (): NetoLine => ({ neto: "", alicuota: "21" });
 
-function calcFromLines(lines: NetoLine[]): Record<string, string> {
-  const ivaTotals: Record<string, number> = {};
-  let netoTotal = 0;
-  for (const line of lines) {
-    const n = parseFloat(line.neto) || 0;
-    netoTotal += n;
-    const entry = IVA_MAP[line.alicuota];
-    if (entry && n > 0) {
-      ivaTotals[entry.field] = (ivaTotals[entry.field] || 0) + n * entry.rate / 100;
-    }
-  }
-  return {
-    montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "",
-    montoIva5:   ivaTotals.montoIva5   ? ivaTotals.montoIva5.toFixed(2)   : "",
-    montoIva25:  ivaTotals.montoIva25  ? ivaTotals.montoIva25.toFixed(2)  : "",
-    montoIva105: ivaTotals.montoIva105 ? ivaTotals.montoIva105.toFixed(2) : "",
-    montoIva21:  ivaTotals.montoIva21  ? ivaTotals.montoIva21.toFixed(2)  : "",
-    montoIva27:  ivaTotals.montoIva27  ? ivaTotals.montoIva27.toFixed(2)  : "",
-  };
-}
-
 function linesFromInvoice(inv: Invoice): NetoLine[] {
   const result: NetoLine[] = [];
   const pairs: Array<{ alicuota: string; field: string; rate: number }> = [
@@ -335,7 +307,7 @@ function InvoiceDialog({
         const netoTotal = updated.reduce((sum, l) => sum + (parseFloat(l.neto) || 0), 0);
         return { ...p, montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "", ...ALL_IVA_FIELDS };
       }
-      return { ...p, ...calcFromLines(updated) };
+      return { ...p, ...calculatePurchaseInvoiceAmountsFromNetLines(updated) };
     });
   };
 
@@ -470,13 +442,7 @@ function InvoiceDialog({
   };
 
   const total = useMemo(() => {
-    return (
-      $n(form.montoNeto) + $n(form.montoIva21) + $n(form.montoIva105) + $n(form.montoIva27) +
-      $n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoExento) + $n(form.montoNoGravado) +
-      $n(form.impuestosInternos) + $n(form.ley25413) + $n(form.percepcionIibb) +
-      $n(form.percepcionIva) + $n(form.percepcionGanancias) -
-      $n(form.retencionIibb) - $n(form.retencionGanancias) - $n(form.retencionIva) - $n(form.retencionSuss)
-    );
+    return calculatePurchaseInvoiceTotal(form);
   }, [form]);
 
   const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
@@ -620,6 +586,7 @@ function InvoiceDialog({
     ? ["Encabezado", "Montos", "Retenciones", "Clasificación"]
     : ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
+  const isLiquidacionTarjeta = isCardSettlement(form.tipoComprobante);
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
@@ -660,7 +627,7 @@ function InvoiceDialog({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Tipo de Comprobante</Label>
-                  <Select value={form.tipoComprobante} onValueChange={(v) => {
+                  <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
                     if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({ ...p, tipoComprobante: v, alicuotaIva: "0", ...ALL_IVA_FIELDS }));
@@ -950,7 +917,16 @@ function InvoiceDialog({
                 <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
               </div>
               <Separator />
-              <p className="text-sm font-semibold text-muted-foreground">Retenciones (HABER — descuentan el pago)</p>
+              <p className="text-sm font-semibold text-muted-foreground">
+                {isLiquidacionTarjeta
+                  ? "Retenciones sufridas (DEBE — suman al total)"
+                  : "Retenciones (HABER — descuentan el pago)"}
+              </p>
+              {isLiquidacionTarjeta && (
+                <p className="text-xs text-muted-foreground">
+                  Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
@@ -1323,6 +1299,11 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
   };
   const account = accounts.find((a) => a.id === invoice.cuentaContableId);
   const ordenesPago: any[] = detail?.ordenesPago || [];
+  const isLiquidacionTarjeta = isCardSettlement(invoice.tipoComprobante);
+  const retentionValue = (value?: string | number) =>
+    `${isLiquidacionTarjeta ? "+" : "−"}${fmt2(value)}`;
+  const retentionLabel = (label: string) =>
+    isLiquidacionTarjeta ? `${label} sufrida` : label;
 
   const rows: [string, string][] = [
     ["Tipo", invoice.tipoComprobante],
@@ -1343,10 +1324,10 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ...(invoice.percepcionIibb && parseFloat(invoice.percepcionIibb) !== 0 ? [["Percep. IIBB", fmt2(invoice.percepcionIibb)] as [string, string]] : []),
     ...(invoice.percepcionIva && parseFloat(invoice.percepcionIva) !== 0 ? [["Percep. IVA", fmt2(invoice.percepcionIva)] as [string, string]] : []),
     ...(invoice.percepcionGanancias && parseFloat(invoice.percepcionGanancias) !== 0 ? [["Percep. Ganancias", fmt2(invoice.percepcionGanancias)] as [string, string]] : []),
-    ...(invoice.retencionIibb && parseFloat(invoice.retencionIibb) !== 0 ? [["Ret. IIBB", `−${fmt2(invoice.retencionIibb)}`] as [string, string]] : []),
-    ...(invoice.retencionGanancias && parseFloat(invoice.retencionGanancias) !== 0 ? [["Ret. Ganancias", `−${fmt2(invoice.retencionGanancias)}`] as [string, string]] : []),
-    ...(invoice.retencionIva && parseFloat(invoice.retencionIva) !== 0 ? [["Ret. IVA", `−${fmt2(invoice.retencionIva)}`] as [string, string]] : []),
-    ...(invoice.retencionSuss && parseFloat(invoice.retencionSuss) !== 0 ? [["Ret. SUSS", `−${fmt2(invoice.retencionSuss)}`] as [string, string]] : []),
+    ...(invoice.retencionIibb && parseFloat(invoice.retencionIibb) !== 0 ? [[retentionLabel("Ret. IIBB"), retentionValue(invoice.retencionIibb)] as [string, string]] : []),
+    ...(invoice.retencionGanancias && parseFloat(invoice.retencionGanancias) !== 0 ? [[retentionLabel("Ret. Ganancias"), retentionValue(invoice.retencionGanancias)] as [string, string]] : []),
+    ...(invoice.retencionIva && parseFloat(invoice.retencionIva) !== 0 ? [[retentionLabel("Ret. IVA"), retentionValue(invoice.retencionIva)] as [string, string]] : []),
+    ...(invoice.retencionSuss && parseFloat(invoice.retencionSuss) !== 0 ? [[retentionLabel("Ret. SUSS"), retentionValue(invoice.retencionSuss)] as [string, string]] : []),
     ...(invoice.impuestosInternos && parseFloat(invoice.impuestosInternos) !== 0 ? [["Imp. Internos", fmt2(invoice.impuestosInternos)] as [string, string]] : []),
     ...(invoice.ley25413 && parseFloat(invoice.ley25413) !== 0 ? [["Ley 25.413", fmt2(invoice.ley25413)] as [string, string]] : []),
   ];

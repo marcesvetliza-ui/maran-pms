@@ -8,18 +8,27 @@ import {
   type PurchaseInvoice,
   type PaymentOrder,
 } from "@shared/schema";
+import { purchaseInvoiceRetentionSide } from "@shared/purchaseInvoiceTotals";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function getAccountId(codigo: string): Promise<number | null> {
-  const res = await db.execute(
+type AccountingExecutor = Pick<typeof db, "execute">;
+
+async function getAccountId(
+  codigo: string,
+  executor: AccountingExecutor = db,
+): Promise<number | null> {
+  const res = await executor.execute(
     sql`SELECT id FROM accounting_accounts WHERE codigo = ${codigo} LIMIT 1`
   );
   return res.rows.length > 0 ? (res.rows[0] as any).id : null;
 }
 
-async function nextMinuta(periodo: string): Promise<number> {
-  const res = await db.execute(
+async function nextMinuta(
+  periodo: string,
+  executor: AccountingExecutor = db,
+): Promise<number> {
+  const res = await executor.execute(
     sql`SELECT COALESCE(MAX(numero_minuta), 0) + 1 AS next FROM accounting_entries WHERE periodo = ${periodo}`
   );
   return (res.rows[0] as any).next as number;
@@ -42,7 +51,8 @@ function getConcepto(tipoComprobante: string): string {
 // ─── Asiento de Factura / NC / Resumen / Tarjeta ──────────────────────────────
 
 export async function generarAsiento(
-  invoice: PurchaseInvoice & { supplier?: { razonSocial?: string } | null }
+  invoice: PurchaseInvoice & { supplier?: { razonSocial?: string } | null },
+  executor: AccountingExecutor = db,
 ): Promise<number> {
   const periodo =
     invoice.periodo ||
@@ -51,7 +61,7 @@ export async function generarAsiento(
       return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
     })();
 
-  const minuta = await nextMinuta(periodo);
+  const minuta = await nextMinuta(periodo, executor);
   const concepto = getConcepto(invoice.tipoComprobante);
   const isNC = invoice.tipoComprobante.startsWith("NC");
   const isBanco = invoice.tipoComprobante === "RESUMEN-BANCO";
@@ -74,6 +84,7 @@ export async function generarAsiento(
   const retGanancias = parseNum(invoice.retencionGanancias);
   const retSuss = parseNum(invoice.retencionSuss);
   const total = parseNum(invoice.montoTotal);
+  const retentionsAreSuffered = purchaseInvoiceRetentionSide(invoice.tipoComprobante) === "debe";
 
   // Account IDs
   const [
@@ -83,25 +94,25 @@ export async function generarAsiento(
     acImpInt, acLey25, acProv, acCaja,
     acCuentaContable,
   ] = await Promise.all([
-    getAccountId("1.1.4.07.01"),
-    getAccountId("1.1.4.07.02"),
-    getAccountId("1.1.4.07.03"),
-    getAccountId("1.1.4.01.04.02"),
-    getAccountId("1.1.4.01.08.02"),
-    getAccountId("1.1.4.01.05"),
-    getAccountId("1.1.4.01.04.01"),
-    getAccountId("1.1.4.01.08.01"),
-    getAccountId("1.1.4.01.05"),
-    getAccountId("1.1.4.01.10"),
-    getAccountId("2.1.3.02.09"),
-    getAccountId("1.1.4.01.15"),
-    getAccountId("2.1.1.01"),
-    getAccountId("1.1.1.01"),
+    getAccountId("1.1.4.07.01", executor),
+    getAccountId("1.1.4.07.02", executor),
+    getAccountId("1.1.4.07.03", executor),
+    getAccountId("1.1.4.01.04.02", executor),
+    getAccountId("1.1.4.01.08.02", executor),
+    getAccountId("1.1.4.01.05", executor),
+    getAccountId("1.1.4.01.04.01", executor),
+    getAccountId("1.1.4.01.08.01", executor),
+    getAccountId("1.1.4.01.05", executor),
+    getAccountId("1.1.4.01.10", executor),
+    getAccountId("2.1.3.02.09", executor),
+    getAccountId("1.1.4.01.15", executor),
+    getAccountId("2.1.1.01", executor),
+    getAccountId("1.1.1.01", executor),
     invoice.cuentaContableId ? invoice.cuentaContableId : null,
   ]);
 
   // Insert entry
-  const entryRes = await db.execute(sql`
+  const entryRes = await executor.execute(sql`
     INSERT INTO accounting_entries (numero_minuta, fecha, periodo, concepto, tipo_origen, origen_id, origen_tipo)
     VALUES (${minuta}, ${invoice.fechaEmision}, ${periodo}, ${concepto}, 'factura', ${invoice.id}, 'purchase_invoice')
     RETURNING id
@@ -136,6 +147,15 @@ export async function generarAsiento(
   if (percIibb > 0 && acPercIibb) lines.push({ accountId: acPercIibb, debe: percIibb * sign, haber: 0 });
   if (percGanancias > 0 && acPercGanancias) lines.push({ accountId: acPercGanancias, debe: percGanancias * sign, haber: 0 });
 
+  // En liquidaciones de tarjeta son retenciones sufridas por el hotel:
+  // representan créditos fiscales a favor y forman parte del total del comprobante.
+  if (retentionsAreSuffered) {
+    if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: retIva * sign, haber: 0 });
+    if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: retIibb * sign, haber: 0 });
+    if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: retGanancias * sign, haber: 0 });
+    if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: retSuss * sign, haber: 0 });
+  }
+
   // DEBE: impuestos internos y ley 25413
   if (impInt > 0 && acImpInt) lines.push({ accountId: acImpInt, debe: impInt * sign, haber: 0 });
   if (ley25 > 0 && acLey25) lines.push({ accountId: acLey25, debe: ley25 * sign, haber: 0 });
@@ -144,11 +164,13 @@ export async function generarAsiento(
   if (invoice.condicionPago === "contado" || isBanco || isTarjeta) {
     // Pago inmediato: haber = caja o banco
     if (acCaja) lines.push({ accountId: acCaja, debe: 0, haber: total * sign });
-    // Retenciones en haber (reducen el pago)
-    if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: 0, haber: retIva * sign });
-    if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
-    if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
-    if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+    // Las retenciones practicadas por Maran permanecen en el Haber y reducen el pago.
+    if (!retentionsAreSuffered) {
+      if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: 0, haber: retIva * sign });
+      if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
+      if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
+      if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+    }
   } else {
     // Cuenta corriente: haber = proveedores a pagar
     if (acProv) lines.push({ accountId: acProv, debe: 0, haber: total * sign });
@@ -157,7 +179,7 @@ export async function generarAsiento(
   // Insert lines
   for (const line of lines) {
     if (!line.accountId || (line.debe === 0 && line.haber === 0)) continue;
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, comprobante_tipo, comprobante_numero, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${line.accountId}, ${compTipo}, ${compNum}, ${provNombre}, ${line.debe}, ${line.haber})
     `);

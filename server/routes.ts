@@ -45,6 +45,10 @@ import { registerCountriesRoutes } from "./routes/countries";
 import { registerPosConfigsRoutes } from "./routes/pos-configs";
 import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-centers";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
+import {
+  calculatePurchaseInvoiceTotal,
+  shouldRegisterPracticedIibbRetention,
+} from "@shared/purchaseInvoiceTotals";
 
 async function enrichGroupCashMovements<T extends { id: string; sourceType: string }>(
   movements: T[],
@@ -2913,12 +2917,7 @@ export async function registerRoutes(
 
       // Calcular montoTotal
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
-      const montoTotal =
-        n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
-        n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
-        n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
-        n("retencionIva") - n("retencionSuss");
+      const montoTotal = calculatePurchaseInvoiceTotal(body);
 
       // Estado según condición de pago
       const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
@@ -3008,7 +3007,11 @@ export async function registerRoutes(
       }
 
       // Si tiene retención IIBB → insertar en iibb_retentions
-      if (n("retencionIibb") > 0 && body.supplierId) {
+      if (
+        n("retencionIibb") > 0 &&
+        body.supplierId &&
+        shouldRegisterPracticedIibbRetention(body.tipoComprobante)
+      ) {
         try {
           const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
           const nroConstancia = (nroRes.rows[0] as any).next;
@@ -3030,12 +3033,13 @@ export async function registerRoutes(
   app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const existing = await db.execute(sql`SELECT estado FROM purchase_invoices WHERE id = ${id}`);
+      const existing = await db.execute(sql`SELECT estado, tipo_comprobante FROM purchase_invoices WHERE id = ${id}`);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
       if ((existing.rows[0] as any).estado !== "pendiente") {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const body = req.body;
+      const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
 
       // ── Validar centro de costo contra la lista gestionada ─────────────────
       const centroCosto = body.centroCosto ? String(body.centroCosto).trim() || null : null;
@@ -3046,26 +3050,108 @@ export async function registerRoutes(
       }
 
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
-      const montoTotal =
-        n("montoNeto") + n("montoIva21") + n("montoIva105") + n("montoIva27") +
-        n("montoIva5") + n("montoIva25") + n("montoExento") + n("montoNoGravado") +
-        n("impuestosInternos") + n("ley25413") + n("percepcionIibb") + n("percepcionIva") +
-        n("percepcionGanancias") - n("retencionIibb") - n("retencionGanancias") -
-        n("retencionIva") - n("retencionSuss");
-      const result = await db.execute(sql`
-        UPDATE purchase_invoices SET
-          monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
-          monto_iva105 = ${n("montoIva105")}, monto_iva27 = ${n("montoIva27")},
-          percepcion_iibb = ${n("percepcionIibb")}, percepcion_iva = ${n("percepcionIva")},
-          retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
-          retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
-          monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
-          centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
-          updated_at = NOW()
-        WHERE id = ${id}
-        RETURNING *
-      `);
-      res.json(result.rows[0]);
+      const montoTotal = calculatePurchaseInvoiceTotal({ ...body, tipoComprobante });
+      const updatedInvoice = await db.transaction(async (tx) => {
+        const result = await tx.execute(sql`
+          UPDATE purchase_invoices SET
+            monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
+            monto_iva105 = ${n("montoIva105")}, monto_iva27 = ${n("montoIva27")},
+            monto_iva5 = ${n("montoIva5")}, monto_iva25 = ${n("montoIva25")},
+            monto_exento = ${n("montoExento")}, monto_no_gravado = ${n("montoNoGravado")},
+            impuestos_internos = ${n("impuestosInternos")}, ley_25413 = ${n("ley25413")},
+            percepcion_iibb = ${n("percepcionIibb")}, percepcion_iva = ${n("percepcionIva")},
+            percepcion_ganancias = ${n("percepcionGanancias")},
+            retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
+            retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
+            monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
+            centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
+            updated_at = NOW()
+          WHERE id = ${id}
+          RETURNING *
+        `);
+        const raw = result.rows[0] as any;
+        const previousEntryId = raw.asiento_id;
+        const invoiceForEntry: any = {
+          id: raw.id,
+          tipoComprobante: raw.tipo_comprobante,
+          supplierId: raw.supplier_id,
+          proveedorNombre: raw.proveedor_nombre,
+          proveedorCuit: raw.proveedor_cuit,
+          puntoVenta: raw.punto_venta,
+          numeroComprobante: raw.numero_comprobante,
+          numeroComprobanteExt: raw.numero_comprobante_ext,
+          fechaEmision: raw.fecha_emision,
+          periodo: raw.periodo,
+          condicionPago: raw.condicion_pago,
+          montoNeto: raw.monto_neto,
+          montoIva27: raw.monto_iva27,
+          montoIva21: raw.monto_iva21,
+          montoIva105: raw.monto_iva105,
+          montoIva5: raw.monto_iva5,
+          montoIva25: raw.monto_iva25,
+          montoExento: raw.monto_exento,
+          montoNoGravado: raw.monto_no_gravado,
+          impuestosInternos: raw.impuestos_internos,
+          ley25413: raw.ley_25413,
+          percepcionIibb: raw.percepcion_iibb,
+          percepcionIva: raw.percepcion_iva,
+          percepcionGanancias: raw.percepcion_ganancias,
+          retencionIibb: raw.retencion_iibb,
+          retencionGanancias: raw.retencion_ganancias,
+          retencionIva: raw.retencion_iva,
+          retencionSuss: raw.retencion_suss,
+          montoTotal: raw.monto_total,
+          cuentaContableId: raw.cuenta_contable_id,
+          centroCosto: raw.centro_costo,
+          estado: raw.estado,
+          observaciones: raw.observaciones,
+        };
+
+        const entryId = await generarAsiento(invoiceForEntry, tx);
+        await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
+        if (previousEntryId && previousEntryId !== entryId) {
+          await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
+          await tx.execute(sql`DELETE FROM accounting_entries WHERE id = ${previousEntryId}`);
+        }
+
+        if (!shouldRegisterPracticedIibbRetention(tipoComprobante)) {
+          await tx.execute(sql`DELETE FROM iibb_retentions WHERE invoice_id = ${id}`);
+        } else if (n("retencionIibb") <= 0) {
+          await tx.execute(sql`DELETE FROM iibb_retentions WHERE invoice_id = ${id}`);
+        } else {
+          const retained = await tx.execute(sql`SELECT id FROM iibb_retentions WHERE invoice_id = ${id} LIMIT 1`);
+          if (retained.rows.length) {
+            await tx.execute(sql`
+              UPDATE iibb_retentions SET
+                cuit_proveedor = ${raw.proveedor_cuit || ""},
+                fecha_retencion = ${raw.fecha_emision},
+                fecha_comprobante = ${raw.fecha_emision},
+                nro_comprobante = ${parseInt(raw.numero_comprobante) || 0},
+                letra_factura = ${tipoComprobante.slice(-1) || null},
+                importe_base = ${n("montoNeto")},
+                importe_retenido = ${n("retencionIibb")}
+              WHERE invoice_id = ${id}
+            `);
+          } else if (raw.supplier_id) {
+            const nroRes = await tx.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
+            const nroConstancia = (nroRes.rows[0] as any).next;
+            await tx.execute(sql`
+              INSERT INTO iibb_retentions (
+                nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante,
+                nro_comprobante, letra_factura, importe_base, alicuota, importe_retenido, invoice_id
+              ) VALUES (
+                ${nroConstancia}, ${raw.supplier_id}, ${raw.proveedor_cuit || ""}, ${raw.fecha_emision},
+                ${raw.fecha_emision}, ${parseInt(raw.numero_comprobante) || 0},
+                ${tipoComprobante.slice(-1) || null}, ${n("montoNeto")},
+                ${body.alicuotaIibbProveedor || 0}, ${n("retencionIibb")}, ${id}
+              )
+            `);
+          }
+        }
+
+        return { ...raw, asiento_id: entryId };
+      });
+      res.json(updatedInvoice);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

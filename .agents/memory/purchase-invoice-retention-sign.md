@@ -1,12 +1,14 @@
 ---
 name: purchase-invoice-retention-sign
-description: Purchase invoice retenciones (IIBB/Ganancias/IVA/SUSS) subtract from the invoice total; they are withholdings the hotel applies to the supplier, not withholdings applied to the hotel.
+description: Supplier-invoice retentions subtract, except LIQ-TARJETA retentions suffered by the hotel, which add and are debited as tax credits.
 ---
 
 # Purchase invoice retention sign convention
 
-Purchase invoice retention fields (IIBB/Ganancias/IVA/SUSS) represent amounts the **hotel withholds from the supplier** when paying an invoice — consistent with how retentions are treated elsewhere in guest/company/agency payments. They must subtract from the invoice total, not add to it, in every place that computes the total (client form, invoice create/update routes, and the accounting-entry generator).
+For ordinary supplier invoices, retention fields (IIBB/Ganancias/IVA/SUSS) represent amounts the **hotel withholds from the supplier** and therefore subtract from the amount paid.
 
-**Why:** treating them as "withheld from the hotel" instead and flipping the sign to add them produces an unbalanced double-entry accounting record for credit-purchase invoices (the credit side included the retention but the debit side did not), and inflates the total shown to users.
+`LIQ-TARJETA` is the explicit exception: those fields represent retentions **suffered by the hotel** from card processors. They add to the comprobante total, appear in the Debe as tax credits, and must not create records in the register of IIBB retentions practiced by the hotel.
 
-**How to apply:** if a genuine need arises to model retentions made *to* the hotel (as opposed to retentions the hotel applies to a supplier) as a distinct concept, add it as a separate field/flow rather than flipping the sign on the existing supplier-withholding fields — and any accounting-entry change must keep debit/credit balanced and be verified before shipping.
+**Why:** applying the supplier-retention sign to card settlements understates the liquidation and misclassifies credits suffered by Maran. Applying the card-settlement sign globally would overstate ordinary supplier invoices and unbalance their accounting.
+
+**How to apply:** every total calculator and accounting path must branch on the comprobante type. Ordinary purchase documents subtract retentions and credit the retention accounts; `LIQ-TARJETA` adds them and debits those accounts. Creation and editing must use the same rule and keep the entry synchronized.
