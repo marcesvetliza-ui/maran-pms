@@ -11,11 +11,9 @@ vi.mock("../db", () => ({
     execute: vi.fn(async () => {
       state.events.push("execute");
       state.executeCount++;
-      // First execution advances the fictitious invoice counter. The second
-      // one is the final update from authorization_pending to emitted.
-      return state.executeCount === 1
-        ? { rows: [{ ultimo_numero: 7 }] }
-        : { rows: [{ id: 44, estado: "emitida", reconciliation_status: "pendiente" }] };
+      // The execution advances the fictitious invoice counter. Finalization
+      // uses the Drizzle update builder mocked below.
+      return { rows: [{ ultimo_numero: 7 }] };
     }),
     insert: vi.fn(() => ({
       values: (values: any) => {
@@ -28,6 +26,20 @@ vi.mock("../db", () => ({
             estado: "autorizacion_pendiente",
             reconciliationStatus: "pendiente",
           }],
+        };
+      },
+    })),
+    update: vi.fn(() => ({
+      set: (values: any) => {
+        state.events.push("update");
+        return {
+          where: (_condition: unknown) => ({
+            returning: async () => [{
+              id: 44,
+              ...values,
+              reconciliationStatus: "pendiente",
+            }],
+          }),
         };
       },
     })),
@@ -66,7 +78,7 @@ describe("recoverable reservation credit-note emission", () => {
       recoverableCreditNote: true,
     });
 
-    expect(state.events).toEqual(["execute", "insert-draft", "execute"]);
+    expect(state.events).toEqual(["execute", "insert-draft", "update"]);
     expect(state.insertValues[0]).toMatchObject({
       estado: "autorizacion_pendiente",
       reconciliationStatus: "pendiente",
