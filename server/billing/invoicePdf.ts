@@ -9,7 +9,9 @@ function fPeso(n: number | string) {
 
 function fDate(d: string | Date | null | undefined) {
   if (!d) return "";
-  const dt = typeof d === "string" ? new Date(d + "T12:00:00") : d;
+  const dt = typeof d === "string"
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d)
+    : d;
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
 }
 
@@ -725,12 +727,34 @@ export interface VoucherHabitacionData {
   charges: Array<{ description: string; date: string; amount: string; category?: string }>;
   payments: Array<{ date: string; method: string; amount: string; reference?: string | null; notes?: string | null }>;
   adjustments?: Array<{ description: string; date: string; amount: string }>;
+  invoices?: Array<{
+    tipo_comprobante: string;
+    punto_venta: number;
+    numero: number;
+    fecha_emision: string;
+    monto_total: string | number;
+    monto_acreditado?: string | number | null;
+    estado?: string | null;
+  }>;
   grandTotal: number;
   totalPayments: number;
   balance: number;
+  netInvoiced?: number;
+  availableAdvance?: number;
+  pendingBilling?: number;
+  printedAt?: string;
 }
 
-export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, config: any): Promise<Buffer> {
+type VoucherHabitacionPdfOptions = {
+  title?: string;
+  showVoucherNumber?: boolean;
+};
+
+export async function generarVoucherHabitacionPDF(
+  data: VoucherHabitacionData,
+  config: any,
+  options: VoucherHabitacionPdfOptions = {},
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4" });
     const chunks: Buffer[] = [];
@@ -761,10 +785,14 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
        .text(`${config?.localidad ?? ""}, ${config?.provincia ?? ""}`, x0 + 16, y + 53);
 
     doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(18)
-       .text("COMPROBANTE DE ESTADÍA", x0 + W / 2, y + 16, { width: W / 2 - 8, align: "right" });
-    doc.fillColor("white").font("Helvetica").fontSize(9)
-       .text(`N° ${String(data.puntoVenta).padStart(4, "0")}-${String(data.numero).padStart(8, "0")}`, x0 + W / 2, y + 44, { width: W / 2 - 8, align: "right" })
-       .text(`Emitido: ${fDate(data.fechaEmision)}`, x0 + W / 2, y + 57, { width: W / 2 - 8, align: "right" });
+       .text(options.title ?? "COMPROBANTE DE ESTADÍA", x0 + W / 2, y + 16, { width: W / 2 - 8, align: "right" });
+    doc.fillColor("white").font("Helvetica").fontSize(9);
+    if (options.showVoucherNumber !== false) {
+      doc.text(`N° ${String(data.puntoVenta).padStart(4, "0")}-${String(data.numero).padStart(8, "0")}`, x0 + W / 2, y + 44, { width: W / 2 - 8, align: "right" })
+         .text(`Emitido: ${fDate(data.fechaEmision)}`, x0 + W / 2, y + 57, { width: W / 2 - 8, align: "right" });
+    } else {
+      doc.text(`Emitido: ${data.printedAt ?? fDate(data.fechaEmision)}`, x0 + W / 2, y + 48, { width: W / 2 - 8, align: "right" });
+    }
 
     y += 90;
 
@@ -866,6 +894,39 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
       hline(y); y += 6;
     }
 
+    if (data.invoices && data.invoices.length > 0) {
+      if (y > 665) { doc.addPage(); y = 40; }
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(NAVY).text("Historial fiscal:", x0, y + 4);
+      y += 18;
+      for (const invoice of data.invoices) {
+        if (y > 720) { doc.addPage(); y = 40; }
+        const isCredit = invoice.tipo_comprobante.startsWith("NC");
+        const total = $n(invoice.monto_total);
+        const credited = $n(invoice.monto_acreditado);
+        const detail = !isCredit && credited > 0
+          ? `Acreditado $${fPeso(credited)} · Neto $${fPeso(Math.max(0, total - credited))}`
+          : invoice.estado === "anulada" ? "Anulada fiscalmente" : "";
+        doc.fillColor(isCredit ? "#c62828" : "#000").font("Helvetica").fontSize(7.5)
+           .text(fDate(invoice.fecha_emision), x0 + 4, y, { width: 60 })
+           .text(`${invoice.tipo_comprobante} ${padNum(invoice.punto_venta, 4)}-${padNum(invoice.numero, 8)}`, x0 + 68, y, { width: 145 })
+           .text(detail, x0 + 218, y, { width: 220 })
+           .text(`${isCredit ? "-" : ""}$${fPeso(total)}`, x0 + W - 80, y, { width: 76, align: "right" });
+        y += 14;
+      }
+      hline(y); y += 6;
+    }
+
+    if (data.netInvoiced !== undefined || data.pendingBilling !== undefined) {
+      if (y > 690) { doc.addPage(); y = 40; }
+      doc.rect(x0, y, W, 42).fillColor("#e8f0fe").fill()
+         .rect(x0, y, W, 42).strokeColor("#90b4d4").lineWidth(0.5).stroke();
+      doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(8)
+         .text(`Facturado neto: $${fPeso(data.netInvoiced ?? 0)}`, x0 + 10, y + 7, { width: W / 2 - 15 })
+         .text(`Anticipo disponible: $${fPeso(data.availableAdvance ?? 0)}`, x0 + W / 2, y + 7, { width: W / 2 - 10, align: "right" })
+         .text(`Pendiente de facturación: $${fPeso(data.pendingBilling ?? 0)}`, x0 + 10, y + 23, { width: W - 20 });
+      y += 48;
+    }
+
     // ── Balance ────────────────────────────────────────────────────────────
     const balColor = data.balance > 0.5 ? "#c62828" : "#2e7d32";
     doc.rect(x0, y, W, 24).fillColor(data.balance > 0.5 ? "#ffebee" : "#e8f5e9").fill()
@@ -886,83 +947,15 @@ export async function generarVoucherHabitacionPDF(data: VoucherHabitacionData, c
   });
 }
 
-// ── Resumen de cuenta (sin cambios estructurales) ────────────────────────────
+// ── Resumen de cuenta de habitación ─────────────────────────────────────────
 export async function generarResumenCuentaPDF(data: any, config: any): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 30, size: "A4" });
-    const chunks: Buffer[] = [];
-    doc.on("data", (c: Buffer) => chunks.push(c));
-    doc.on("end",  () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    const W  = 535;
-    const x0 = 30;
-    const NAVY = "#1e3a5f";
-
-    let y = 30;
-
-    // Header
-    doc.rect(x0, y, W, 64).fillColor(NAVY).fill();
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(18)
-       .text(config?.razonSocial ?? "MARAN S.A.", x0 + 12, y + 10, { width: W / 2 });
-    doc.font("Helvetica").fontSize(8).fillColor("#ccc")
-       .text(config?.domicilioComercial ?? "", x0 + 12, y + 34)
-       .text(`${config?.localidad ?? ""}, ${config?.provincia ?? ""}`, x0 + 12, y + 44);
-    doc.fillColor("white").font("Helvetica-Bold").fontSize(14)
-       .text("RESUMEN DE CUENTA", x0 + W / 2, y + 14, { width: W / 2 - 8, align: "right" });
-    doc.font("Helvetica").fontSize(8).fillColor("#ccc")
-       .text(new Date().toLocaleDateString("es-AR"), x0 + W / 2, y + 38, { width: W / 2 - 8, align: "right" });
-    y += 74;
-
-    // Entity info
-    doc.font("Helvetica-Bold").fontSize(10).fillColor(NAVY)
-       .text(data.entityName ?? "—", x0, y);
-    if (data.entityCuit) {
-      doc.font("Helvetica").fontSize(8).fillColor("#333")
-         .text(`CUIT: ${data.entityCuit}`, x0, y + 14);
-    }
-    y += 30;
-    doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").lineWidth(0.5).stroke();
-    y += 10;
-
-    // Movements table
-    if (data.movements && data.movements.length > 0) {
-      doc.rect(x0, y, W, 16).fillColor("#e8e8e8").fill()
-         .rect(x0, y, W, 16).strokeColor("#ccc").stroke();
-      doc.fillColor("#000").font("Helvetica-Bold").fontSize(7.5)
-         .text("FECHA",     x0 + 4,       y + 4, { width: 55 })
-         .text("TIPO",      x0 + 63,      y + 4, { width: 60 })
-         .text("CONCEPTO",  x0 + 127,     y + 4, { width: 230 })
-         .text("IMPORTE",   x0 + W - 75,  y + 4, { width: 71, align: "right" });
-      y += 16;
-
-      for (const mv of data.movements) {
-        if (y > 750) { doc.addPage(); y = 40; }
-        doc.rect(x0, y, W, 13).strokeColor("#eee").stroke();
-        const isDebit = (mv.type === "charge" || mv.type === "invoice");
-        doc.fillColor(isDebit ? "#000" : "#1565c0").font("Helvetica").fontSize(7.5)
-           .text(fDate(mv.date),        x0 + 4,      y + 2, { width: 55 })
-           .text(mv.type ?? "",         x0 + 63,     y + 2, { width: 60 })
-           .text(mv.description ?? "",  x0 + 127,    y + 2, { width: 230 })
-           .text(`${isDebit ? "" : "-"}$${fPeso(mv.amount)}`, x0 + W - 75, y + 2, { width: 71, align: "right" });
-        y += 13;
-      }
-      doc.moveTo(x0, y).lineTo(x0 + W, y).strokeColor("#ccc").lineWidth(0.5).stroke();
-      y += 8;
-    }
-
-    // Balance
-    const saldo = $n(data.balance ?? 0);
-    const balColor = saldo > 0.5 ? "#c62828" : saldo < -0.5 ? "#1565c0" : "#2e7d32";
-    doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(10).text("Saldo:", x0 + W - 180, y);
-    doc.fillColor(balColor).font("Helvetica-Bold").fontSize(12)
-       .text(`$${fPeso(saldo)}`, x0 + W - 120, y, { width: 116, align: "right" });
-    y += 20;
-
-    const _ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
-    doc.font("Helvetica").fontSize(6).fillColor("#aaaaaa")
-       .text(`Generado el ${_ts}`, x0, y + 8, { align: "center", width: W });
-
-    doc.end();
+  return generarVoucherHabitacionPDF({
+    numero: 0,
+    puntoVenta: 0,
+    fechaEmision: String(data.checkInDate || ""),
+    ...data,
+  }, config, {
+    title: "RESUMEN DE CUENTA",
+    showVoucherNumber: false,
   });
 }

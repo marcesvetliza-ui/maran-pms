@@ -5,6 +5,11 @@ import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
 import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
+  getAvailableReservationAdvancePayments,
+  isReservationCreditNoteAdjustment,
+  parseReservationInvoiceRef,
+} from "@shared/reservationFolio";
+import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
   CircleCheck, AlertCircle, Loader2, Building2, User,
    Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
@@ -145,31 +150,21 @@ export function getRemainingChargeAmounts(
 }
 
 /**
- * Credit notes retain the original charge and append a tagged negative
- * adjustment. Project those adjustments back onto their source only for
- * operational totals, keeping the original amount visible and auditable.
+ * Credit notes retain the original charge and append a tagged audit adjustment.
+ * That fiscal adjustment must not change the operational amount that can be
+ * billed again after the original invoice has been fully credited.
  */
 export function getEffectiveFolioItemAmounts(
   folio: Pick<PrefacturaFolioData, "roomTotal" | "charges">,
 ): Record<string, number> {
   const amounts: Record<string, number> = { accommodation: folio.roomTotal };
-  const adjustments: Record<string, number> = {};
-
   for (const charge of folio.charges || []) {
     const id = String(charge.id);
     const amount = parseFloat(String(charge.amount)) || 0;
-    if (charge.category === "adjustment") {
-      const sourceId = String(charge.description || "").match(/\[nc:\d+:([^\]]+)\]/)?.[1];
-      if (sourceId) adjustments[sourceId] = (adjustments[sourceId] || 0) + amount;
-      continue;
-    }
+    if (charge.category === "adjustment") continue;
     if (charge.category !== "transfer_out" && charge.category !== "transfer_in") {
       amounts[id] = amount;
     }
-  }
-
-  for (const [sourceId, adjustment] of Object.entries(adjustments)) {
-    amounts[sourceId] = Math.max(0, (amounts[sourceId] || 0) + adjustment);
   }
   return amounts;
 }
@@ -247,12 +242,13 @@ export function getSelectedFolioTotal(items: SelectedFolioItem[]): number {
 export function getSelectedFolioBalance(
   selectedItems: SelectedFolioItem[],
   allBillableItems: SelectedFolioItem[],
-  payments: Array<{ amount: string | number; status?: string }> = [],
+  payments: Array<{ amount: string | number; status?: string; availableAdvanceAmount?: number }> = [],
 ): number {
   const selectedIds = new Set(selectedItems.map((item) => item.id));
   let paymentRemaining = payments
     .filter((payment) => payment.status !== "anulado")
-    .reduce((total, payment) => total + (parseFloat(String(payment.amount)) || 0), 0);
+    .reduce((total, payment) =>
+      total + (payment.availableAdvanceAmount ?? (parseFloat(String(payment.amount)) || 0)), 0);
   let allocatedToSelection = 0;
 
   for (const item of allBillableItems) {
@@ -385,6 +381,59 @@ export function isArgentineNationality(nationality?: string | null, nationalityC
     ["argentina", "argentino", "argentina/a", "argentine"].includes(normalizedNationality);
 }
 
+export function getAdvancePaymentIdsToLink(
+  payments: Array<{
+    id?: string | number | null;
+    amount?: string | number | null;
+    availableAdvanceAmount?: number;
+    invoiceRef?: unknown;
+    invoice_ref?: unknown;
+  }>,
+  amountToApply: number,
+): Array<string | number> {
+  let remaining = amountToApply;
+  const ids: Array<string | number> = [];
+  for (const payment of payments) {
+    const amount = payment.availableAdvanceAmount ?? (Number(payment.amount) || 0);
+    if (amount <= 0.01 || amount > remaining + 0.01) continue;
+    remaining -= amount;
+    // A credited invoice releases value but remains the payment's historical
+    // receipt. Only advances that never had an invoice receive a new link.
+    if (!parseReservationInvoiceRef(payment.invoiceRef ?? payment.invoice_ref) && payment.id != null) {
+      ids.push(payment.id);
+    }
+  }
+  return ids;
+}
+
+export function getCreditedAdvanceReapplications(
+  payments: Array<{
+    id?: string | number | null;
+    amount?: string | number | null;
+    availableAdvanceAmount?: number;
+    invoiceRef?: unknown;
+    invoice_ref?: unknown;
+  }>,
+  amountToApply: number,
+): Array<{ paymentId: string | number; amount: number }> {
+  let remaining = amountToApply;
+  const applications: Array<{ paymentId: string | number; amount: number }> = [];
+  for (const payment of payments) {
+    if (remaining <= 0.009) break;
+    const available = payment.availableAdvanceAmount ?? (Number(payment.amount) || 0);
+    const applied = Math.min(available, remaining);
+    remaining -= applied;
+    if (
+      applied > 0.009 &&
+      payment.id != null &&
+      parseReservationInvoiceRef(payment.invoiceRef ?? payment.invoice_ref)
+    ) {
+      applications.push({ paymentId: payment.id, amount: Number(applied.toFixed(2)) });
+    }
+  }
+  return applications;
+}
+
 let rowIdCounter = 0;
 function newRowId() { return `row_${++rowIdCounter}`; }
 
@@ -484,7 +533,7 @@ export function PrefacturaDialog({
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
 
   // Emitted fiscal invoices for this reservation (for NC flow)
-  const { data: emittedInvoices = [], refetch: refetchEmittedInvoices } = useQuery<any[]>({
+  const { data: emittedInvoices = [], isLoading: invoicesLoading, refetch: refetchEmittedInvoices } = useQuery<any[]>({
     queryKey: ["/api/reservations", String(reservationId), "invoices"],
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservationId}/invoices`);
@@ -537,7 +586,7 @@ export function PrefacturaDialog({
   // balance.  If the user split into multiple rows we leave them untouched and let
   // the saldoRestante indicator surface any mismatch — they can adjust manually.
   useEffect(() => {
-    if (!folio || !open) return;
+    if (!folio || !open || invoicesLoading) return;
 
     if (!folioInitializedRef.current) {
       // ── Initial load ────────────────────────────────────────────────────────
@@ -550,7 +599,7 @@ export function PrefacturaDialog({
       const initialBalance = getSelectedFolioBalance(
         initialItems,
         initialItems,
-        folio.payments || [],
+        getAvailableReservationAdvancePayments(folio.payments || [], emittedInvoices),
       );
       if (initialBalance > 0.01) {
         setPaymentRows([{
@@ -582,7 +631,7 @@ export function PrefacturaDialog({
   // A refetch must never reselect an already invoiced item or overwrite the
   // selection-specific payment allocation shown to the user.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folio?.balance, open]);
+  }, [folio?.balance, open, invoicesLoading, emittedInvoices]);
 
   // When reservation loads: auto-fill client data
   useEffect(() => {
@@ -758,29 +807,28 @@ export function PrefacturaDialog({
   const allBillableItems = folio
     ? getAllBillableFolioItems(folio, itemDescriptions, remainingAmountsByCharge)
     : [];
+  const availableAdvancePayments = getAvailableReservationAdvancePayments(
+    folio?.payments || [],
+    emittedInvoices,
+  );
   const totalSelected = getSelectedFolioTotal(selectedItems);
   const selectedBalance = getSelectedFolioBalance(
     selectedItems,
     allBillableItems,
-    (folio?.payments || []).filter((payment: any) =>
-      payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
-    ),
+    availableAdvancePayments,
   );
   const selectedAlreadyPaid = totalSelected - selectedBalance;
   const selectedSourceIds = selectedItems.map(item => item.id);
-  // Payments are cash received, not a fiscal discount. Once an invoice is
-  // emitted for the selected residual, link the fully applied advances to it
-  // so they stop appearing as "paid without invoice" on the folio.
-  let remainingAdvanceToLink = selectedAlreadyPaid;
-  const selectedAdvancePaymentIds = (folio?.payments || [])
-    .filter((payment: any) => payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed)
-    .filter((payment: any) => {
-      const amount = parseFloat(payment.amount || "0");
-      if (amount <= 0.01 || amount > remainingAdvanceToLink + 0.01) return false;
-      remainingAdvanceToLink -= amount;
-      return true;
-    })
-    .map((payment: any) => payment.id as string);
+  // Uninvoiced advances are linked after emission. Advances released by an NC
+  // keep the original invoice reference as immutable fiscal history.
+  const selectedAdvancePaymentIds = getAdvancePaymentIdsToLink(
+    availableAdvancePayments,
+    selectedAlreadyPaid,
+  );
+  const creditedAdvanceReapplications = getCreditedAdvanceReapplications(
+    availableAdvancePayments,
+    selectedAlreadyPaid,
+  );
 
   const totalPayments = paymentRows.reduce((acc, r) => {
     const net = parseFloat(r.amount) || 0;
@@ -1045,6 +1093,20 @@ export function PrefacturaDialog({
             });
           }
         }
+        for (const reapplication of creditedAdvanceReapplications) {
+          const reapplyRes = await apiRequest(
+            "PATCH",
+            `/api/payments/${reapplication.paymentId}/invoice-reapplication`,
+            { invoiceData, amount: reapplication.amount },
+          );
+          if (!reapplyRes.ok) {
+            toast({
+              title: "Factura emitida con reaplicación pendiente",
+              description: "El comprobante original del pago se conservó, pero su reaplicación requiere revisión manual.",
+              variant: "destructive",
+            });
+          }
+        }
       }
 
       // 2. Register payments only after the invoice has been accepted. The
@@ -1174,8 +1236,9 @@ export function PrefacturaDialog({
         const nextBalance = getSelectedFolioBalance(
           nextItems,
           getAllBillableFolioItems(freshFolio!, itemDescriptions, freshRemainingAmounts),
-          (freshFolio!.payments || []).filter((payment: any) =>
-            !payment.invoiceRef && !payment.invoice_ref && !payment.invoiceLinkFailed
+          getAvailableReservationAdvancePayments(
+            freshFolio!.payments || [],
+            refreshedInvoices.data || [],
           ),
         );
         setSelectedIds(nextSelection);

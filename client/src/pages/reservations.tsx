@@ -2,7 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
-import { getLocalToday, formatDateAR, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
+import {
+  formatReservationInvoiceRef,
+  getAvailableReservationAdvancePayments,
+  getAvailableReservationAdvanceTotal,
+  getNetReservationInvoicedTotal,
+  isReservationCreditNoteAdjustment,
+  parseReservationInvoiceRef,
+} from "@shared/reservationFolio";
 import {
   CalendarCheck,
   CalendarRange,
@@ -2785,7 +2793,9 @@ function ReservationDetailDialog({
     adjustment: "Ajuste",
   };
 
-  const consumptionCharges = charges?.filter((c) => c.category !== "payment") || [];
+  const consumptionCharges = charges?.filter((c) =>
+    c.category !== "payment" && !isReservationCreditNoteAdjustment(c)
+  ) || [];
   const activeConsumptionCharges = consumptionCharges.filter((c) => (c as any).status !== "anulado");
   const totalConsumptions = activeConsumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   const totalPayments = payments?.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
@@ -2795,12 +2805,9 @@ function ReservationDetailDialog({
   const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
-  const totalInvoiced = (folioInvoices || [])
-    .filter((invoice: any) => ["emitida", "parcial"].includes(invoice.estado || "emitida"))
-    .reduce((sum: number, invoice: any) => sum + parseFloat(invoice.montoTotal ?? invoice.monto_total ?? "0"), 0);
-  const paidPendingInvoice = (payments || [])
-    .filter((payment: any) => payment.status !== "anulado" && !payment.invoiceRef && !payment.invoice_ref)
-    .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount || "0"), 0);
+  const totalInvoiced = getNetReservationInvoicedTotal(folioInvoices || []);
+  const availableAdvancePayments = getAvailableReservationAdvancePayments(payments || [], folioInvoices || []);
+  const paidPendingInvoice = getAvailableReservationAdvanceTotal(payments || [], folioInvoices || []);
   const pendingCollection = Math.max(0, totalToPay - totalPayments);
   const pendingBilling = Math.max(0, totalToPay - totalInvoiced);
 
@@ -4009,9 +4016,9 @@ function ReservationDetailDialog({
                 {payments?.map((payment) => {
                   const isAnulado = (payment as any).status === "anulado";
                   const linkFailed = !!(payment as any).invoiceLinkFailed;
-                  const invoiceRef = (() => { try { return (payment as any).invoiceRef ? JSON.parse((payment as any).invoiceRef) : null; } catch { return null; } })();
+                  const invoiceRef = parseReservationInvoiceRef((payment as any).invoiceRef ?? (payment as any).invoice_ref);
                   const invoiceBadgeText = invoiceRef && !linkFailed
-                    ? `${invoiceRef.tipo_comprobante ?? "FAC"} ${String(invoiceRef.punto_venta ?? "").padStart(4, "0")}-${String(invoiceRef.numero ?? "").padStart(8, "0")}`
+                    ? formatReservationInvoiceRef(invoiceRef)
                     : null;
                   return (
                   <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""} ${linkFailed && !isAnulado ? "bg-orange-50/50 dark:bg-orange-950/10" : ""}`} data-testid={`payment-row-${payment.id}`}>
@@ -4203,7 +4210,7 @@ function ReservationDetailDialog({
                       size="sm"
                       className="w-full"
                       onClick={() => {
-                        const uninvoiced = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef);
+                        const uninvoiced = availableAdvancePayments;
                         if (uninvoiced.length > 0) {
                           setUninvoicedWarningAction("facturar");
                           setShowUninvoicedWarning(true);
@@ -4241,8 +4248,8 @@ function ReservationDetailDialog({
                 const isXferOut = c.category === "transfer_out";
                 const itemType  = isXferIn ? "transfer_in" : isXferOut ? "transfer_out" : "cargo";
                 return {
-                  sortDate: new Date(c.date || c.createdAt || 0).getTime(),
-                  dateLabel: (() => { const d = new Date(c.date || c.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                  sortDate: folioDateSortValue(c.date || c.createdAt),
+                  dateLabel: formatFolioDateAR(c.date || c.createdAt),
                   type: itemType as "cargo" | "transfer_in" | "transfer_out",
                   label: c.description,
                   amount: parseFloat(c.amount || "0"),
@@ -4251,13 +4258,11 @@ function ReservationDetailDialog({
                 };
               });
               const paymentItems = (payments || []).map((p: any) => {
-                const invRef = (() => { try { return p.invoiceRef ? JSON.parse(p.invoiceRef) : null; } catch { return null; } })();
-                const invBadge = invRef
-                  ? `${invRef.tipo_comprobante ?? "FAC"} ${String(invRef.punto_venta ?? "").padStart(4,"0")}-${String(invRef.numero ?? "").padStart(8,"0")}`
-                  : null;
+                const invRef = parseReservationInvoiceRef(p.invoiceRef ?? p.invoice_ref);
+                const invBadge = formatReservationInvoiceRef(invRef);
                 return {
-                  sortDate: new Date(p.paymentDate || p.date || p.createdAt || 0).getTime(),
-                  dateLabel: (() => { const d = new Date(p.paymentDate || p.date || p.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                  sortDate: folioDateSortValue(p.paymentDate || p.date || p.createdAt),
+                  dateLabel: formatFolioDateAR(p.paymentDate || p.date || p.createdAt),
                   type: "pago" as const,
                   label: p.reference || p.notes || p.paymentMethod || "Pago",
                   invBadge,
@@ -4267,17 +4272,19 @@ function ReservationDetailDialog({
                 };
               });
               const invoiceItems = folioInvoices.map((f: any) => ({
-                sortDate: new Date((f.fecha_emision || "") + "T12:00:00").getTime(),
-                dateLabel: (() => { const d = new Date((f.fecha_emision || "") + "T12:00:00"); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                sortDate: folioDateSortValue(f.fecha_emision),
+                dateLabel: formatFolioDateAR(f.fecha_emision),
                 type: "factura" as const,
                 label: `${f.tipo_comprobante} ${String(f.punto_venta).padStart(4,"0")}-${String(f.numero).padStart(8,"0")} — ${f.cliente_razon_social}`,
-                amount: parseFloat(f.monto_total || "0"),
+                amount: String(f.tipo_comprobante || "").startsWith("NC")
+                  ? -parseFloat(f.monto_total || "0")
+                  : parseFloat(f.monto_total || "0"),
                 isAnulado: f.estado === "anulada",
                 id: `factura-${f.id}`,
               }));
               const voidItems = folioVoidMovements.map((m: any) => ({
-                sortDate: new Date(m.createdAt || 0).getTime(),
-                dateLabel: (() => { const d = new Date(m.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                sortDate: folioDateSortValue(m.createdAt),
+                dateLabel: formatFolioDateAR(m.createdAt),
                 type: "anulacion" as const,
                 label: m.description || "Ajuste por Nota de Crédito",
                 amount: parseFloat(m.amount || "0"),
@@ -4285,8 +4292,8 @@ function ReservationDetailDialog({
                 id: `void-${m.id}`,
               }));
               const ndItems = folioNdMovements.map((m: any) => ({
-                sortDate: new Date(m.createdAt || 0).getTime(),
-                dateLabel: (() => { const d = new Date(m.createdAt || 0); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`; })(),
+                sortDate: folioDateSortValue(m.createdAt),
+                dateLabel: formatFolioDateAR(m.createdAt),
                 type: "nota_debito" as const,
                 label: m.description || "Nota de Débito",
                 ndReceiptCode: (m.receiptType as string | undefined) ?? "ND",
@@ -4454,7 +4461,7 @@ function ReservationDetailDialog({
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
                 onClick={() => {
-                  const uninvoiced = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef);
+                  const uninvoiced = availableAdvancePayments;
                   if (uninvoiced.length > 0) {
                     setUninvoicedWarningAction("checkout");
                     setShowUninvoicedWarning(true);
@@ -4500,7 +4507,7 @@ function ReservationDetailDialog({
               <div className="space-y-2">
                 <p>
                   {(() => {
-                    const count = (payments || []).filter((p: any) => p.status !== "anulado" && !p.invoiceRef).length;
+                    const count = availableAdvancePayments.length;
                     return `${count} anticipo${count !== 1 ? "s" : ""} registrado${count !== 1 ? "s" : ""} sin factura electrónica emitida.`;
                   })()}
                 </p>
@@ -4744,7 +4751,7 @@ function ReservationDetailDialog({
                       </div>
                     )}
                     {activePaymentsForBulk.map((p: any) => {
-                      const invoiceRef = (() => { try { return p.invoiceRef ? JSON.parse(p.invoiceRef) : null; } catch { return null; } })();
+                      const invoiceRef = parseReservationInvoiceRef(p.invoiceRef ?? p.invoice_ref);
                       return (
                         <div key={p.id} className="flex items-center gap-3 p-3">
                           <input
@@ -4765,7 +4772,7 @@ function ReservationDetailDialog({
                               {invoiceRef && (
                                 <Badge variant="secondary" className="text-xs py-0 text-blue-700 border-blue-300 bg-blue-50 dark:bg-blue-950/20">
                                   <FileText className="h-2.5 w-2.5 mr-1" />
-                                  {invoiceRef.tipo_comprobante}
+                                  {formatReservationInvoiceRef(invoiceRef)}
                                 </Badge>
                               )}
                               <span className="text-muted-foreground text-xs">({formatDateAR(p.date)})</span>
@@ -6133,9 +6140,15 @@ export default function ReservationsPage() {
                             <DropdownMenuItem
                               onClick={async () => {
                                 try {
-                                  const res = await fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`, { credentials: "include" });
-                                  const pmts = res.ok ? await res.json() : [];
-                                  const uninvoiced = Array.isArray(pmts) ? pmts.filter((p: any) => p.status !== "anulado" && !p.invoiceRef) : [];
+                                  const [paymentsRes, invoicesRes] = await Promise.all([
+                                    fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`, { credentials: "include" }),
+                                    fetch(`/api/reservations/${reservation.id}/invoices`, { credentials: "include" }),
+                                  ]);
+                                  const pmts = paymentsRes.ok ? await paymentsRes.json() : [];
+                                  const invoices = invoicesRes.ok ? await invoicesRes.json() : [];
+                                  const uninvoiced = Array.isArray(pmts)
+                                    ? getAvailableReservationAdvancePayments(pmts, Array.isArray(invoices) ? invoices : [])
+                                    : [];
                                   if (uninvoiced.length > 0) {
                                     setListCheckoutWarningCount(uninvoiced.length);
                                     setListCheckoutWarningResId(reservation.id);

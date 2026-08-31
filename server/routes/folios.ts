@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { formatReservationInvoiceRef } from "@shared/reservationFolio";
 import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
@@ -481,12 +482,7 @@ export function registerFolioRoutes(app: Express) {
 
       // Build invoice map: folio_movement.sourceId (payment id) -> invoice badge text
       let paymentInvoiceMap: Record<string, string> | undefined;
-      const buildBadge = (invoiceRef: string): string | null => {
-        try {
-          const ref = JSON.parse(invoiceRef);
-          return `${ref.tipo_comprobante ?? "FAC"} ${String(ref.punto_venta ?? "").padStart(4,"0")}-${String(ref.numero ?? "").padStart(8,"0")}`;
-        } catch { return null; }
-      };
+      const buildBadge = (invoiceRef: string): string | null => formatReservationInvoiceRef(invoiceRef);
       if (entityType === "reservation") {
         try {
           const { db } = await import("../db");

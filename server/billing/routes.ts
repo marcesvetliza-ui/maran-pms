@@ -966,10 +966,11 @@ export function registerBillingRoutes(app: Express) {
         const originalAmounts: Record<string, number> = { accommodation: accommodationTotal };
         for (const charge of charges) {
           if (charge.category === "adjustment") {
-            const sourceId = getNotaCreditoAdjustmentSourceId(charge.description);
-            if (sourceId) {
-              originalAmounts[sourceId] = (originalAmounts[sourceId] || 0) + (parseFloat(charge.amount) || 0);
-            }
+            // NC adjustments are audit history. The credit itself restores
+            // fiscal capacity through monto_acreditado/source allocations;
+            // subtracting it here would make the restored charge impossible
+            // to invoice again.
+            continue;
           } else if (charge.category !== "transfer_in" && charge.category !== "transfer_out") {
             originalAmounts[String(charge.id)] = parseFloat(charge.amount) || 0;
           }

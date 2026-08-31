@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 
 const state = vi.hoisted(() => ({
   invoices: [] as any[],
+  charges: [] as any[],
   emitted: [] as any[],
   locked: false,
   waiters: [] as Array<() => void>,
@@ -84,9 +85,7 @@ vi.mock("../db-storage", () => ({
       finalRatePerNight: "0",
       nights: 1,
     })),
-    getCharges: vi.fn(async () => [
-      { id: "charge-1", amount: "100.00", category: "otros" },
-    ]),
+    getCharges: vi.fn(async () => state.charges),
     createAccountMovement: vi.fn(),
     registerCashMovement: vi.fn(),
   },
@@ -157,11 +156,15 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
 
 beforeEach(() => {
   state.invoices = [];
+  state.charges = [
+    { id: "charge-1", amount: "100.00", category: "otros", status: "active" },
+  ];
   state.emitted = [];
   state.locked = false;
   state.waiters = [];
   state.releaseCalls = 0;
 });
+
 
 afterEach(() => {
   if (state.locked) {
@@ -206,5 +209,70 @@ describe("folio invoice source guard", () => {
       });
       expect(state.emitted).toHaveLength(0);
     });
+  });
+
+  it("allows the full charge to be invoiced again after its invoice was fully credited", async () => {
+    state.charges.push({
+      id: "nc-adjustment",
+      amount: "-100.00",
+      category: "adjustment",
+      status: "active",
+      description: "Ajuste por NC NCB 0001-00000002 [nc:2:charge-1]",
+    });
+    // A fully credited original is estado=anulada and is intentionally absent
+    // from the active prior-invoice query.
+    state.invoices = [];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoiceBody()),
+      });
+
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emitted).toHaveLength(1);
+    expect(state.emitted[0].sourceChargeAmounts).toEqual({ "charge-1": 100 });
+  });
+
+  it("allows only the amount restored by a partial credit note to be invoiced again", async () => {
+    state.charges.push({
+      id: "nc-adjustment",
+      amount: "-40.00",
+      category: "adjustment",
+      status: "active",
+      description: "Ajuste por NC NCB 0001-00000002 [nc:2:charge-1]",
+    });
+    state.invoices = [{
+      source_charge_amounts: { "charge-1": 100 },
+      credit_source_charge_amounts: [{ "charge-1": 40 }],
+      monto_total: "100.00",
+      monto_acreditado: "40.00",
+    }];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoiceBody({
+          items: [{
+            descripcion: "Cargo de prueba",
+            cantidad: 1,
+            precioUnitario: 40,
+            alicuotaIva: "21",
+            subtotalNeto: 33.06,
+            subtotal: 40,
+          }],
+          sourceChargeAmounts: { "charge-1": 40 },
+        })),
+      });
+
+      expect(response.status).toBe(201);
+    });
+
+    expect(state.emitted).toHaveLength(1);
+    expect(state.emitted[0].sourceChargeAmounts).toEqual({ "charge-1": 40 });
   });
 });

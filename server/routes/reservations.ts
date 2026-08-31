@@ -14,6 +14,13 @@ import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
+import {
+  getAvailableReservationAdvancePayments,
+  getAvailableReservationAdvanceTotal,
+  getNetReservationInvoicedTotal,
+  getOperationalReservationCharges,
+  isReservationCreditNoteAdjustment,
+} from "@shared/reservationFolio";
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
 import PDFDocument from "pdfkit";
 
@@ -891,7 +898,9 @@ export function registerReservationsRoutes(app: Express) {
 
       const chargesList = await storage.getCharges(req.params.id);
       const paymentsList = await storage.getPayments(req.params.id);
-      const totalCharges = chargesList.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+      const operationalCharges = getOperationalReservationCharges(chargesList);
+      const creditNoteAdjustments = chargesList.filter(isReservationCreditNoteAdjustment);
+      const totalCharges = operationalCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
       const activePayments = paymentsList.filter((p: any) => p.status !== "anulado");
       const totalPayments = activePayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
       const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
@@ -910,7 +919,8 @@ export function registerReservationsRoutes(app: Express) {
         nights: reservation.nights,
         roomRate: reservation.finalRatePerNight,
         roomTotal,
-        charges: chargesList,
+        charges: operationalCharges,
+        fiscalAdjustments: creditNoteAdjustments,
         totalCharges,
         payments: paymentsList,
         totalPayments,
@@ -933,20 +943,25 @@ export function registerReservationsRoutes(app: Express) {
         storage.getPayments(req.params.id),
         getBillingConfig(),
         db.execute(sql`
-          SELECT tipo_comprobante, punto_venta, numero, fecha_emision, monto_total, cae
+          SELECT id, tipo_comprobante, punto_venta, numero, fecha_emision, monto_total,
+                 monto_acreditado, estado, nota_credito_id, cae
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
-            AND estado IN ('emitida','parcial')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','NCA','NCB','NCC','NCT','NCM')
+            AND estado IN ('emitida','parcial','anulada')
           ORDER BY created_at ASC
         `).catch(() => ({ rows: [] })),
       ]);
       const emittedInvoices = (invoicesResult.rows as any[]).map((r: any) => ({
+        id: Number(r.id),
         tipo_comprobante: r.tipo_comprobante as string,
         punto_venta: Number(r.punto_venta),
         numero: Number(r.numero),
         fecha_emision: r.fecha_emision as string,
         monto_total: r.monto_total,
+        monto_acreditado: r.monto_acreditado,
+        estado: r.estado,
+        nota_credito_id: r.nota_credito_id,
         cae: r.cae ?? null,
       }));
 
@@ -963,7 +978,8 @@ export function registerReservationsRoutes(app: Express) {
           );
           voidAdjustments = (movRows.rows as any[]).map((r) => ({
             description: r.description as string,
-            date: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at)).toISOString().split("T")[0],
+            date: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at))
+              .toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
             amount: String(r.amount),
           }));
         }
@@ -972,11 +988,14 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const activePayments = paymentsList.filter((p) => (p as any).status !== "anulado");
+      const operationalCharges = getOperationalReservationCharges(chargesList);
       const roomTotal = parseFloat(reservation.totalRoomAmount || "0");
-      const totalCharges = chargesList.reduce((s, c) => s + parseFloat(c.amount), 0);
+      const totalCharges = operationalCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
       const grandTotal = roomTotal + totalCharges;
       const totalPayments = activePayments.reduce((s, p) => s + parseFloat(p.amount), 0);
       const balance = grandTotal - totalPayments;
+      const netInvoiced = getNetReservationInvoicedTotal(emittedInvoices);
+      const availableAdvance = getAvailableReservationAdvanceTotal(activePayments, emittedInvoices);
 
       const printedAt = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -989,13 +1008,16 @@ export function registerReservationsRoutes(app: Express) {
         nights: reservation.nights ?? 1,
         roomRate: parseFloat(reservation.finalRatePerNight || "0"),
         roomTotal,
-        charges: chargesList.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
+        charges: operationalCharges.map(c => ({ description: c.description, date: c.date, amount: c.amount, category: c.category ?? undefined })),
         payments: activePayments.map(p => ({ date: p.date, method: p.method, amount: p.amount, reference: p.reference, notes: p.notes })),
         adjustments: voidAdjustments.length > 0 ? voidAdjustments : undefined,
         invoices: emittedInvoices.length > 0 ? emittedInvoices : undefined,
         grandTotal,
         totalPayments,
         balance,
+        netInvoiced,
+        availableAdvance,
+        pendingBilling: Math.max(0, grandTotal - netInvoiced),
         printedAt,
       }, config);
 
@@ -1024,7 +1046,7 @@ export function registerReservationsRoutes(app: Express) {
         FROM sales_invoices si
         WHERE si.reserva_id = ${req.params.id}
           AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
-          AND estado IN ('emitida', 'parcial')
+          AND estado IN ('emitida', 'parcial', 'anulada')
         ORDER BY si.created_at DESC
       `);
       res.json(rows.rows);
@@ -2625,6 +2647,79 @@ export function registerReservationsRoutes(app: Express) {
           console.error("[invoice-link] Failed to propagate invoice_ref to group_payment:", propagateErr);
         }
       }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Reutilizar el importe liberado por una NC sin reemplazar el comprobante
+  // original del pago. The nested allocation is idempotent by invoice id.
+  app.patch("/api/payments/:id/invoice-reapplication", requireAuth, async (req, res) => {
+    try {
+      const { invoiceData } = req.body;
+      const amount = Number(req.body.amount);
+      if (!invoiceData?.id || !Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: "invoiceData y amount positivo requeridos" });
+      }
+      const entry = {
+        invoiceId: invoiceData.id,
+        tipoComprobante: invoiceData.tipoComprobante ?? invoiceData.tipo_comprobante,
+        puntoVenta: invoiceData.puntoVenta ?? invoiceData.punto_venta,
+        numero: invoiceData.numero,
+        amount: Number(amount.toFixed(2)),
+      };
+      const paymentResult = await db.execute(sql`
+        SELECT * FROM payments WHERE id = ${req.params.id}
+      `);
+      const payment = paymentResult.rows?.[0] as any;
+      if (!payment) return res.status(404).json({ error: "Pago no encontrado" });
+      if (!payment.invoice_ref) {
+        return res.status(409).json({ error: "El pago no tiene un comprobante original para conservar" });
+      }
+      const originalRef = JSON.parse(payment.invoice_ref);
+      const previousReapplications = Array.isArray(originalRef.reapplications)
+        ? originalRef.reapplications
+        : [];
+      if (previousReapplications.some((item: any) =>
+        Number(item?.invoiceId ?? item?.id) === Number(invoiceData.id))) {
+        return res.json(payment);
+      }
+      const invoiceIds = [
+        Number(originalRef.id),
+        ...previousReapplications.map((item: any) => Number(item?.invoiceId ?? item?.id)),
+      ].filter((id) => Number.isInteger(id) && id > 0);
+      if (invoiceIds.length === 0) {
+        return res.status(409).json({ error: "No se pudo identificar el comprobante original del pago" });
+      }
+      const invoiceResult = await db.execute(sql`
+        SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
+        FROM sales_invoices
+        WHERE id = ANY(${invoiceIds}::int[])
+      `);
+      const available = getAvailableReservationAdvancePayments(
+        [payment],
+        invoiceResult.rows as any[],
+      )[0]?.availableAdvanceAmount || 0;
+      if (amount > available + 0.009) {
+        return res.status(409).json({
+          error: `El pago sólo tiene $${available.toFixed(2)} disponible para reaplicar`,
+        });
+      }
+      const updated = await db.execute(sql`
+        UPDATE payments
+        SET invoice_ref = jsonb_set(
+          invoice_ref::jsonb,
+          '{reapplications}',
+          COALESCE(invoice_ref::jsonb->'reapplications', '[]'::jsonb) || ${JSON.stringify(entry)}::jsonb
+        )::text
+        WHERE id = ${req.params.id}
+          AND invoice_ref IS NOT NULL
+          AND NOT COALESCE(invoice_ref::jsonb->'reapplications', '[]'::jsonb)
+            @> ${JSON.stringify([{ invoiceId: invoiceData.id }])}::jsonb
+        RETURNING *
+      `);
+      if (updated.rows?.[0]) return res.json(updated.rows[0]);
+      return res.status(409).json({ error: "No se pudo registrar la reaplicación del pago" });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

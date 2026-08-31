@@ -1,0 +1,175 @@
+const SALE_INVOICE_TYPES = new Set(["FA", "FB", "FC", "FT", "FM"]);
+
+export type ReservationChargeLike = {
+  category?: string | null;
+  description?: string | null;
+  status?: string | null;
+};
+
+export type ReservationInvoiceLike = {
+  id?: string | number | null;
+  tipo_comprobante?: string | null;
+  tipoComprobante?: string | null;
+  punto_venta?: string | number | null;
+  puntoVenta?: string | number | null;
+  numero?: string | number | null;
+  monto_total?: string | number | null;
+  montoTotal?: string | number | null;
+  monto_acreditado?: string | number | null;
+  montoAcreditado?: string | number | null;
+  estado?: string | null;
+};
+
+export type ReservationPaymentLike = {
+  id?: string | number | null;
+  amount?: string | number | null;
+  status?: string | null;
+  invoiceRef?: unknown;
+  invoice_ref?: unknown;
+  invoiceLinkFailed?: boolean | null;
+  invoice_link_failed?: boolean | null;
+};
+
+export type AvailableReservationAdvancePayment<T extends ReservationPaymentLike = ReservationPaymentLike> = T & {
+  availableAdvanceAmount: number;
+  releasedFromCreditedInvoice: boolean;
+};
+
+export function parseReservationInvoiceRef(value: unknown): Record<string, any> | null {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, any>;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function invoiceValue(invoice: ReservationInvoiceLike | Record<string, any>, snake: string, camel: string) {
+  const record = invoice as Record<string, any>;
+  return record?.[snake] ?? record?.[camel];
+}
+
+function invoiceKey(invoice: ReservationInvoiceLike | Record<string, any>): string | null {
+  const id = invoiceValue(invoice, "id", "id") ?? (invoice as any).invoiceId;
+  if (id !== null && id !== undefined && String(id).trim()) return `id:${String(id)}`;
+
+  const type = invoiceValue(invoice, "tipo_comprobante", "tipoComprobante");
+  const point = invoiceValue(invoice, "punto_venta", "puntoVenta");
+  const number = invoiceValue(invoice, "numero", "numero");
+  if (!type || point === null || point === undefined || number === null || number === undefined) return null;
+  return `voucher:${String(type)}:${Number(point)}:${Number(number)}`;
+}
+
+export function formatReservationInvoiceRef(value: unknown): string | null {
+  const ref = parseReservationInvoiceRef(value);
+  if (!ref) return null;
+  const type = invoiceValue(ref, "tipo_comprobante", "tipoComprobante");
+  const point = invoiceValue(ref, "punto_venta", "puntoVenta");
+  const number = invoiceValue(ref, "numero", "numero");
+  if (!type || !Number.isFinite(Number(point)) || !Number.isFinite(Number(number))) return null;
+  return `${String(type)} ${String(Number(point)).padStart(4, "0")}-${String(Number(number)).padStart(8, "0")}`;
+}
+
+export function isReservationCreditNoteAdjustment(charge: ReservationChargeLike): boolean {
+  return charge.category === "adjustment" && /\[nc:\d+:[^\]]+\]/.test(String(charge.description || ""));
+}
+
+export function getOperationalReservationCharges<T extends ReservationChargeLike>(charges: T[] = []): T[] {
+  return charges.filter(charge =>
+    charge.status !== "anulado" && !isReservationCreditNoteAdjustment(charge)
+  );
+}
+
+export function getNetReservationInvoicedTotal(invoices: ReservationInvoiceLike[] = []): number {
+  return invoices.reduce((sum, invoice) => {
+    const type = String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante") || "");
+    if (!SALE_INVOICE_TYPES.has(type)) return sum;
+    const total = Number(invoiceValue(invoice, "monto_total", "montoTotal") || 0);
+    const credited = Number(invoiceValue(invoice, "monto_acreditado", "montoAcreditado") || 0);
+    if (!Number.isFinite(total) || total <= 0) return sum;
+    return sum + Math.max(0, total - (Number.isFinite(credited) ? credited : 0));
+  }, 0);
+}
+
+function invoiceReleaseRatio(invoice: ReservationInvoiceLike): number {
+  const type = String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante") || "");
+  if (!SALE_INVOICE_TYPES.has(type)) return 0;
+  const total = Number(invoiceValue(invoice, "monto_total", "montoTotal") || 0);
+  const credited = Number(invoiceValue(invoice, "monto_acreditado", "montoAcreditado") || 0);
+  if (!(total > 0)) return 0;
+  if (invoice.estado === "anulada") return 1;
+  return Math.max(0, Math.min(1, (Number.isFinite(credited) ? credited : 0) / total));
+}
+
+/**
+ * A payment remains historically linked to its original invoice. When that
+ * invoice is offset by a credit note, the matching proportion of the payment
+ * becomes an available advance without deleting or rewriting that history.
+ */
+export function getAvailableReservationAdvancePayments<T extends ReservationPaymentLike>(
+  payments: T[] = [],
+  invoices: ReservationInvoiceLike[] = [],
+): AvailableReservationAdvancePayment<T>[] {
+  const releaseRatioByKey = new Map<string, number>();
+  for (const invoice of invoices) {
+    const releaseRatio = invoiceReleaseRatio(invoice);
+    const idKey = invoiceKey(invoice);
+    if (idKey) releaseRatioByKey.set(idKey, releaseRatio);
+    const type = invoiceValue(invoice, "tipo_comprobante", "tipoComprobante");
+    const point = invoiceValue(invoice, "punto_venta", "puntoVenta");
+    const number = invoiceValue(invoice, "numero", "numero");
+    if (type && point !== null && point !== undefined && number !== null && number !== undefined) {
+      releaseRatioByKey.set(`voucher:${String(type)}:${Number(point)}:${Number(number)}`, releaseRatio);
+    }
+  }
+
+  return payments.flatMap<AvailableReservationAdvancePayment<T>>(payment => {
+    if (payment.status === "anulado" || payment.invoiceLinkFailed || payment.invoice_link_failed) return [];
+    const paymentAmount = Number(payment.amount) || 0;
+    if (paymentAmount <= 0) return [];
+    const ref = parseReservationInvoiceRef(payment.invoiceRef ?? payment.invoice_ref);
+    if (!ref) {
+      return [{
+        ...payment,
+        availableAdvanceAmount: paymentAmount,
+        releasedFromCreditedInvoice: false,
+      } as AvailableReservationAdvancePayment<T>];
+    }
+    const key = invoiceKey(ref);
+    let releaseRatio = key ? releaseRatioByKey.get(key) : undefined;
+    const type = invoiceValue(ref, "tipo_comprobante", "tipoComprobante");
+    const point = invoiceValue(ref, "punto_venta", "puntoVenta");
+    const number = invoiceValue(ref, "numero", "numero");
+    releaseRatio ??= releaseRatioByKey.get(`voucher:${String(type)}:${Number(point)}:${Number(number)}`);
+    const reapplications = Array.isArray(ref.reapplications) ? ref.reapplications : [];
+    const amountStillApplied = reapplications.reduce((total, reapplication) => {
+      if (!reapplication || typeof reapplication !== "object") return total;
+      const reappliedAmount = Number((reapplication as any).amount) || 0;
+      const reappliedKey = invoiceKey(reapplication as ReservationInvoiceLike);
+      const targetReleaseRatio = reappliedKey ? (releaseRatioByKey.get(reappliedKey) || 0) : 0;
+      return total + reappliedAmount * (1 - targetReleaseRatio);
+    }, 0);
+    const availableAdvanceAmount = Number(Math.max(
+      0,
+      paymentAmount * (releaseRatio || 0) - amountStillApplied,
+    ).toFixed(2));
+    return availableAdvanceAmount > 0.009
+      ? [{
+        ...payment,
+        availableAdvanceAmount,
+        releasedFromCreditedInvoice: true,
+      } as AvailableReservationAdvancePayment<T>]
+      : [];
+  });
+}
+
+export function getAvailableReservationAdvanceTotal(
+  payments: ReservationPaymentLike[] = [],
+  invoices: ReservationInvoiceLike[] = [],
+): number {
+  return getAvailableReservationAdvancePayments(payments, invoices)
+    .reduce((sum, payment) => sum + payment.availableAdvanceAmount, 0);
+}

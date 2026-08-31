@@ -201,6 +201,85 @@ function buildInvoiceConflictFetchMock() {
   return mock;
 }
 
+function buildPartiallyCreditedAdvanceFetchMock() {
+  let reissued = false;
+  const originalInvoice = {
+    id: 700,
+    tipo_comprobante: "FB",
+    punto_venta: 1,
+    numero: 86,
+    monto_total: "100.00",
+    monto_acreditado: "40.00",
+    estado: "parcial",
+    source_charge_amounts: { "charge-partial": 100 },
+    credit_source_charge_amounts: [{ "charge-partial": 40 }],
+  };
+  const mock = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    const strUrl = url.toString();
+    const method = options?.method?.toUpperCase() ?? "GET";
+
+    if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
+      return new Response(JSON.stringify({
+        ...FAKE_FOLIO,
+        charges: [
+          { id: "charge-partial", description: "Cargo parcial", amount: "100.00", category: "otros", date: "2026-08-31" },
+          { id: "nc-adjustment", description: "Ajuste por NC [nc:701:charge-partial]", amount: "-40.00", category: "adjustment", date: "2026-08-31" },
+        ],
+        payments: [{
+          id: "payment-original",
+          amount: "100.00",
+          method: "transferencia",
+          status: "active",
+          invoiceRef: JSON.stringify({ id: 700, tipoComprobante: "FB", puntoVenta: 1, numero: 86 }),
+        }],
+        totalPayments: 100,
+        balance: 0,
+      }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/invoices`)) {
+      return new Response(JSON.stringify(reissued
+        ? [originalInvoice, {
+          id: 800,
+          tipo_comprobante: "FB",
+          punto_venta: 1,
+          numero: 87,
+          monto_total: "40.00",
+          monto_acreditado: "0.00",
+          estado: "emitida",
+          source_charge_amounts: { "charge-partial": 40 },
+          credit_source_charge_amounts: [],
+        }]
+        : [originalInvoice]), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes("/api/billing/config")) {
+      return new Response(JSON.stringify({ puntoVenta: 1, arcaAmbiente: "ficticio" }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes("/api/billing/invoices") && method === "POST") {
+      reissued = true;
+      return new Response(JSON.stringify({
+        id: 800,
+        tipoComprobante: "FB",
+        puntoVenta: 1,
+        numero: 87,
+        cae: "CAE-TEST-800",
+        montoTotal: "40.00",
+      }), {
+        status: 201, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify([]), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  });
+  return mock;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Wrapper({ children }: { children: React.ReactNode }) {
@@ -355,5 +434,50 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
       String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
     );
     expect(calledPaymentPost).toBe(false);
+  });
+
+  it("reuses a partially released advance without overwriting its original invoice reference", async () => {
+    const partialFetchMock = buildPartiallyCreditedAdvanceFetchMock();
+    vi.stubGlobal("fetch", partialFetchMock);
+    const user = userEvent.setup();
+    renderDialog({
+      mode: "billing",
+      reservation: CONFLICT_RESERVATION,
+    });
+
+    const submitButton = await screen.findByTestId("button-registrar-emitir");
+    await waitFor(() => expect(submitButton).toBeEnabled());
+    await user.click(submitButton);
+    await waitFor(() => {
+      expect(partialFetchMock.mock.calls.some(([url, options]) =>
+        String(url).includes("/api/billing/invoices") &&
+        String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
+      )).toBe(true);
+    });
+
+    const invoicePost = partialFetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/billing/invoices") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
+    );
+    const invoiceBody = JSON.parse(String((invoicePost?.[1] as RequestInit).body));
+    expect(invoiceBody.sourceChargeAmounts).toEqual({ "charge-partial": 40 });
+    expect(partialFetchMock.mock.calls.some(([url, options]) =>
+      String(url).includes("/api/payments/payment-original/invoice") &&
+      !String(url).includes("/invoice-reapplication") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "PATCH"
+    )).toBe(false);
+    const reapplicationCall = partialFetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/payments/payment-original/invoice-reapplication") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "PATCH"
+    );
+    expect(reapplicationCall).toBeDefined();
+    expect(JSON.parse(String((reapplicationCall?.[1] as RequestInit).body))).toMatchObject({
+      amount: 40,
+      invoiceData: { id: 800, tipoComprobante: "FB", numero: 87 },
+    });
+    expect(partialFetchMock.mock.calls.some(([url, options]) =>
+      String(url).includes("/api/payments") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"
+    )).toBe(false);
   });
 });

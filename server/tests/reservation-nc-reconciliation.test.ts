@@ -295,6 +295,90 @@ describe("reservation credit-note reconciliation recovery", () => {
 });
 
 describe("reservation credit notes from Administración", () => {
+  it("allows the exact restored accommodation amount to be re-invoiced after a total NC", async () => {
+    const exactInvoice = {
+      ...originalInvoice,
+      monto_total: "43000.00",
+      source_charge_ids: JSON.stringify(["accommodation"]),
+      source_charge_amounts: JSON.stringify({ accommodation: 43000 }),
+      items: JSON.stringify([{ descripcion: "Alojamiento", subtotal: 43000, alicuotaIva: "21" }]),
+    };
+    state.responses = [
+      { rows: [exactInvoice] },
+      { rows: [exactInvoice] },
+      { rows: [] },
+      { rows: [] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const creditResponse = await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          motivo: "Corrección total",
+          monto: 43000,
+          items: [{ sourceId: "accommodation", amount: 43000 }],
+        }),
+      });
+      expect(creditResponse.status).toBe(201);
+
+      const { storage } = await import("../db-storage");
+      vi.mocked(storage.getReservation).mockResolvedValue({
+        id: "reservation-1",
+        totalRoomAmount: "143000.00",
+        finalRatePerNight: "143000.00",
+        nights: 1,
+      } as any);
+      vi.mocked(storage.getCharges).mockResolvedValue([
+        { id: "parking", amount: "2500.00", category: "otros", status: "active" },
+        {
+          id: "nc-adjustment",
+          amount: "-43000.00",
+          category: "adjustment",
+          status: "active",
+          description: "Ajuste por NC NCB 0001-00000015 [nc:90:accommodation]",
+        },
+      ] as any);
+      state.responses = [{ rows: [] }];
+
+      const reissueResponse = await fetch(`${baseUrl}/api/billing/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipoComprobante: "FB",
+          cliente: {
+            razonSocial: "Consumidor Final",
+            condicionIva: "Consumidor Final",
+          },
+          items: [{
+            descripcion: "Alojamiento",
+            cantidad: 1,
+            precioUnitario: 43000,
+            alicuotaIva: "21",
+            subtotalNeto: 35537.19,
+            subtotal: 43000,
+          }],
+          reservaId: "reservation-1",
+          sourceChargeIds: ["accommodation"],
+          sourceChargeAmounts: { accommodation: 43000 },
+        }),
+      });
+      expect(reissueResponse.status).toBe(201);
+    });
+
+    expect(state.emittedCalls).toHaveLength(2);
+    expect(state.emittedCalls[0]).toMatchObject({
+      tipoComprobante: "NCB",
+      sourceChargeAmounts: { accommodation: 43000 },
+    });
+    expect(state.emittedCalls[1]).toMatchObject({
+      tipoComprobante: "FB",
+      sourceChargeAmounts: { accommodation: 43000 },
+    });
+    const { storage } = await import("../db-storage");
+    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+  });
+
   it("emits only the selected charge and preserves receiver, point of sale, and payment method", async () => {
     state.responses = [
       { rows: [multiChargeInvoice] },
@@ -335,6 +419,8 @@ describe("reservation credit notes from Administración", () => {
     expect(state.emittedCalls[0].items).toEqual([
       expect.objectContaining({ descripcion: "Cena", precioUnitario: 50, subtotal: 50 }),
     ]);
+    const { storage } = await import("../db-storage");
+    expect(storage.registerCashMovement).not.toHaveBeenCalled();
   });
 
   it("uses only the residual of a charge on a second partial NC", async () => {

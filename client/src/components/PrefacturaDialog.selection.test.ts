@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   getAllBillableFolioItems,
+  getAdvancePaymentIdsToLink,
+  getCreditedAdvanceReapplications,
   getEffectiveFolioItemAmounts,
   getInvoicedAmountsByCharge,
   getRemainingChargeAmounts,
@@ -130,7 +132,7 @@ describe("PrefacturaDialog selected folio projection", () => {
     expect(amountToCollect).toBe(171500);
   });
 
-  it("projects a credit-note adjustment onto its original charge without changing its history", () => {
+  it("keeps a credit-note audit adjustment out of the operational charge amount", () => {
     const adjustedFolio = {
       roomTotal: 120,
       roomNumber: "203",
@@ -141,14 +143,14 @@ describe("PrefacturaDialog selected folio projection", () => {
       ],
     };
 
-    expect(getEffectiveFolioItemAmounts(adjustedFolio)).toMatchObject({ accommodation: 120, restaurant: 65 });
+    expect(getEffectiveFolioItemAmounts(adjustedFolio)).toMatchObject({ accommodation: 120, restaurant: 100 });
     expect(getAllBillableFolioItems(adjustedFolio)).toEqual([
       expect.objectContaining({ id: "accommodation", amount: 120 }),
-      expect.objectContaining({ id: "restaurant", originalAmount: 100, amount: 65 }),
+      expect.objectContaining({ id: "restaurant", originalAmount: 100, amount: 100 }),
     ]);
   });
 
-  it("supports a total NC after a prior partial NC by exposing only the remaining charge", () => {
+  it("restores the whole operational charge for refactoring after a total NC", () => {
     const adjustedFolio = {
       roomTotal: 0,
       roomNumber: "203",
@@ -160,8 +162,28 @@ describe("PrefacturaDialog selected folio projection", () => {
     };
 
     const items = getSelectedFolioItems(new Set(["parking"]), adjustedFolio);
-    expect(items).toEqual([expect.objectContaining({ id: "parking", originalAmount: 80, amount: 50 })]);
-    expect(getSelectedFolioTotal(items)).toBe(50);
+    expect(items).toEqual([expect.objectContaining({ id: "parking", originalAmount: 80, amount: 80 })]);
+    expect(getSelectedFolioTotal(items)).toBe(80);
+  });
+
+  it("keeps the original invoice reference when a credited payment funds a re-invoice", () => {
+    const payments = [
+      {
+        id: "credited-payment",
+        amount: "100",
+        availableAdvanceAmount: 40,
+        invoiceRef: JSON.stringify({ id: 12, tipoComprobante: "FB", puntoVenta: 1, numero: 86 }),
+      },
+      {
+        id: "never-invoiced-payment",
+        amount: "20",
+        availableAdvanceAmount: 20,
+      },
+    ];
+    expect(getAdvancePaymentIdsToLink(payments, 60)).toEqual(["never-invoiced-payment"]);
+    expect(getCreditedAdvanceReapplications(payments, 60)).toEqual([
+      { paymentId: "credited-payment", amount: 40 },
+    ]);
   });
 
   it("defaults to an electronic receipt for Consumidor Final", () => {

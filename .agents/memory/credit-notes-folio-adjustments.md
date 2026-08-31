@@ -9,6 +9,18 @@ Reservation credit notes must retain the original charge and add a separately au
 
 **How to apply:** Require a complete, explicit charge mapping before automating a reservation NC. Preserve fiscal receiver, document type, point of sale, sale condition, and payment method from the source invoice. Reject ambiguous historical mappings and serialize NCs with other reservation invoice operations.
 
+The tagged negative Folio adjustment created by a reservation NC is audit history only: it must not reduce the operational source amount or its future invoice capacity. Restored capacity comes from the original invoice's credited source allocation.
+
+**Why:** If both the negative adjustment and the credited invoice allocation reduce the same source, a total NC leaves the UI showing a restored charge while the server rejects its re-invoice as having zero capacity.
+
+**How to apply:** Operational totals and invoice validation ignore tagged NC adjustments. Remaining fiscal capacity is original operational amount minus each sale invoice's net, source-level allocation after its credit notes.
+
+The payment's original invoice reference is immutable history. A credit note releases a proportional amount of that payment as reusable advance, but a later re-invoice must not overwrite the original reference.
+
+**Why:** Overwriting the payment link makes the original receipt disappear from the Folio and prevents explaining the invoice → NC → re-invoice sequence.
+
+**How to apply:** For a partial NC, available advance is payment amount × credited/original invoice total; a fully credited invoice releases the full payment. Link only never-invoiced advances to a new invoice; record later uses as nested reapplications so they consume availability without replacing the original receipt.
+
 For fiscal NCs, persist a local authorization-pending record before contacting ARCA. Before retrying a pending authorization, query ARCA by the persisted voucher type, point of sale, and number; reconcile a recovered CAE, reauthorize only after an explicit “not found,” and leave any ambiguous response pending for finance review.
 
 **Why:** A process or network failure can occur after ARCA authorizes a voucher but before the local record is updated. Reissuing in that state can leave an authorized fiscal NC without its Folio correction or risk a duplicate authorization.
