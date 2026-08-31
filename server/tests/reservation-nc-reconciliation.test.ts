@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   responses: [] as Array<{ rows: any[] }>,
   transactionExecutions: 0,
   emittedCalls: [] as any[],
+  emitirError: null as string | null,
 }));
 
 vi.mock("../db", () => ({
@@ -36,6 +37,7 @@ vi.mock("@shared/schema", () => ({
 vi.mock("../billing/invoiceService", () => ({
   emitirFactura: vi.fn(async (data: any) => {
     state.emittedCalls.push(data);
+    if (state.emitirError) throw new Error(state.emitirError);
     const sourceChargeAmounts = data.sourceChargeAmounts ?? { "charge-1": 100 };
     const amount = Object.values(sourceChargeAmounts).reduce(
       (sum: number, value) => sum + Number(value),
@@ -154,6 +156,7 @@ beforeEach(() => {
   state.responses = [];
   state.transactionExecutions = 0;
   state.emittedCalls = [];
+  state.emitirError = null;
 });
 
 afterEach(() => {
@@ -234,6 +237,60 @@ describe("reservation credit-note reconciliation recovery", () => {
 
     expect(state.emittedCalls).toHaveLength(0);
     expect(state.transactionExecutions).toBe(3);
+  });
+
+  it("returns the persisted reconciliation error in the pending queue", async () => {
+    const exactError = "ARCA rechazó la NC: comprobante duplicado";
+    state.responses = [{
+      rows: [{
+        ...pendingCredit("autorizacion_pendiente"),
+        reconciliation_error: exactError,
+      }],
+    }];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/credit-note-reconciliations/pending`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual([expect.objectContaining({
+        id: 90,
+        reconciliation_error: exactError,
+        reconciliationError: exactError,
+      })]);
+    });
+  });
+
+  it("returns the exact ARCA error when retrying the persisted NC", async () => {
+    const exactError = "ARCA rechazó la NC: fecha fuera de período";
+    state.emitirError = exactError;
+    state.responses = [
+      { rows: [{ id: 90, original_invoice_id: 12 }] },
+      { rows: [pendingCredit("autorizacion_pendiente")] },
+      { rows: [originalInvoice] },
+      { rows: [pendingCredit("autorizacion_pendiente")] },
+      { rows: [originalInvoice] },
+      { rows: [] }, // persist the latest reconciliation_error
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/credit-notes/90/reconcile`, {
+        method: "POST",
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: exactError,
+        reconciliation_error: exactError,
+        reconciliationError: exactError,
+        pendingCreditNoteId: 90,
+        reconciliationStatus: "pendiente",
+      });
+    });
+
+    expect(state.emittedCalls).toHaveLength(1);
+    expect(state.emittedCalls[0]).toMatchObject({
+      recoveryInvoiceId: 90,
+      recoverableCreditNote: true,
+    });
+    expect(state.transactionExecutions).toBe(0);
   });
 });
 

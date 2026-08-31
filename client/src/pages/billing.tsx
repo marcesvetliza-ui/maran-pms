@@ -56,6 +56,10 @@ function padNum(n: number | undefined, len: number) {
   return String(n ?? 0).padStart(len, "0");
 }
 
+function getReconciliationError(invoice: any): string | null {
+  return invoice?.reconciliation_error ?? invoice?.reconciliationError ?? null;
+}
+
 const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
 ];
@@ -197,11 +201,16 @@ export default function BillingPage() {
         description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
       });
     },
-    onError: (error: any) => toast({
-      title: "La NC sigue pendiente",
-      description: parseApiError(error),
-      variant: "destructive",
-    }),
+    onError: async (error: any) => {
+      // The server persists reconciliation_error on every failed attempt.
+      // Refresh the queue so the operator sees the latest ARCA message,
+      // rather than the one from the previous attempt.
+      await queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] });
+      toast({
+        title: parseApiError(error),
+        variant: "destructive",
+      });
+    },
   });
 
   const { data: config } = useQuery<any>({ queryKey: ["/api/billing/config"] });
@@ -314,8 +323,8 @@ export default function BillingPage() {
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
                         </div>
-                        {nc.reconciliation_error && (
-                          <div className="text-amber-800 dark:text-amber-200 mt-1">{nc.reconciliation_error}</div>
+                        {getReconciliationError(nc) && (
+                          <div className="text-amber-800 dark:text-amber-200 mt-1">{getReconciliationError(nc)}</div>
                         )}
                       </div>
                       <Button
@@ -410,6 +419,9 @@ export default function BillingPage() {
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
                                     </Badge>
                                     <div className="text-[10px] text-amber-700 dark:text-amber-300">No emitir otra NC</div>
+                                    {getReconciliationError(f) && (
+                                      <div className="text-[10px] text-amber-700 dark:text-amber-300">{getReconciliationError(f)}</div>
+                                    )}
                                   </div>
                                 ) : f.estado === "emitida" || f.estado === "parcial" ? (
                                   <Badge variant="outline" className="text-xs text-green-700 border-green-400 bg-green-50 dark:bg-green-950/20"><CheckCircle2 className="w-3 h-3 mr-1" />Emitida</Badge>

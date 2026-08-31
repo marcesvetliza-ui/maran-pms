@@ -134,6 +134,15 @@ function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
   return invoice?.[snakeCase] ?? invoice?.[camelCase];
 }
 
+function exposeReconciliationError(invoice: any) {
+  const reconciliationError = invoiceValue(invoice, "reconciliation_error", "reconciliationError") ?? null;
+  return {
+    ...invoice,
+    reconciliation_error: reconciliationError,
+    reconciliationError,
+  };
+}
+
 function getCreditSourceAmounts(invoice: any): Record<string, number> | null {
   const value = parseStoredJson(invoiceValue(invoice, "source_charge_amounts", "sourceChargeAmounts"));
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -595,7 +604,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY si.created_at DESC
         LIMIT 200
       `);
-      res.json(rows.rows);
+      res.json(rows.rows.map((row: any) => exposeReconciliationError(row)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -622,7 +631,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
         LIMIT 100
       `);
-      res.json(rows.rows);
+      res.json(rows.rows.map((row: any) => exposeReconciliationError(row)));
     } catch (error: any) {
       res.status(500).json({ error: error.message || "No se pudieron cargar las conciliaciones pendientes" });
     }
@@ -697,7 +706,11 @@ export function registerBillingRoutes(app: Express) {
         `).catch(() => undefined);
       }
       res.status(409).json({
-        error: `La NC sigue pendiente. No se emitió una segunda Nota de Crédito: ${message}`,
+        // Keep the persisted ARCA/reconciliation message as the primary error
+        // so retry clients can show exactly what ARCA returned.
+        error: message,
+        reconciliation_error: message,
+        reconciliationError: message,
         pendingCreditNoteId: ncId,
         reconciliationStatus: "pendiente",
       });
@@ -796,7 +809,10 @@ export function registerBillingRoutes(app: Express) {
             )
           : buildUnavailableGroupInvoiceComposition(invoice.monto_total)
         : undefined;
-      res.json({ ...invoice, ...(composition ? { groupComposition: composition } : {}) });
+      res.json({
+        ...exposeReconciliationError(invoice),
+        ...(composition ? { groupComposition: composition } : {}),
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1514,7 +1530,9 @@ export function registerBillingRoutes(app: Express) {
               WHERE id = ${Number(pendingNc.id)}
             `).catch(() => undefined);
             return res.status(409).json({
-              error: `Hay una Nota de Crédito pendiente de conciliación. No se emitió una segunda NC: ${message}`,
+              error: message,
+              reconciliation_error: message,
+              reconciliationError: message,
               pendingCreditNoteId: Number(pendingNc.id),
               reconciliationStatus: "pendiente",
             });
@@ -1729,7 +1747,9 @@ export function registerBillingRoutes(app: Express) {
             WHERE id = ${Number((nc as any).id)}
           `).catch(() => undefined);
           return res.status(409).json({
-            error: `La Nota de Crédito fue autorizada, pero quedó pendiente de conciliación. No emitas otra: ${message}`,
+            error: message,
+            reconciliation_error: message,
+            reconciliationError: message,
             pendingCreditNoteId: Number((nc as any).id),
             reconciliationStatus: "pendiente",
           });

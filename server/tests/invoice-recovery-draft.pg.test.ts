@@ -137,6 +137,36 @@ runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito A
         reconciliation_error: retryError,
       }]);
 
+      mocks.feCompConsultar.mockResolvedValueOnce({
+        cae: "71234567890123",
+        caeFechaVto: new Date("2026-09-10T12:00:00Z"),
+      });
+      const recovered = await emitirFactura({
+        ...input,
+        recoverableCreditNote: false,
+        recoveryInvoiceId: draftId,
+      });
+      expect(recovered).toMatchObject({
+        id: draftId,
+        estado: "emitida",
+        reconciliationStatus: "pendiente",
+        reconciliationError: null,
+      });
+
+      const afterRetrySuccess = await pool.query(
+        `SELECT id, estado, reconciliation_status, reconciliation_error, cae
+         FROM sales_invoices
+         WHERE id = $1`,
+        [draftId],
+      );
+      expect(afterRetrySuccess.rows).toEqual([{
+        id: draftId,
+        estado: "emitida",
+        reconciliation_status: "pendiente",
+        reconciliation_error: null,
+        cae: "71234567890123",
+      }]);
+
       const sameDraftCount = await pool.query(
         `SELECT COUNT(*)::int AS count
          FROM sales_invoices
