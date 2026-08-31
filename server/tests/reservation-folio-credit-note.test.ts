@@ -1,5 +1,6 @@
 import express from "express";
 import type { Server } from "node:http";
+import { inflateSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -91,21 +92,69 @@ vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../billing/invoiceService", () => ({ emitirFactura: vi.fn() }));
-vi.mock("../billing/invoicePdf", () => ({
-  generarResumenCuentaPDF: vi.fn(async (payload: any) => {
-    state.pdfPayloads.push(payload);
-    return Buffer.from("pdf");
-  }),
-}));
+vi.mock("../billing/invoicePdf", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../billing/invoicePdf")>();
+  return {
+    ...actual,
+    generarResumenCuentaPDF: vi.fn(async (payload: any, config: any) => {
+      state.pdfPayloads.push(payload);
+      return actual.generarResumenCuentaPDF(payload, config);
+    }),
+  };
+});
 vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => ({ razonSocial: "Maran" })),
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 vi.mock("../email-service", () => ({ sendCheckoutEmail: vi.fn(), sendConfirmationEmail: vi.fn() }));
 vi.mock("../utils/assetPath", () => ({ assetPath: (value: string) => value }));
-vi.mock("pdfkit", () => ({ default: class PDFDocument {} }));
 
 const { registerReservationsRoutes } = await import("../routes/reservations");
+
+/**
+ * PDFKit writes page content as Flate-compressed PDF streams. Decode those
+ * streams directly with Node so this regression test does not require
+ * pdftotext (or any other system utility) in CI.
+ */
+function extractPdfText(pdf: Buffer): string {
+  const source = pdf.toString("latin1");
+  const chunks: string[] = [];
+
+  for (const match of source.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+    let content: string;
+    try {
+      content = inflateSync(Buffer.from(match[1], "latin1")).toString("latin1");
+    } catch {
+      continue;
+    }
+
+    // Rebuild each text operation independently. PDFKit can split a word
+    // into multiple hexadecimal strings inside one TJ array for kerning.
+    for (const operation of content.matchAll(/\[([\s\S]*?)\]\s*TJ|\(((?:\\.|[^\\()])*)\)\s*Tj/g)) {
+      const operands = operation[1] ?? `(${operation[2]})`;
+      const operationChunks: string[] = [];
+      for (const textMatch of operands.matchAll(/<([0-9a-f]+)>|\(((?:\\.|[^\\()])*)\)/gi)) {
+        if (textMatch[1] !== undefined) {
+          operationChunks.push(Buffer.from(textMatch[1], "hex").toString("latin1"));
+        } else {
+          operationChunks.push(textMatch[2].replace(/\\([\\()nrtbf])/g, (_match, escaped: string) => ({
+            "\\": "\\",
+            "(": "(",
+            ")": ")",
+            n: "\n",
+            r: "\r",
+            t: "\t",
+            b: "\b",
+            f: "\f",
+          })[escaped] ?? escaped));
+        }
+      }
+      chunks.push(operationChunks.join(""));
+    }
+  }
+
+  return chunks.join(" ");
+}
 
 async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
   const app = express();
@@ -156,6 +205,15 @@ describe("reservation folio after a total credit note", () => {
       const pdfResponse = await fetch(`${baseUrl}/api/reservations/reservation-1/folio/pdf`);
       expect(pdfResponse.status).toBe(200);
       expect(pdfResponse.headers.get("content-type")).toContain("application/pdf");
+
+      const pdfText = extractPdfText(Buffer.from(await pdfResponse.arrayBuffer()));
+      expect(pdfText).toContain("FB 0001-00000086");
+      expect(pdfText).toContain("NCB 0001-00000087");
+      expect(pdfText).toContain("31/08/2026");
+      expect(pdfText).toContain("$145.500,00");
+      expect(pdfText).toContain("$102.500,00");
+      expect(pdfText).toContain("Facturado neto: $0,00");
+      expect(pdfText).toContain("Anticipo disponible: $43.000,00");
     });
 
     expect(state.pdfPayloads).toHaveLength(1);
