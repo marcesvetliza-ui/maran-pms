@@ -36,6 +36,7 @@ export interface NewInvoiceData {
   groupId?: string;
   /** Parent group collection being invoiced, if any. */
   groupPaymentId?: string;
+  groupPaymentIntent?: Record<string, any>;
   /** SPA folio claimed by this invoice at issuance time. */
   spaAccountId?: string;
   restaurantOrderId?: string;
@@ -195,7 +196,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
   const recoverableCreditNote = Boolean(data.recoverableCreditNote || data.recoveryInvoiceId);
-  const recoverableBeforeAuthorization = recoverableCreditNote || Boolean(data.spaAccountId);
+  const recoverableBeforeAuthorization = recoverableCreditNote || Boolean(data.spaAccountId) || Boolean(data.groupPaymentIntent);
 
   const puntoVenta =
     data.puntoVentaOverride ??
@@ -235,6 +236,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       reservaId: data.reservaId || null,
       groupId: data.groupId || null,
       groupPaymentId: data.groupPaymentId || null,
+      groupPaymentIntent: data.groupPaymentIntent || null,
       spaAccountId: data.spaAccountId || null,
       restaurantOrderId: data.restaurantOrderId || null,
       folioId: data.folioId || null,
@@ -407,6 +409,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     reservaId: data.reservaId || null,
     groupId: data.groupId || null,
     groupPaymentId: data.groupPaymentId || null,
+    groupPaymentIntent: data.groupPaymentIntent || null,
     spaAccountId: data.spaAccountId || null,
     restaurantOrderId: data.restaurantOrderId || null,
     folioId: data.folioId || null,

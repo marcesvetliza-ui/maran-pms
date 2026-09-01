@@ -39,6 +39,27 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+function redistributeNonRetentionRows(rows: any[], targetGross: number): any[] {
+  const retentionTotal = rows.reduce((sum, row) => sum + Number(row.retention?.monto || 0), 0);
+  const targetCents = Math.round((targetGross - retentionTotal) * 100);
+  const eligible = rows.map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.method !== "retencion" && Number(row.amount || 0) > 0);
+  if (targetCents < 0 || eligible.length === 0) return rows.map((row) => ({ ...row, amount: "-1" }));
+  const weightTotal = eligible.reduce((sum, entry) => sum + Number(entry.row.amount || 0), 0);
+  let allocated = 0;
+  const centsByIndex = new Map<number, number>();
+  eligible.forEach((entry, position) => {
+    const cents = position === eligible.length - 1
+      ? targetCents - allocated
+      : Math.floor(targetCents * Number(entry.row.amount || 0) / weightTotal);
+    centsByIndex.set(entry.index, cents);
+    allocated += cents;
+  });
+  return rows.map((row, index) =>
+    centsByIndex.has(index) ? { ...row, amount: (centsByIndex.get(index)! / 100).toFixed(2) } : row
+  );
+}
+
 function fDate(d: string | undefined | null) {
   if (!d) return "—";
   const dt = new Date(d + "T12:00:00");
@@ -587,7 +608,7 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -608,6 +629,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   groupPaymentId?: string;
   /** Group owning groupPaymentId. */
   groupPaymentGroupId?: string;
+  /** Uncommitted group collection. It is persisted only after ARCA confirms the invoice. */
+  groupPaymentDraft?: { endpoint: string; body: Record<string, any> };
   /** Server snapshot shown before group emission and used for partial projections. */
   groupInvoiceSources?: GroupInvoiceSourcePreview[];
   /** Parent collection destinations, independently auditable from service concepts. */
@@ -882,6 +905,25 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   };
   const totalPreview = round2(brutos.bruto21 + brutos.bruto105 + brutos.exento + brutos.ng);
 
+  const finalizedGroupPaymentBody = (invoice: any) => {
+    if (!groupPaymentDraft) return {};
+    const finalItems = Array.isArray(invoice.items) ? invoice.items : items;
+    const concepts = finalItems
+      .map((item: any) => ({
+        description: String(item.descripcion || item.description || "").trim(),
+        amount: Number(item.subtotal ?? (Number(item.precioUnitario || 0) * Number(item.cantidad || 1))),
+      }))
+      .filter((item: any) => item.description && item.amount > 0);
+    const originalConceptTotal = (groupPaymentDraft.body.concepts || [])
+      .reduce((sum: number, concept: any) => sum + Number(concept.amount || 0), 0);
+    const finalConceptTotal = concepts.reduce((sum: number, concept: any) => sum + concept.amount, 0);
+    const delta = round2(finalConceptTotal - originalConceptTotal);
+    const originalGross = (groupPaymentDraft.body.paymentRows || [])
+      .reduce((sum: number, row: any) => sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
+    const paymentRows = redistributeNonRetentionRows(groupPaymentDraft.body.paymentRows || [], round2(originalGross + delta));
+    return { ...groupPaymentDraft.body, concepts, paymentRows };
+  };
+
   const mutation = useMutation({
     mutationFn: (body: any) => apiRequest("POST", "/api/billing/invoices", body),
     onSuccess: async (res: any) => {
@@ -980,6 +1022,29 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           setLinkPending(false);
           setLinkError(true);
         }
+      } else if (groupPaymentDraft && groupPaymentGroupId) {
+        setEmittedInvoiceData(data);
+        setLinkPending(true);
+        try {
+          const linkRes = await apiRequest("POST", groupPaymentDraft.endpoint, {
+            ...finalizedGroupPaymentBody(data),
+            invoiceData: data,
+          });
+          setLinkPending(false);
+          if (linkRes.ok) {
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "master-folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "invoice-snapshot"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+            onSuccess?.(data);
+            onClose(); resetForm();
+          } else {
+            setLinkError(true);
+          }
+        } catch {
+          setLinkPending(false);
+          setLinkError(true);
+        }
       } else if (groupPaymentId && groupPaymentGroupId) {
         setEmittedInvoiceData(data);
         setLinkPending(true);
@@ -1064,7 +1129,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   async function handleRetryLink() {
-    if (!emittedInvoiceData || (!paymentId && !spaAccountId && !groupId && !(groupPaymentId && groupPaymentGroupId))) return;
+    if (!emittedInvoiceData || (!paymentId && !spaAccountId && !groupId && !(groupPaymentId && groupPaymentGroupId) && !(groupPaymentDraft && groupPaymentGroupId))) return;
     setLinkRetrying(true);
     try {
       if (paymentId) {
@@ -1089,6 +1154,22 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           onClose(); resetForm();
         } else {
           toast({ title: "Reintento fallido", description: "No se pudo vincular la factura al folio SPA.", variant: "destructive" });
+        }
+      } else if (groupPaymentDraft && groupPaymentGroupId) {
+        const linkRes = await apiRequest("POST", groupPaymentDraft.endpoint, {
+          ...finalizedGroupPaymentBody(emittedInvoiceData),
+          invoiceData: emittedInvoiceData,
+        });
+        if (linkRes.ok) {
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "master-folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupPaymentGroupId, "invoice-snapshot"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+          toast({ title: "Vínculo exitoso", description: "La factura y el cobro grupal quedaron confirmados." });
+          onSuccess?.(emittedInvoiceData);
+          onClose(); resetForm();
+        } else {
+          toast({ title: "Reintento fallido", description: "No se pudo confirmar el cobro. Caja no fue modificada.", variant: "destructive" });
         }
       } else if (groupPaymentId && groupPaymentGroupId) {
         const linkRes = await apiRequest(
@@ -1186,9 +1267,26 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   }
 
   function handleConfirmEmit(saveRecipientProfile = false) {
+    const resolvedGroupId = groupId || groupPaymentGroupId;
+    if (groupPaymentDraft) {
+      const originalConceptTotal = (groupPaymentDraft.body.concepts || [])
+        .reduce((sum: number, concept: any) => sum + Number(concept.amount || 0), 0);
+      const originalGross = (groupPaymentDraft.body.paymentRows || [])
+        .reduce((sum: number, row: any) => sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
+      const retentionTotal = (groupPaymentDraft.body.paymentRows || [])
+        .reduce((sum: number, row: any) => sum + Number(row.retention?.monto || 0), 0);
+      const targetGross = round2(originalGross + grossItemsTotal(items) - originalConceptTotal);
+      if (targetGross <= retentionTotal || targetGross <= 0) {
+        toast({
+          title: "Revisá el desglose del cobro",
+          description: "El nuevo total no deja un importe positivo para los medios de cobro elegidos. Ajustá las retenciones o el comprobante antes de emitir.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
     setShowConfirm(false);
     saveRecipientOnEmitRef.current = saveRecipientProfile;
-    const resolvedGroupId = groupId || groupPaymentGroupId;
     const groupSourceAmounts = resolvedGroupId
       ? allocateGroupInvoiceSources(groupInvoiceSources || [], grossItemsTotal(items))
       : undefined;
@@ -1200,6 +1298,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,
         ...(groupPaymentId ? { groupPaymentId } : {}),
+        ...(groupPaymentDraft ? { groupPaymentIntent: groupPaymentDraft } : {}),
         sourceChargeIds: Object.keys(groupSourceAmounts || {}),
         sourceChargeAmounts: groupSourceAmounts,
         ...(groupFolioContext ? { folioContext: groupFolioContext } : {}),
@@ -1292,13 +1391,15 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             </div>
 
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button
-                variant="outline"
-                onClick={() => { onClose(); resetForm(); }}
-                data-testid="btn-cerrar-sin-vincular"
-              >
-                Cerrar sin vincular
-              </Button>
+              {!groupPaymentDraft && (
+                <Button
+                  variant="outline"
+                  onClick={() => { onClose(); resetForm(); }}
+                  data-testid="btn-cerrar-sin-vincular"
+                >
+                  Cerrar sin vincular
+                </Button>
+              )}
               <Button
                 onClick={handleRetryLink}
                 disabled={linkRetrying}

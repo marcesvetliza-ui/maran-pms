@@ -1692,6 +1692,8 @@ export class DatabaseStorage implements IStorage {
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;
     receiverDetails?: Record<string, string | undefined> | null;
+    invoiceData?: Record<string, any> | null;
+    invoiceTotal?: number | null;
   }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }> {
     assertFinancialSchemaReady();
     const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -1717,6 +1719,69 @@ export class DatabaseStorage implements IStorage {
         SELECT id FROM groups WHERE id = ${input.groupId} FOR UPDATE
       `);
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+
+      let linkedInvoice: any = null;
+      if (input.invoiceData) {
+        const invoiceId = Number(input.invoiceData.id);
+        if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+          throw invalid("La factura confirmada no tiene un identificador válido.");
+        }
+        const invoiceRows = await tx.execute(sql`
+          SELECT id, group_id, group_payment_id, estado, tipo_comprobante, monto_total,
+                 cliente_razon_social, cliente_cuit, cliente_dni
+          FROM sales_invoices
+          WHERE id = ${invoiceId}
+          FOR UPDATE
+        `);
+        linkedInvoice = invoiceRows.rows[0] as any;
+        if (!linkedInvoice || linkedInvoice.group_id !== input.groupId || linkedInvoice.estado !== "emitida") {
+          throw Object.assign(new Error("La factura confirmada no pertenece a este grupo o todavía no fue emitida."), { statusCode: 409 });
+        }
+        const receiptToInvoiceType: Record<string, string> = {
+          factura_a: "FA",
+          factura_b: "FB",
+          factura_mipyme_a: "FM",
+          factura_t: "FT",
+        };
+        const expectedInvoiceType = receiptToInvoiceType[String(input.receiptType || "").toLowerCase()];
+        if (!expectedInvoiceType || linkedInvoice.tipo_comprobante !== expectedInvoiceType) {
+          throw invalid("El tipo de la factura confirmada no coincide con el comprobante elegido.");
+        }
+        if (input.invoiceTotal != null
+          && Math.abs(Number(linkedInvoice.monto_total || 0) - Number(input.invoiceTotal || 0)) > 0.02) {
+          throw invalid("El total de la factura confirmada no coincide con los conceptos del cobro.");
+        }
+        const normalizeDocument = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+        const normalizeName = (value: unknown) => String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
+        const receiver = input.receiverDetails || {};
+        if (receiver.cuit && normalizeDocument(linkedInvoice.cliente_cuit) !== normalizeDocument(receiver.cuit)) {
+          throw invalid("El CUIT de la factura no coincide con el receptor del cobro.");
+        }
+        if (!receiver.cuit && receiver.dni && normalizeDocument(linkedInvoice.cliente_dni) !== normalizeDocument(receiver.dni)) {
+          throw invalid("El DNI de la factura no coincide con el receptor del cobro.");
+        }
+        if (!receiver.cuit && !receiver.dni && receiver.razonSocial
+          && normalizeName(linkedInvoice.cliente_razon_social) !== normalizeName(receiver.razonSocial)) {
+          throw invalid("El receptor de la factura no coincide con el receptor del cobro.");
+        }
+        if (linkedInvoice.group_payment_id) {
+          const [existingPayment] = await tx.select()
+            .from(groupPayments)
+            .where(and(
+              eq(groupPayments.id, String(linkedInvoice.group_payment_id)),
+              eq(groupPayments.groupId, input.groupId),
+              eq(groupPayments.invoiceId, invoiceId),
+            ))
+            .limit(1);
+          if (!existingPayment) {
+            throw Object.assign(new Error("La factura ya fue reclamada por otro cobro grupal."), { statusCode: 409 });
+          }
+          const reservationPayments = await tx.select()
+            .from(payments)
+            .where(eq(payments.groupPaymentId, existingPayment.id));
+          return { groupPayment: existingPayment, reservationPayments };
+        }
+      }
 
       const rows = input.paymentRows.filter((row) => cents(row.amount) > 0);
       // A retención (IIBB/Ganancias) withheld by the payer settles part of the
@@ -2033,7 +2098,23 @@ export class DatabaseStorage implements IStorage {
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
+        invoiceId: linkedInvoice ? Number(linkedInvoice.id) : null,
+        invoiceRef: linkedInvoice ? JSON.stringify(input.invoiceData) : null,
       } as any).returning();
+
+      if (linkedInvoice) {
+        const [claimedInvoice] = await tx.update(salesInvoices)
+          .set({ groupPaymentId: groupPayment.id })
+          .where(and(
+            eq(salesInvoices.id, Number(linkedInvoice.id)),
+            eq(salesInvoices.groupId, input.groupId),
+            sql`${salesInvoices.groupPaymentId} IS NULL`,
+          ))
+          .returning({ id: salesInvoices.id });
+        if (!claimedInvoice) {
+          throw Object.assign(new Error("La factura fue reclamada por otra operación. Actualice la pantalla."), { statusCode: 409 });
+        }
+      }
 
       // Caja is part of the same economic event as the parent receipt. Do not
       // commit a group payment and attempt this later: a failed movement would

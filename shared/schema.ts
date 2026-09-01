@@ -2443,6 +2443,9 @@ export const salesInvoices = pgTable("sales_invoices", {
   // A group payment can fund at most one fiscal document. Kept separately
   // from group_payments.invoice_id so the claim exists before the UI link.
   groupPaymentId: varchar("group_payment_id"),
+  // Durable collection intent captured before ARCA. It allows a confirmed
+  // group invoice to finish linking even if the browser reloads after CAE.
+  groupPaymentIntent: jsonb("group_payment_intent"),
   // SPA account that owns this invoice. Persisted at issuance so the later
   // account link cannot attach an unrelated same-value invoice.
   spaAccountId: varchar("spa_account_id"),

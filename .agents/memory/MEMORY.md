@@ -56,3 +56,4 @@
 - [GitHub Actions npm install failures](github-actions-npm-exit-handler-bug.md) — root cause was package-lock.json resolved URLs pointing at Replit's internal package-firewall host, unreachable from GitHub runners; fixed by rewriting to registry.npmjs.org.
 - [SPA circuit resources](spa-circuit-resources.md) — circuits reserve linked Sauna/Hidromasaje slots under one parent turn/folio; availability changes must lock every occupied cabin.
 - [SPA settlement safety](spa-settlement-safety.md) — room charges never hit Caja; SPA invoices claim their folio before ARCA and only the final link writes Caja/payment.
+- [Fiscal group collection intents](fiscal-group-collection-intents.md) — persist intent before ARCA; only an emitted, atomically claimed invoice may create the group payment and Caja movement.

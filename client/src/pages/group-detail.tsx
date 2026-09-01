@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -856,7 +856,6 @@ export default function GroupDetailPage() {
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
   const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
-  const [groupPaymentEmitirComprobante, setGroupPaymentEmitirComprobante] = useState(false);
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
   const [groupPaymentDestino, setGroupPaymentDestino] = useState<"distribute" | "master">("distribute");
@@ -879,7 +878,7 @@ export default function GroupDetailPage() {
   const [groupPaymentPvNum, setGroupPaymentPvNum] = useState("");
   const [groupPaymentItems, setGroupPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
-  const [pendingGroupPaymentId, setPendingGroupPaymentId] = useState<string>("");
+  const [pendingGroupPaymentDraft, setPendingGroupPaymentDraft] = useState<{ endpoint: string; body: Record<string, any> } | null>(null);
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
   const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
   const [showCancelledRes, setShowCancelledRes] = useState(false);
@@ -891,7 +890,6 @@ export default function GroupDetailPage() {
   const resetGroupPaymentDialogFields = () => {
     setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
     setGroupPaymentReceiptType("sin_comprobante");
-    setGroupPaymentEmitirComprobante(false);
     setGroupPaymentDistribution("equal");
     setGroupPaymentCloseAll(false);
     setGroupPaymentDestino("distribute");
@@ -946,7 +944,6 @@ export default function GroupDetailPage() {
   // payment with destino="master" (Aplicar al Folio Maestro) requires a factura. It always
   // reads its data from the groupPayment* state below — there is a single entry point.
   const [showMasterFacturaDialog, setShowMasterFacturaDialog] = useState(false);
-  const [pendingMasterPaymentId, setPendingMasterPaymentId] = useState<string>("");
   // NC dialog: invoice DB id from the payment's invoiceRef
   const [ncInvoiceId, setNcInvoiceId] = useState<number | null>(null);
   // Delete group charge confirmation
@@ -1041,6 +1038,77 @@ export default function GroupDetailPage() {
       return res.json();
     },
   });
+  const { data: pendingFiscalCollections = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "pending-fiscal-collections"],
+    enabled: !!groupId,
+  });
+  const recoveringFiscalInvoices = useRef(new Set<number>());
+
+  useEffect(() => {
+    for (const pending of pendingFiscalCollections) {
+      const invoiceId = Number(pending?.id);
+      const intent = pending?.intent;
+      if (!invoiceId || recoveringFiscalInvoices.current.has(invoiceId) || !intent?.endpoint || !intent?.body) continue;
+      const allowedEndpoints = new Set([
+        `/api/groups/${groupId}/payment`,
+        `/api/groups/${groupId}/master-payment`,
+      ]);
+      if (!allowedEndpoints.has(String(intent.endpoint))) continue;
+      recoveringFiscalInvoices.current.add(invoiceId);
+      const finalConcepts = (Array.isArray(pending.items) ? pending.items : [])
+        .map((item: any) => ({
+          description: String(item.descripcion || item.description || "").trim(),
+          amount: Number(item.subtotal ?? (Number(item.precioUnitario || 0) * Number(item.cantidad || 1))),
+        }))
+        .filter((item: any) => item.description && item.amount > 0);
+      const oldTotal = (intent.body.concepts || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
+      const newTotal = finalConcepts.reduce((sum: number, item: any) => sum + item.amount, 0);
+      const sourceRows = intent.body.paymentRows || [];
+      const originalGross = sourceRows.reduce((sum: number, row: any) =>
+        sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
+      const targetGrossCents = Math.round((originalGross + newTotal - oldTotal) * 100);
+      const retentionCents = Math.round(sourceRows.reduce((sum: number, row: any) =>
+        sum + Number(row.retention?.monto || 0), 0) * 100);
+      if (targetGrossCents <= retentionCents || targetGrossCents <= 0) {
+        recoveringFiscalInvoices.current.delete(invoiceId);
+        toast({
+          title: "Cobro fiscal pendiente",
+          description: "El comprobante emitido requiere revisar sus retenciones antes de poder registrar el cobro.",
+          variant: "destructive",
+        });
+        continue;
+      }
+      const eligible = sourceRows.map((row: any, index: number) => ({ row, index }))
+        .filter(({ row }: any) => row.method !== "retencion" && Number(row.amount || 0) > 0);
+      const weightTotal = eligible.reduce((sum: number, entry: any) => sum + Number(entry.row.amount || 0), 0);
+      let allocated = 0;
+      const centsByIndex = new Map<number, number>();
+      eligible.forEach((entry: any, position: number) => {
+        const cents = position === eligible.length - 1
+          ? targetGrossCents - retentionCents - allocated
+          : Math.floor((targetGrossCents - retentionCents) * Number(entry.row.amount || 0) / weightTotal);
+        centsByIndex.set(entry.index, cents);
+        allocated += cents;
+      });
+      const paymentRows = sourceRows.map((row: any, index: number) =>
+        centsByIndex.has(index) ? { ...row, amount: (centsByIndex.get(index)! / 100).toFixed(2) } : row
+      );
+      apiRequest("POST", intent.endpoint, {
+        ...intent.body,
+        paymentRows,
+        concepts: finalConcepts,
+        invoiceData: { id: invoiceId },
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-fiscal-collections"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+        toast({ title: "Cobro fiscal recuperado", description: "Se completó un cobro confirmado que había quedado pendiente." });
+      }).catch(() => {
+        recoveringFiscalInvoices.current.delete(invoiceId);
+      });
+    }
+  }, [pendingFiscalCollections, groupId, queryClient, toast]);
 
   const refreshGroupBillingState = async () => {
     await Promise.all([
@@ -1267,8 +1335,7 @@ export default function GroupDetailPage() {
     },
   });
 
-  const groupPaymentMutation = useMutation({
-    mutationFn: async () => {
+  const buildGroupPaymentDraft = () => {
       const validRows = groupPaymentRows.filter(r => parseFloat(r.amount || "0") > 0);
       if (!groupPaymentReceptorLocked) {
         throw new Error("Seleccioná y confirmá el receptor antes de registrar el pago.");
@@ -1308,16 +1375,16 @@ export default function GroupDetailPage() {
         domicilio: groupPaymentDomicilio || undefined,
       };
       if (groupPaymentDestino === "master") {
-        return apiRequest("POST", `/api/groups/${groupId}/master-payment`, {
+        return { endpoint: `/api/groups/${groupId}/master-payment`, body: {
           paymentRows: rowsPayload,
           receiptType: groupPaymentReceiptType === "sin_comprobante" ? "none" : groupPaymentReceiptType,
           billingEntityType: groupPaymentCcEntityType,
           billingEntityId: groupPaymentCcEntityId || undefined,
           receiverDetails,
           concepts,
-        });
+        }};
       }
-      return apiRequest("POST", `/api/groups/${groupId}/payment`, {
+      return { endpoint: `/api/groups/${groupId}/payment`, body: {
         paymentRows: rowsPayload,
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
@@ -1326,7 +1393,13 @@ export default function GroupDetailPage() {
         billingEntityId: groupPaymentCcEntityId || undefined,
         receiverDetails,
         concepts,
-      });
+      }};
+  };
+
+  const groupPaymentMutation = useMutation({
+    mutationFn: async () => {
+      const draft = buildGroupPaymentDraft();
+      return apiRequest("POST", draft.endpoint, draft.body);
     },
     onSuccess: async (res) => {
       const data = await res.json().catch(() => ({}));
@@ -1341,21 +1414,7 @@ export default function GroupDetailPage() {
       // the snapshot that happened to be cached while the payment was entered.
       await refreshGroupBillingState();
 
-      const needsFactura = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
       const isMaster = groupPaymentDestino === "master";
-
-      if (needsFactura) {
-        // Close the payment dialog and open the invoice dialog with the payment ID
-        setShowGroupPaymentDialog(false);
-        if (isMaster) {
-          setPendingMasterPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
-          setShowMasterFacturaDialog(true);
-        } else {
-          setPendingGroupPaymentId(data.groupPaymentId ? String(data.groupPaymentId) : "");
-          setShowGroupFacturaDialog(true);
-        }
-        return;
-      }
 
       if (groupPaymentCloseAll) {
         if (data.balanceDiff && Math.abs(data.balanceDiff) > 0.01) {
@@ -3337,7 +3396,6 @@ export default function GroupDetailPage() {
                 const available = availableGroupInvoiceTotal(billableSources);
                 const operationalBalance = Number(freshSnapshot?.financial?.operationalBalance ?? 0);
                 resetGroupPaymentDialogFields();
-                setGroupPaymentEmitirComprobante(true);
                 setGroupPaymentReceiptType("factura_b");
                 setGroupPaymentRows([{
                   method: "cash",
@@ -3353,7 +3411,7 @@ export default function GroupDetailPage() {
                   setGroupPaymentCcEntityId("");
                   setGroupPaymentCcEntityType("company");
                 }
-                setPendingGroupPaymentId("");
+                setPendingGroupPaymentDraft(null);
                 if (operationalBalance > 0.009) {
                   setGroupFacturaFromResumen(false);
                   setGroupPaymentDestino("distribute");
@@ -3903,32 +3961,45 @@ export default function GroupDetailPage() {
                   <Label className="text-sm font-semibold">2. Comprobante</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <button type="button"
-                      onClick={() => { setGroupPaymentEmitirComprobante(false); setGroupPaymentReceiptType("sin_comprobante"); }}
-                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${!groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                      onClick={() => {
+                        setGroupPaymentReceiptType("sin_comprobante");
+                        const advanceAmount = Number(groupInvoiceSnapshot?.financial?.operationalBalance ?? priorBalance);
+                        setGroupPaymentRows((rows) => rows.map((row, index) =>
+                          index === 0 ? { ...row, amount: advanceAmount > 0 ? String(advanceAmount) : "" } : { ...row, amount: "" }
+                        ));
+                      }}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${!isFiscal ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                       data-testid="button-group-sin-comprobante">
                       Anticipo
                     </button>
                     <button type="button"
                       onClick={() => {
-                        setGroupPaymentEmitirComprobante(true);
                         if (groupPaymentReceiptType === "sin_comprobante") {
                           setGroupPaymentReceiptType(condicionSupportsFA ? "factura_a" : "factura_b");
                         }
                         // Fiscal lines always originate in the immutable invoice
                         // snapshot, rather than from the amount being collected.
                         const sources = (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => Number(source.available) > 0);
+                        const sourceTotal = sources.reduce((sum: number, source: any) => sum + Number(source.available || 0), 0);
+                        const required = requiredGroupInvoiceCollection(
+                          sourceTotal,
+                          Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0),
+                        );
+                        setGroupPaymentRows((rows) => rows.map((row, index) =>
+                          index === 0 ? { ...row, amount: required > 0 ? String(required) : "" } : { ...row, amount: "" }
+                        ));
                         setGroupPaymentItems(gItemsFromSimple(sources.map((source: any) => ({
                           descripcion: `${source.destination} — ${source.concept}`,
                           precioUnitario: Number(source.available),
                         }))));
                       }}
-                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${groupPaymentEmitirComprobante ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${isFiscal ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                       data-testid="button-group-con-comprobante">
                       Emitir comprobante
                     </button>
                   </div>
 
-                  {groupPaymentEmitirComprobante && (
+                  {isFiscal && (
                     <div className="space-y-1">
                       <Select value={groupPaymentReceiptType} onValueChange={setGroupPaymentReceiptType}>
                         <SelectTrigger data-testid="select-group-payment-receipt">
@@ -4297,7 +4368,7 @@ export default function GroupDetailPage() {
                   <Label className="text-sm font-semibold flex items-center gap-1.5"><Receipt className="h-4 w-4" /> Resumen antes de emitir</Label>
                   <div className="text-sm space-y-1">
                     <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Receptor</span><span className="font-medium text-right">{groupPaymentRazonSocial || "—"}</span></div>
-                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{groupPaymentEmitirComprobante ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Anticipo"}</span></div>
+                    <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{isFiscal ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Anticipo"}</span></div>
                     {isFiscal && posElectronicos.length > 0 && (
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Punto de Venta</span><span className="font-medium">{groupPaymentPvNum ? `PV ${groupPaymentPvNum.padStart(4, "0")}` : "Por defecto"}</span></div>
                     )}
@@ -4342,10 +4413,23 @@ export default function GroupDetailPage() {
                 // Documentation of already-collected accommodation must not
                 // manufacture a second, zero-value cash collection.
                 if (groupPaymentIsFiscal && groupPaymentRowsTotal <= 0 && groupPaymentFiscalAvailable > 0) {
-                  setPendingGroupPaymentId("");
+                  setPendingGroupPaymentDraft(null);
                   setGroupFacturaFromResumen(true);
                   setShowGroupPaymentDialog(false);
                   setShowGroupFacturaDialog(true);
+                  return;
+                }
+                if (groupPaymentIsFiscal) {
+                  try {
+                    const draft = buildGroupPaymentDraft();
+                    setPendingGroupPaymentDraft(draft);
+                    setGroupFacturaFromResumen(false);
+                    setShowGroupPaymentDialog(false);
+                    if (groupPaymentDestino === "master") setShowMasterFacturaDialog(true);
+                    else setShowGroupFacturaDialog(true);
+                  } catch (error: any) {
+                    toast({ title: "No se puede continuar", description: error?.message || "Revisá los datos del cobro.", variant: "destructive" });
+                  }
                   return;
                 }
                 groupPaymentMutation.mutate();
@@ -4365,7 +4449,7 @@ export default function GroupDetailPage() {
           open={showGroupFacturaDialog}
           onClose={() => {
             setShowGroupFacturaDialog(false);
-            setPendingGroupPaymentId("");
+            setPendingGroupPaymentDraft(null);
             setGroupFacturaFromResumen(false);
             resetGroupPaymentDialogFields();
           }}
@@ -4391,8 +4475,8 @@ export default function GroupDetailPage() {
               precioUnitario: it.precioUnitario * it.cantidad,
             })),
           }}
-          groupPaymentId={pendingGroupPaymentId || undefined}
-          groupPaymentGroupId={pendingGroupPaymentId ? groupId : undefined}
+          groupPaymentDraft={pendingGroupPaymentDraft || undefined}
+          groupPaymentGroupId={pendingGroupPaymentDraft ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
           groupInvoiceSources={groupPaymentDestino === "master" && masterFolio?.config === "accommodation"
             ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
@@ -4410,7 +4494,7 @@ export default function GroupDetailPage() {
             await refreshGroupBillingState();
             setShowGroupFacturaDialog(false);
             setGroupFacturaFromResumen(false);
-            setPendingGroupPaymentId("");
+            setPendingGroupPaymentDraft(null);
             resetGroupPaymentDialogFields();
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoices"] });
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });
@@ -4445,7 +4529,7 @@ export default function GroupDetailPage() {
             open={showMasterFacturaDialog}
             onClose={() => {
               setShowMasterFacturaDialog(false);
-              setPendingMasterPaymentId("");
+              setPendingGroupPaymentDraft(null);
               resetGroupPaymentDialogFields();
             }}
             config={billingConfig}
@@ -4465,8 +4549,8 @@ export default function GroupDetailPage() {
                 precioUnitario: it.precioUnitario * it.cantidad,
               })),
             }}
-            groupPaymentId={pendingMasterPaymentId || undefined}
-            groupPaymentGroupId={pendingMasterPaymentId ? groupId : undefined}
+            groupPaymentDraft={pendingGroupPaymentDraft || undefined}
+            groupPaymentGroupId={pendingGroupPaymentDraft ? groupId : undefined}
             groupInvoiceSources={masterFolio?.config === "accommodation"
               ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
               : groupInvoiceSnapshot?.sources}
@@ -4480,7 +4564,7 @@ export default function GroupDetailPage() {
             onSuccess={async () => {
               await refreshGroupBillingState();
               setShowMasterFacturaDialog(false);
-              setPendingMasterPaymentId("");
+              setPendingGroupPaymentDraft(null);
               resetGroupPaymentDialogFields();
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
               queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "payments"] });

@@ -413,6 +413,8 @@ export interface IStorage {
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;
     receiverDetails?: Record<string, string | undefined> | null;
+    invoiceData?: Record<string, any> | null;
+    invoiceTotal?: number | null;
   }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }>;
   getGroupPayments(groupId: string): Promise<GroupPayment[]>;
   transferChargeToGroup(chargeId: string, groupId: string): Promise<GroupCharge>;

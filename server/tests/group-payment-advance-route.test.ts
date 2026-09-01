@@ -69,6 +69,12 @@ function paymentBody(amount: string) {
     paymentRows: [{ method: "cash", amount, reference: "CIERRE-EXACTO" }],
     distribution: "equal",
     closeAllRooms: true,
+    invoiceData: {
+      id: 901,
+      tipoComprobante: "FB",
+      puntoVenta: 1,
+      numero: 123,
+    },
   };
 }
 
@@ -113,6 +119,67 @@ describe("POST group payment applies non-fiscal advances", () => {
     mocks.recordGroupPayment.mockResolvedValue({
       groupPayment: { id: "new-parent", amount: "270000.00" },
       reservationPayments: [{ id: "new-child" }],
+    });
+  });
+
+  it("does not persist a fiscal collection before its invoice is confirmed", async () => {
+    await withServer(async (baseUrl) => {
+      const body = paymentBody("270000.00");
+      delete (body as any).invoiceData;
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringMatching(/confirmá la factura/i),
+      });
+      expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  it("rejects negative payment rows instead of dropping them during persistence", async () => {
+    await withServer(async (baseUrl) => {
+      const body = paymentBody("270000.00");
+      body.paymentRows = [
+        { method: "cash", amount: "-100.00" },
+        { method: "transfer", amount: "270100.00", reference: "TR-NEG" },
+      ];
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  it("confirms the collection against the emitted invoice even when that invoice already consumed the fiscal availability", async () => {
+    mocks.invoiceSnapshot.mockResolvedValueOnce({
+      sources: [],
+      totals: { eligible: 360_000, invoiced: 330_000, available: 0 },
+      financial: {
+        nonFiscalAdvances: 60_000,
+        operationalBalance: 270_000,
+        fiscalAvailable: 0,
+      },
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(paymentBody("270000.00")),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        invoiceData: expect.objectContaining({ id: 901 }),
+        invoiceTotal: 330_000,
+      }));
     });
   });
 

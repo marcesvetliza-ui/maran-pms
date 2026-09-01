@@ -115,6 +115,10 @@ function parentAllocationsByReservation(groupPayments: any[]): Map<string, numbe
 // Reject malformed payloads here instead of trusting the client.
 function validateAndNormalizePaymentRows<T extends { method: string; retention?: any }>(rows: T[]): T[] {
   return rows.map((row) => {
+    const amount = Number((row as any).amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw Object.assign(new Error("Cada importe de cobro debe ser un número mayor o igual a cero."), { statusCode: 400 });
+    }
     if (row.retention == null) return { ...row, retention: undefined };
     if (row.method === "cuenta_corriente") {
       throw Object.assign(new Error("Las retenciones no aplican a pagos por Cuenta Corriente."), { statusCode: 400 });
@@ -1038,6 +1042,28 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/groups/:groupId/pending-fiscal-collections", requireAuth, async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT id, items, group_payment_intent
+        FROM sales_invoices
+        WHERE group_id = ${req.params.groupId}
+          AND estado = 'emitida'
+          AND group_payment_id IS NULL
+          AND group_payment_intent IS NOT NULL
+        ORDER BY id
+      `);
+      res.json(result.rows.map((row: any) => ({
+        id: Number(row.id),
+        items: row.items,
+        intent: row.group_payment_intent,
+      })));
+    } catch (error) {
+      console.error("[pending-fiscal-collections] Error:", error);
+      res.status(500).json({ error: "No se pudieron recuperar los cobros fiscales pendientes" });
+    }
+  });
+
   app.post("/api/groups/:groupId/payment", requireAuth, async (req, res) => {
     try {
       const group = await storage.getGroup(req.params.groupId);
@@ -1051,7 +1077,7 @@ export function registerGroupsRoutes(app: Express) {
         receiptType, distribution, closeAllRooms,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
-        receiverDetails, concepts, notes,
+        receiverDetails, concepts, notes, invoiceData,
       } = req.body;
 
       const paymentRows = validateAndNormalizePaymentRows<{method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number }}>(
@@ -1064,6 +1090,9 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "El monto debe ser positivo" });
       }
       const evidence = validateGroupPaymentEvidence(receiptType, paymentRows, receiverDetails, concepts);
+      if (isFiscalGroupReceipt(evidence.receiptType) && !invoiceData?.id) {
+        return res.status(409).json({ error: "Confirmá la factura antes de registrar el cobro grupal." });
+      }
 
       const billingEntityType = rawBillingEntityType || legacyCcEntityType;
       const billingEntityId = rawBillingEntityId || legacyCcEntityId;
@@ -1099,7 +1128,11 @@ export function registerGroupsRoutes(app: Express) {
         const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
         const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
         const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
-        if (Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
+        // Once ARCA confirmed the invoice, that same document already consumes
+        // its source availability. recordGroupPayment validates and claims the
+        // persisted invoice atomically, so comparing it again with the reduced
+        // post-emission availability would reject every valid confirmation.
+        if (!invoiceData && Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
           return res.status(400).json({
             error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
           });
@@ -1151,6 +1184,10 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
+        invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
+        invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
+          ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
+          : null,
       });
 
       let checkoutCount = 0;
@@ -1759,7 +1796,7 @@ export function registerGroupsRoutes(app: Express) {
 
       // Support multi-row payments and keep a single parent movement for the
       // receipt, regardless of how many payment methods the operator uses.
-      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails, concepts } = req.body;
+      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails, concepts, invoiceData } = req.body;
       const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
         Array.isArray(paymentRows) && paymentRows.length > 0
           ? paymentRows
@@ -1769,6 +1806,9 @@ export function registerGroupsRoutes(app: Express) {
       const totalAmount = paymentRowsGrossTotal(rows);
       if (!rows.length || totalAmount <= 0) return res.status(400).json({ error: "Monto total debe ser positivo" });
       const evidence = validateGroupPaymentEvidence(receiptType, rows, receiverDetails, concepts);
+      if (isFiscalGroupReceipt(evidence.receiptType) && !invoiceData?.id) {
+        return res.status(409).json({ error: "Confirmá la factura antes de registrar el cobro del Folio Maestro." });
+      }
       if (rows.some((row) => row.method === "cuenta_corriente") && (!billingEntityType || !billingEntityId)) {
         return res.status(400).json({ error: "Seleccione la empresa o agencia para el pago por cuenta corriente." });
       }
@@ -1836,7 +1876,7 @@ export function registerGroupsRoutes(app: Express) {
         const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
         const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
         const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
-        if (Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
+        if (!invoiceData && Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
           return res.status(400).json({
             error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
           });
@@ -1883,6 +1923,10 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
+        invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
+        invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
+          ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
+          : null,
       });
 
       await audit(req, "create", "groups",

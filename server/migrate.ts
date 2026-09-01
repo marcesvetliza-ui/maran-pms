@@ -1702,7 +1702,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`
       ALTER TABLE sales_invoices
         ADD COLUMN IF NOT EXISTS group_id varchar,
-        ADD COLUMN IF NOT EXISTS group_payment_id varchar;
+        ADD COLUMN IF NOT EXISTS group_payment_id varchar,
+        ADD COLUMN IF NOT EXISTS group_payment_intent jsonb;
       CREATE INDEX IF NOT EXISTS sales_invoices_group_id_idx
         ON sales_invoices (group_id);
       ALTER TABLE sales_invoices

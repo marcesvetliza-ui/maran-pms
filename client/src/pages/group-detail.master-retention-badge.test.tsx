@@ -295,10 +295,13 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     await user.click(screen.getByTestId("button-group-con-comprobante"));
 
     // A $60,000 non-fiscal advance is applied to the $330,000 invoice, so the
-    // new collection must cover the exact $270,000 operational balance.
-    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
-
+    // new collection is recalculated automatically to the exact $270,000
+    // operational balance when "Emitir comprobante" is selected.
     const cash = screen.getByTestId("input-group-payment-amount-0");
+    expect(cash).toHaveValue(270000);
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeEnabled();
+
+    await user.clear(cash);
     await user.type(cash, "240000");
     await user.click(screen.getByTestId("button-group-add-retencion-0"));
     const retention = screen.getByTestId("input-group-retencion-monto-0");

@@ -821,7 +821,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -834,6 +834,18 @@ export function registerBillingRoutes(app: Express) {
         : String(reservaId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
+      const allowedGroupIntentEndpoints = new Set([
+        `/api/groups/${groupId}/payment`,
+        `/api/groups/${groupId}/master-payment`,
+      ]);
+      const sanitizedGroupPaymentIntent = groupId
+        && groupPaymentIntent
+        && typeof groupPaymentIntent === "object"
+        && allowedGroupIntentEndpoints.has(String(groupPaymentIntent.endpoint || ""))
+        && groupPaymentIntent.body
+        && typeof groupPaymentIntent.body === "object"
+          ? { endpoint: String(groupPaymentIntent.endpoint), body: groupPaymentIntent.body }
+          : undefined;
       const spaAccountId = rawSpaAccountId === undefined || rawSpaAccountId === null ? "" : String(rawSpaAccountId).trim();
       if (groupPaymentId && !groupId) {
         return res.status(400).json({ error: "groupPaymentId requiere un groupId del mismo cobro grupal" });
@@ -1119,6 +1131,7 @@ export function registerBillingRoutes(app: Express) {
           reservaId: reservationId || undefined,
           groupId: groupId || undefined,
           groupPaymentId: groupPaymentId || undefined,
+          groupPaymentIntent: sanitizedGroupPaymentIntent,
           spaAccountId: spaAccountId || undefined,
           folioId,
           operador: user?.fullName || user?.username,
