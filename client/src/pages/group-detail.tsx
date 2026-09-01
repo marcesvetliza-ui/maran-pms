@@ -858,6 +858,7 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
+  const [groupPaymentCloseReservationIds, setGroupPaymentCloseReservationIds] = useState<string[]>([]);
   const [groupPaymentDestino, setGroupPaymentDestino] = useState<"distribute" | "master">("distribute");
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
@@ -892,6 +893,7 @@ export default function GroupDetailPage() {
     setGroupPaymentReceiptType("sin_comprobante");
     setGroupPaymentDistribution("equal");
     setGroupPaymentCloseAll(false);
+    setGroupPaymentCloseReservationIds([]);
     setGroupPaymentDestino("distribute");
     setGroupPaymentCcEntityType("company");
     setGroupPaymentCcEntityId("");
@@ -1389,6 +1391,7 @@ export default function GroupDetailPage() {
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
         closeAllRooms: groupPaymentCloseAll,
+        closeReservationIds: groupPaymentCloseReservationIds,
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
         receiverDetails,
@@ -1425,7 +1428,7 @@ export default function GroupDetailPage() {
           });
         } else {
           toast({
-            title: "Pago grupal registrado — grupo cerrado",
+            title: "Pago grupal registrado — habitaciones cerradas",
             description: `${data.checkoutCount ?? 0} habitación(es) cerrada(s) exitosamente.`,
           });
         }
@@ -1812,6 +1815,14 @@ export default function GroupDetailPage() {
   const groupPaymentOperationalBalance = Number(
     groupInvoiceSnapshot?.financial?.operationalBalance ?? folio?.totals?.balance ?? 0,
   );
+  const groupPaymentActiveReservations = group.reservations.filter(
+    (reservation) => reservation.status === "confirmed" || reservation.status === "checked_in",
+  );
+  const groupPaymentSelectedBalance = groupPaymentCloseReservationIds.reduce((sum, reservationId) => {
+    const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
+    return sum + Math.max(0, Number(row?.balance || 0));
+  }, 0);
+  const groupPaymentHasCloseSelection = !groupPaymentCloseAll || groupPaymentCloseReservationIds.length > 0;
   // A fiscal document is backed by the invoice snapshot, not by the cash rows:
   // an earlier advance can leave cash balance at zero while accommodation is
   // still available to document.
@@ -1827,7 +1838,7 @@ export default function GroupDetailPage() {
       groupPaymentNonFiscalAdvances,
       {
         enabled: groupPaymentDestino === "distribute" && groupPaymentCloseAll,
-        operationalBalance: groupPaymentOperationalBalance,
+        operationalBalance: groupPaymentCloseAll ? groupPaymentSelectedBalance : groupPaymentOperationalBalance,
       },
     );
   const groupPaymentHasRequiredReferences = groupPaymentIsFiscal || groupPaymentRows
@@ -1841,6 +1852,7 @@ export default function GroupDetailPage() {
     && (!groupPaymentEntityRequired || groupPaymentHasEntityData)
     && groupPaymentHasRequiredReferences
     && groupPaymentHasConcepts
+    && groupPaymentHasCloseSelection
     && !groupPaymentConceptsMismatchPayment
     && !groupPaymentExceedsFiscalAvailable;
 
@@ -3701,7 +3713,7 @@ export default function GroupDetailPage() {
             const automaticAdvance = Math.max(0, itemsTotal - requiredCollection);
             const closeCollection = isMaster
               ? requiredCollection
-              : Number(groupInvoiceSnapshot?.financial?.operationalBalance ?? priorBalance);
+              : groupPaymentSelectedBalance;
             const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
             const conceptsMismatchPayment = isFiscal
               && itemsTotal > 0
@@ -4345,19 +4357,75 @@ export default function GroupDetailPage() {
                         <Checkbox
                           id="close-all-rooms"
                           checked={groupPaymentCloseAll}
-                          onCheckedChange={(v) => setGroupPaymentCloseAll(!!v)}
+                          onCheckedChange={(value) => {
+                            const checked = !!value;
+                            setGroupPaymentCloseAll(checked);
+                            const nextIds = checked ? groupPaymentActiveReservations.map((reservation) => reservation.id) : [];
+                            setGroupPaymentCloseReservationIds(nextIds);
+                            if (checked) {
+                              const amount = nextIds.reduce((sum, reservationId) => {
+                                const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
+                                return sum + Math.max(0, Number(row?.balance || 0));
+                              }, 0);
+                              setGroupPaymentRows((rows) => rows.map((row, index) =>
+                                index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
+                              ));
+                            }
+                          }}
                           data-testid="checkbox-close-all-rooms"
                         />
                         <div className="space-y-1">
                           <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
-                            Con este pago se cierran todas las habitaciones del grupo
+                            Cerrar habitaciones elegidas con este pago
                           </label>
                           <p className="text-xs text-muted-foreground">
-                            El sistema distribuirá el pago para saldar cada reserva y realizará el check-out de todas las habitaciones activas.
+                            Seleccioná las reservas a saldar. Las que están en casa pasan a limpieza; las confirmadas se cierran sin generar limpieza.
                           </p>
                         </div>
                       </div>
                     </div>
+                    {groupPaymentCloseAll && (
+                      <div className="rounded-lg border p-3 space-y-2" data-testid="group-close-room-selection">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label className="text-sm font-semibold">Habitaciones a cerrar</Label>
+                          <span className="text-sm font-medium">Saldo seleccionado: {fmtMoney(groupPaymentSelectedBalance)}</span>
+                        </div>
+                        {groupPaymentActiveReservations.map((reservation) => {
+                          const folioRow = folio?.reservations?.find((row) => row.reservationId === reservation.id);
+                          const selected = groupPaymentCloseReservationIds.includes(reservation.id);
+                          return (
+                            <label key={reservation.id} className="flex items-center justify-between gap-3 rounded-md border p-2 cursor-pointer">
+                              <span className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={selected}
+                                  onCheckedChange={(value) => {
+                                    const nextIds = value
+                                      ? [...groupPaymentCloseReservationIds, reservation.id]
+                                      : groupPaymentCloseReservationIds.filter((id) => id !== reservation.id);
+                                    setGroupPaymentCloseReservationIds(nextIds);
+                                    const amount = nextIds.reduce((sum, reservationId) => {
+                                      const row = folio?.reservations?.find((item) => item.reservationId === reservationId);
+                                      return sum + Math.max(0, Number(row?.balance || 0));
+                                    }, 0);
+                                    setGroupPaymentRows((rows) => rows.map((row, index) =>
+                                      index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
+                                    ));
+                                  }}
+                                  data-testid={`checkbox-close-reservation-${reservation.id}`}
+                                />
+                                <span className="text-sm">
+                                  Hab. {reservation.room?.roomNumber || "—"} · {reservation.status === "checked_in" ? "En casa" : "Confirmada"}
+                                </span>
+                              </span>
+                              <span className="text-sm font-medium">{fmtMoney(Math.max(0, Number(folioRow?.balance || 0)))}</span>
+                            </label>
+                          );
+                        })}
+                        {groupPaymentCloseReservationIds.length === 0 && (
+                          <p className="text-xs text-destructive">Elegí al menos una habitación para cerrar.</p>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -4438,7 +4506,7 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
-              {groupPaymentMutation.isPending ? "Procesando..." : (groupPaymentDestino === "distribute" && groupPaymentCloseAll) ? "Pagar y Cerrar Grupo" : groupPaymentDestino === "master" ? "Registrar Pago al Folio Maestro" : "Registrar Pago"}
+              {groupPaymentMutation.isPending ? "Procesando..." : (groupPaymentDestino === "distribute" && groupPaymentCloseAll) ? "Pagar y Cerrar Habitaciones" : groupPaymentDestino === "master" ? "Registrar Pago al Folio Maestro" : "Registrar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4502,7 +4570,7 @@ export default function GroupDetailPage() {
               loadInvoice();
             }
             if (groupPaymentCloseAll) {
-              toast({ title: "Pago grupal registrado — grupo cerrado" });
+              toast({ title: "Pago grupal registrado — habitaciones cerradas" });
             } else if (groupFacturaFromResumen) {
               toast({ title: "Factura emitida y vinculada al folio del grupo" });
             } else {

@@ -207,7 +207,7 @@ describe("POST group payment applies non-fiscal advances", () => {
       });
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({
-        error: expect.stringContaining("saldo operativo de $270000.00"),
+        error: expect.stringContaining("saldo exacto de $270000.00"),
       });
       expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
     });
@@ -251,6 +251,59 @@ describe("POST group payment applies non-fiscal advances", () => {
       expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
         paymentRows: [expect.objectContaining({ amount: "310000.00" })],
       }));
+    });
+  });
+
+  it("allocates and closes only the selected rooms in a three-room group", async () => {
+    mockStorage.getGroup.mockResolvedValue({
+      id: groupId,
+      name: "Grupo cierre dirigido",
+      reservations: [
+        { id: "room-a", roomId: "physical-a", status: "checked_in" },
+        { id: "room-b", roomId: "physical-b", status: "confirmed" },
+        { id: "room-c", roomId: "physical-c", status: "checked_in" },
+      ],
+    });
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      { reservationId: "room-a", accommodationTotal: 100, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+      { reservationId: "room-b", accommodationTotal: 200, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+      { reservationId: "room-c", accommodationTotal: 300, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    ]);
+    mockStorage.getGroupCharges.mockResolvedValue([]);
+    mockStorage.getGroupPayments.mockResolvedValue([]);
+    mocks.invoiceSnapshot.mockResolvedValue({
+      sources: [],
+      totals: { eligible: 0, invoiced: 0, available: 0 },
+      financial: { operationalBalance: 600, nonFiscalAdvances: 0, fiscalAvailable: 0 },
+      paymentDestinations: [],
+    });
+    mocks.recordGroupPayment.mockResolvedValue({
+      groupPayment: { id: "directed-parent", amount: "300.00" },
+      reservationPayments: [{ id: "child-a" }, { id: "child-b" }],
+      closedReservations: { processed: 2, checkedIn: 1, confirmed: 1 },
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "sin_comprobante",
+          receiverDetails: { razonSocial: "Grupo cierre dirigido", cuit: "30712345678" },
+          concepts: [{ description: "Cierre dirigido", amount: 300 }],
+          paymentRows: [{ method: "cash", amount: "300.00", reference: "CIERRE-AB" }],
+          closeReservationIds: ["room-a", "room-b"],
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        distributionDetail: { "room-a": 100, "room-b": 200 },
+        closeReservationIds: ["room-a", "room-b"],
+      }));
+      expect(await response.json()).toMatchObject({
+        checkoutCount: 2,
+        closedReservationIds: ["room-a", "room-b"],
+      });
     });
   });
 });

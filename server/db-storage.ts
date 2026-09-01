@@ -123,7 +123,7 @@ import {
   reservations, charges, payments, cancelledReservationLogs,
   otaChannels, otaReservationLogs,
   groups, groupRoomBlocks, groupReservationLinks, groupCharges, groupPayments,
-  guestReviews, housekeepingTasks,
+  guestReviews, housekeepingTasks, reservationChangelog,
   restaurantAreas, restaurantTables, menuCategories, menuItems,
   restaurantOrders, orderItems, tableReservations, restaurantTimeSlots,
   restaurantReservationAdvances,
@@ -1694,7 +1694,8 @@ export class DatabaseStorage implements IStorage {
     receiverDetails?: Record<string, string | undefined> | null;
     invoiceData?: Record<string, any> | null;
     invoiceTotal?: number | null;
-  }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[] }> {
+    closeReservationIds?: string[];
+  }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[]; closedReservations?: { processed: number; checkedIn: number; confirmed: number } }> {
     assertFinancialSchemaReady();
     const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
     const cents = (value: number | string) => Math.round((parseFloat(String(value)) || 0) * 100);
@@ -1716,7 +1717,7 @@ export class DatabaseStorage implements IStorage {
       // balances. This is what prevents two open dialogs from accepting the
       // same remaining saldo.
       const lock = await tx.execute(sql`
-        SELECT id FROM groups WHERE id = ${input.groupId} FOR UPDATE
+        SELECT id, name FROM groups WHERE id = ${input.groupId} FOR UPDATE
       `);
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
 
@@ -2021,14 +2022,25 @@ export class DatabaseStorage implements IStorage {
         .map(([tipo, centsAmount]) => ({ tipo, monto: centsAmount / 100 }))
         .filter((entry) => entry.monto > 0);
 
-      const reservationIds = allocations
-        .map((allocation) => allocation.reservationId)
-        .filter((reservationId) => !reservationId.startsWith("__"));
+      const closeReservationIds = Array.from(new Set((input.closeReservationIds || []).filter(Boolean)));
+      const reservationIds = Array.from(new Set([
+        ...allocations
+          .map((allocation) => allocation.reservationId)
+          .filter((reservationId) => !reservationId.startsWith("__")),
+        ...closeReservationIds,
+      ]));
 
-      const reservationDetails = new Map<string, { reservationCode: string | null; guestName: string; roomNumber: string | null }>();
+      const reservationDetails = new Map<string, {
+        reservationCode: string | null;
+        guestName: string;
+        roomNumber: string | null;
+        status: string;
+        roomId: string | null;
+        balanceCents: number;
+      }>();
       if (reservationIds.length > 0) {
         const activeReservations = await tx.execute(sql`
-          SELECT r.id, r.reservation_code,
+          SELECT r.id, r.reservation_code, r.status, r.room_id,
                  r.total_room_amount::numeric AS accommodation,
                  rm.room_number,
                  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', g.first_name, g.last_name)), ''), 'Huésped') AS guest_name,
@@ -2063,6 +2075,9 @@ export class DatabaseStorage implements IStorage {
             reservationCode: row.reservation_code || null,
             guestName: row.guest_name || "Huésped",
             roomNumber: row.room_number || null,
+            status: row.status,
+            roomId: row.room_id || null,
+            balanceCents: balances.get(row.id) || 0,
           });
         }
 
@@ -2218,7 +2233,69 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      return { groupPayment, reservationPayments };
+      let closedReservations: { processed: number; checkedIn: number; confirmed: number } | undefined;
+      if (closeReservationIds.length > 0) {
+        const allocationCentsById = new Map(allocations.map((allocation) => [allocation.reservationId, allocation.cents]));
+        for (const reservationId of closeReservationIds) {
+          const reservation = reservationDetails.get(reservationId);
+          if (!reservation) {
+            throw invalid("Una de las habitaciones elegidas ya no está activa en este grupo.");
+          }
+          if ((allocationCentsById.get(reservationId) || 0) !== reservation.balanceCents) {
+            throw invalid("Para cerrar una habitación, su asignación debe cubrir exactamente el saldo pendiente.");
+          }
+        }
+
+        let checkedIn = 0;
+        let confirmed = 0;
+        const groupName = String((lock.rows[0] as any).name || input.groupId);
+        for (const reservationId of closeReservationIds) {
+          const reservation = reservationDetails.get(reservationId)!;
+          const wasCheckedIn = reservation.status === "checked_in";
+          await tx.update(reservations).set({ status: "checked_out" }).where(eq(reservations.id, reservationId));
+          await tx.insert(reservationChangelog).values({
+            reservationId,
+            fecha: new Date(),
+            operador: input.receivedBy || "sistema",
+            tipo: wasCheckedIn ? "checkout_grupal_dirigido" : "cierre_confirmada_grupal",
+            descripcion: wasCheckedIn
+              ? `Check-out dirigido con pago centralizado. Grupo: ${groupName}.`
+              : `Cierre dirigido sin check-in con pago centralizado. Grupo: ${groupName}.`,
+          });
+          if (wasCheckedIn && reservation.roomId) {
+            await tx.update(rooms).set({ status: "dirty" }).where(eq(rooms.id, reservation.roomId));
+            try {
+              await tx.insert(housekeepingTasks).values({
+                id: randomUUID(),
+                roomId: reservation.roomId,
+                taskType: "checkout_clean",
+                priority: "high",
+                status: "pending",
+                notes: `Check-out grupal dirigido (pago centralizado) — ${groupName}`,
+                scheduledDate: getArgentinaToday(),
+                createdAt: new Date(),
+              } as any);
+            } catch {}
+            checkedIn++;
+          } else {
+            confirmed++;
+          }
+        }
+        const active = await tx.execute(sql`
+          SELECT 1
+          FROM reservations r
+          JOIN group_reservation_links l ON l.reservation_id = r.id
+          WHERE l.group_id = ${input.groupId}
+            AND r.status IN ('confirmed', 'checked_in')
+          LIMIT 1
+        `);
+        if (!active.rows[0]) {
+          await tx.update(groups).set({ status: "finished" as any }).where(eq(groups.id, input.groupId));
+        }
+        closedReservations = { processed: closeReservationIds.length, checkedIn, confirmed };
+      }
+
+      return { groupPayment, reservationPayments, closedReservations };
     });
   }
 
@@ -5778,6 +5855,105 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { processed, skipped, pendingBalance };
+    });
+  }
+
+  async closeGroupReservations(
+    groupId: string,
+    reservationIds: string[],
+    operator: string,
+  ): Promise<{ processed: number; checkedIn: number; confirmed: number }> {
+    const uniqueIds = Array.from(new Set(reservationIds.filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      throw Object.assign(new Error("Seleccione al menos una habitación para cerrar."), { statusCode: 400 });
+    }
+
+    return db.transaction(async (tx) => {
+      const lock = await tx.execute(sql`SELECT id, name FROM groups WHERE id = ${groupId} FOR UPDATE`);
+      if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+      const groupName = String((lock.rows[0] as any).name || groupId);
+
+      const selected = await tx.execute(sql`
+        SELECT r.id, r.status, r.room_id, rm.room_number,
+          (
+            COALESCE(r.total_room_amount::numeric, 0)
+            + COALESCE((
+              SELECT SUM(c.amount::numeric)
+              FROM charges c
+              WHERE c.reservation_id = r.id AND c.status <> 'anulado'
+            ), 0)
+            - COALESCE((
+              SELECT SUM(p.amount::numeric)
+              FROM payments p
+              WHERE p.reservation_id = r.id AND p.status <> 'anulado'
+            ), 0)
+          ) AS balance
+        FROM reservations r
+        JOIN group_reservation_links l ON l.reservation_id = r.id
+        LEFT JOIN rooms rm ON rm.id = r.room_id
+        WHERE l.group_id = ${groupId}
+          AND r.id IN (${sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `)})
+          AND r.status IN ('confirmed', 'checked_in')
+        ORDER BY r.id
+        FOR UPDATE OF r
+      `);
+      if (selected.rows.length !== uniqueIds.length) {
+        throw Object.assign(new Error("Una de las habitaciones elegidas ya no está activa en este grupo."), { statusCode: 409 });
+      }
+      const pending = (selected.rows as any[]).filter((row) => Math.round(Number(row.balance || 0) * 100) !== 0);
+      if (pending.length > 0) {
+        const rooms = pending.map((row) => `Hab. ${row.room_number || "—"} ($${Number(row.balance).toFixed(2)})`).join(", ");
+        throw Object.assign(new Error(`No se pueden cerrar habitaciones con saldo pendiente: ${rooms}.`), { statusCode: 409 });
+      }
+
+      let checkedIn = 0;
+      let confirmed = 0;
+      for (const row of selected.rows as any[]) {
+        const wasCheckedIn = row.status === "checked_in";
+        await tx.update(reservations).set({ status: "checked_out" }).where(eq(reservations.id, row.id));
+        await tx.insert(reservationChangelog).values({
+          reservationId: row.id,
+          fecha: new Date(),
+          operador: operator || "sistema",
+          tipo: wasCheckedIn ? "checkout_grupal_dirigido" : "cierre_confirmada_grupal",
+          descripcion: wasCheckedIn
+            ? `Check-out dirigido con pago centralizado. Grupo: ${groupName}.`
+            : `Cierre dirigido sin check-in con pago centralizado. Grupo: ${groupName}.`,
+        });
+
+        if (wasCheckedIn) {
+          await tx.update(rooms).set({ status: "dirty" }).where(eq(rooms.id, row.room_id));
+          try {
+            await tx.insert(housekeepingTasks).values({
+              id: randomUUID(),
+              roomId: row.room_id,
+              taskType: "checkout_clean",
+              priority: "high",
+              status: "pending",
+              notes: `Check-out grupal dirigido (pago centralizado) — ${groupName}`,
+              scheduledDate: getArgentinaToday(),
+              createdAt: new Date(),
+            } as any);
+          } catch {}
+          checkedIn++;
+        } else {
+          confirmed++;
+        }
+      }
+
+      const active = await tx.execute(sql`
+        SELECT 1
+        FROM reservations r
+        JOIN group_reservation_links l ON l.reservation_id = r.id
+        WHERE l.group_id = ${groupId}
+          AND r.status IN ('confirmed', 'checked_in')
+        LIMIT 1
+      `);
+      if (!active.rows[0]) {
+        await tx.update(groups).set({ status: "finished" as any }).where(eq(groups.id, groupId));
+      }
+
+      return { processed: selected.rows.length, checkedIn, confirmed };
     });
   }
   // ==================== Cash Register Module ====================

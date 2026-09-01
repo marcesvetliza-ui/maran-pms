@@ -1074,7 +1074,7 @@ export function registerGroupsRoutes(app: Express) {
       const {
         paymentRows: rawPaymentRows,
         amount: legacyAmount, method: legacyMethod, reference: legacyReference,
-        receiptType, distribution, closeAllRooms,
+        receiptType, distribution, closeAllRooms, closeReservationIds: rawCloseReservationIds,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
         receiverDetails, concepts, notes, invoiceData,
@@ -1117,12 +1117,23 @@ export function registerGroupsRoutes(app: Express) {
       ]);
       const operational = computeGroupOperationalLedger(ledgerLines, groupChargesList, groupPaymentsList);
       const activeIds = new Set(activeReservations.map((reservation: any) => reservation.id));
+      const requestedCloseIds = Array.isArray(rawCloseReservationIds)
+          ? Array.from(new Set(rawCloseReservationIds.map((id: unknown) => String(id))))
+          : closeAllRooms
+            ? activeReservations.map((reservation: any) => reservation.id)
+            : [];
+      const shouldCloseReservations = requestedCloseIds.length > 0;
+      if (requestedCloseIds.some((id) => !activeIds.has(id))) {
+        return res.status(400).json({ error: "Sólo se pueden cerrar habitaciones activas de este grupo." });
+      }
       const balances = ledgerLines
         .filter((line) => activeIds.has(line.reservationId))
         .map((line) => ({
           id: line.reservationId,
           balance: Math.max(0, Math.round((line.accommodationTotal + line.extrasTotal - line.paymentsTotal) * 100) / 100),
         }));
+      const balancesById = new Map(balances.map((item) => [item.id, item.balance]));
+      const selectedBalance = requestedCloseIds.reduce((sum, id) => sum + (balancesById.get(id) || 0), 0);
       const totalBalance = Math.max(0, operational.balance);
       if (isFiscalGroupReceipt(evidence.receiptType)) {
         const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
@@ -1145,12 +1156,12 @@ export function registerGroupsRoutes(app: Express) {
           newCollection: totalAmount,
           conceptsTotal,
           nonFiscalAdvances,
-          closeAllRooms: !!closeAllRooms,
-          operationalBalance: totalBalance,
+          closeAllRooms: shouldCloseReservations,
+          operationalBalance: shouldCloseReservations ? selectedBalance : totalBalance,
         })) {
           return res.status(400).json({
-            error: closeAllRooms
-              ? `Para cerrar el grupo, el cobro nuevo debe cubrir el saldo operativo de $${totalBalance.toFixed(2)} e incluir al menos $${requiredCollection.toFixed(2)} para la factura.`
+            error: shouldCloseReservations
+              ? `Para cerrar las habitaciones elegidas, el cobro nuevo debe cubrir su saldo exacto de $${selectedBalance.toFixed(2)} e incluir al menos $${requiredCollection.toFixed(2)} para la factura.`
               : `El cobro nuevo debe ser $${requiredCollection.toFixed(2)}; la diferencia se cubre con adelantos no fiscalizados.`,
           });
         }
@@ -1158,12 +1169,15 @@ export function registerGroupsRoutes(app: Express) {
       if (Math.round(totalAmount * 100) > Math.round(totalBalance * 100)) {
         return res.status(400).json({ error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo grupal disponible de $${totalBalance.toFixed(2)}.` });
       }
-      if (closeAllRooms && Math.round(totalAmount * 100) !== Math.round(totalBalance * 100)) {
-        return res.status(400).json({ error: `Para cerrar todas las habitaciones, el pago debe coincidir exactamente con el saldo de $${totalBalance.toFixed(2)}.` });
+      if (shouldCloseReservations && Math.round(totalAmount * 100) !== Math.round(selectedBalance * 100)) {
+        return res.status(400).json({ error: `Para cerrar las habitaciones elegidas, el pago debe coincidir exactamente con su saldo de $${selectedBalance.toFixed(2)}.` });
       }
 
-      const allocation = closeAllRooms
-        ? Object.fromEntries(balances.filter((item) => item.balance > 0).map((item) => [item.id, Number(item.balance.toFixed(2))]))
+      const allocation = shouldCloseReservations
+        ? Object.fromEntries(requestedCloseIds
+            .map((id) => ({ id, balance: balancesById.get(id) || 0 }))
+            .filter((item) => item.balance > 0)
+            .map((item) => [item.id, Number(item.balance.toFixed(2))]))
         : distributeCents(
             Math.round(totalAmount * 100),
             balances.map((item) => ({ id: item.id, weight: distribution === "proportional" ? item.balance : 1 }))
@@ -1174,7 +1188,7 @@ export function registerGroupsRoutes(app: Express) {
         paymentRows,
         date: today,
         reference: paymentRows.map((row) => String(row.reference || "").trim()).filter(Boolean).join(" / ")
-          || `Pago grupal${closeAllRooms ? " (cierre total)" : ""} — ${group.name}`,
+          || `Pago grupal${shouldCloseReservations ? " (cierre dirigido)" : ""} — ${group.name}`,
         distribution: distribution || "equal",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
@@ -1188,49 +1202,10 @@ export function registerGroupsRoutes(app: Express) {
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
           : null,
+        closeReservationIds: shouldCloseReservations ? requestedCloseIds : undefined,
       });
 
-      let checkoutCount = 0;
-      if (closeAllRooms) {
-        for (const reservation of activeReservations) {
-          if (reservation.status !== "checked_in") continue;
-
-          await db.insert(reservationChangelog).values({
-            reservationId: reservation.id,
-            fecha: new Date(),
-            operador: (req as any).user?.username || "sistema",
-            tipo: "checkout_grupal",
-            descripcion: `Check-out grupal con pago centralizado. Grupo: ${group.name}. Monto total: $${totalAmount.toFixed(2)}.`,
-          });
-
-          await storage.updateReservation(reservation.id, { status: "checked_out" });
-          await storage.updateRoom(reservation.roomId, { status: "dirty" });
-
-          try {
-            await db.insert(housekeepingTasks).values({
-              id: randomUUID(),
-              roomId: reservation.roomId,
-              type: "checkout_clean",
-              priority: "high",
-              status: "pending",
-              notes: `Check-out grupal (pago centralizado) — ${group.name}`,
-              createdAt: new Date(),
-            } as any);
-          } catch {}
-
-          checkoutCount++;
-        }
-
-        const updatedGroup = await storage.getGroup(req.params.groupId);
-        if (updatedGroup) {
-          const allDone = updatedGroup.reservations.every(
-            (r: any) => r.status === "checked_out" || r.status === "cancelled"
-          );
-          if (allDone) {
-            await storage.updateGroup(req.params.groupId, { status: "finished" as any });
-          }
-        }
-      }
+      const checkoutCount = recorded.closedReservations?.processed || 0;
 
       res.json({
         success: true,
@@ -1238,6 +1213,7 @@ export function registerGroupsRoutes(app: Express) {
         groupPaymentId: recorded.groupPayment.id,
         distributed: Object.keys(allocation).length,
         checkoutCount,
+        closedReservationIds: shouldCloseReservations ? requestedCloseIds : [],
         paymentIds: recorded.reservationPayments.map((payment) => payment.id),
         paymentId: recorded.reservationPayments[0]?.id ?? null,
       });
