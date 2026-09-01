@@ -23,6 +23,31 @@ export const insertRoomTypeSchema = createInsertSchema(roomTypes).omit({ id: tru
 export type InsertRoomType = z.infer<typeof insertRoomTypeSchema>;
 export type RoomType = typeof roomTypes.$inferSelect;
 
+export type RoomTypeReferenceSource =
+  | "rooms"
+  | "rate_plans"
+  | "reservations"
+  | "reservation_history"
+  | "group_room_blocks"
+  | "packages"
+  | "package_room_prices";
+
+export type RoomTypeReference = {
+  source: RoomTypeReferenceSource;
+  count: number;
+};
+
+export type OrphanedRoomTypeReference = {
+  roomTypeId: string;
+  references: RoomTypeReference[];
+};
+
+export type RoomTypeReassignmentResult = {
+  fromRoomTypeId: string;
+  toRoomTypeId: string;
+  updated: RoomTypeReference[];
+};
+
 // Rate Plans (Planes Tarifarios)
 export const ratePlans = pgTable("rate_plans", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -450,6 +475,7 @@ export type PlanningData = {
     groupColor: string;
     roomTypeId: string;
     roomTypeName: string;
+    roomTypeCode?: string | null;
     quantity: number;
     assigned: number;
     checkIn: string;

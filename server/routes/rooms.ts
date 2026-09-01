@@ -8,6 +8,7 @@ import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
+const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
 
 export function registerRoomsRoutes(app: Express) {
   // Room Types
@@ -17,6 +18,17 @@ export function registerRoomsRoutes(app: Express) {
       res.json(roomTypes);
     } catch (error) {
       res.status(500).json({ error: "Error fetching room types" });
+    }
+  });
+
+  // Diagnostic endpoint for legacy rows created before room-type references
+  // were protected. It intentionally exposes the source/count so an admin
+  // can resolve each orphan without guessing which records are affected.
+  app.get("/api/room-types/integrity", requireRole(ROOMS_WRITE_ROLES), async (_req, res) => {
+    try {
+      res.json({ orphanedReferences: await storage.getOrphanedRoomTypeReferences() });
+    } catch (error) {
+      res.status(500).json({ error: "Error checking room type references" });
     }
   });
 
@@ -41,12 +53,56 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/room-types/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
+  app.post("/api/room-types/reassign-references", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+    const { fromRoomTypeId, toRoomTypeId } = req.body ?? {};
+    if (typeof fromRoomTypeId !== "string" || typeof toRoomTypeId !== "string" || !fromRoomTypeId || !toRoomTypeId) {
+      return res.status(400).json({ error: "fromRoomTypeId y toRoomTypeId son requeridos" });
+    }
     try {
-      const deleted = await storage.deleteRoomType(req.params.id);
-      if (!deleted) {
+      const result = await storage.reassignRoomTypeReferences(fromRoomTypeId, toRoomTypeId);
+      await audit(
+        req,
+        "update",
+        "room-types",
+        `Referencias de tipo de habitación reasignadas: ${fromRoomTypeId} → ${toRoomTypeId}`,
+        {
+          entityType: "room_type",
+          entityId: toRoomTypeId,
+          details: {
+            before: { roomTypeId: fromRoomTypeId },
+            after: { roomTypeId: toRoomTypeId, updated: result.updated },
+          },
+        },
+      );
+      res.json(result);
+    } catch (error: any) {
+      const message = error?.message || "Error reassigning room type references";
+      const status = message.includes("destino no existe") || message.includes("origen y destino") ? 400 : 500;
+      res.status(status).json({ error: message });
+    }
+  });
+
+  app.delete("/api/room-types/:id", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+    try {
+      const result = await storage.deleteRoomType(req.params.id);
+      if (result.references.length > 0) {
+        return res.status(409).json({
+          error: "No se puede eliminar un tipo de habitación utilizado",
+          code: "ROOM_TYPE_IN_USE",
+          references: result.references,
+          resolution: "Reasigne las referencias a otro tipo de habitación y vuelva a eliminarlo.",
+        });
+      }
+      if (!result.deleted) {
         return res.status(404).json({ error: "Room type not found" });
       }
+      await audit(
+        req,
+        "delete",
+        "room-types",
+        `Tipo de habitación eliminado: ${req.params.id}`,
+        { entityType: "room_type", entityId: req.params.id },
+      );
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting room type" });

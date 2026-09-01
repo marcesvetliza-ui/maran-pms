@@ -664,10 +664,12 @@ export default function PlanningPage() {
   // REUB virtual room (always shown separately at top)
   const reubRoom = data?.rooms.find(r => (r as any).isVirtual === true || r.roomNumber === "REUB") ?? null;
 
-  // Available room types and floors for filter UI — exclude REUB and inactive
-  const availableRoomTypes = data?.rooms
-    ? Array.from(new Map(data.rooms.filter(r => !(r as any).isVirtual && r.isActive !== false).map(r => [r.roomTypeId, r.roomType])).entries()).map(([id, rt]) => ({ id, name: rt?.name ?? id }))
-    : [];
+  // Room types come from the canonical catalog, not from the current room
+  // inventory. This keeps Planning aligned with Groups when a type has no
+  // active rooms yet.
+  const availableRoomTypes = roomTypes
+    .filter(rt => rt.id)
+    .map(rt => ({ id: rt.id, name: rt.name, code: rt.code }));
   const availableFloors = data?.rooms
     ? Array.from(new Set(data.rooms.filter(r => !(r as any).isVirtual && r.isActive !== false).map(r => String(r.floor)))).sort((a, b) => Number(a) - Number(b))
     : [];
@@ -836,7 +838,10 @@ export default function PlanningPage() {
                               <Users className="h-3 w-3" />
                               <span className="font-medium">{block.groupName}</span>
                               <span>·</span>
-                              <span>{block.quantity - block.assigned} hab. {block.roomTypeName}</span>
+                              <span>
+                                {block.quantity - block.assigned} hab. {block.roomTypeName}
+                                {block.roomTypeCode ? ` (${block.roomTypeCode})` : ""}
+                              </span>
                               <span className="text-orange-500">({block.checkIn} → {block.checkOut})</span>
                             </button>
                           ))}
@@ -1300,7 +1305,10 @@ export default function PlanningPage() {
                                       <div className="text-xs space-y-1">
                                         {reservation ? (
                                           <>
-                                            <div className="font-semibold">{room.roomNumber} — {room.roomType?.name ?? ""}</div>
+                                            <div className="font-semibold">
+                                              {room.roomNumber} — {room.roomType?.name ?? ""}
+                                              {room.roomType?.code ? ` (${room.roomType.code})` : ""}
+                                            </div>
                                             {reservation.isGroup && reservation.groupName && (
                                               <div className="font-semibold text-indigo-600 dark:text-indigo-400">
                                                 Grupo: {reservation.groupName}
@@ -1353,7 +1361,10 @@ export default function PlanningPage() {
                                           </>
                                         ) : ghostBlock ? (
                                           <>
-                                            <div className="font-semibold">{room.roomNumber} — {room.roomType?.name ?? ""}</div>
+                                            <div className="font-semibold">
+                                              {room.roomNumber} — {room.roomType?.name ?? ""}
+                                              {room.roomType?.code ? ` (${room.roomType.code})` : ""}
+                                            </div>
                                             <div className="border-t pt-1 mt-1 space-y-0.5">
                                               <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
                                                 Grupo: {ghostBlock.groupName}

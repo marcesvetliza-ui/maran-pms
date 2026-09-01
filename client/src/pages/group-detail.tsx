@@ -5117,7 +5117,11 @@ export default function GroupDetailPage() {
                       && (!changingReservation?.roomTypeId || r.roomTypeId === changingReservation?.roomTypeId))
                     .map(r => (
                       <SelectItem key={r.id} value={r.id}>
-                        Hab. {r.roomNumber} — Piso {r.floor} ({r.roomType?.name || r.roomTypeId})
+                        Hab. {r.roomNumber} — Piso {r.floor} (
+                          {r.roomType
+                            ? `${r.roomType.name}${r.roomType.code ? ` (${r.roomType.code})` : ""}`
+                            : `Tipo no encontrado (${r.roomTypeId})`}
+                        )
                       </SelectItem>
                     ))
                   }

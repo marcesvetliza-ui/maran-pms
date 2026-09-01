@@ -53,7 +53,7 @@ interface PlanningFiltersPanelProps {
   filters: PlanningFilter;
   setFilters: (updater: (f: PlanningFilter) => PlanningFilter) => void;
   availableFloors: string[];
-  availableRoomTypes: { id: string; name: string }[];
+  availableRoomTypes: { id: string; name: string; code?: string | null }[];
   onClose?: () => void;
 }
 
@@ -171,7 +171,7 @@ export function PlanningFiltersPanel({
             <SelectContent>
               <SelectItem value="__all__">Todas las categorías</SelectItem>
               {availableRoomTypes.filter(rt => rt.id).map(rt => (
-                <SelectItem key={rt.id} value={rt.id}>{rt.name}</SelectItem>
+                <SelectItem key={rt.id} value={rt.id}>{rt.name}{rt.code ? ` (${rt.code})` : ""}</SelectItem>
               ))}
             </SelectContent>
           </Select>
