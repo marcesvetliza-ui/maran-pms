@@ -1,4 +1,6 @@
 import type { Express } from "express";
+import { createHash } from "node:crypto";
+import JSZip from "jszip";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
@@ -72,8 +74,9 @@ export function registerRoomsRoutes(app: Express) {
   });
 
   app.get("/api/room-types/integrity/export", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
-    const { roomTypeId, source } = req.query;
+    const { roomTypeId, source, format } = req.query;
     const requestedSource = typeof source === "string" ? source : "";
+    const requestedFormat = format === "csv" ? "csv" : "zip";
     if (
       typeof roomTypeId !== "string" ||
       !roomTypeId ||
@@ -83,7 +86,8 @@ export function registerRoomsRoutes(app: Express) {
     }
 
     const safeRoomTypeId = roomTypeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "desconocido";
-    const filename = `evidencia_tipo_habitacion_${safeRoomTypeId}_${requestedSource}.csv`;
+    const csvFilename = `evidencia_tipo_habitacion_${safeRoomTypeId}_${requestedSource}.csv`;
+    const zipFilename = `evidencia_tipo_habitacion_${safeRoomTypeId}_${requestedSource}_certificada.zip`;
 
     const csvCell = (value: unknown) => {
       const text = String(value ?? "");
@@ -104,15 +108,23 @@ export function registerRoomsRoutes(app: Express) {
         ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE,
       );
 
-      res.status(200);
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      res.setHeader("Cache-Control", "no-store");
-      await writeChunk("\uFEFFIdentificador técnico,Etiqueta legible\n");
+      const csvChunks: string[] = ["\uFEFFIdentificador técnico,Etiqueta legible\n"];
+      if (requestedFormat === "csv") {
+        res.status(200);
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${csvFilename}"`);
+        res.setHeader("Cache-Control", "no-store");
+        await writeChunk(csvChunks[0]);
+      }
 
       while (true) {
         for (const record of page.records) {
-          await writeChunk(`${csvCell(record.id)},${csvCell(record.label)}\n`);
+          const row = `${csvCell(record.id)},${csvCell(record.label)}\n`;
+          if (requestedFormat === "csv") {
+            await writeChunk(row);
+          } else {
+            csvChunks.push(row);
+          }
         }
 
         offset += page.records.length;
@@ -126,7 +138,61 @@ export function registerRoomsRoutes(app: Express) {
         );
       }
 
-      res.end();
+      if (requestedFormat === "csv") {
+        res.end();
+        return;
+      }
+
+      const csvBuffer = Buffer.from(csvChunks.join(""), "utf8");
+      const sha256 = createHash("sha256").update(csvBuffer).digest("hex");
+      const generatedAt = new Date().toISOString();
+      const manifest = {
+        manifestVersion: 1,
+        generatedAt,
+        roomTypeId,
+        source: requestedSource,
+        recordCount: csvChunks.length - 1,
+        csvFile: csvFilename,
+        hash: {
+          algorithm: "SHA-256",
+          value: sha256,
+          verifiedBytes: "El contenido completo del CSV, incluyendo su encabezado y BOM UTF-8.",
+        },
+        verificationInstructions: [
+          `Extraé ${csvFilename} de este ZIP.`,
+          `Ejecutá sha256sum "${csvFilename}" (o una herramienta equivalente SHA-256).`,
+          `Compará el resultado con hash.value de este manifiesto; deben coincidir exactamente.`,
+        ],
+      };
+      const verificationGuide = [
+        "Evidencia certificada de referencias de tipos de habitación",
+        "",
+        `Generada: ${generatedAt}`,
+        `Tipo huérfano: ${roomTypeId}`,
+        `Origen: ${requestedSource}`,
+        `Cantidad de registros: ${manifest.recordCount}`,
+        `Archivo CSV: ${csvFilename}`,
+        `Algoritmo: SHA-256`,
+        `Huella esperada: ${sha256}`,
+        "",
+        "Cómo verificar:",
+        `1. Extraé ${csvFilename} de este ZIP.`,
+        `2. Ejecutá: sha256sum "${csvFilename}"`,
+        `3. Compará la salida con la huella esperada de arriba.`,
+        "Si las huellas no coinciden, el CSV fue modificado o no es el archivo original.",
+        "",
+      ].join("\n");
+      const zip = new JSZip();
+      zip.file(csvFilename, csvBuffer);
+      zip.file("manifiesto.json", `${JSON.stringify(manifest, null, 2)}\n`);
+      zip.file("COMO_VERIFICAR.txt", verificationGuide);
+      const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+
+      res.status(200);
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${zipFilename}"`);
+      res.setHeader("Cache-Control", "no-store");
+      res.send(zipBuffer);
     } catch (error) {
       console.error("[room-type-integrity-export] error:", error);
       if (res.headersSent) {

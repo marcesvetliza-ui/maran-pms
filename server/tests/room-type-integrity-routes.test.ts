@@ -1,5 +1,7 @@
 import express from "express";
 import * as http from "node:http";
+import { createHash } from "node:crypto";
+import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockStorage = {
@@ -166,7 +168,7 @@ describe("room type catalog integrity routes", () => {
     }
   });
 
-  it("streams the complete evidence in pages as escaped CSV", async () => {
+  it("streams the complete evidence in pages as escaped CSV when explicitly requested", async () => {
     mockStorage.getRoomTypeReferenceExportPage
       .mockResolvedValueOnce({
         records: [
@@ -187,7 +189,7 @@ describe("room type catalog integrity routes", () => {
 
     try {
       const response = await fetch(
-        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms&format=csv`,
       );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/csv");
@@ -214,6 +216,63 @@ describe("room type catalog integrity routes", () => {
         "deleted-type",
         "rooms",
         2,
+        250,
+      );
+    } finally {
+      app.close();
+    }
+  });
+
+  it("downloads a certified ZIP with the CSV, manifest and verifiable SHA-256 hash", async () => {
+    mockStorage.getRoomTypeReferenceExportPage.mockResolvedValue({
+      records: [
+        { id: "room-1", label: "101" },
+        { id: "room-2", label: "102" },
+      ],
+      hasMore: false,
+    });
+    const app = await startApp();
+
+    try {
+      const response = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/zip");
+      expect(response.headers.get("content-disposition")).toContain(
+        "evidencia_tipo_habitacion_deleted-type_rooms_certificada.zip",
+      );
+
+      const zip = await JSZip.loadAsync(await response.arrayBuffer());
+      const csvFilename = "evidencia_tipo_habitacion_deleted-type_rooms.csv";
+      const csvBuffer = Buffer.from(await zip.file(csvFilename)!.async("nodebuffer"));
+      const manifest = JSON.parse(await zip.file("manifiesto.json")!.async("string"));
+      const guide = await zip.file("COMO_VERIFICAR.txt")!.async("string");
+
+      expect(manifest).toEqual(expect.objectContaining({
+        manifestVersion: 1,
+        roomTypeId: "deleted-type",
+        source: "rooms",
+        recordCount: 2,
+        csvFile: csvFilename,
+        hash: {
+          algorithm: "SHA-256",
+          value: expect.any(String),
+          verifiedBytes: expect.stringContaining("CSV"),
+        },
+        verificationInstructions: expect.arrayContaining([
+          expect.stringContaining("sha256sum"),
+        ]),
+      }));
+      expect(manifest.generatedAt).toEqual(expect.any(String));
+      expect(manifest.hash.value).toBe(createHash("sha256").update(csvBuffer).digest("hex"));
+      expect(guide).toContain(manifest.hash.value);
+      expect(guide).toContain("Cómo verificar:");
+      expect(await zip.file(csvFilename)!.async("string")).toContain("room-1");
+      expect(mockStorage.getRoomTypeReferenceExportPage).toHaveBeenCalledWith(
+        "deleted-type",
+        "rooms",
+        0,
         250,
       );
     } finally {

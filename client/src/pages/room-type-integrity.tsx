@@ -238,10 +238,11 @@ export default function RoomTypeIntegrityPage() {
 
       <Alert>
         <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Reparación segura</AlertTitle>
+        <AlertTitle>Reparación segura y evidencia certificada</AlertTitle>
         <AlertDescription>
           La reasignación se ejecuta en una única transacción. Si una fuente falla, se revierten todos los cambios y se conservan las referencias originales.
-          No se agregan restricciones nuevas hasta resolver estos históricos.
+          No se agregan restricciones nuevas hasta resolver estos históricos. Cada descarga certificada incluye el CSV, un manifiesto con filtros y fecha de generación, y su huella SHA-256.
+          Para verificarla, extraé el CSV y ejecutá <code className="rounded bg-muted px-1 py-0.5">sha256sum nombre-del-archivo.csv</code>; compará el resultado con <code className="rounded bg-muted px-1 py-0.5">hash.value</code> de <code className="rounded bg-muted px-1 py-0.5">manifiesto.json</code>.
         </AlertDescription>
       </Alert>
 
@@ -384,7 +385,7 @@ export default function RoomTypeIntegrityPage() {
                             data-testid={`button-download-${orphan.roomTypeId}-${reference.source}`}
                           >
                             <Download className="mr-1.5 h-3.5 w-3.5" />
-                            Descargar evidencia
+                            Descargar evidencia certificada
                           </a>
                         </Button>
                       </div>
