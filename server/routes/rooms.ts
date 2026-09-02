@@ -1,6 +1,12 @@
 import type { Express } from "express";
 import { createHash } from "node:crypto";
-import JSZip from "jszip";
+import archiver from "archiver";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
+import { Transform, type Writable } from "node:stream";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
@@ -13,6 +19,8 @@ const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito",
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE = 250;
+const ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES = 256 * 1024 * 1024;
+const ROOM_TYPE_REFERENCE_EXPORT_MAX_ZIP_BYTES = 300 * 1024 * 1024;
 const ROOM_TYPE_REFERENCE_SOURCES: RoomTypeReferenceSource[] = [
   "rooms",
   "rate_plans",
@@ -22,6 +30,100 @@ const ROOM_TYPE_REFERENCE_SOURCES: RoomTypeReferenceSource[] = [
   "packages",
   "package_room_prices",
 ];
+
+class RoomTypeExportLimitError extends Error {
+  constructor(fileType: "CSV" | "ZIP", maxBytes: number) {
+    super(`La evidencia excede el límite de ${fileType} de ${maxBytes} bytes`);
+    this.name = "RoomTypeExportLimitError";
+  }
+}
+
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("Descarga cancelada");
+}
+
+function writeChunk(stream: Writable, chunk: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      stream.off("error", onError);
+      stream.off("drain", onDrain);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = (error: Error) => rejectOnce(error);
+    const onDrain = () => resolveOnce();
+    const onAbort = () => rejectOnce(abortReason(signal));
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    stream.once("error", onError);
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      if (stream.write(chunk, "utf8")) {
+        resolveOnce();
+      } else {
+        stream.once("drain", onDrain);
+      }
+    } catch (error) {
+      rejectOnce(error);
+    }
+  });
+}
+
+function finishWritable(stream: Writable, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      stream.off("error", onError);
+      stream.off("finish", onFinish);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = (error: Error) => rejectOnce(error);
+    const onFinish = () => resolveOnce();
+    const onAbort = () => rejectOnce(abortReason(signal));
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    stream.once("error", onError);
+    stream.once("finish", onFinish);
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      stream.end();
+    } catch (error) {
+      rejectOnce(error);
+    }
+  });
+}
 
 export function registerRoomsRoutes(app: Express) {
   // Room Types
@@ -94,13 +196,46 @@ export function registerRoomsRoutes(app: Express) {
       const safeText = /^[\u0000-\u0020]*[=+\-@]/.test(text) ? `'${text}` : text;
       return `"${safeText.replaceAll('"', '""')}"`;
     };
-    const writeChunk = (chunk: string) => {
-      if (res.write(chunk)) return Promise.resolve();
-      return new Promise<void>((resolve) => res.once("drain", resolve));
+
+    const abortController = new AbortController();
+    let requestAborted = false;
+    let csvStream: ReturnType<typeof createWriteStream> | undefined;
+    let archive: ReturnType<typeof archiver> | undefined;
+    let tempDir: string | undefined;
+    const abortExport = () => {
+      requestAborted = true;
+      if (!abortController.signal.aborted) {
+        abortController.abort(new Error("Descarga cancelada por el cliente"));
+      }
+      csvStream?.destroy();
+      archive?.abort();
     };
+    const onResponseClose = () => {
+      if (!res.writableEnded) abortExport();
+    };
+    const cleanupExportResources = async () => {
+      csvStream?.destroy();
+      csvStream = undefined;
+      if (archive && !archive.destroyed) archive.abort();
+      archive = undefined;
+      if (tempDir) {
+        const directoryToRemove = tempDir;
+        try {
+          await rm(directoryToRemove, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+          if (tempDir === directoryToRemove) tempDir = undefined;
+        } catch (cleanupError) {
+          console.error("[room-type-integrity-export] cleanup error:", cleanupError);
+        }
+      }
+    };
+    req.once("aborted", abortExport);
+    res.once("close", onResponseClose);
 
     try {
       let offset = 0;
+      let recordCount = 0;
+      let csvBytes = 0;
+      const csvHash = requestedFormat === "zip" ? createHash("sha256") : undefined;
       let page = await storage.getRoomTypeReferenceExportPage(
         roomTypeId,
         requestedSource as RoomTypeReferenceSource,
@@ -108,23 +243,43 @@ export function registerRoomsRoutes(app: Express) {
         ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE,
       );
 
-      const csvChunks: string[] = ["\uFEFFIdentificador técnico,Etiqueta legible\n"];
+      const csvHeader = "\uFEFFIdentificador técnico,Etiqueta legible\n";
       if (requestedFormat === "csv") {
         res.status(200);
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="${csvFilename}"`);
         res.setHeader("Cache-Control", "no-store");
-        await writeChunk(csvChunks[0]);
+        csvBytes += Buffer.byteLength(csvHeader, "utf8");
+        if (csvBytes > ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES) {
+          throw new RoomTypeExportLimitError("CSV", ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES);
+        }
+        await writeChunk(res, csvHeader, abortController.signal);
+      } else {
+        tempDir = await mkdtemp(join(tmpdir(), "room-type-integrity-"));
+        csvStream = createWriteStream(join(tempDir, csvFilename), { flags: "wx", mode: 0o600 });
+        csvBytes += Buffer.byteLength(csvHeader, "utf8");
+        if (csvBytes > ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES) {
+          throw new RoomTypeExportLimitError("CSV", ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES);
+        }
+        await writeChunk(csvStream, csvHeader, abortController.signal);
+        csvHash!.update(csvHeader, "utf8");
       }
 
       while (true) {
         for (const record of page.records) {
           const row = `${csvCell(record.id)},${csvCell(record.label)}\n`;
-          if (requestedFormat === "csv") {
-            await writeChunk(row);
-          } else {
-            csvChunks.push(row);
+          const rowBytes = Buffer.byteLength(row, "utf8");
+          if (csvBytes + rowBytes > ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES) {
+            throw new RoomTypeExportLimitError("CSV", ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES);
           }
+          if (requestedFormat === "csv") {
+            await writeChunk(res, row, abortController.signal);
+          } else {
+            await writeChunk(csvStream!, row, abortController.signal);
+            csvHash!.update(row, "utf8");
+          }
+          csvBytes += rowBytes;
+          recordCount += 1;
         }
 
         offset += page.records.length;
@@ -143,15 +298,16 @@ export function registerRoomsRoutes(app: Express) {
         return;
       }
 
-      const csvBuffer = Buffer.from(csvChunks.join(""), "utf8");
-      const sha256 = createHash("sha256").update(csvBuffer).digest("hex");
+      await finishWritable(csvStream!, abortController.signal);
+      csvStream = undefined;
+      const sha256 = csvHash!.digest("hex");
       const generatedAt = new Date().toISOString();
       const manifest = {
         manifestVersion: 1,
         generatedAt,
         roomTypeId,
         source: requestedSource,
-        recordCount: csvChunks.length - 1,
+        recordCount,
         csvFile: csvFilename,
         hash: {
           algorithm: "SHA-256",
@@ -182,24 +338,48 @@ export function registerRoomsRoutes(app: Express) {
         "Si las huellas no coinciden, el CSV fue modificado o no es el archivo original.",
         "",
       ].join("\n");
-      const zip = new JSZip();
-      zip.file(csvFilename, csvBuffer);
-      zip.file("manifiesto.json", `${JSON.stringify(manifest, null, 2)}\n`);
-      zip.file("COMO_VERIFICAR.txt", verificationGuide);
-      const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+      archive = archiver("zip", {
+        zlib: { level: 6 },
+        highWaterMark: 1024 * 1024,
+      });
+      archive.append(createReadStream(join(tempDir!, csvFilename)), { name: csvFilename });
+      archive.append(`${JSON.stringify(manifest, null, 2)}\n`, { name: "manifiesto.json" });
+      archive.append(verificationGuide, { name: "COMO_VERIFICAR.txt" });
 
       res.status(200);
       res.setHeader("Content-Type", "application/zip");
       res.setHeader("Content-Disposition", `attachment; filename="${zipFilename}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.send(zipBuffer);
+      let zipBytes = 0;
+      const limitedZip = new Transform({
+        transform(chunk, _encoding, callback) {
+          zipBytes += chunk.length;
+          if (zipBytes > ROOM_TYPE_REFERENCE_EXPORT_MAX_ZIP_BYTES) {
+            callback(new RoomTypeExportLimitError("ZIP", ROOM_TYPE_REFERENCE_EXPORT_MAX_ZIP_BYTES));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      const transfer = pipeline(archive, limitedZip, res, { signal: abortController.signal });
+      archive.finalize();
+      await transfer;
     } catch (error) {
       console.error("[room-type-integrity-export] error:", error);
-      if (res.headersSent) {
+      await cleanupExportResources();
+      if (res.headersSent && !res.destroyed) {
         res.destroy(error instanceof Error ? error : new Error("Error exportando referencias"));
-      } else {
-        res.status(500).json({ error: "Error exportando las referencias" });
+      } else if (!requestAborted) {
+        const status = error instanceof RoomTypeExportLimitError ? 413 : 500;
+        const message = error instanceof RoomTypeExportLimitError
+          ? "La evidencia excede el límite permitido"
+          : "Error exportando las referencias";
+        res.status(status).json({ error: message });
       }
+    } finally {
+      req.off("aborted", abortExport);
+      res.off("close", onResponseClose);
+      await cleanupExportResources();
     }
   });
 

@@ -1,6 +1,8 @@
 import express from "express";
 import * as http from "node:http";
 import { createHash } from "node:crypto";
+import { readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -54,6 +56,12 @@ async function startApp() {
       });
     });
   });
+}
+
+async function roomTypeExportTempDirs() {
+  return (await readdir(tmpdir()))
+    .filter((entry) => entry.startsWith("room-type-integrity-"))
+    .sort();
 }
 
 describe("room type catalog integrity routes", () => {
@@ -275,6 +283,28 @@ describe("room type catalog integrity routes", () => {
         0,
         250,
       );
+    } finally {
+      app.close();
+    }
+  });
+
+  it("removes the temporary CSV when certified evidence generation fails", async () => {
+    const tempDirsBefore = await roomTypeExportTempDirs();
+    mockStorage.getRoomTypeReferenceExportPage
+      .mockResolvedValueOnce({
+        records: [{ id: "room-1", label: "101" }],
+        hasMore: true,
+      })
+      .mockRejectedValueOnce(new Error("storage unavailable"));
+    const app = await startApp();
+
+    try {
+      const response = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Error exportando las referencias" });
+      expect(await roomTypeExportTempDirs()).toEqual(tempDirsBefore);
     } finally {
       app.close();
     }
