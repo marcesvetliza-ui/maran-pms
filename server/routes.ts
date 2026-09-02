@@ -42,6 +42,7 @@ import { registerFolioRoutes } from "./routes/folios";
 import { registerPublicBookingRoutes } from "./routes/publicBooking";
 import { registerEmailRoutes } from "./routes/emails";
 import { registerCountriesRoutes } from "./routes/countries";
+import { buildManualCashMovement } from "./cash-manual-movement";
 import { registerPosConfigsRoutes } from "./routes/pos-configs";
 import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-centers";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
@@ -2210,9 +2211,12 @@ export async function registerRoutes(
 
   app.post("/api/cash/movements", requireAuth, async (req, res) => {
     try {
-      const body = req.body;
+      const body = req.body as any;
+      const movementData = body.sourceType === "manual"
+        ? buildManualCashMovement(body)
+        : body;
       if (body.sourceType === "cobro_cc") assertFinancialSchemaReady();
-      const movement = await storage.createCashMovement(body);
+      const movement = await storage.createCashMovement(movementData);
 
       // Si es un cobro de cuenta corriente, crear movimiento en account_movements
       if (body.sourceType === "cobro_cc" && body.ccEntityType && body.ccEntityId) {

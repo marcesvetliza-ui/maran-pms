@@ -155,6 +155,7 @@ import {
 } from "@shared/schema";
 import { assertFinancialSchemaReady } from "./migrate";
 import { getGroupInvoiceSnapshot } from "./billing/groupInvoiceScope";
+import { buildGroupRoomFinancialSnapshot } from "@shared/groupFinancial";
 import { computeGroupOperationalLedger } from "./billing/groupOperationalLedger";
 
 export class DatabaseStorage implements IStorage {
@@ -1913,6 +1914,7 @@ export class DatabaseStorage implements IStorage {
       agreedRate?: string;
       ratePlanId?: string | null;
       guestId?: string | null;
+      canonicalRoomTypeId?: string;
     }
   ): Promise<Reservation | undefined> {
     const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
@@ -1920,9 +1922,13 @@ export class DatabaseStorage implements IStorage {
 
     const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
     if (!room) return undefined;
+    if (options?.canonicalRoomTypeId && room.roomTypeId !== options.canonicalRoomTypeId) {
+      throw new Error("La habitación no corresponde al tipo del bloque");
+    }
 
     const blocks = await this.getGroupBlocks(groupId);
-    const matchingBlock = blocks.find(b => b.roomTypeId === room.roomTypeId);
+    const canonicalRoomTypeId = options?.canonicalRoomTypeId || room.roomTypeId;
+    const matchingBlock = blocks.find(b => b.roomTypeId === canonicalRoomTypeId);
 
     const checkInDate = options?.checkInDate || matchingBlock?.blockCheckInDate || group.checkInDate;
     const checkOutDate = options?.checkOutDate || matchingBlock?.blockCheckOutDate || group.checkOutDate;
@@ -1953,7 +1959,7 @@ export class DatabaseStorage implements IStorage {
     const reservation = await this.createReservation({
       reservationCode: `G${group.groupCode}-${room.roomNumber}`,
       guestId: guest.id,
-      roomTypeId: room.roomTypeId,
+      roomTypeId: canonicalRoomTypeId,
       roomId: room.id,
       ratePlanId,
       checkInDate,
@@ -2822,6 +2828,15 @@ export class DatabaseStorage implements IStorage {
     const groupPaymentsTotal = gPayments.reduce((s, p) => s + Math.round(Number(p.amount) * 100), 0) / 100;
 
     const resRows = ledgerLines.map((line) => {
+      const roomSourcePrefix = `reservation:${line.reservationId}:`;
+      const roomSources = billing.sources.filter((source) => source.id.startsWith(roomSourcePrefix));
+      const financial = buildGroupRoomFinancialSnapshot({
+        accommodation: line.accommodationTotal,
+        extras: line.extrasTotal,
+        collected: line.paymentsTotal,
+        invoiced: roomSources.reduce((sum, source) => sum + source.invoiced, 0),
+        fiscalAvailable: roomSources.reduce((sum, source) => sum + source.available, 0),
+      });
       return {
         reservationId: line.reservationId,
         guestName: line.guestName,
@@ -2830,7 +2845,8 @@ export class DatabaseStorage implements IStorage {
         accommodationTotal: line.accommodationTotal,
         extrasTotal: line.extrasTotal,
         paymentsTotal: line.paymentsTotal,
-        balance: line.accommodationTotal + line.extrasTotal - line.paymentsTotal,
+        balance: financial.operationalBalance,
+        financial,
       };
     });
 
@@ -2849,7 +2865,7 @@ export class DatabaseStorage implements IStorage {
         extras: operational.extras,
         payments: operational.payments,
         voids: voidMovementsTotal,
-        balance: operational.balance,
+        balance: Math.max(0, operational.balance),
       },
       billing,
     };

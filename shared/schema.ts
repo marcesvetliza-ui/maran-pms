@@ -2128,7 +2128,8 @@ export const cashMovements = pgTable("cash_movements", {
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
   movementType: text("movement_type").notNull().default("income"),
   receiptType: text("receipt_type"),
-  receiptNumber: text("receipt_number"),
+  // Issued by PostgreSQL so parallel cash registrations cannot reuse a number.
+  receiptNumber: text("receipt_number").default(sql`nextval('cash_movements_receipt_number_seq'::regclass)::text`),
   proveedor: text("proveedor"),
   expenseCategory: text("expense_category"),
   registeredBy: text("registered_by"),
@@ -2140,7 +2141,8 @@ export const cashMovements = pgTable("cash_movements", {
   anuladoAt: timestamp("anulado_at"),
 });
 
-export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({ id: true, createdAt: true });
+// Receipt numbers are an auditable server/database sequence, never client input.
+export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({ id: true, receiptNumber: true, createdAt: true });
 export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
 export type CashMovement = typeof cashMovements.$inferSelect;
 

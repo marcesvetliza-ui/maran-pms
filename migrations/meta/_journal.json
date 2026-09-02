@@ -8,6 +8,13 @@
       "when": 1778881778623,
       "tag": "0000_unique_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778881778624,
+      "tag": "0001_cash_movement_receipt_sequence",
+      "breakpoints": true
     }
   ]
 }

@@ -165,6 +165,11 @@ const AREA_LABEL_MAP: Record<string, string> = {
   spa: "SPA",
   events: "Eventos",
 };
+const MANUAL_RECEIPT_LABELS: Record<string, string> = {
+  inicio_caja: "Inicio de Caja",
+  retiro_efectivo: "Retiro de Efectivo",
+  ingreso_efectivo: "Ingreso de Efectivo",
+};
 
 const DIAS_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const TURNO_TIPO_OPTIONS = [
@@ -490,7 +495,7 @@ ${anulSection}
   if (w) { w.document.write(html); w.document.close(); }
 }
 
-function AreaTab({ area, config }: { area: string; config: CashConfig }) {
+function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: CashConfig; shiftRefreshToken: number }) {
   const { user } = useAuth();
   const isAdmin = ["admin", "manager", "jefe_recepcion", "resp_administracion"].includes(user?.role ?? "");
   const { toast } = useToast();
@@ -532,7 +537,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   const [movMethod, setMovMethod] = useState("cash");
   const [movAmount, setMovAmount] = useState("");
   const [movReceipt, setMovReceipt] = useState("");
-  const [movReceiptNumber, setMovReceiptNumber] = useState("");
   const [movProveedor, setMovProveedor] = useState("");
   const [movExpenseCategory, setMovExpenseCategory] = useState("");
   // Cobro cuenta corriente
@@ -562,7 +566,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
   }
 
   const { data: currentShift, isLoading: shiftLoading } = useQuery<CashShift | null>({
-    queryKey: ["/api/cash/shifts/current", `?area=${area}`],
+    // A new token is issued whenever Caja is entered or the operating area
+    // changes. This prevents React Query from painting a cached prior shift.
+    queryKey: ["/api/cash/shifts/current", `?area=${area}`, shiftRefreshToken],
     queryFn: async () => {
       const res = await fetch(`/api/cash/shifts/current?area=${area}`, { credentials: "include" });
       if (!res.ok) {
@@ -572,6 +578,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
       const data = await res.json();
       return data || null;
     },
+    refetchOnMount: "always",
   });
 
   const { data: movements = [], isLoading: movementsLoading } = useQuery<CashMovement[]>({
@@ -650,6 +657,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           paymentMethod: "cash",
           amount: parseFloat(movAmount),
           movementType: "income",
+          receiptType: "inicio_caja",
           description: "Inicio de caja",
         });
       }
@@ -661,9 +669,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
         sourceLabel: label,
         paymentMethod: movMethod,
         amount: parseFloat(movAmount),
-        movementType: movType === "expense" ? "expense" : "income",
-        receiptType: movReceipt || undefined,
-        receiptNumber: movReceiptNumber || undefined,
+        receiptType: movReceipt,
         proveedor: movProveedor || undefined,
         expenseCategory: movExpenseCategory || undefined,
         description: label,
@@ -988,7 +994,7 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                                 <div><span className="font-medium text-foreground">Categoría:</span> {expenseCategoryLabels[m.expenseCategory] || m.expenseCategory}</div>
                               )}
                               {m.receiptType && (
-                                <div><span className="font-medium text-foreground">Comprobante:</span> {m.receiptType}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {MANUAL_RECEIPT_LABELS[m.receiptType] || m.receiptType}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
                               )}
                               {m.motivoAnulacion && (
                                 <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {m.motivoAnulacion}</div>
@@ -1082,7 +1088,6 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           setMovMethod("cash");
           setMovAmount("");
           setMovReceipt("");
-          setMovReceiptNumber("");
           setMovProveedor("");
           setMovExpenseCategory("");
           setMovCCEntityId("");
@@ -1126,20 +1131,22 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
           ) : (
           <>
           <div className="space-y-4">
-            {/* Tipo de movimiento */}
+            {/* El comprobante determina el signo contable del movimiento. */}
             <div>
-              <label className="text-sm font-medium">Tipo</label>
-              <Select value={movType} onValueChange={(v) => {
-                setMovType(v);
+              <label className="text-sm font-medium">Comprobante <span className="text-destructive">*</span></label>
+              <Select value={movReceipt} onValueChange={(v) => {
+                setMovReceipt(v);
+                setMovType(v === "retiro_efectivo" ? "expense" : "income");
                 setMovCCEntityId("");
                 setMovCCEntityName("");
               }}>
-                <SelectTrigger data-testid={`select-mov-type-${area}`}>
-                  <SelectValue />
+                <SelectTrigger data-testid={`select-mov-receipt-${area}`}>
+                  <SelectValue placeholder="Seleccionar comprobante..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="income">Ingreso manual</SelectItem>
-                  {isAdmin && <SelectItem value="expense">Egreso (solo admin)</SelectItem>}
+                  <SelectItem value="inicio_caja">Inicio de Caja</SelectItem>
+                  <SelectItem value="retiro_efectivo">Retiro de Efectivo</SelectItem>
+                  <SelectItem value="ingreso_efectivo">Ingreso de Efectivo</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1254,21 +1261,12 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </div>
             )}
 
-            {/* Método de pago */}
+            {/* Los comprobantes manuales de este flujo representan efectivo físico. */}
             <div>
               <label className="text-sm font-medium">Método de pago</label>
-              <Select value={movMethod} onValueChange={setMovMethod}>
-                <SelectTrigger data-testid={`select-mov-method-${area}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(PAYMENT_METHOD_MAP)
-                    .filter(([key]) => !["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente"].includes(key))
-                    .map(([key, label]) => (
-                      <SelectItem key={key} value={key}>{label}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <div className="mt-1 rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium" data-testid={`manual-movement-method-${area}`}>
+                Efectivo
+              </div>
             </div>
 
             {/* Monto */}
@@ -1316,48 +1314,9 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
               </div>
             )}
 
-            {/* Comprobante */}
-            <div>
-              <label className="text-sm font-medium">
-                Comprobante {movType === "expense" ? <span className="text-destructive">*</span> : <span className="text-muted-foreground text-xs">(opcional)</span>}
-              </label>
-              <Select value={movReceipt} onValueChange={setMovReceipt}>
-                <SelectTrigger data-testid={`select-mov-receipt-${area}`}>
-                  <SelectValue placeholder="Seleccionar..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {movType === "expense" ? (
-                    <>
-                      <SelectItem value="ticket">Ticket</SelectItem>
-                      <SelectItem value="factura_a">Factura A</SelectItem>
-                      <SelectItem value="factura_b">Factura B</SelectItem>
-                      <SelectItem value="factura_c">Factura C</SelectItem>
-                      <SelectItem value="remito">Remito</SelectItem>
-                      <SelectItem value="recibo">Recibo</SelectItem>
-                    </>
-                  ) : (
-                    <>
-                      <SelectItem value="ticket">Ticket</SelectItem>
-                      <SelectItem value="remito">Remito</SelectItem>
-                      <SelectItem value="recibo">Recibo</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* N° de comprobante */}
-            {movReceipt && (
-              <div>
-                <label className="text-sm font-medium">N° de comprobante {movType === "expense" && <span className="text-destructive">*</span>}</label>
-                <Input
-                  value={movReceiptNumber}
-                  onChange={(e) => setMovReceiptNumber(e.target.value)}
-                  placeholder="Ej: 0001-00003456"
-                  data-testid={`input-mov-receipt-number-${area}`}
-                />
-              </div>
-            )}
+            <p className="text-xs text-muted-foreground">
+              El número de comprobante se asigna automáticamente al registrar el movimiento.
+            </p>
           </div>
           <DialogFooter>
             <Button
@@ -1366,7 +1325,8 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                 !movAmount ||
                 addMovementMutation.isPending ||
                 (isCobro ? !movCCEntityId : !movDesc.trim()) ||
-                (movType === "expense" && (!movReceipt || !movProveedor.trim() || !movExpenseCategory || !movReceiptNumber.trim()))
+                !movReceipt ||
+                (movType === "expense" && (!movProveedor.trim() || !movExpenseCategory))
               }
               data-testid={`btn-confirm-movement-${area}`}
             >
@@ -2543,6 +2503,9 @@ export default function CashRegister() {
   );
   const [mostrarSelectorParte, setMostrarSelectorParte] = useState(false);
   const [currentTab, setCurrentTab] = useState<string | undefined>(undefined);
+  // A per-entry cache key makes the very first active tab wait for a fresh
+  // current-shift response instead of displaying a previous visit's shift.
+  const [shiftRefreshToken, setShiftRefreshToken] = useState(() => Date.now());
 
   useEffect(() => {
     if (isAdminOrManager && !parteSeleccionado && !isLoading && allActiveConfigs.length > 0) {
@@ -2552,6 +2515,7 @@ export default function CashRegister() {
   }, [isLoading]);
 
   function seleccionarParte(area: string) {
+    setShiftRefreshToken((token) => token + 1);
     setParteSeleccionado(area);
     sessionStorage.setItem("caja_parte_activo", area);
     setMostrarSelectorParte(false);
@@ -2562,6 +2526,13 @@ export default function CashRegister() {
     sessionStorage.removeItem("caja_parte_activo");
     setParteSeleccionado(null);
     setMostrarSelectorParte(true);
+  }
+
+  function handleTabChange(tab: string) {
+    if (allActiveConfigs.some((config) => config.area === tab)) {
+      setShiftRefreshToken((token) => token + 1);
+    }
+    setCurrentTab(tab);
   }
 
   // Admin/manager/global roles see all areas; others see their assigned department or role-matching area
@@ -2651,7 +2622,7 @@ export default function CashRegister() {
         </Dialog>
       )}
 
-      <Tabs value={currentTab ?? defaultTab} onValueChange={setCurrentTab}>
+      <Tabs value={currentTab ?? defaultTab} onValueChange={handleTabChange}>
           <TabsList data-testid="tabs-cash-areas">
             {visibleConfigs.map((c) => (
               <TabsTrigger key={c.area} value={c.area} data-testid={`tab-${c.area}`}>
@@ -2684,7 +2655,7 @@ export default function CashRegister() {
 
           {visibleConfigs.map((c) => (
             <TabsContent key={c.area} value={c.area}>
-              <AreaTab area={c.area} config={c} />
+              <AreaTab area={c.area} config={c} shiftRefreshToken={shiftRefreshToken} />
             </TabsContent>
           ))}
 

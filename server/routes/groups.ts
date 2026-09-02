@@ -12,7 +12,8 @@ import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupIn
 import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
-import { groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
+import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
+import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -688,19 +689,17 @@ export function registerGroupsRoutes(app: Express) {
         const checkIn = blockCheckInDate || group.checkInDate;
         const checkOut = blockCheckOutDate || group.checkOutDate;
 
-        const allRoomsOfType = await db.select().from(roomsTable).where(eq(roomsTable.roomTypeId, roomTypeId));
+        const allRoomsOfType = await db.select().from(roomsTable).where(eq(roomsTable.roomTypeId, block.roomTypeId));
         const allReservations = await storage.getReservations();
-        const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
 
-        const availableRooms = allRoomsOfType.filter(room => {
-          if (room.roomNumber === "REUB") return false;
-          if (room.status === "maintenance" || room.status === "oos") return false;
-          return !allReservations.find(res => {
-            if (!activeStatuses.includes(res.status)) return false;
-            if (res.roomId !== room.id) return false;
-            return res.checkInDate < checkOut && res.checkOutDate > checkIn;
-          });
-        });
+        const maintenanceBlocks = await storage.getMaintenanceBlocks();
+        const availableRooms = allRoomsOfType.filter((room) => isRoomAvailableForInterval({
+          room,
+          checkIn,
+          checkOut,
+          reservations: allReservations,
+          maintenanceBlocks,
+        }));
 
         let autoAssigned = 0;
         for (const room of availableRooms) {
@@ -717,7 +716,9 @@ export function registerGroupsRoutes(app: Express) {
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
             guestId: placeholderGuest.id,
             guestName: "",
-            roomTypeId: room.roomTypeId,
+            // The block is the source of truth for a group allocation. The
+            // physical room was filtered against this same persisted ID above.
+            roomTypeId: block.roomTypeId,
             roomId: room.id,
             ratePlanId: ratePlanId || null,
             checkInDate: checkIn,
@@ -805,7 +806,7 @@ export function registerGroupsRoutes(app: Express) {
   // Assign real guest to a pre-blocked (placeholder) reservation, optionally changing room
   app.patch("/api/groups/:groupId/placeholder-reservations/:reservationId", async (req, res) => {
     try {
-      const { guestId, guestFirstName, guestLastName, roomId } = req.body;
+      const { guestId, guestFirstName, guestLastName, roomId, roomTypeId } = req.body;
       const { groupId, reservationId } = req.params;
 
       if (!guestId && !guestFirstName?.trim()) {
@@ -852,8 +853,12 @@ export function registerGroupsRoutes(app: Express) {
           }
           const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
           if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
+          const canonicalRoomTypeId = roomTypeId || currentRes.roomTypeId;
+          if (!hasCanonicalRoomType(newRoom, canonicalRoomTypeId)) {
+            return res.status(400).json({ error: "La habitación no corresponde al tipo del bloque" });
+          }
           reservationUpdates.roomId = roomId;
-          reservationUpdates.roomTypeId = newRoom.roomTypeId;
+          reservationUpdates.roomTypeId = canonicalRoomTypeId;
           oldRoomId = currentRes.roomId || null;
           newRoomId = roomId;
         }
@@ -915,7 +920,7 @@ export function registerGroupsRoutes(app: Express) {
   // Group Room Assignment
   app.post("/api/groups/:groupId/assign-room", async (req, res) => {
     try {
-      const { roomId, guestId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
+      const { roomId, roomTypeId, guestId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
       if (!roomId || (!guestId && !guestFirstName)) {
         return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
@@ -948,6 +953,7 @@ export function registerGroupsRoutes(app: Express) {
           agreedRate: agreedRate ? String(agreedRate) : undefined,
           ratePlanId: ratePlanId !== undefined ? ratePlanId : undefined,
           guestId: guestId || undefined,
+          canonicalRoomTypeId: roomTypeId || undefined,
         }
       );
       if (!reservation) {
@@ -1036,6 +1042,15 @@ export function registerGroupsRoutes(app: Express) {
 
       for (const line of ledgerLines) {
         const totalCost = line.accommodationTotal + line.extrasTotal;
+        const roomSourcePrefix = `reservation:${line.reservationId}:`;
+        const roomSources = billing.sources.filter((source) => source.id.startsWith(roomSourcePrefix));
+        const financial = buildGroupRoomFinancialSnapshot({
+          accommodation: line.accommodationTotal,
+          extras: line.extrasTotal,
+          collected: line.paymentsTotal,
+          invoiced: roomSources.reduce((sum, source) => sum + source.invoiced, 0),
+          fiscalAvailable: roomSources.reduce((sum, source) => sum + source.available, 0),
+        });
 
         invoiceData.reservations.push({
           reservationCode: line.reservationCode,
@@ -1059,7 +1074,8 @@ export function registerGroupsRoutes(app: Express) {
             retention: parsePaymentRetention(p.notes),
           })),
           paymentsTotal: line.paymentsTotal,
-          balance: totalCost - line.paymentsTotal,
+          balance: financial.operationalBalance,
+          financial,
         });
 
       }
@@ -1068,7 +1084,7 @@ export function registerGroupsRoutes(app: Express) {
       invoiceData.totals.charges = operational.extras;
       invoiceData.totals.groupCharges = operational.groupCharges;
       invoiceData.totals.payments = operational.payments;
-      invoiceData.totals.balance = operational.balance;
+      invoiceData.totals.balance = Math.max(0, operational.balance);
 
       res.json(invoiceData);
     } catch (error) {
@@ -1791,6 +1807,7 @@ export function registerGroupsRoutes(app: Express) {
       // (/folio) and the group invoice summary (/invoice), so the three views
       // can never disagree about a room's accommodation, extras or payments.
       const ledgerLines = await storage.getGroupReservationLedger(req.params.groupId);
+      const billing = await getGroupInvoiceSnapshot(req.params.groupId);
 
       // Build per-room data
       const rooms: any[] = [];
@@ -1818,6 +1835,18 @@ export function registerGroupsRoutes(app: Express) {
          // master folio while still preventing duplicate room collection.
          directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
 
+        const roomSourcePrefix = `reservation:${line.reservationId}:`;
+        const roomSources = billing.sources.filter((source) => source.id.startsWith(roomSourcePrefix));
+        const roomInvoiced = roomSources.reduce((sum, source) => sum + source.invoiced, 0);
+        const roomFiscalAvailable = roomSources.reduce((sum, source) => sum + source.available, 0);
+        const financial = buildGroupRoomFinancialSnapshot({
+          accommodation,
+          extras,
+          collected: paid,
+          invoiced: roomInvoiced,
+          fiscalAvailable: roomFiscalAvailable,
+        });
+
         rooms.push({
           reservationId: line.reservationId,
           guestName: line.guestName,
@@ -1841,12 +1870,13 @@ export function registerGroupsRoutes(app: Express) {
             date: p.date,
             retention: parsePaymentRetention(p.notes),
           })),
+          financial,
           // balance that remains on the individual folio
           individualBalance: config === "accommodation"
-            ? extras - paid  // accommodation covered by master
+            ? Math.max(0, extras - directPaid) // master allocations cover accommodation, not room extras
             : config === "all"
-              ? 0 - paid  // everything covered by master
-              : accommodation + extras - paid, // nothing covered by master
+              ? 0 // everything covered by master
+              : financial.operationalBalance, // nothing covered by master
         });
       }
 
@@ -1859,10 +1889,6 @@ export function registerGroupsRoutes(app: Express) {
       const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
       const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
       const masterBalance = masterTotal - masterPaid;
-
-      // Same fiscal snapshot the group invoice summary reads, so facturado/
-      // disponible never diverges between the master folio and Resumen.
-      const billing = await getGroupInvoiceSnapshot(req.params.groupId);
 
       res.json({
         config,

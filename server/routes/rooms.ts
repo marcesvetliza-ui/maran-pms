@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 import { createHash } from "node:crypto";
 import archiver from "archiver";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -881,31 +882,21 @@ export function registerRoomsRoutes(app: Express) {
         groupReservationIds = new Set(links.map((l: any) => l.reservationId));
       }
 
-      let filtered = rooms.filter(r => r.status !== "oos");
+      let filtered = rooms;
       if (roomTypeId) {
-        filtered = filtered.filter(r => r.roomTypeId === roomTypeId);
+        filtered = filtered.filter(r => hasCanonicalRoomType(r, roomTypeId));
       }
 
-      const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"];
-      const available = filtered.filter(room => {
-        const resConflict = allReservations.find(res => {
-          if (!activeStatuses.includes(res.status)) return false;
-          if (res.roomId !== room.id) return false;
-          // Skip this group's own placeholder reservations — not a conflict for its own assignment
-          if (groupReservationIds.has(res.id)) return false;
-          return res.checkInDate < (checkOut as string) && res.checkOutDate > (checkIn as string);
-        });
-        if (resConflict) return false;
-
-        const blockConflict = maintenanceBlocks.find(blk =>
-          blk.roomId === room.id &&
-          blk.blockFrom < (checkOut as string) &&
-          blk.blockTo > (checkIn as string)
-        );
-        if (blockConflict) return false;
-
-        return true;
-      });
+      const available = filtered.filter((room) => isRoomAvailableForInterval({
+        room,
+        checkIn,
+        checkOut,
+        reservations: allReservations,
+        maintenanceBlocks,
+        // A group's existing placeholders reserve rooms for that group, not
+        // against it, while all other overlapping stays remain unavailable.
+        excludedReservationIds: groupReservationIds,
+      }));
 
       res.json(available);
     } catch (error) {

@@ -9,6 +9,15 @@ export type GroupFinancialSnapshot = {
   fiscalAvailable: number;
 };
 
+export type GroupRoomFinancialSnapshot = {
+  operationalTotal: number;
+  collected: number;
+  nonFiscalAdvances: number;
+  operationalBalance: number;
+  invoiced: number;
+  fiscalAvailable: number;
+};
+
 export function buildGroupFinancialSnapshot(input: {
   operationalTotal: number;
   collected: number;
@@ -27,6 +36,26 @@ export function buildGroupFinancialSnapshot(input: {
     fiscalAvailable: input.fiscalAvailable == null
       ? Math.max(0, operationalCents - invoicedCents) / 100
       : Math.max(0, cents(input.fiscalAvailable)) / 100,
+  };
+}
+
+export function buildGroupRoomFinancialSnapshot(input: {
+  accommodation: number;
+  extras: number;
+  collected: number;
+  invoiced: number;
+  fiscalAvailable: number;
+}): GroupRoomFinancialSnapshot {
+  const operationalCents = cents(input.accommodation) + cents(input.extras);
+  const collectedCents = cents(input.collected);
+  const invoicedCents = cents(input.invoiced);
+  return {
+    operationalTotal: operationalCents / 100,
+    collected: collectedCents / 100,
+    nonFiscalAdvances: Math.max(0, collectedCents - invoicedCents) / 100,
+    operationalBalance: Math.max(0, operationalCents - collectedCents) / 100,
+    invoiced: invoicedCents / 100,
+    fiscalAvailable: Math.max(0, cents(input.fiscalAvailable)) / 100,
   };
 }
 

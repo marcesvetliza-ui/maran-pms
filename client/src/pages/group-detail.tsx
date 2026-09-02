@@ -469,18 +469,20 @@ export function AssignBlockDialog({
 
   const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
   const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
+  // group_room_blocks.room_type_id is the canonical type for every row in
+  // this dialog. Do not infer it from a possibly stale reservation join.
+  const canonicalRoomTypeId = block.roomTypeId;
 
   // Distribute reservations across same-type blocks sequentially
   const sameTypeBlocks = [...group.blocks]
-    .filter(b => b.roomTypeId === block.roomTypeId)
+    .filter(b => b.roomTypeId === canonicalRoomTypeId)
     .sort((a, b) => a.id.localeCompare(b.id));
   const blockIndex = sameTypeBlocks.findIndex(b => b.id === block.id);
   let offset = 0;
   for (let i = 0; i < blockIndex; i++) offset += sameTypeBlocks[i].quantity;
 
   const allActiveOfType = group.reservations.filter(r => {
-    const rTypeId = r.room?.roomTypeId ?? (r as any).roomTypeId;
-    return rTypeId === block.roomTypeId && !["cancelled", "checked_out"].includes(r.status);
+    return r.roomTypeId === canonicalRoomTypeId && !["cancelled", "checked_out"].includes(r.status);
   });
   const thisBlockReservations = allActiveOfType.slice(offset, offset + block.quantity);
   // A reservation is a placeholder if it has no guestId (new approach) or still uses the
@@ -512,12 +514,12 @@ export function AssignBlockDialog({
   ]);
 
   const { data: availableRooms = [] } = useQuery<RoomWithType[]>({
-    queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, block.roomTypeId, group.id],
+    queryKey: ["/api/rooms/available", defaultCheckIn, defaultCheckOut, canonicalRoomTypeId, group.id],
     queryFn: async () => {
       const params = new URLSearchParams({
         checkIn: defaultCheckIn,
         checkOut: defaultCheckOut,
-        roomTypeId: block.roomTypeId,
+        roomTypeId: canonicalRoomTypeId,
         groupId: group.id,
       });
       const res = await fetch(`/api/rooms/available?${params}`);
@@ -564,10 +566,12 @@ export function AssignBlockDialog({
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
+            roomTypeId: canonicalRoomTypeId,
           });
         } else {
           await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
+            roomTypeId: canonicalRoomTypeId,
             guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
@@ -1825,6 +1829,37 @@ export default function GroupDetailPage() {
     });
   };
 
+  const autoSyncFiscalPayment = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+  const autoSyncItemsTotal = groupPaymentItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const autoSyncRequiredCollection = requiredGroupInvoiceCollection(
+    autoSyncItemsTotal,
+    Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0),
+  );
+  useEffect(() => {
+    if (!showGroupPaymentDialog
+      || !autoSyncFiscalPayment
+      || groupPaymentReceiptType === "factura_mipyme_a"
+      || groupPaymentCloseAll
+      || groupPaymentRows.length !== 1) {
+      return;
+    }
+    const nextAmount = autoSyncRequiredCollection > 0
+      ? autoSyncRequiredCollection.toFixed(2)
+      : "";
+    setGroupPaymentRows((rows) => {
+      if (rows.length !== 1 || rows[0].amount === nextAmount) return rows;
+      return [{ ...rows[0], amount: nextAmount }];
+    });
+  }, [
+    showGroupPaymentDialog,
+    autoSyncFiscalPayment,
+    groupPaymentReceiptType,
+    groupPaymentCloseAll,
+    autoSyncItemsTotal,
+    autoSyncRequiredCollection,
+    groupPaymentRows.length,
+  ]);
+
   if (isLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -1883,6 +1918,7 @@ export default function GroupDetailPage() {
     return Math.round(Number(groupPaymentCloseAmounts[reservationId] || 0) * 100)
       === Math.round(Math.max(0, Number(row?.balance || 0)) * 100);
   });
+
   // A fiscal document is backed by the invoice snapshot, not by the cash rows:
   // an earlier advance can leave cash balance at zero while accommodation is
   // still available to document.
@@ -2603,23 +2639,27 @@ export default function GroupDetailPage() {
                       </div>
                     </div>
 
-                    {/* Desglose de alojamiento por habitación */}
+                    {/* Desglose financiero por habitación */}
                     <div>
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Alojamiento por habitación</p>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Estado por habitación</p>
                       <div className="rounded-md border divide-y">
                         {masterFolio.rooms.map((r: any) => (
-                          <div key={r.reservationId} className="flex items-center justify-between px-3 py-2 text-sm">
-                            <div className="flex items-center gap-3">
+                          <div key={r.reservationId} className="grid grid-cols-2 gap-2 px-3 py-2 text-sm sm:grid-cols-[minmax(12rem,1fr)_repeat(5,minmax(6.5rem,auto))]" data-testid={`master-room-financial-${r.reservationId}`}>
+                            <div className="col-span-2 flex items-center gap-3 sm:col-span-1">
                               <span className="font-bold w-10">Hab. {r.roomNumber}</span>
                               <span className="text-muted-foreground">{r.guestName || "Sin asignar"}</span>
                               <span className="text-xs text-muted-foreground">{r.nights} noche(s)</span>
                             </div>
-                            <span className="font-semibold">${r.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                            <div className="text-right"><p className="text-[10px] text-muted-foreground">Operativo</p><p className="font-semibold">{fmtMoney(r.financial?.operationalTotal ?? (r.accommodation + r.extras))}</p></div>
+                            <div className="text-right"><p className="text-[10px] text-muted-foreground">Cobrado</p><p className="font-semibold text-green-600">{fmtMoney(r.financial?.collected ?? 0)}</p></div>
+                            <div className="text-right"><p className="text-[10px] text-muted-foreground">Facturado</p><p className="font-semibold text-orange-600">{fmtMoney(r.financial?.invoiced ?? 0)}</p></div>
+                            <div className="text-right"><p className="text-[10px] text-muted-foreground">Anticipo</p><p className="font-semibold text-amber-600">{fmtMoney(r.financial?.nonFiscalAdvances ?? 0)}</p></div>
+                            <div className="text-right"><p className="text-[10px] text-muted-foreground">Saldo</p><p className={`font-semibold ${(r.financial?.operationalBalance ?? 0) > 0.01 ? "text-red-600" : "text-green-600"}`}>{fmtMoney(r.financial?.operationalBalance ?? 0)}</p></div>
                           </div>
                         ))}
                         <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold">
-                          <span>Total alojamiento</span>
-                          <span>${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          <span>El saldo de cada habitación descuenta sus pagos y anticipos asignados</span>
+                          <span>Total alojamiento: {fmtMoney(masterFolio.masterAccommodation)}</span>
                         </div>
                       </div>
                     </div>
@@ -3016,6 +3056,14 @@ export default function GroupDetailPage() {
                                 <span>${indivBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               </div>
 
+                              <div className="grid grid-cols-2 gap-2 rounded border bg-background p-2 text-xs sm:grid-cols-5" data-testid={`room-financial-summary-${r.reservationId}`}>
+                                <div><p className="text-muted-foreground">Operativo</p><p className="font-semibold">{fmtMoney(r.financial?.operationalTotal ?? (r.accommodation + r.extras))}</p></div>
+                                <div><p className="text-muted-foreground">Cobrado</p><p className="font-semibold text-green-600">{fmtMoney(r.financial?.collected ?? 0)}</p></div>
+                                <div><p className="text-muted-foreground">Facturado</p><p className="font-semibold text-orange-600">{fmtMoney(r.financial?.invoiced ?? 0)}</p></div>
+                                <div><p className="text-muted-foreground">Anticipo disponible</p><p className="font-semibold text-amber-600">{fmtMoney(r.financial?.nonFiscalAdvances ?? 0)}</p></div>
+                                <div><p className="text-muted-foreground">Pendiente operativo</p><p className={`font-semibold ${(r.financial?.operationalBalance ?? 0) > 0.01 ? "text-red-600" : "text-green-600"}`}>{fmtMoney(r.financial?.operationalBalance ?? 0)}</p></div>
+                              </div>
+
                               <div className="flex justify-end">
                                 <Button
                                   size="sm"
@@ -3391,6 +3439,14 @@ export default function GroupDetailPage() {
                             <span>Total pagos</span>
                             <span>-${fmtMoney(res.paymentsTotal)}</span>
                           </div>
+                        </div>
+                      )}
+                      {res.financial && (
+                        <div className="grid grid-cols-2 gap-2 border-t pt-2 text-xs sm:grid-cols-4" data-testid={`invoice-room-financial-${res.reservationCode}`}>
+                          <div><p className="text-muted-foreground">Facturado</p><p className="font-semibold text-orange-600">{fmtMoney(res.financial.invoiced)}</p></div>
+                          <div><p className="text-muted-foreground">Anticipo disponible</p><p className="font-semibold text-amber-600">{fmtMoney(res.financial.nonFiscalAdvances)}</p></div>
+                          <div><p className="text-muted-foreground">Disponible fiscal</p><p className="font-semibold text-emerald-600">{fmtMoney(res.financial.fiscalAvailable)}</p></div>
+                          <div><p className="text-muted-foreground">Saldo operativo</p><p className={res.financial.operationalBalance > 0.01 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(res.financial.operationalBalance)}</p></div>
                         </div>
                       )}
                     </CardContent>
@@ -3855,7 +3911,7 @@ export default function GroupDetailPage() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">Cobrar ahora</p>
+                    <p className="text-xs text-muted-foreground">Saldo operativo</p>
                     <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
                   </div>
                   <div>
@@ -4332,9 +4388,19 @@ export default function GroupDetailPage() {
                       </div>}
 
                       {/* Total preview */}
-                      <div className="bg-muted/30 rounded-lg p-3 text-sm flex justify-between font-semibold">
-                        <span>TOTAL ítems:</span>
-                        <span>{fmtMoney(itemsTotal)}</span>
+                      <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm" data-testid="group-fiscal-amount-summary">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total del comprobante</p>
+                          <p className="font-semibold">{fmtMoney(itemsTotal)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Anticipos aplicados</p>
+                          <p className="font-semibold text-amber-600">{fmtMoney(automaticAdvance)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Cobro nuevo requerido</p>
+                          <p className="font-semibold text-green-600">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</p>
+                        </div>
                       </div>
                       {exceedsFiscalAvailable && (
                         <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-items-payment-mismatch">
@@ -4602,7 +4668,10 @@ export default function GroupDetailPage() {
                     {retentionsTotal > 0 && (
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Retenciones</span><span className="font-medium">{fmtMoney(retentionsTotal)}</span></div>
                     )}
-                    <div className="flex justify-between gap-2 border-t pt-1 font-semibold"><span>Total cubierto</span><span>{fmtMoney(rowsTotal + retentionsTotal)}</span></div>
+                    <div className="flex justify-between gap-2 border-t pt-1 font-semibold">
+                      <span>{isFiscal ? "Nuevo cobro informado" : "Total del anticipo"}</span>
+                      <span>{fmtMoney(rowsTotal + retentionsTotal)}</span>
+                    </div>
                   </div>
                 </div>
                 </fieldset>

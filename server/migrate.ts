@@ -392,6 +392,27 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN IF NOT EXISTS expense_category text
     `)
   );
+  // Server-issued receipt numbers use a PostgreSQL sequence: unlike MAX + 1,
+  // this remains safe when two cashiers register movements concurrently.
+  await withTimeout("cash_movements.receipt_number_sequence", T, async () => {
+    await db.execute(sql`CREATE SEQUENCE IF NOT EXISTS cash_movements_receipt_number_seq`);
+    await db.execute(sql`
+      ALTER TABLE cash_movements
+      ALTER COLUMN receipt_number
+      SET DEFAULT nextval('cash_movements_receipt_number_seq'::regclass)::text
+    `);
+    await db.execute(sql`
+      SELECT setval(
+        'cash_movements_receipt_number_seq',
+        COALESCE((
+          SELECT MAX(receipt_number::bigint)
+          FROM cash_movements
+          WHERE receipt_number ~ '^[0-9]+$'
+        ), 0) + 1,
+        false
+      )
+    `);
+  });
 
   // Cash movements: payment_id para vincular movimiento de caja con pago de reserva
   await withTimeout("cash_movements_payment_id_col", T, () =>
