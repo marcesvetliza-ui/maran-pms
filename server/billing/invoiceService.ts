@@ -54,6 +54,8 @@ export interface NewInvoiceData {
    * requesting the CAE, so an authorization can always be reconciled later.
    */
   recoverableCreditNote?: boolean;
+  /** Reservation debit notes use the same durable pre-authorization draft flow. */
+  recoverableDebitNote?: boolean;
   recoveryInvoiceId?: number;
 }
 
@@ -196,8 +198,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
-  const recoverableCreditNote = Boolean(data.recoverableCreditNote || data.recoveryInvoiceId);
-  const recoverableBeforeAuthorization = recoverableCreditNote || Boolean(data.spaAccountId) || Boolean(data.groupPaymentIntent);
+  const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
+  const recoverableBeforeAuthorization = recoverableFiscalAdjustment || Boolean(data.spaAccountId) || Boolean(data.groupPaymentIntent);
   if (recoverableBeforeAuthorization) {
     // A recoverable fiscal draft depends on the live sales_invoices recovery
     // columns. Fail before numbering or contacting ARCA when a timed-out

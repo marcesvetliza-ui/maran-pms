@@ -81,6 +81,7 @@ type InvoiceSource = {
   source_charge_ids?: unknown;
   source_charge_amounts?: unknown;
   credit_source_charge_amounts?: unknown;
+  debit_source_charge_amounts?: unknown;
   items?: unknown;
   monto_total?: string | number | null;
   monto_acreditado?: string | number | null;
@@ -109,15 +110,20 @@ export function getInvoicedAmountsByCharge(invoices: InvoiceSource[]): Record<st
     const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
     const explicit = parseJsonValue(invoice.source_charge_amounts);
     const creditMaps = parseJsonValue(invoice.credit_source_charge_amounts);
+    const debitMaps = parseJsonValue(invoice.debit_source_charge_amounts);
     const hasPerSourceCredits = Array.isArray(creditMaps);
 
     if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
       for (const [id, value] of Object.entries(explicit as Record<string, unknown>)) {
         const amount = parseFloat(String(value)) || 0;
-        const credit = hasPerSourceCredits
+        const grossCredit = hasPerSourceCredits
           ? creditMaps.reduce((sum, map) => sum + (parseFloat(String((map as Record<string, unknown>)?.[id])) || 0), 0)
           : amount * (total > 0 ? credited / total : 0);
-        if (amount > 0) amounts[id] = (amounts[id] || 0) + Math.max(0, amount - credit);
+        const debitReversal = Array.isArray(debitMaps)
+          ? debitMaps.reduce((sum, map) => sum + (parseFloat(String((map as Record<string, unknown>)?.[id])) || 0), 0)
+          : 0;
+        const netCredit = Math.max(0, grossCredit - debitReversal);
+        if (amount > 0) amounts[id] = (amounts[id] || 0) + Math.max(0, amount - netCredit);
       }
       continue;
     }
@@ -539,6 +545,16 @@ export function PrefacturaDialog({
       const res = await fetch(`/api/reservations/${reservationId}/invoices`);
       if (!res.ok) return [];
       return res.json();
+    },
+    enabled: open && !!reservationId,
+  });
+  const { data: emittedCreditNotes = [], refetch: refetchEmittedCreditNotes } = useQuery<any[]>({
+    queryKey: ["/api/reservations", String(reservationId), "credit-notes"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservationId}/credit-notes`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     },
     enabled: open && !!reservationId,
   });
@@ -1288,11 +1304,12 @@ export function PrefacturaDialog({
   );
   const ncDisabled = ncEligibleInvoices.length === 0;
 
-  // Invoices eligible for a Nota de Débito (only FA / FB / FC / FT / FM)
-  const ndEligibleInvoices = emittedInvoices.filter((inv: any) =>
-    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante)
+  // A reservation ND reverses an active NC, never the original invoice directly.
+  const ndEligibleCreditNotes = emittedCreditNotes.filter((nc: any) =>
+    ["NCA", "NCB", "NCT", "NCM", "NCC"].includes(nc.tipo_comprobante) &&
+    (parseFloat(nc.monto_total || "0") - parseFloat(nc.monto_revertido || "0")) > 0.01
   );
-  const ndDisabled = ndEligibleInvoices.length === 0;
+  const ndDisabled = ndEligibleCreditNotes.length === 0;
 
   const reservationData = reservation as any;
   const isHistorical = reservationData?.checkOutDate < getLocalToday();
@@ -2190,13 +2207,14 @@ export function PrefacturaDialog({
         open={ndDialogOpen}
         onClose={() => setNdDialogOpen(false)}
         reservationId={reservationId}
-        invoices={ndEligibleInvoices}
+        creditNotes={ndEligibleCreditNotes}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
           queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
           refetchFolio();
           refetchEmittedInvoices();
+          refetchEmittedCreditNotes();
         }}
       />
     </Dialog>
@@ -2602,49 +2620,64 @@ function NotaCreditoDialog({
 // ─── NotaDebitoDialog sub-component ──────────────────────────────────────────
 
 function NotaDebitoDialog({
-  open, onClose, reservationId, invoices, onSuccess,
+  open, onClose, reservationId, creditNotes, onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
   reservationId: string | number;
-  invoices: NcInvoice[];
+  creditNotes: Array<NcInvoice & {
+    monto_revertido?: string | null;
+    original_tipo_comprobante?: string;
+    original_punto_venta?: number;
+    original_numero?: number;
+    original_monto_total?: string;
+  }>;
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>("");
+  const [selectedCreditNoteId, setSelectedCreditNoteId] = useState<string>("");
   const [motivo, setMotivo] = useState("");
   const [monto, setMonto] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emittedNd, setEmittedNd] = useState<any>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
-  const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
+  const selectedCreditNote = creditNotes.find(nc => String(nc.id) === selectedCreditNoteId) ?? null;
 
   // Reset when dialog opens
   useEffect(() => {
     if (open) {
-      setSelectedInvoiceId(invoices.length === 1 ? String(invoices[0].id) : "");
+      setSelectedCreditNoteId(creditNotes.length === 1 ? String(creditNotes[0].id) : "");
       setMotivo("");
       setMonto("");
       setEmittedNd(null);
+      setDialogError(null);
     }
-  }, [open]);
+  }, [open, creditNotes]);
 
   const montoNum = parseFloat(monto) || 0;
+  const reversibleBalance = selectedCreditNote
+    ? Math.max(0, parseFloat(selectedCreditNote.monto_total || "0") - parseFloat(selectedCreditNote.monto_revertido || "0"))
+    : 0;
 
   async function handleSubmit() {
-    if (!selectedInvoice) {
-      toast({ title: "Seleccioná una factura de referencia", variant: "destructive" }); return;
+    if (!selectedCreditNote) {
+      setDialogError("Seleccioná una Nota de Crédito."); return;
     }
     if (montoNum <= 0) {
-      toast({ title: "El monto debe ser mayor a $0", variant: "destructive" }); return;
+      setDialogError("El monto debe ser mayor a $0."); return;
+    }
+    if (montoNum > reversibleBalance + 0.01) {
+      setDialogError(`El monto supera el saldo reversible de la Nota de Crédito ($${fmtMoney(reversibleBalance)}).`); return;
     }
     if (!motivo.trim()) {
-      toast({ title: "Ingresá un motivo para la Nota de Débito", variant: "destructive" }); return;
+      setDialogError("Ingresá un motivo para la Nota de Débito."); return;
     }
 
     setIsSubmitting(true);
+    setDialogError(null);
     try {
-      const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-debito`, {
+      const res = await apiRequest("POST", `/api/billing/invoices/${selectedCreditNote.id}/nota-debito`, {
         motivo: motivo.trim(),
         monto: montoNum,
       });
@@ -2658,7 +2691,7 @@ function NotaDebitoDialog({
       // Auto-open PDF
       setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
     } catch (err: any) {
-      toast({ title: parseApiError(err), variant: "destructive" });
+      setDialogError(parseApiError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -2710,45 +2743,48 @@ function NotaDebitoDialog({
 
         <div className="space-y-4 py-1">
           <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
-            La Nota de Débito se emite cuando se facturó un monto menor al que correspondía. Se emite una ND por la diferencia.
+            Esta Nota de Débito revierte total o parcialmente una Nota de Crédito. Restaura la factura original sin registrar un nuevo cobro.
           </div>
 
-          {/* Invoice selector */}
-          {invoices.length > 1 ? (
+          {/* Credit note selector */}
+          {creditNotes.length > 1 ? (
             <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">Factura de referencia</Label>
-              <Select value={selectedInvoiceId} onValueChange={setSelectedInvoiceId}>
+              <Label className="text-xs text-muted-foreground mb-1 block">Nota de Crédito a revertir</Label>
+              <Select value={selectedCreditNoteId} onValueChange={setSelectedCreditNoteId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Seleccionar factura..." />
+                  <SelectValue placeholder="Seleccionar Nota de Crédito..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {invoices.map(inv => (
-                    <SelectItem key={inv.id} value={String(inv.id)}>
-                      {inv.tipo_comprobante} {String(inv.punto_venta).padStart(4,"0")}-{String(inv.numero).padStart(8,"0")} — ${fmtMoney(inv.monto_total)} · {inv.cliente_razon_social}
+                  {creditNotes.map(nc => (
+                    <SelectItem key={nc.id} value={String(nc.id)}>
+                      {nc.tipo_comprobante} {String(nc.punto_venta).padStart(4,"0")}-{String(nc.numero).padStart(8,"0")} — ${fmtMoney(parseFloat(nc.monto_total) - parseFloat(nc.monto_revertido || "0"))} reversible
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          ) : invoices.length === 1 && !selectedInvoiceId ? (
+          ) : creditNotes.length === 1 && !selectedCreditNoteId ? (
             // auto-select handled by useEffect; show nothing extra
             null
           ) : null}
 
           {/* Invoice summary */}
-          {selectedInvoice && (
+          {selectedCreditNote && (
             <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-1">
               <div className="font-medium">
-                {selectedInvoice.tipo_comprobante}{" "}
-                {String(selectedInvoice.punto_venta).padStart(4,"0")}-{String(selectedInvoice.numero).padStart(8,"0")}
-                {" · "}{formatDateAR(selectedInvoice.fecha_emision)}
+                {selectedCreditNote.tipo_comprobante}{" "}
+                {String(selectedCreditNote.punto_venta).padStart(4,"0")}-{String(selectedCreditNote.numero).padStart(8,"0")}
+                {" · "}{formatDateAR(selectedCreditNote.fecha_emision)}
               </div>
               <div className="text-muted-foreground">
-                <span>Cliente: </span><span className="text-foreground">{selectedInvoice.cliente_razon_social}</span>
-                {selectedInvoice.cliente_cuit && <span className="ml-2 text-xs">CUIT {selectedInvoice.cliente_cuit}</span>}
+                Factura original: <span className="text-foreground font-medium">
+                  {selectedCreditNote.original_tipo_comprobante} {String(selectedCreditNote.original_punto_venta || 0).padStart(4, "0")}-{String(selectedCreditNote.original_numero || 0).padStart(8, "0")}
+                </span>
               </div>
-              <div className="text-muted-foreground">
-                Total facturado: <span className="text-foreground font-medium">${fmtMoney(selectedInvoice.monto_total)}</span>
+              <div className="text-muted-foreground flex flex-wrap gap-x-4">
+                <span>Total NC: <span className="text-foreground font-medium">${fmtMoney(selectedCreditNote.monto_total)}</span></span>
+                <span>Ya revertido: <span className="text-foreground">${fmtMoney(selectedCreditNote.monto_revertido || "0")}</span></span>
+                <span>Saldo reversible: <span className="font-bold text-blue-700 dark:text-blue-300">${fmtMoney(reversibleBalance)}</span></span>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
                 La ND se emitirá como <strong>{{
@@ -2756,13 +2792,13 @@ function NotaDebitoDialog({
                   FT: "NDT (Nota de Débito T)",
                   FM: "NDM (Nota de Débito MiPyme A)",
                   FC: "NDC (Nota de Débito C)",
-                }[selectedInvoice.tipo_comprobante] ?? "NDB (Nota de Débito B)"}</strong>
+                }[selectedCreditNote.original_tipo_comprobante || ""] ?? "NDB (Nota de Débito B)"}</strong>
               </div>
             </div>
           )}
 
           {/* Motivo */}
-          {selectedInvoice && (
+          {selectedCreditNote && (
             <>
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Motivo / Descripción <span className="text-red-500">*</span></Label>
@@ -2775,11 +2811,12 @@ function NotaDebitoDialog({
               </div>
 
               <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Monto adicional a cobrar <span className="text-red-500">*</span></Label>
+                <Label className="text-xs text-muted-foreground mb-1 block">Monto de la NC a revertir <span className="text-red-500">*</span></Label>
                 <Input
                   type="number"
                   step="0.01"
                   min="0.01"
+                  max={reversibleBalance}
                   value={monto}
                   onChange={e => setMonto(e.target.value)}
                   placeholder="0.00"
@@ -2794,12 +2831,19 @@ function NotaDebitoDialog({
             </>
           )}
 
-          {invoices.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-4">No hay facturas emitidas para esta reserva.</p>
+          {dialogError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-3 py-2">
+              <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700 dark:text-red-300">{dialogError}</p>
+            </div>
           )}
 
-          {invoices.length > 1 && !selectedInvoice && (
-            <p className="text-sm text-muted-foreground text-center py-4">Seleccioná una factura para continuar.</p>
+          {creditNotes.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">No hay Notas de Crédito con saldo reversible para esta reserva.</p>
+          )}
+
+          {creditNotes.length > 1 && !selectedCreditNote && (
+            <p className="text-sm text-muted-foreground text-center py-4">Seleccioná una Nota de Crédito para continuar.</p>
           )}
         </div>
 
@@ -2807,7 +2851,7 @@ function NotaDebitoDialog({
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !selectedInvoice || montoNum <= 0 || !motivo.trim()}
+            disabled={isSubmitting || !selectedCreditNote || montoNum <= 0 || montoNum > reversibleBalance + 0.01 || !motivo.trim()}
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {isSubmitting ? (

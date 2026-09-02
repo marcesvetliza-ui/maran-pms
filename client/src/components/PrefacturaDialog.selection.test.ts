@@ -166,6 +166,18 @@ describe("PrefacturaDialog selected folio projection", () => {
     expect(getSelectedFolioTotal(items)).toBe(80);
   });
 
+  it("restores invoice capacity when an ND reverses part of a prior NC", () => {
+    const invoiced = getInvoicedAmountsByCharge([{
+      source_charge_amounts: { accommodation: 100 },
+      credit_source_charge_amounts: [{ accommodation: 60 }],
+      debit_source_charge_amounts: [{ accommodation: 25 }],
+      monto_total: "100",
+      monto_acreditado: "35",
+    }]);
+
+    expect(invoiced).toEqual({ accommodation: 65 });
+  });
+
   it("keeps the original invoice reference when a credited payment funds a re-invoice", () => {
     const payments = [
       {

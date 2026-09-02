@@ -1042,7 +1042,16 @@ export function registerReservationsRoutes(app: Express) {
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
                    AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
-               ), '[]'::jsonb) AS credit_source_charge_amounts
+               ), '[]'::jsonb) AS credit_source_charge_amounts,
+               COALESCE((
+                 SELECT jsonb_agg(nd.source_charge_amounts)
+                 FROM sales_invoices nc
+                 JOIN sales_invoices nd ON nd.nota_credito_id = nc.id
+                 WHERE nc.nota_credito_id = si.id
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                   AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+                   AND nd.estado <> 'anulada'
+               ), '[]'::jsonb) AS debit_source_charge_amounts
         FROM sales_invoices si
         WHERE si.reserva_id = ${req.params.id}
           AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
@@ -1068,17 +1077,25 @@ export function registerReservationsRoutes(app: Express) {
           nc.numero,
           nc.fecha_emision,
           nc.monto_total,
+          nc.monto_acreditado AS monto_revertido,
           nc.estado,
+          nc.items,
+          nc.source_charge_ids,
+          nc.source_charge_amounts,
           nc.nota_credito_id AS original_invoice_id,
           orig.tipo_comprobante AS original_tipo_comprobante,
           orig.punto_venta AS original_punto_venta,
           orig.numero AS original_numero,
-          orig.monto_total AS original_monto_total
+          orig.monto_total AS original_monto_total,
+          orig.cliente_razon_social,
+          orig.cliente_cuit,
+          orig.cliente_condicion_iva
         FROM sales_invoices nc
         LEFT JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.reserva_id = ${req.params.id}
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
           AND nc.estado IN ('emitida', 'parcial', 'anulada')
+          AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status = 'conciliada')
         ORDER BY nc.created_at ASC
       `);
       res.json(rows.rows);

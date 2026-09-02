@@ -294,6 +294,109 @@ describe("reservation credit-note reconciliation recovery", () => {
   });
 });
 
+describe("reservation debit note reversing a credit note", () => {
+  const reconciledCreditNote = {
+    ...pendingCredit("emitida"),
+    reconciliation_status: "conciliada",
+    monto_acreditado: "0.00",
+    source_charge_ids: JSON.stringify(["charge-1"]),
+  };
+
+  it("emits the ND against the NC and restores the original invoice atomically", async () => {
+    state.responses = [
+      { rows: [reconciledCreditNote] },
+      { rows: [reconciledCreditNote] },
+      { rows: [originalInvoice] },
+      { rows: [] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/90/nota-debito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Revertir NC incorrecta", monto: 40 }),
+      });
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({
+        reversedCreditNoteId: 90,
+        originalInvoiceId: 12,
+      });
+    });
+
+    expect(state.emittedCalls).toHaveLength(1);
+    expect(state.emittedCalls[0]).toMatchObject({
+      tipoComprobante: "NDB",
+      facturaOriginalId: 90,
+      reservaId: "reservation-1",
+      sourceChargeAmounts: { "charge-1": 40 },
+    });
+    expect(state.transactionExecutions).toBe(3);
+  });
+
+  it("rejects a second ND when the NC has no reversible balance", async () => {
+    state.responses = [
+      { rows: [reconciledCreditNote] },
+      { rows: [reconciledCreditNote] },
+      { rows: [originalInvoice] },
+      { rows: [] },
+      { rows: [{ source_charge_amounts: JSON.stringify({ "charge-1": 100 }), monto_total: "100.00" }] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/90/nota-debito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Duplicada", monto: 1 }),
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("supera el saldo reversible"),
+      });
+    });
+
+    expect(state.emittedCalls).toHaveLength(0);
+    expect(state.transactionExecutions).toBe(0);
+  });
+
+  it("reconciles an already emitted pending ND instead of authorizing another one", async () => {
+    const pendingDebit = {
+      id: 91,
+      nota_credito_id: 90,
+      reserva_id: "reservation-1",
+      tipo_comprobante: "NDB",
+      punto_venta: 1,
+      numero: 16,
+      estado: "emitida",
+      monto_total: "40.00",
+      source_charge_amounts: JSON.stringify({ "charge-1": 40 }),
+      reconciliation_status: "pendiente",
+    };
+    state.responses = [
+      { rows: [reconciledCreditNote] },
+      { rows: [reconciledCreditNote] },
+      { rows: [originalInvoice] },
+      { rows: [pendingDebit] },
+    ];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/90/nota-debito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Reintento", monto: 40 }),
+      });
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({
+        id: 91,
+        reconciliation_status: "conciliada",
+        reversedCreditNoteId: 90,
+      });
+    });
+
+    expect(state.emittedCalls).toHaveLength(0);
+    expect(state.transactionExecutions).toBe(3);
+  });
+});
+
 describe("reservation credit notes from Administración", () => {
   it("allows the exact restored accommodation amount to be re-invoiced after a total NC", async () => {
     const exactInvoice = {

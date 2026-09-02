@@ -27,6 +27,12 @@ Folio summaries must show operational/fiscal and collection figures separately: 
 
 **How to apply:** Keep NCs visible as fiscal adjustments without subtracting them from operational charges. Label the amount after reusable advances as “new collection required,” never as the total pending billing amount.
 
+A reservation ND that reverses an NC must be linked to that NC, net its exact per-source credit map, and restore the original invoice without creating a cash movement or operational Folio charge.
+
+**Why:** Treating the ND as a new charge duplicates revenue and leaves refacturation validation disagreeing with the UI. A post-authorization failure can also strand an emitted ND unless reconciliation is recoverable.
+
+**How to apply:** Serialize by reservation, persist the ND before authorization, resume pending authorization/reconciliation idempotently, and update the NC, original invoice, and ND reconciliation state in one transaction.
+
 For fiscal NCs, persist a local authorization-pending record before contacting ARCA. Before retrying a pending authorization, query ARCA by the persisted voucher type, point of sale, and number; reconcile a recovered CAE, reauthorize only after an explicit “not found,” and leave any ambiguous response pending for finance review.
 
 **Why:** A process or network failure can occur after ARCA authorizes a voucher but before the local record is updated. Reissuing in that state can leave an authorized fiscal NC without its Folio correction or risk a duplicate authorization.

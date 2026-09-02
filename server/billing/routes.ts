@@ -20,6 +20,7 @@ import {
   getPersistedGroupInvoiceCompositionSources,
 } from "./groupInvoiceScope";
 import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
+import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
 import { assertFinancialSchemaReady } from "../migrate";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
@@ -68,18 +69,22 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
   const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
   const explicit = parseJson(invoice.source_charge_amounts);
   const creditMaps = parseJson(invoice.credit_source_charge_amounts);
+  const debitMaps = parseJson(invoice.debit_source_charge_amounts);
   const hasPerSourceCredits = Array.isArray(creditMaps);
   const result: Record<string, number> = {};
 
   if (explicit && typeof explicit === "object" && !Array.isArray(explicit)) {
     for (const [id, amount] of Object.entries(explicit as Record<string, unknown>)) {
       const value = parseFloat(String(amount)) || 0;
-      const credit = hasPerSourceCredits
+      const grossCredit = hasPerSourceCredits
         // Older rows may have been stored double-JSON-encoded (a jsonb scalar
         // string instead of an object); parse each aggregated entry defensively.
         ? creditMaps.reduce((sum: number, rawMap: any) => sum + (parseFloat(String(parseJson(rawMap)?.[id])) || 0), 0)
         : value * (total > 0 ? credited / total : 0);
-      if (value > 0) result[id] = Math.max(0, value - credit);
+      const debitReversal = Array.isArray(debitMaps)
+        ? debitMaps.reduce((sum: number, rawMap: any) => sum + (parseFloat(String(parseJson(rawMap)?.[id])) || 0), 0)
+        : 0;
+      if (value > 0) result[id] = Math.max(0, value - Math.max(0, grossCredit - debitReversal));
     }
     return result;
   }
@@ -995,7 +1000,16 @@ export function registerBillingRoutes(app: Express) {
                    FROM sales_invoices nc
                    WHERE nc.nota_credito_id = si.id
                      AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
-                 ), '[]'::jsonb) AS credit_source_charge_amounts
+                  ), '[]'::jsonb) AS credit_source_charge_amounts,
+                  COALESCE((
+                    SELECT jsonb_agg(nd.source_charge_amounts)
+                    FROM sales_invoices nc
+                    JOIN sales_invoices nd ON nd.nota_credito_id = nc.id
+                    WHERE nc.nota_credito_id = si.id
+                      AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                      AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+                      AND nd.estado <> 'anulada'
+                  ), '[]'::jsonb) AS debit_source_charge_amounts
             FROM sales_invoices si
             WHERE si.reserva_id = ${reservationId}
             AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
@@ -2049,6 +2063,206 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       const original = row.rows[0] as any;
+
+      // Reservation debit notes reverse an active credit note. They restore the
+      // original invoice's fiscal allocation; they are not a new operational
+      // charge and do not collect cash by themselves.
+      if (["NCA", "NCB", "NCC", "NCT", "NCM"].includes(original.tipo_comprobante) && original.reserva_id) {
+        const { motivo, monto } = req.body;
+        const requestedAmount = parseFloat(String(monto || "0"));
+        if (!String(motivo || "").trim()) {
+          return res.status(400).json({ error: "El motivo de la Nota de Débito es obligatorio" });
+        }
+
+        try {
+          const result = await withReservationInvoiceLock(String(original.reserva_id), async () => {
+          const lockedNcResult = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id} LIMIT 1`);
+          const nc = lockedNcResult.rows[0] as any;
+          if (!nc || !["NCA", "NCB", "NCC", "NCT", "NCM"].includes(nc.tipo_comprobante)) {
+            throw new Error("La Nota de Crédito seleccionada ya no está disponible");
+          }
+          if (nc.reconciliation_status && nc.reconciliation_status !== "conciliada") {
+            throw new Error("La Nota de Crédito todavía no está conciliada con el Folio");
+          }
+
+          const sourceInvoiceResult = await db.execute(sql`
+            SELECT * FROM sales_invoices WHERE id = ${Number(nc.nota_credito_id)} LIMIT 1
+          `);
+          const sourceInvoice = sourceInvoiceResult.rows[0] as any;
+          if (!sourceInvoice || String(sourceInvoice.reserva_id) !== String(nc.reserva_id)) {
+            throw new Error("No se encontró la factura original vinculada a la Nota de Crédito");
+          }
+
+          const parseJson = (value: unknown): any => {
+            if (typeof value !== "string") return value;
+            try { return JSON.parse(value); } catch { return null; }
+          };
+          const reconcileDebitNote = async (nd: any) => {
+            if (nd.reconciliation_status === "conciliada") {
+              return { ...nd, reversedCreditNoteId: nc.id, originalInvoiceId: sourceInvoice.id };
+            }
+            const debitAmount = parseFloat(String(nd.monto_total ?? nd.montoTotal ?? 0));
+            const ncTotal = parseFloat(String(nc.monto_total || 0));
+            const ncAlreadyReversed = parseFloat(String(nc.monto_acreditado || 0));
+            const newNcReversed = Math.min(ncTotal, ncAlreadyReversed + debitAmount);
+            const originalTotal = parseFloat(String(sourceInvoice.monto_total || 0));
+            const originalCredited = parseFloat(String(sourceInvoice.monto_acreditado || 0));
+            const newOriginalCredited = Math.max(0, originalCredited - debitAmount);
+            await db.transaction(async tx => {
+              await tx.execute(sql`
+                UPDATE sales_invoices
+                SET monto_acreditado = ${newNcReversed.toFixed(2)},
+                    estado = ${newNcReversed >= ncTotal - 0.009 ? "anulada" : "parcial"}
+                WHERE id = ${nc.id}
+              `);
+              await tx.execute(sql`
+                UPDATE sales_invoices
+                SET monto_acreditado = ${newOriginalCredited.toFixed(2)},
+                    estado = ${newOriginalCredited <= 0.009 ? "emitida" : newOriginalCredited >= originalTotal - 0.009 ? "anulada" : "parcial"}
+                WHERE id = ${sourceInvoice.id}
+              `);
+              await tx.execute(sql`
+                UPDATE sales_invoices
+                SET reconciliation_status = 'conciliada',
+                    reconciliation_error = NULL,
+                    reconciliation_updated_at = now()
+                WHERE id = ${Number(nd.id)}
+              `);
+            });
+            return {
+              ...nd,
+              reconciliation_status: "conciliada",
+              reversedCreditNoteId: nc.id,
+              originalInvoiceId: sourceInvoice.id,
+            };
+          };
+
+          const pendingDebitResult = await db.execute(sql`
+            SELECT *
+            FROM sales_invoices
+            WHERE nota_credito_id = ${id}
+              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+              AND reconciliation_status = 'pendiente'
+            ORDER BY id DESC
+            LIMIT 1
+          `);
+          const pendingDebit = pendingDebitResult.rows[0] as any;
+          if (pendingDebit) {
+            let authorizedDebit = pendingDebit;
+            if (pendingDebit.estado === "autorizacion_pendiente") {
+              authorizedDebit = await emitirFactura({
+                tipoComprobante: pendingDebit.tipo_comprobante,
+                cliente: {
+                  razonSocial: pendingDebit.cliente_razon_social,
+                  cuit: pendingDebit.cliente_cuit,
+                  dni: pendingDebit.cliente_dni,
+                  condicionIva: pendingDebit.cliente_condicion_iva,
+                  domicilio: pendingDebit.cliente_domicilio,
+                },
+                items: parseJson(pendingDebit.items),
+                reservaId: pendingDebit.reserva_id,
+                facturaOriginalId: nc.id,
+                operador: pendingDebit.operador,
+                puntoVentaOverride: pendingDebit.punto_venta,
+                cashFormaPago: pendingDebit.cash_forma_pago,
+                sourceChargeIds: parseJson(pendingDebit.source_charge_ids),
+                sourceChargeAmounts: parseJson(pendingDebit.source_charge_amounts),
+                observaciones: pendingDebit.observaciones,
+                recoverableDebitNote: true,
+                recoveryInvoiceId: Number(pendingDebit.id),
+              } as NewInvoiceData);
+            }
+            return reconcileDebitNote(authorizedDebit);
+          }
+
+          const priorDebitResult = await db.execute(sql`
+            SELECT source_charge_amounts, monto_total
+            FROM sales_invoices
+            WHERE nota_credito_id = ${id}
+              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+              AND estado <> 'anulada'
+          `);
+          const creditedBySource = parseJson(nc.source_charge_amounts);
+          if (!creditedBySource || typeof creditedBySource !== "object" || Array.isArray(creditedBySource)) {
+            throw new Error("La Nota de Crédito no tiene un detalle seguro por cargo y no puede revertirse automáticamente");
+          }
+          const reversedBySource: Record<string, number> = {};
+          for (const debit of priorDebitResult.rows as any[]) {
+            const debitMap = parseJson(debit.source_charge_amounts);
+            if (!debitMap || typeof debitMap !== "object" || Array.isArray(debitMap)) {
+              throw new Error("Una Nota de Débito anterior no tiene detalle por cargo. Revisá el historial antes de continuar");
+            }
+            for (const [sourceId, value] of Object.entries(debitMap)) {
+              reversedBySource[sourceId] = (reversedBySource[sourceId] || 0) + (parseFloat(String(value)) || 0);
+            }
+          }
+
+          const sourceChargeAmounts = allocateDebitReversalBySource(
+            creditedBySource as Record<string, number>,
+            reversedBySource,
+            requestedAmount,
+          );
+          const sourceIds = Object.keys(sourceChargeAmounts);
+          const ncSourceIds = parseJson(nc.source_charge_ids);
+          const ncItems = parseJson(nc.items);
+          if (!Array.isArray(ncSourceIds) || !Array.isArray(ncItems)) {
+            throw new Error("La Nota de Crédito no conserva sus conceptos fiscales originales");
+          }
+          const normalizedNcSourceIds = ncSourceIds.map(String);
+          const ndItems = sourceIds.map(sourceId => {
+            const index = normalizedNcSourceIds.indexOf(sourceId);
+            const sourceItem = ncItems[index] || (ncItems.length === 1 ? ncItems[0] : null);
+            if (!sourceItem) throw new Error("No se pudo reconstruir un concepto fiscal de la Nota de Crédito");
+            const amount = sourceChargeAmounts[sourceId];
+            const alicuotaIva = ["21", "10.5", "exento", "no_gravado"].includes(String(sourceItem.alicuotaIva))
+              ? sourceItem.alicuotaIva
+              : "no_gravado";
+            const divisor = alicuotaIva === "21" ? 1.21 : alicuotaIva === "10.5" ? 1.105 : 1;
+            return {
+              descripcion: `${sourceItem.descripcion || `Reversión ${sourceId}`} — ${String(motivo).trim()}`,
+              cantidad: 1,
+              precioUnitario: amount,
+              alicuotaIva,
+              subtotalNeto: Number((amount / divisor).toFixed(2)),
+              subtotal: amount,
+            };
+          });
+          const sourceType = String(sourceInvoice.tipo_comprobante);
+          const tipoND =
+            sourceType === "FA" ? "NDA" :
+            sourceType === "FT" ? "NDT" :
+            sourceType === "FM" ? "NDM" :
+            sourceType === "FC" ? "NDC" : "NDB";
+          const user = (req as any).user;
+          const nd = await emitirFactura({
+            tipoComprobante: tipoND as any,
+            cliente: {
+              razonSocial: sourceInvoice.cliente_razon_social,
+              cuit: sourceInvoice.cliente_cuit,
+              dni: sourceInvoice.cliente_dni,
+              condicionIva: sourceInvoice.cliente_condicion_iva,
+              domicilio: sourceInvoice.cliente_domicilio,
+            },
+            items: ndItems,
+            reservaId: sourceInvoice.reserva_id,
+            facturaOriginalId: nc.id,
+            operador: user?.fullName || user?.username,
+            puntoVentaOverride: sourceInvoice.punto_venta,
+            cashFormaPago: sourceInvoice.cash_forma_pago,
+            sourceChargeIds: sourceIds,
+            sourceChargeAmounts,
+            observaciones: `Reversión de ${nc.tipo_comprobante} ${String(nc.punto_venta).padStart(4, "0")}-${String(nc.numero).padStart(8, "0")}`,
+            recoverableDebitNote: true,
+          });
+
+          return reconcileDebitNote(nd);
+          });
+          return res.status(201).json(result);
+        } catch (error: any) {
+          return res.status(409).json({ error: error?.message || "No se pudo revertir la Nota de Crédito" });
+        }
+      }
+
       let groupId = original.group_id ? String(original.group_id) : null;
       if (!groupId) {
         groupId = await findLegacyInvoiceGroupId(id);
