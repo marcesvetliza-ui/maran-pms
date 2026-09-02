@@ -333,6 +333,31 @@ describe("POST group payment applies non-fiscal advances", () => {
     });
   });
 
+  it("rejects a directed close for a reservation outside the group without recording the collection", async () => {
+    configureDirectedCloseFixture();
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/master-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "sin_comprobante",
+          receiverDetails: { razonSocial: "Grupo cierre dirigido", cuit: "30712345678" },
+          concepts: [{ description: "Cierre dirigido", amount: 100 }],
+          paymentRows: [{ method: "cash", amount: "100.00", reference: "CIERRE-AJENO" }],
+          closeReservationIds: ["room-a", "room-outside-group"],
+          distributionDetail: { "room-a": 100, "room-outside-group": 0 },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: "Sólo se pueden cerrar habitaciones activas de este grupo.",
+      });
+      expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects an altered selected-room amount without recording the collection", async () => {
     configureDirectedCloseFixture();
     const persistedPayments: unknown[] = [];
