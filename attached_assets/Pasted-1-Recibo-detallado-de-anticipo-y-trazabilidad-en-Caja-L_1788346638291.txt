@@ -1,0 +1,118 @@
+1. Recibo detallado de anticipo y trazabilidad en Caja
+
+La tarea #444 corrigió el problema crítico del orden:
+
+factura confirmada → pago → Caja
+Pero no rediseñó completamente:
+
+Recibo PDF de anticipo.
+Número visible del anticipo en Caja.
+Detalle de conceptos del anticipo.
+Distribución por habitación impresa.
+Búsqueda y edición de anticipos.
+Mostrar factura vinculada en todos los listados de Caja.
+Eso es un módulo de trazabilidad y documentación, distinto de la atomicidad del cobro fiscal. Se dejó separado para no mezclar un cambio contable crítico con un rediseño de recibos.
+
+2. Conceptos “Sin desglose”, “Totalizados” y “Detallados”
+
+#444 corrigió la reutilización incorrecta de importes y estados entre Anticipo y Emitir comprobante.
+
+Pero no terminó de rediseñar la experiencia de selección de conceptos. Por ejemplo:
+
+Qué opción debe aparecer seleccionada inicialmente.
+Cuándo mostrar cada habitación.
+Cómo editar un importe parcial por habitación.
+Qué detalle debe conservarse para un anticipo.
+Qué debe imprimirse como concepto fiscal.
+Eso requiere definir primero la regla funcional. Especialmente porque un anticipo parcial no debería obligar necesariamente a editar habitación por habitación, pero sí debe quedar trazable.
+
+3. Cierre dirigido desde Folio Maestro
+
+La tarea #445 permite elegir habitaciones para cerrar, pero sólo en:
+
+Pago Grupal → Distribución entre habitaciones
+No se aplicó a:
+
+Pago Grupal → Folio Maestro
+La razón es que el Folio Maestro es un saldo global del grupo. Un pago aplicado al maestro puede cubrir:
+
+Cargos generales del grupo.
+Alojamiento de varias habitaciones.
+Servicios compartidos.
+Conceptos que todavía no están asignados a una reserva concreta.
+Cerrar una habitación automáticamente con un pago al Folio Maestro podría asignar dinero a una reserva incorrecta. Para hacerlo bien habría que definir primero una regla de imputación:
+
+Por saldo individual.
+Por orden de check-out.
+Manualmente.
+Por conceptos fiscales.
+Por prioridad definida por el operador.
+Por eso #445 dejó explícitamente el Folio Maestro independiente, en lugar de implementar un cierre potencialmente incorrecto.
+
+4. Pantalla de reparación de tipos de habitación
+
+#446 agregó la lógica segura para:
+
+Detectar referencias huérfanas.
+Ver dónde se usa un tipo.
+Reasignar referencias.
+Proteger tarifas, reservas, paquetes y bloques.
+Impedir borrar tipos utilizados.
+Pero no agregó una pantalla administrativa completa para que el usuario vea y repare esos datos desde la interfaz.
+
+Se dejó como endpoint protegido porque una reparación masiva puede modificar:
+
+Reservas históricas.
+Tarifas.
+Paquetes.
+Bloques de grupos.
+Historial de habitaciones.
+Primero se priorizó que la operación sea transaccional, auditable y reversible. La pantalla de administración puede agregarse después con confirmaciones y vista previa.
+
+5. Foreign keys y migración automática
+
+No se agregó una foreign key directa sobre todos los room_type_id.
+
+La razón es que ya existen posibles referencias históricas o huérfanas. Agregar una restricción directamente podría hacer fallar:
+
+Migraciones.
+Edición de reservas antiguas.
+Importaciones.
+Datos que hoy no tienen correspondencia en room_types.
+En vez de romper la base actual, #446 agrega detección y reparación controlada. La prueba #447 confirma que esa reparación hace rollback completo si algo falla.
+
+6. La tarea #447 no agregó funcionalidad
+
+#447 fue exclusivamente una prueba PostgreSQL real para validar #446.
+
+Comprobó que:
+
+Se actualicen todas las tablas relacionadas.
+Se mantengan los datos históricos correctos.
+Las tarifas y paquetes también se reasignen.
+Si falla una tabla a mitad de camino, se reviertan todas las anteriores.
+No modificó el comportamiento de producción.
+
+7. La tarea #448 fue cancelada
+
+La tarea #448 —relacionada con evitar que la recuperación de facturas falle por un esquema desactualizado— no se fusionó porque fue cancelada.
+
+Por lo tanto, ese tema quedó fuera de #444–#447 y, si sigue siendo necesario, hay que retomarlo como una tarea independiente.
+
+Resumen
+
+Se priorizó así:
+
+Evitar pagos y Caja sin factura confirmada.
+Permitir cerrar habitaciones específicas.
+Evitar inconsistencias entre Planning y Grupos.
+Garantizar rollback de las reparaciones.
+Quedaron para una segunda etapa:
+
+Recibos completos de anticipos.
+Mejor trazabilidad en Caja.
+Rediseño de conceptos y referencias.
+Cierre dirigido desde Folio Maestro.
+Pantalla administrativa de reparación.
+Recuperación de facturas con esquema desactualizado.
+En otras palabras: lo crítico para que el cierre no deje datos financieros mal guardados ya se atacó; lo pendiente es principalmente trazabilidad, experiencia de uso y reglas más avanzadas del Folio Maestro.
