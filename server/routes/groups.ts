@@ -196,6 +196,45 @@ function validateGroupPaymentEvidence(
   return { receiptType: normalizedReceiptType, receiver, concepts: normalizedConcepts };
 }
 
+function normalizeConceptsForGroupPaymentDestination(input: {
+  destination: "group_distribution" | "master_folio";
+  concepts: Array<{ description: string; amount: number }>;
+  distributionDetail: Record<string, number>;
+  ledgerLines: Array<{ reservationId: string; roomNumber?: string | null; reservationCode?: string | null }>;
+  groupName: string;
+}): Array<{ description: string; amount: number }> {
+  const totalCents = input.concepts.reduce((sum, concept) => sum + Math.round(concept.amount * 100), 0);
+  if (input.destination === "master_folio") {
+    return [{
+      description: `Folio Maestro — ${input.groupName}`,
+      amount: totalCents / 100,
+    }];
+  }
+
+  const roomByReservation = new Map(input.ledgerLines.map((line) => [line.reservationId, line]));
+  const roomAllocations = Object.entries(input.distributionDetail)
+    .filter(([reservationId, amount]) => !reservationId.startsWith("__") && Number(amount) > 0);
+  if (roomAllocations.length === 0) {
+    throw Object.assign(
+      new Error("Un Pago Grupal distribuido debe incluir al menos una habitación."),
+      { statusCode: 400 },
+    );
+  }
+
+  const conceptAmounts = distributeCents(
+    totalCents,
+    roomAllocations.map(([reservationId, amount]) => ({ id: reservationId, weight: Number(amount) })),
+  );
+  return roomAllocations.map(([reservationId]) => {
+    const room = roomByReservation.get(reservationId);
+    const roomLabel = room?.roomNumber || room?.reservationCode || reservationId;
+    return {
+      description: `Habitación ${roomLabel}`,
+      amount: conceptAmounts[reservationId],
+    };
+  });
+}
+
 function formatGroupPaymentNotes(
   existingNotes: unknown,
   concepts: Array<{ description: string; amount: number }>,
@@ -1196,6 +1235,13 @@ export function registerGroupsRoutes(app: Express) {
             Math.round(totalAmount * 100),
             balances.map((item) => ({ id: item.id, weight: distribution === "proportional" ? item.balance : 1 }))
           );
+      const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
+        destination: "group_distribution",
+        concepts: evidence.concepts,
+        distributionDetail: allocation,
+        ledgerLines,
+        groupName: group.name,
+      });
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
         destination: "group_distribution",
@@ -1206,13 +1252,13 @@ export function registerGroupsRoutes(app: Express) {
         distribution: distribution || "equal",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
-        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        notes: formatGroupPaymentNotes(notes, persistedConcepts),
         cashLabel: `Pago Grupal — ${group.name}`,
         receiptType: evidence.receiptType,
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
-        concepts: evidence.concepts,
+        concepts: persistedConcepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
@@ -1592,6 +1638,13 @@ export function registerGroupsRoutes(app: Express) {
         distrib,
         distributionDetail
       );
+      const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
+        destination: "group_distribution",
+        concepts: evidence.concepts,
+        distributionDetail: detail,
+        ledgerLines: [],
+        groupName: req.params.groupId,
+      });
 
       // A single parent movement owns both the receipt and all room
       // allocations. This keeps this legacy entry point aligned with Pago
@@ -1605,11 +1658,11 @@ export function registerGroupsRoutes(app: Express) {
         distribution: distrib,
         distributionDetail: detail,
         receivedBy: (req.user as any)?.username || null,
-        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        notes: formatGroupPaymentNotes(notes, persistedConcepts),
         cashLabel: `Pago Grupal — ${req.params.groupId}`,
         receiptType: evidence.receiptType,
         receiverDetails: evidence.receiver,
-        concepts: evidence.concepts,
+        concepts: persistedConcepts,
       });
 
       await audit(req, "create", "groups",
@@ -1991,6 +2044,14 @@ export function registerGroupsRoutes(app: Express) {
        if (allocationEntries.length === 0) allocationEntries.push({ id: "__master_balance__", weight: 1 });
       const allocation = confirmedAllocation
         ?? distributeCents(Math.round(totalAmount * 100), allocationEntries);
+      const destination = closeReservationIds.length > 0 ? "group_distribution" : "master_folio";
+      const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
+        destination,
+        concepts: evidence.concepts,
+        distributionDetail: allocation,
+        ledgerLines,
+        groupName: group.name,
+      });
 
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
@@ -1998,7 +2059,7 @@ export function registerGroupsRoutes(app: Express) {
         // explicit room allocations are operational room payments. Keeping
         // them out of master_folio prevents an accommodation-only master from
         // rejecting room extras or consuming unrelated group charges.
-        destination: closeReservationIds.length > 0 ? "group_distribution" : "master_folio",
+        destination,
         paymentRows: rows,
         date: paymentDate,
         reference: rows.map((row) => String(row.reference || "").trim()).filter(Boolean).join(" / ")
@@ -2008,7 +2069,7 @@ export function registerGroupsRoutes(app: Express) {
         distribution: closeReservationIds.length > 0 ? "selected_rooms" : "master_folio",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
-        notes: formatGroupPaymentNotes(notes, evidence.concepts),
+        notes: formatGroupPaymentNotes(notes, persistedConcepts),
         cashLabel: closeReservationIds.length > 0
           ? `Cierre dirigido desde Folio Maestro — ${group.name}`
           : `Pago Folio Maestro — ${group.name}`,
@@ -2016,7 +2077,7 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
-        concepts: evidence.concepts,
+        concepts: persistedConcepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)

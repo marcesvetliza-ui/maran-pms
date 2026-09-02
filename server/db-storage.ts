@@ -2428,21 +2428,26 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      const confirmedConcepts = linkedInvoice
+      const confirmedInvoiceConcepts = linkedInvoice
         ? (Array.isArray(linkedInvoice.items) ? linkedInvoice.items : [])
             .map((item: any) => ({
               description: String(item?.descripcion || item?.description || "").trim(),
               amount: cents(item?.subtotal ?? (Number(item?.precioUnitario || 0) * Number(item?.cantidad || 1))) / 100,
             }))
             .filter((item: any) => item.description && cents(item.amount) > 0)
-        : (input.concepts || []);
+        : [];
       if (linkedInvoice) {
         const inputConceptCents = (input.concepts || []).reduce((sum, concept) => sum + cents(concept.amount), 0);
-        const confirmedConceptCents = confirmedConcepts.reduce((sum: number, concept: any) => sum + cents(concept.amount), 0);
+        const confirmedConceptCents = confirmedInvoiceConcepts.reduce((sum: number, concept: any) => sum + cents(concept.amount), 0);
         if (inputConceptCents !== confirmedConceptCents || confirmedConceptCents !== cents(linkedInvoice.monto_total || 0)) {
           throw invalid("Los conceptos del cobro no coinciden con el snapshot confirmado de la factura.");
         }
       }
+      // sales_invoices.items remains the immutable fiscal snapshot. The
+      // group-payment receipt has a separate presentation contract: its
+      // concepts were normalized by the API according to the payment
+      // destination and must not be replaced by the invoice's breakdown.
+      const receiptConcepts = input.concepts || [];
 
       const [groupPayment] = await tx.insert(groupPayments).values({
         groupId: input.groupId,
@@ -2458,7 +2463,7 @@ export class DatabaseStorage implements IStorage {
         billingEntityType: input.billingEntityType || null,
         billingEntityId: input.billingEntityId || null,
         paymentMethodDetail: rows,
-        concepts: confirmedConcepts.length > 0 ? confirmedConcepts : null,
+        concepts: receiptConcepts.length > 0 ? receiptConcepts : null,
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,

@@ -90,9 +90,9 @@ function configureDirectedCloseFixture() {
     ],
   });
   mockStorage.getGroupReservationLedger.mockResolvedValue([
-    { reservationId: "room-a", accommodationTotal: 100, extrasTotal: 0, paymentsTotal: 0, payments: [] },
-    { reservationId: "room-b", accommodationTotal: 200, extrasTotal: 0, paymentsTotal: 0, payments: [] },
-    { reservationId: "room-c", accommodationTotal: 300, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    { reservationId: "room-a", roomNumber: "101", accommodationTotal: 100, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    { reservationId: "room-b", roomNumber: "102", accommodationTotal: 200, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    { reservationId: "room-c", roomNumber: "103", accommodationTotal: 300, extrasTotal: 0, paymentsTotal: 0, payments: [] },
   ]);
   mockStorage.getGroupCharges.mockResolvedValue([]);
   mockStorage.getGroupPayments.mockResolvedValue([]);
@@ -303,6 +303,108 @@ describe("POST group payment applies non-fiscal advances", () => {
         paymentRows: [expect.objectContaining({ amount: "310000.00" })],
       }));
     });
+  });
+
+  it("rebuilds manipulated concepts from the room allocation for a distributed payment", async () => {
+    configureDirectedCloseFixture();
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "sin_comprobante",
+          receiverDetails: { razonSocial: "Grupo cierre dirigido", cuit: "30712345678" },
+          concepts: [
+            { description: "Concepto duplicado A", amount: 50 },
+            { description: "Habitación ajena", amount: 250 },
+          ],
+          paymentRows: [{ method: "cash", amount: "300.00", reference: "DIST-MANIPULADO" }],
+          distribution: "equal",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        destination: "group_distribution",
+        concepts: [
+          { description: "Habitación 101", amount: 100 },
+          { description: "Habitación 102", amount: 100 },
+          { description: "Habitación 103", amount: 100 },
+        ],
+      }));
+    });
+  });
+
+  it("keeps a fiscal master payment global instead of persisting the invoice breakdown", async () => {
+    configureDirectedCloseFixture();
+    mocks.invoiceSnapshot.mockResolvedValueOnce({
+      sources: [],
+      totals: { eligible: 300, invoiced: 0, available: 300 },
+      financial: { operationalBalance: 600, nonFiscalAdvances: 0, fiscalAvailable: 300 },
+      paymentDestinations: [],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/master-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "factura_b",
+          receiverDetails: {
+            razonSocial: "Grupo cierre dirigido",
+            cuit: "30712345678",
+            condicionIva: "Responsable Inscripto",
+            domicilio: "Domicilio de prueba",
+          },
+          concepts: [
+            { description: "Habitación 101", amount: 100 },
+            { description: "Habitación 102", amount: 200 },
+          ],
+          paymentRows: [{ method: "cash", amount: "300.00" }],
+          invoiceData: { id: 902, tipoComprobante: "FB", puntoVenta: 1, numero: 124 },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+        destination: "master_folio",
+        concepts: [{ description: "Folio Maestro — Grupo cierre dirigido", amount: 300 }],
+        invoiceData: expect.objectContaining({ id: 902 }),
+      }));
+    });
+  });
+
+  it("normalizes repeated manipulated master-folio requests to one global concept", async () => {
+    configureDirectedCloseFixture();
+    const requestBody = {
+      receiptType: "sin_comprobante",
+      receiverDetails: { razonSocial: "Grupo cierre dirigido", cuit: "30712345678" },
+      concepts: [
+        { description: "Habitación 101", amount: 100 },
+        { description: "Habitación 102", amount: 200 },
+      ],
+      paymentRows: [{ method: "cash", amount: "300.00", reference: "MASTER-REPETIDO" }],
+    };
+
+    await withServer(async (baseUrl) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await fetch(`${baseUrl}/api/groups/${groupId}/master-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        expect(response.status).toBe(200);
+      }
+    });
+
+    expect(mocks.recordGroupPayment).toHaveBeenCalledTimes(2);
+    for (const [input] of mocks.recordGroupPayment.mock.calls) {
+      expect(input).toEqual(expect.objectContaining({
+        destination: "master_folio",
+        concepts: [{ description: "Folio Maestro — Grupo cierre dirigido", amount: 300 }],
+      }));
+    }
   });
 
   it("allocates and closes only the selected rooms in a three-room group", async () => {
