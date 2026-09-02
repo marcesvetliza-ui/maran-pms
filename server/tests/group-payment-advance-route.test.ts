@@ -460,7 +460,7 @@ describe("POST group payment applies non-fiscal advances", () => {
     });
   });
 
-  it.each(["cancelled", "pending", "checked_out"])(
+  it.each(["cancelled", "pending", "checked_out", "tentative", "reserved", "web_checkin", "no_show"])(
     "rejects a directed close for a %s reservation without recording the collection",
     async (status) => {
       configureDirectedCloseFixture();
