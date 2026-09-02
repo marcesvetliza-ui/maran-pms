@@ -1055,6 +1055,38 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // GET /api/reservations/:id/credit-notes — NC fiscales emitidas para una reserva
+  // Kept separate from /invoices because the prefactura source-allocation logic
+  // intentionally consumes only the original sales invoices.
+  app.get("/api/reservations/:id/credit-notes", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT
+          nc.id,
+          nc.tipo_comprobante,
+          nc.punto_venta,
+          nc.numero,
+          nc.fecha_emision,
+          nc.monto_total,
+          nc.estado,
+          nc.nota_credito_id AS original_invoice_id,
+          orig.tipo_comprobante AS original_tipo_comprobante,
+          orig.punto_venta AS original_punto_venta,
+          orig.numero AS original_numero,
+          orig.monto_total AS original_monto_total
+        FROM sales_invoices nc
+        LEFT JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
+        WHERE nc.reserva_id = ${req.params.id}
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.estado IN ('emitida', 'parcial', 'anulada')
+        ORDER BY nc.created_at ASC
+      `);
+      res.json(rows.rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Changelog por reserva
   app.get("/api/reservations/:id/changelog", requireAuth, async (req, res) => {
     try {

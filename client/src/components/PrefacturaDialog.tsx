@@ -935,7 +935,7 @@ export function PrefacturaDialog({
   // Gate: warn if user enters less than the full balance before actually submitting
   function handleSubmit() {
     if (totalSelected <= 0.01) {
-      toast({ title: "Seleccioná al menos un cargo para facturar", variant: "destructive" });
+      setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
     }
     const balanceOwed = selectedBalance;
@@ -943,7 +943,7 @@ export function PrefacturaDialog({
     // "must enter an amount" guard — no new payment is needed.
     if (saleCondition === "contado" && balanceOwed > 0.01) {
       if (paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
-        toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
+        setSubmitError("Ingresá un monto en cada forma de pago.");
         return;
       }
       if (saldoRestante > 0.01) {
@@ -956,40 +956,36 @@ export function PrefacturaDialog({
 
   async function doSubmit() {
     if (totalSelected <= 0.01 && !alreadyPaidAndInvoiced) {
-      toast({ title: "Seleccioná al menos un cargo para facturar", variant: "destructive" });
+      setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
     }
     const balanceOwed = selectedBalance;
     // Same guard: only require amounts when there is an actual outstanding balance.
     if (saleCondition === "contado" && balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
-      toast({ title: "Ingresá un monto en cada forma de pago", variant: "destructive" });
+      setSubmitError("Ingresá un monto en cada forma de pago.");
       return;
     }
     if (!alreadyPaidAndInvoiced && facturaANeedsCuit) {
-      toast({ title: "Factura A requiere CUIT válido (11 dígitos)", variant: "destructive" });
+      setSubmitError("Factura A requiere CUIT válido (11 dígitos).");
       return;
     }
     if (!alreadyPaidAndInvoiced && saleCondition === "cuenta_corriente" &&
       ((billingTarget !== "company" && billingTarget !== "agency") || !billingEntityId)) {
-      toast({
-        title: "Cuenta Corriente requiere una empresa o agencia",
-        description: "Seleccioná una entidad receptora antes de emitir el comprobante.",
-        variant: "destructive",
-      });
+      setSubmitError("Cuenta Corriente requiere una empresa o agencia. Seleccioná una entidad receptora antes de emitir el comprobante.");
       return;
     }
     // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
     // razón social a mano. El CUIT se valida más abajo para Factura A.
     if (!alreadyPaidAndInvoiced && billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
-      toast({ title: "Ingresá la razón social de la empresa o seleccionala del listado", variant: "destructive" });
+      setSubmitError("Ingresá la razón social de la empresa o seleccionala del listado.");
       return;
     }
     if (!alreadyPaidAndInvoiced && billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
-      toast({ title: "Ingresá la razón social de la agencia o seleccionala del listado", variant: "destructive" });
+      setSubmitError("Ingresá la razón social de la agencia o seleccionala del listado.");
       return;
     }
     if (!alreadyPaidAndInvoiced && isFiscalTipo && !razonSocial.trim()) {
-      toast({ title: "Ingresá el nombre / razón social", variant: "destructive" });
+      setSubmitError("Ingresá el nombre / razón social.");
       return;
     }
     setIsSubmitting(true);
@@ -1287,7 +1283,8 @@ export function PrefacturaDialog({
 
   // Invoices eligible for a Nota de Crédito (only FA / FB / FC / FT / FM)
   const ncEligibleInvoices = emittedInvoices.filter((inv: any) =>
-    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante)
+    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante) &&
+    (parseFloat(inv.monto_total || "0") - parseFloat(inv.monto_acreditado || "0")) > 0.01
   );
   const ncDisabled = ncEligibleInvoices.length === 0;
 
@@ -2176,10 +2173,11 @@ export function PrefacturaDialog({
         open={ncDialogOpen}
         onClose={() => setNcDialogOpen(false)}
         reservationId={reservationId}
-        invoices={emittedInvoices}
+        invoices={ncEligibleInvoices}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId, "credit-notes"] });
           queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
           queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
           refetchFolio();
@@ -2251,6 +2249,7 @@ function NotaCreditoDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [emittedNc, setEmittedNc] = useState<any>(null);
   const [mappingWarning, setMappingWarning] = useState<string | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   const selectedInvoice = invoices.find(inv => String(inv.id) === selectedInvoiceId) ?? null;
 
@@ -2262,6 +2261,7 @@ function NotaCreditoDialog({
       setNcItems([]);
       setEmittedNc(null);
       setMappingWarning(null);
+      setDialogError(null);
     }
   }, [open]);
 
@@ -2348,25 +2348,26 @@ function NotaCreditoDialog({
 
   async function handleSubmit() {
     if (!selectedInvoice) {
-      toast({ title: "Seleccioná una factura", variant: "destructive" }); return;
+      setDialogError("Seleccioná una factura."); return;
     }
     if (totalNc <= 0) {
-      toast({ title: "El monto de la NC debe ser mayor a $0", variant: "destructive" }); return;
+      setDialogError("El monto de la NC debe ser mayor a $0."); return;
     }
     if (totalNc > saldoPendienteInvoice + 0.01) {
-      toast({ title: `El monto ($${fmtMoney(totalNc)}) supera el saldo pendiente de la factura ($${fmtMoney(saldoPendienteInvoice)})`, variant: "destructive" }); return;
+      setDialogError(`El monto ($${fmtMoney(totalNc)}) supera el saldo disponible de la factura ($${fmtMoney(saldoPendienteInvoice)}).`); return;
     }
     if (!motivo.trim()) {
-      toast({ title: "Ingresá un motivo para la Nota de Crédito", variant: "destructive" }); return;
+      setDialogError("Ingresá un motivo para la Nota de Crédito."); return;
     }
     if (mappingWarning) {
-      toast({ title: mappingWarning, variant: "destructive" }); return;
+      setDialogError(mappingWarning); return;
     }
     if (ncItems.some(item => item.selected && ((parseFloat(item.amount) || 0) > item.subtotal + 0.01))) {
-      toast({ title: "Un importe supera el saldo disponible de su concepto", variant: "destructive" }); return;
+      setDialogError("Un importe supera el saldo disponible de su concepto."); return;
     }
 
     setIsSubmitting(true);
+    setDialogError(null);
     try {
       const res = await apiRequest("POST", `/api/billing/invoices/${selectedInvoice.id}/nota-credito`, {
         motivo: motivo.trim(),
@@ -2389,7 +2390,7 @@ function NotaCreditoDialog({
       // Auto-open PDF
       setTimeout(() => window.open(`/api/billing/invoices/${body.id}/pdf`, "_blank"), 300);
     } catch (err: any) {
-      toast({ title: parseApiError(err), variant: "destructive" });
+      setDialogError(parseApiError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -2569,6 +2570,13 @@ function NotaCreditoDialog({
 
           {!selectedInvoice && invoices.length > 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">Seleccioná una factura para continuar.</p>
+          )}
+
+          {dialogError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-3 py-2">
+              <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700 dark:text-red-300">{dialogError}</p>
+            </div>
           )}
         </div>
 

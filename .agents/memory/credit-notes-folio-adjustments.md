@@ -21,6 +21,12 @@ The payment's original invoice reference is immutable history. A credit note rel
 
 **How to apply:** For a partial NC, available advance is payment amount × credited/original invoice total; a fully credited invoice releases the full payment. Link only never-invoiced advances to a new invoice; record later uses as nested reapplications so they consume availability without replacing the original receipt.
 
+Folio summaries must show operational/fiscal and collection figures separately: gross Folio balance, net invoiced, pending billing, registered collections, advances made available by NCs, and new collection required.
+
+**Why:** After a paid invoice is fully credited, pending billing returns to the full operational charge while only the new cash needed is reduced by the preserved payment. A single “balance” label makes one of those two correct amounts look wrong.
+
+**How to apply:** Keep NCs visible as fiscal adjustments without subtracting them from operational charges. Label the amount after reusable advances as “new collection required,” never as the total pending billing amount.
+
 For fiscal NCs, persist a local authorization-pending record before contacting ARCA. Before retrying a pending authorization, query ARCA by the persisted voucher type, point of sale, and number; reconcile a recovered CAE, reauthorize only after an explicit “not found,” and leave any ambiguous response pending for finance review.
 
 **Why:** A process or network failure can occur after ARCA authorizes a voucher but before the local record is updated. Reissuing in that state can leave an authorized fiscal NC without its Folio correction or risk a duplicate authorization.

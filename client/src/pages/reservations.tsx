@@ -2496,6 +2496,16 @@ function ReservationDetailDialog({
     },
   });
 
+  const { data: folioCreditNotes = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", reservation.id, "credit-notes"],
+    queryFn: async () => {
+      const res = await fetch(`/api/reservations/${reservation.id}/credit-notes`, { credentials: "include" });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
   // Void adjustments from folio_movements (written when an NC voids a payment)
   const { data: reservationFolioData } = useQuery<any>({
     queryKey: ["/api/folios", "reservation", reservation.id],
@@ -2810,6 +2820,7 @@ function ReservationDetailDialog({
   const paidPendingInvoice = getAvailableReservationAdvanceTotal(payments || [], folioInvoices || []);
   const pendingCollection = Math.max(0, totalToPay - totalPayments);
   const pendingBilling = Math.max(0, totalToPay - totalInvoiced);
+  const grossFolioBalance = Math.max(0, totalToPay);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -4155,10 +4166,10 @@ function ReservationDetailDialog({
               })()}
 
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 border-t text-sm">
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Facturado</span><span>${fmtMoney(totalInvoiced)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pagado</span><span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pagado sin facturar</span><span className="text-amber-600">${fmtMoney(paidPendingInvoice)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pendiente de cobro</span><span className="text-destructive">${fmtMoney(pendingCollection)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Facturado neto</span><span>${fmtMoney(totalInvoiced)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobros registrados</span><span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pendiente de facturación</span><span className="text-blue-700 dark:text-blue-300">${fmtMoney(pendingBilling)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Anticipos disponibles</span><span className="text-amber-600">${fmtMoney(paidPendingInvoice)}</span></div>
               </div>
             </div>
 
@@ -4190,12 +4201,34 @@ function ReservationDetailDialog({
                     <span>${fmtMoney(totalNdAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm mb-2 border-b pb-2">
-                  <span>- Pagos/Anticipos</span>
+                {folioCreditNotes.map((nc: any) => (
+                  <div key={nc.id} className="flex justify-between gap-3 text-sm mb-1 text-amber-700 dark:text-amber-300">
+                    <span>
+                      Ajuste fiscal: {nc.tipo_comprobante} {String(nc.punto_venta || 0).padStart(4, "0")}-{String(nc.numero || 0).padStart(8, "0")}
+                      {nc.original_tipo_comprobante && (
+                        <span className="block text-xs text-muted-foreground">
+                          sobre {nc.original_tipo_comprobante} {String(nc.original_punto_venta || 0).padStart(4, "0")}-{String(nc.original_numero || 0).padStart(8, "0")}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0">-${fmtMoney(nc.monto_total || "0")}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm border-t pt-2">
+                  <span>Saldo bruto del folio</span>
+                  <span className="font-medium">${fmtMoney(grossFolioBalance)}</span>
+                </div>
+                <div className="flex justify-between text-sm mt-1">
+                  <span>- Cobros registrados</span>
                   <span className="text-green-600">-${fmtMoney(totalPayments)}</span>
                 </div>
-                <div className="flex justify-between font-bold text-lg">
-                  <span>PENDIENTE DE COBRO</span>
+                {paidPendingInvoice > 0.01 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 px-3 py-2 mt-2 text-xs text-amber-800 dark:text-amber-300">
+                    ${fmtMoney(paidPendingInvoice)} quedan como anticipo disponible después de la Nota de Crédito. La devolución o anulación del cobro se gestiona por separado.
+                  </div>
+                )}
+                <div className="flex justify-between font-bold text-lg mt-2 border-t pt-2">
+                  <span>COBRO NUEVO REQUERIDO</span>
                   <span className={pendingCollection > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
                     ${fmtMoney(pendingCollection)}
                   </span>
