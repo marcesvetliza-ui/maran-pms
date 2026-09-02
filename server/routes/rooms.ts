@@ -257,6 +257,11 @@ export function registerRoomsRoutes(app: Express) {
       } else {
         tempDir = await mkdtemp(join(tmpdir(), "room-type-integrity-"));
         csvStream = createWriteStream(join(tempDir, csvFilename), { flags: "wx", mode: 0o600 });
+        csvStream.on("error", (error) => {
+          if (!abortController.signal.aborted) {
+            abortController.abort(error);
+          }
+        });
         csvBytes += Buffer.byteLength(csvHeader, "utf8");
         if (csvBytes > ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES) {
           throw new RoomTypeExportLimitError("CSV", ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES);

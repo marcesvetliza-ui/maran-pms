@@ -1,6 +1,7 @@
 import express from "express";
 import * as http from "node:http";
 import { createHash } from "node:crypto";
+import { watch } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import JSZip from "jszip";
@@ -26,7 +27,9 @@ vi.mock("../db", () => ({
   },
 }));
 
-async function startApp() {
+async function startApp(options: {
+  onRequest?: (request: http.IncomingMessage) => void;
+} = {}) {
   const { registerRoomsRoutes } = await import("../routes/rooms");
   const app = express();
   app.use(express.json());
@@ -42,17 +45,20 @@ async function startApp() {
       isActive: "true",
     };
     req.isAuthenticated = () => true;
+    options.onRequest?.(req);
     next();
   });
   registerRoomsRoutes(app);
 
-  return await new Promise<{ baseUrl: string; close: () => void }>((resolve) => {
+  return await new Promise<{ baseUrl: string; close: () => Promise<void> }>((resolve) => {
     const server = http.createServer(app);
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as { port: number };
       resolve({
         baseUrl: `http://127.0.0.1:${port}`,
-        close: () => server.close(),
+        close: () => new Promise<void>((resolveClose, rejectClose) => {
+          server.close((error) => error ? rejectClose(error) : resolveClose());
+        }),
       });
     });
   });
@@ -62,6 +68,28 @@ async function roomTypeExportTempDirs() {
   return (await readdir(tmpdir()))
     .filter((entry) => entry.startsWith("room-type-integrity-"))
     .sort();
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function waitForTempDirRemoval(directoryName: string) {
+  return new Promise<void>((resolve, reject) => {
+    const watcher = watch(tmpdir(), (_eventType, filename) => {
+      if (String(filename ?? "") !== directoryName) return;
+      watcher.close();
+      resolve();
+    });
+    watcher.once("error", (error) => {
+      watcher.close();
+      reject(error);
+    });
+  });
 }
 
 describe("room type catalog integrity routes", () => {
@@ -307,6 +335,70 @@ describe("room type catalog integrity routes", () => {
       expect(await roomTypeExportTempDirs()).toEqual(tempDirsBefore);
     } finally {
       app.close();
+    }
+  });
+
+  it("stops requesting pages and removes the temporary directory when the client cancels", async () => {
+    const tempDirsBefore = await roomTypeExportTempDirs();
+    const secondPageRequested = deferred<void>();
+    const secondPage = deferred<{
+      records: Array<{ id: string; label: string }>;
+      hasMore: boolean;
+    }>();
+    const serverRequestAborted = deferred<void>();
+    mockStorage.getRoomTypeReferenceExportPage
+      .mockResolvedValueOnce({
+        records: [{ id: "room-1", label: "101" }],
+        hasMore: true,
+      })
+      .mockImplementationOnce(() => {
+        secondPageRequested.resolve(undefined);
+        return secondPage.promise;
+      });
+
+    const app = await startApp({
+      onRequest: (request) => {
+        request.once("aborted", () => serverRequestAborted.resolve(undefined));
+      },
+    });
+    let clientRequest: http.ClientRequest | undefined;
+    let clientClosed: Promise<void> | undefined;
+
+    try {
+      clientRequest = http.request(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+        { method: "GET" },
+      );
+      clientClosed = new Promise<void>((resolve, reject) => {
+        clientRequest!.once("close", () => resolve());
+        clientRequest!.once("error", (error) => {
+          if ((error as NodeJS.ErrnoException).code !== "ECONNRESET") reject(error);
+        });
+      });
+      clientRequest.end();
+
+      await secondPageRequested.promise;
+      const tempDirsDuringExport = await roomTypeExportTempDirs();
+      const createdTempDirs = tempDirsDuringExport.filter((entry) => !tempDirsBefore.includes(entry));
+      expect(createdTempDirs).toHaveLength(1);
+      const tempDirRemoval = waitForTempDirRemoval(createdTempDirs[0]);
+
+      clientRequest.destroy();
+      await serverRequestAborted.promise;
+      secondPage.resolve({
+        records: [{ id: "room-2", label: "102" }],
+        hasMore: true,
+      });
+      await clientClosed;
+      await tempDirRemoval;
+
+      expect(mockStorage.getRoomTypeReferenceExportPage).toHaveBeenCalledTimes(2);
+      expect(await roomTypeExportTempDirs()).toEqual(tempDirsBefore);
+    } finally {
+      clientRequest?.destroy();
+      secondPage.resolve({ records: [], hasMore: false });
+      await clientClosed?.catch(() => undefined);
+      await app.close();
     }
   });
 
