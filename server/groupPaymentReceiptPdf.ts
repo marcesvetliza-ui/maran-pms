@@ -9,6 +9,11 @@ export interface GroupPaymentReceiptData {
     receiptType?: string | null; receivedBy?: string | null; notes?: string | null;
     paymentMethodDetail?: unknown; receiverDetails?: unknown; retentionDetail?: unknown;
     concepts?: unknown; invoiceRef?: string | null; invoiceNcRef?: string | null;
+    settlementBreakdown?: {
+      documentTotal: number;
+      appliedAdvances: number;
+      newCollection: number;
+    } | null;
   };
   roomDistribution: Array<{ roomNumber?: string | null; guestName?: string | null; reservationCode?: string | null; amount: number }>;
 }
@@ -49,12 +54,22 @@ export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptDa
     const retentions = array(data.payment.retentionDetail);
     const invoice = json(data.payment.invoiceRef);
     const nc = json(data.payment.invoiceNcRef);
+    const storedBreakdown = object(data.payment.settlementBreakdown);
+    const conceptTotal = concepts.reduce((sum: number, concept: any) => sum + (Number(concept?.amount) || 0), 0);
+    const documentTotal = Number(storedBreakdown.documentTotal)
+      || (Object.keys(invoice).length ? conceptTotal : Number(data.payment.amount) || 0);
+    const newCollection = Number(storedBreakdown.newCollection) || Number(data.payment.amount) || 0;
+    const appliedAdvances = Number(storedBreakdown.appliedAdvances)
+      || Math.max(0, documentTotal - newCollection);
 
-    doc.font("Helvetica-Bold").fontSize(19).fillColor("#143d52").text("RECIBO DE ADELANTO GRUPAL");
+    doc.font("Helvetica-Bold").fontSize(19).fillColor("#143d52").text("RECIBO DE PAGO GRUPAL");
     doc.moveDown(.25).font("Helvetica").fontSize(9).fillColor("#333")
       .text(`Recibo Nº ${data.receiptNumber ?? `LEG-${data.legacyId}`}   |   Fecha: ${data.payment.date}`);
     write(`Grupo: ${data.group.name}${data.group.code ? ` (${data.group.code})` : ""}`, true);
-    write(`Total recibido (único comprobante padre): ${money(data.payment.amount)}`, true);
+    heading("Desglose del cobro");
+    write(`Total del comprobante: ${money(documentTotal)}`, true);
+    write(`Anticipos aplicados: ${money(appliedAdvances)}`);
+    write(`Cobro nuevo: ${money(newCollection)}`, true);
     heading("Receptor y recepción");
     write(`Receptor: ${receiver.razonSocial || "No informado"}${receiver.cuit ? ` — CUIT ${receiver.cuit}` : receiver.dni ? ` — DNI ${receiver.dni}` : ""}`);
     if (receiver.condicionIva) write(`Condición IVA: ${receiver.condicionIva}`);

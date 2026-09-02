@@ -921,7 +921,18 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     const originalGross = (groupPaymentDraft.body.paymentRows || [])
       .reduce((sum: number, row: any) => sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
     const paymentRows = redistributeNonRetentionRows(groupPaymentDraft.body.paymentRows || [], round2(originalGross + delta));
-    return { ...groupPaymentDraft.body, concepts, paymentRows };
+    const newCollection = paymentRows
+      .reduce((sum: number, row: any) => sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
+    return {
+      ...groupPaymentDraft.body,
+      concepts,
+      paymentRows,
+      settlementBreakdown: {
+        documentTotal: finalConceptTotal,
+        appliedAdvances: Number(groupPaymentDraft.body.settlementBreakdown?.appliedAdvances || 0),
+        newCollection: round2(newCollection),
+      },
+    };
   };
 
   const mutation = useMutation({
@@ -1268,6 +1279,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
 
   function handleConfirmEmit(saveRecipientProfile = false) {
     const resolvedGroupId = groupId || groupPaymentGroupId;
+    const finalizedPaymentBody = groupPaymentDraft ? finalizedGroupPaymentBody({ items }) : null;
     if (groupPaymentDraft) {
       const originalConceptTotal = (groupPaymentDraft.body.concepts || [])
         .reduce((sum: number, concept: any) => sum + Number(concept.amount || 0), 0);
@@ -1298,7 +1310,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,
         ...(groupPaymentId ? { groupPaymentId } : {}),
-        ...(groupPaymentDraft ? { groupPaymentIntent: groupPaymentDraft } : {}),
+        ...(groupPaymentDraft && finalizedPaymentBody ? {
+          groupPaymentIntent: { ...groupPaymentDraft, body: finalizedPaymentBody },
+        } : {}),
         sourceChargeIds: Object.keys(groupSourceAmounts || {}),
         sourceChargeAmounts: groupSourceAmounts,
         ...(groupFolioContext ? { folioContext: groupFolioContext } : {}),

@@ -71,6 +71,10 @@ export function GroupPaymentHistoryRow({
   const receiptDisplay = receiptNumber != null
     ? `Recibo #${String(receiptNumber).padStart(6, "0")}`
     : `Recibo ${String(gp.id || "").slice(0, 8).toUpperCase()}`;
+  const breakdown = gp.settlementBreakdown;
+  const documentTotal = Number(breakdown?.documentTotal ?? gp.amount) || 0;
+  const appliedAdvances = Number(breakdown?.appliedAdvances ?? 0) || 0;
+  const newCollection = Number(breakdown?.newCollection ?? gp.amount) || 0;
   return (
     <div className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-history-${gp.id}`}>
       <div className="flex items-center gap-2 flex-wrap">
@@ -103,6 +107,11 @@ export function GroupPaymentHistoryRow({
         {receiverName && <span className="text-xs text-muted-foreground">→ {receiverName}</span>}
         {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
         {gp.notes && <span className="text-xs text-muted-foreground whitespace-pre-line">{gp.notes}</span>}
+        <span className="text-xs text-muted-foreground" data-testid={`group-payment-breakdown-${gp.id}`}>
+          Comprobante: <strong>{documentTotal.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+          {" · "}Anticipos: <strong>{appliedAdvances.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+          {" · "}Cobro nuevo: <strong>{newCollection.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+        </span>
         {Array.isArray(gp.retentionDetail) && gp.retentionDetail.map((ret: any, retIdx: number) => {
           if (!ret?.monto) return null;
           const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : ret.tipo ? `Ret. ${ret.tipo}` : null;

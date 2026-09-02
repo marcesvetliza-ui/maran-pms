@@ -431,6 +431,11 @@ export interface IStorage {
     concepts?: Array<{ description: string; amount: number }> | null;
     invoiceData?: Record<string, any> | null;
     invoiceTotal?: number | null;
+    settlementBreakdown?: {
+      documentTotal: number;
+      appliedAdvances: number;
+      newCollection: number;
+    } | null;
     closeReservationIds?: string[];
   }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[]; closedReservations?: { processed: number; checkedIn: number; confirmed: number } }>;
   getGroupPayments(groupId: string): Promise<GroupPayment[]>;

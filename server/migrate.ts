@@ -57,6 +57,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "receiver_details",
       "invoice_ref",
       "retention_detail",
+      "settlement_breakdown",
       "receipt_number",
       "concepts",
     ],
@@ -1713,6 +1714,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // was silently dropped instead of just recorded elsewhere.
   await withTimeout("group_payments.retention_detail", T, () =>
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS retention_detail jsonb`)
+  );
+
+  await withTimeout("group_payments.settlement_breakdown", T, () =>
+    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS settlement_breakdown jsonb`)
   );
 
   // Receipt numbers are generated only for newly issued parent receipts.

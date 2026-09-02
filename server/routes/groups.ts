@@ -44,6 +44,21 @@ function parseGroupPaymentRetentions(retentionDetail: unknown): Array<{ tipo: st
     .filter((r) => r.monto > 0);
 }
 
+function groupPaymentMethodLabel(method: unknown): string {
+  const value = String(method || "");
+  return ({
+    cash: "Efectivo",
+    transfer: "Transferencia",
+    transferencia: "Transferencia",
+    credit_card: "Tarjeta de crédito",
+    debit_card: "Tarjeta de débito",
+    check: "Cheque",
+    mercadopago: "Mercado Pago",
+    cuenta_corriente: "Cuenta corriente",
+    other: "Otro",
+  } as Record<string, string>)[value] || value.replace(/_/g, " ");
+}
+
 function isFiscalGroupReceipt(receiptType: string): boolean {
   return receiptType !== "sin_comprobante" && receiptType !== "none";
 }
@@ -139,6 +154,46 @@ function validateAndNormalizePaymentRows<T extends { method: string; retention?:
 
 function paymentRowsGrossTotal(rows: Array<{ amount: string; retention?: { monto: number } | null }>): number {
   return rows.reduce((s, r) => s + (parseFloat(r.amount) || 0) + (r.retention?.monto || 0), 0);
+}
+
+function buildSettlementBreakdown(input: {
+  documentTotal: number;
+  newCollection: number;
+  availableAdvances?: number;
+  supplied?: unknown;
+}) {
+  const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
+  const documentCents = cents(input.documentTotal);
+  const collectionCents = cents(input.newCollection);
+  const expectedAdvanceCents = Math.min(documentCents, Math.max(0, cents(input.availableAdvances)));
+  const raw = input.supplied && typeof input.supplied === "object"
+    ? input.supplied as Record<string, unknown>
+    : null;
+  const breakdown = {
+    documentTotal: raw ? cents(raw.documentTotal) / 100 : documentCents / 100,
+    appliedAdvances: raw ? cents(raw.appliedAdvances) / 100 : expectedAdvanceCents / 100,
+    newCollection: raw ? cents(raw.newCollection) / 100 : collectionCents / 100,
+  };
+  if (cents(breakdown.documentTotal) !== documentCents
+    || cents(breakdown.newCollection) !== collectionCents
+    || cents(breakdown.appliedAdvances) < 0
+    || cents(breakdown.appliedAdvances) > documentCents
+    || collectionCents < documentCents - cents(breakdown.appliedAdvances)
+    || cents(breakdown.appliedAdvances) !== expectedAdvanceCents) {
+    throw Object.assign(
+      new Error("El desglose del comprobante, anticipos y cobro nuevo no coincide con el ledger del grupo."),
+      { statusCode: 400 },
+    );
+  }
+  return breakdown;
+}
+
+function confirmedInvoiceAppliedAdvances(invoiceData: any, fallback: number): number {
+  const persisted = invoiceData?.groupPaymentIntent?.body?.settlementBreakdown?.appliedAdvances
+    ?? invoiceData?.group_payment_intent?.body?.settlementBreakdown?.appliedAdvances;
+  return persisted !== undefined && persisted !== null && Number.isFinite(Number(persisted))
+    ? Number(persisted)
+    : fallback;
 }
 
 const supportedGroupReceiptTypes = new Set([
@@ -1146,7 +1201,7 @@ export function registerGroupsRoutes(app: Express) {
         receiptType, distribution, closeAllRooms, closeReservationIds: rawCloseReservationIds,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
-        receiverDetails, concepts, notes, invoiceData,
+        receiverDetails, concepts, notes, invoiceData, settlementBreakdown: rawSettlementBreakdown,
       } = req.body;
 
       const paymentRows = validateAndNormalizePaymentRows<{method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number }}>(
@@ -1258,6 +1313,18 @@ export function registerGroupsRoutes(app: Express) {
         ledgerLines,
         groupName: group.name,
       });
+      const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
+      const settlementBreakdown = buildSettlementBreakdown({
+        documentTotal: isFiscalGroupReceipt(evidence.receiptType) ? conceptsTotal : totalAmount,
+        newCollection: totalAmount,
+        availableAdvances: isFiscalGroupReceipt(evidence.receiptType)
+          ? confirmedInvoiceAppliedAdvances(
+              invoiceData,
+              Number(invoiceSnapshot.financial?.nonFiscalAdvances || 0),
+            )
+          : 0,
+        supplied: rawSettlementBreakdown,
+      });
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
         destination: "group_distribution",
@@ -1277,8 +1344,9 @@ export function registerGroupsRoutes(app: Express) {
         concepts: persistedConcepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
-          ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
+          ? conceptsTotal
           : null,
+        settlementBreakdown,
         closeReservationIds: shouldCloseReservations ? requestedCloseIds : undefined,
       });
 
@@ -1921,6 +1989,7 @@ export function registerGroupsRoutes(app: Express) {
       const {
         paymentRows, amount, method, date, reference, notes, receiptType,
         billingEntityType, billingEntityId, receiverDetails, concepts, invoiceData,
+        settlementBreakdown: rawSettlementBreakdown,
         closeReservationIds: rawCloseReservationIds, distributionDetail: rawDistributionDetail,
       } = req.body;
       const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
@@ -2020,11 +2089,13 @@ export function registerGroupsRoutes(app: Express) {
           error: `Para cerrar las habitaciones elegidas, el pago debe coincidir exactamente con su saldo de $${selectedBalance.toFixed(2)}.`,
         });
       }
+      let availableAdvances = 0;
       if (isFiscalGroupReceipt(evidence.receiptType)) {
         const invoiceSnapshot = await getGroupInvoiceSnapshot(req.params.groupId);
         const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
         const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
         const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
+        availableAdvances = nonFiscalAdvances;
         if (!invoiceData && Math.round(conceptsTotal * 100) > Math.round(fiscalAvailable * 100)) {
           return res.status(400).json({
             error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
@@ -2078,6 +2149,15 @@ export function registerGroupsRoutes(app: Express) {
         ledgerLines,
         groupName: group.name,
       });
+      const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
+      const settlementBreakdown = buildSettlementBreakdown({
+        documentTotal: isFiscalGroupReceipt(evidence.receiptType) ? conceptsTotal : totalAmount,
+        newCollection: totalAmount,
+        availableAdvances: isFiscalGroupReceipt(evidence.receiptType)
+          ? confirmedInvoiceAppliedAdvances(invoiceData, availableAdvances)
+          : 0,
+        supplied: rawSettlementBreakdown,
+      });
 
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
@@ -2106,8 +2186,9 @@ export function registerGroupsRoutes(app: Express) {
         concepts: persistedConcepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
-          ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
+          ? conceptsTotal
           : null,
+        settlementBreakdown,
         closeReservationIds: closeReservationIds.length > 0 ? closeReservationIds : undefined,
       });
 
@@ -2686,10 +2767,40 @@ export function registerGroupsRoutes(app: Express) {
         y += 14;
         for (const p of gPayments) {
           if (y > 740) { doc.addPage(); y = 40; }
-          doc.fontSize(9).font("Helvetica")
-            .text(`${fmtAR(p.date)} — ${p.method}${p.reference ? ` (${p.reference})` : ""}`, 50, y)
-            .text(`$${parseFloat(p.amount).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+          const settlement = (p as any).settlementBreakdown && typeof (p as any).settlementBreakdown === "object"
+            ? (p as any).settlementBreakdown
+            : {
+                documentTotal: Number(p.amount) || 0,
+                appliedAdvances: 0,
+                newCollection: Number(p.amount) || 0,
+              };
+          doc.fontSize(9).font("Helvetica-Bold")
+            .text(`${fmtAR(p.date)}${p.reference ? ` — ${p.reference}` : ""}`, 50, y)
+            .text(`$${Number(settlement.newCollection || 0).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
+          doc.fontSize(7.5).font("Helvetica").fillColor("#555555")
+            .text(
+              `Comprobante: $${Number(settlement.documentTotal || 0).toLocaleString("es-AR")}  ·  `
+              + `Anticipos aplicados: $${Number(settlement.appliedAdvances || 0).toLocaleString("es-AR")}  ·  `
+              + `Cobro nuevo: $${Number(settlement.newCollection || 0).toLocaleString("es-AR")}`,
+              60,
+              y,
+              { width: 495 },
+            );
+          doc.fillColor("#000000");
+          y += 12;
+          const methodRows = Array.isArray((p as any).paymentMethodDetail) && (p as any).paymentMethodDetail.length > 0
+            ? (p as any).paymentMethodDetail
+            : [{ method: p.method, amount: p.amount, reference: p.reference }];
+          for (const methodRow of methodRows) {
+            if (y > 740) { doc.addPage(); y = 40; }
+            const methodLabel = groupPaymentMethodLabel(methodRow.method);
+            doc.fontSize(7.5).font("Helvetica").fillColor("#555555")
+              .text(`    • ${methodLabel}${methodRow.reference ? ` (${methodRow.reference})` : ""}`, 60, y, { width: 365 })
+              .text(`$${Number(methodRow.amount || 0).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
+            doc.fillColor("#000000");
+            y += 11;
+          }
           for (const ret of parseGroupPaymentRetentions((p as any).retentionDetail)) {
             if (y > 740) { doc.addPage(); y = 40; }
             const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : `Ret. ${ret.tipo}`;

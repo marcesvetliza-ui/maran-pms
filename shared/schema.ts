@@ -702,6 +702,14 @@ export const groupPayments = pgTable("group_payments", {
   // real rooms is instead recorded on that room's payments.notes — this
   // column exists only so the non-room portion isn't silently discarded.
   retentionDetail: jsonb("retention_detail"),
+  // Immutable settlement snapshot shown on receipts and group PDFs.
+  // A fiscal document may be larger than the new collection because earlier
+  // non-fiscal advances are applied when the invoice is emitted.
+  settlementBreakdown: jsonb("settlement_breakdown").$type<{
+    documentTotal: number;
+    appliedAdvances: number;
+    newCollection: number;
+  }>(),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   receiptNumberUnique: uniqueIndex("group_payments_receipt_number_unique")

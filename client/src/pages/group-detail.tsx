@@ -1416,6 +1416,16 @@ export default function GroupDetailPage() {
       if (!isFiscal && !groupPaymentConceptsMatchTotal(concepts, grossPaymentTotal)) {
         throw new Error("El detalle del recibo no coincide con el total del anticipo.");
       }
+      const documentTotal = isFiscal
+        ? concepts.reduce((sum, concept) => sum + concept.amount, 0)
+        : grossPaymentTotal;
+      const settlementBreakdown = {
+        documentTotal,
+        appliedAdvances: isFiscal
+          ? Math.min(documentTotal, Math.max(0, Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0)))
+          : 0,
+        newCollection: grossPaymentTotal,
+      };
       const receiverDetails = {
         razonSocial: groupPaymentRazonSocial || undefined,
         cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
@@ -1435,6 +1445,7 @@ export default function GroupDetailPage() {
           billingEntityId: groupPaymentCcEntityId || undefined,
           receiverDetails,
           concepts,
+          settlementBreakdown,
         }};
       }
       return { endpoint: `/api/groups/${groupId}/payment`, body: {
@@ -1450,6 +1461,7 @@ export default function GroupDetailPage() {
         billingEntityId: groupPaymentCcEntityId || undefined,
         receiverDetails,
         concepts,
+        settlementBreakdown,
       }};
   };
 
@@ -2755,6 +2767,11 @@ export default function GroupDetailPage() {
                             const methodsLabel = Array.isArray(gp.paymentMethodDetail) && gp.paymentMethodDetail.length > 0
                               ? gp.paymentMethodDetail.map((row: any) => PAYMENT_METHOD_LABELS[row.method] || row.method).join(" + ")
                               : PAYMENT_METHOD_LABELS[gp.method] || gp.method;
+                             const settlement = gp.settlementBreakdown || {
+                               documentTotal: Number(gp.amount) || 0,
+                               appliedAdvances: 0,
+                               newCollection: Number(gp.amount) || 0,
+                             };
                             // NC button: show only when there's an invoice with a known DB id and no NC yet
                             const canEmitNc = invoiceRefParsed?.id && !ncRefParsed;
                             return (
@@ -2787,6 +2804,11 @@ export default function GroupDetailPage() {
                                     <span className="text-xs text-muted-foreground">→ {receiverName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
+                                   <span className="text-xs text-muted-foreground" data-testid={`master-payment-breakdown-${gp.id}`}>
+                                     Comprobante: <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
+                                     {" · "}Anticipos: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
+                                     {" · "}Cobro nuevo: <strong>{fmtMoney(Number(settlement.newCollection) || 0)}</strong>
+                                   </span>
                                   {/* Retención (IIBB/Ganancias) withheld on the Folio Maestro / group-charges
                                       portion of this payment — no room to carry it on payments.notes, so it's
                                       stored on the group_payments row itself (retentionDetail). */}

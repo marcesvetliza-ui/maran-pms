@@ -17,6 +17,7 @@ import {
   attachGroupInvoiceCompositionSources,
   getGroupInvoiceComposition,
   getGroupInvoiceCompositionSources,
+  getGroupInvoiceSnapshot,
   getPersistedGroupInvoiceCompositionSources,
 } from "./groupInvoiceScope";
 import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
@@ -954,6 +955,7 @@ export function registerBillingRoutes(app: Express) {
       }
 
       const emitInvoice = async () => {
+        let persistedGroupPaymentIntent = sanitizedGroupPaymentIntent;
         // Every reservation invoice must declare the exact folio sources it
         // consumes. Without this, an older tab could bypass the residual guard.
         if (reservationId) {
@@ -1057,6 +1059,32 @@ export function registerBillingRoutes(app: Express) {
           // valid aggregate "Sin desglose" line. The source map, not the
           // number of visible fiscal rows, restores availability after an NC.
           await assertGroupInvoiceAllocation(groupId, sanitizedSourceChargeAmounts, itemsTotal);
+          if (persistedGroupPaymentIntent) {
+            const paymentRows = Array.isArray(persistedGroupPaymentIntent.body.paymentRows)
+              ? persistedGroupPaymentIntent.body.paymentRows
+              : [];
+            const newCollection = paymentRows.reduce(
+              (sum: number, row: any) =>
+                sum + (Number(row?.amount) || 0) + (Number(row?.retention?.monto) || 0),
+              0,
+            );
+            const invoiceSnapshot = await getGroupInvoiceSnapshot(groupId);
+            const appliedAdvances = Math.min(
+              itemsTotal,
+              Math.max(0, Number(invoiceSnapshot.financial?.nonFiscalAdvances || 0)),
+            );
+            persistedGroupPaymentIntent = {
+              ...persistedGroupPaymentIntent,
+              body: {
+                ...persistedGroupPaymentIntent.body,
+                settlementBreakdown: {
+                  documentTotal: itemsTotal,
+                  appliedAdvances,
+                  newCollection,
+                },
+              },
+            };
+          }
           if (groupPaymentId) {
             await assertGroupPaymentInvoiceEligibility(groupId, groupPaymentId, itemsTotal);
           }
@@ -1145,7 +1173,7 @@ export function registerBillingRoutes(app: Express) {
           reservaId: reservationId || undefined,
           groupId: groupId || undefined,
           groupPaymentId: groupPaymentId || undefined,
-          groupPaymentIntent: sanitizedGroupPaymentIntent,
+          groupPaymentIntent: persistedGroupPaymentIntent,
           spaAccountId: spaAccountId || undefined,
           folioId,
           operador: user?.fullName || user?.username,

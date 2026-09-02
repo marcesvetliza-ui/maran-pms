@@ -2032,6 +2032,11 @@ export class DatabaseStorage implements IStorage {
     concepts?: Array<{ description: string; amount: number }> | null;
     invoiceData?: Record<string, any> | null;
     invoiceTotal?: number | null;
+    settlementBreakdown?: {
+      documentTotal: number;
+      appliedAdvances: number;
+      newCollection: number;
+    } | null;
     closeReservationIds?: string[];
   }): Promise<{ groupPayment: GroupPayment; reservationPayments: Payment[]; closedReservations?: { processed: number; checkedIn: number; confirmed: number } }> {
     assertFinancialSchemaReady();
@@ -2067,6 +2072,7 @@ export class DatabaseStorage implements IStorage {
         }
         const invoiceRows = await tx.execute(sql`
           SELECT id, group_id, group_payment_id, estado, tipo_comprobante, monto_total, items,
+                 group_payment_intent,
                  cliente_razon_social, cliente_cuit, cliente_dni
           FROM sales_invoices
           WHERE id = ${invoiceId}
@@ -2142,6 +2148,89 @@ export class DatabaseStorage implements IStorage {
       });
       const receivedCents = grossRowCents.reduce((sum, value) => sum + value, 0);
       if (receivedCents <= 0) throw invalid("El monto debe ser positivo");
+      const rawBreakdown = input.settlementBreakdown;
+      let settlementBreakdown = rawBreakdown ? {
+        documentTotal: cents(rawBreakdown.documentTotal) / 100,
+        appliedAdvances: cents(rawBreakdown.appliedAdvances) / 100,
+        newCollection: cents(rawBreakdown.newCollection) / 100,
+      } : {
+        documentTotal: linkedInvoice ? cents(linkedInvoice.monto_total || 0) / 100 : receivedCents / 100,
+        appliedAdvances: linkedInvoice
+          ? Math.max(0, cents(linkedInvoice.monto_total || 0) - receivedCents) / 100
+          : 0,
+        newCollection: receivedCents / 100,
+      };
+      const documentCents = cents(settlementBreakdown.documentTotal);
+      const advanceCents = cents(settlementBreakdown.appliedAdvances);
+      const newCollectionCents = cents(settlementBreakdown.newCollection);
+      if (documentCents <= 0 || advanceCents < 0 || advanceCents > documentCents
+        || newCollectionCents !== receivedCents
+        || (!linkedInvoice && (documentCents !== receivedCents || advanceCents !== 0))
+        || (linkedInvoice && documentCents !== cents(linkedInvoice.monto_total || 0))
+        || (linkedInvoice && newCollectionCents < documentCents - advanceCents)) {
+        throw invalid("El desglose del comprobante, anticipos y cobro nuevo no coincide con el cobro registrado.");
+      }
+      let hasAuthoritativeIntent = false;
+      if (linkedInvoice?.group_payment_intent) {
+        let intent = linkedInvoice.group_payment_intent;
+        if (typeof intent === "string") {
+          try {
+            intent = JSON.parse(intent);
+          } catch {
+            throw Object.assign(new Error("La intención fiscal confirmada no contiene un desglose válido."), { statusCode: 409 });
+          }
+        }
+        const intended = intent?.body?.settlementBreakdown;
+        if (intended) {
+          hasAuthoritativeIntent = true;
+          if (
+            cents(intended.documentTotal) !== documentCents
+            || cents(intended.appliedAdvances) !== advanceCents
+            || cents(intended.newCollection) !== newCollectionCents
+          ) {
+            throw Object.assign(new Error("El desglose del cobro no coincide con la intención fiscal confirmada."), { statusCode: 409 });
+          }
+          settlementBreakdown = {
+            documentTotal: cents(intended.documentTotal) / 100,
+            appliedAdvances: cents(intended.appliedAdvances) / 100,
+            newCollection: cents(intended.newCollection) / 100,
+          };
+        }
+      }
+      if (linkedInvoice && !hasAuthoritativeIntent) {
+        const priorLedger = await tx.execute(sql`
+          SELECT
+            COALESCE((
+              SELECT SUM(gp.amount::numeric)
+              FROM group_payments gp
+              WHERE gp.group_id = ${input.groupId}
+            ), 0) AS collected,
+            COALESCE((
+              SELECT SUM(GREATEST(
+                si.monto_total::numeric - COALESCE(si.monto_acreditado::numeric, 0),
+                0
+              ))
+              FROM sales_invoices si
+              WHERE si.group_id = ${input.groupId}
+                AND si.id <> ${Number(linkedInvoice.id)}
+                AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FM', 'FT')
+                AND si.estado IN ('emitida', 'autorizacion_pendiente')
+            ), 0) AS invoiced
+        `);
+        const prior = priorLedger.rows[0] as any;
+        const authoritativeAdvanceCents = Math.min(
+          documentCents,
+          Math.max(0, cents(prior?.collected) - cents(prior?.invoiced)),
+        );
+        if (rawBreakdown && advanceCents !== authoritativeAdvanceCents) {
+          throw Object.assign(new Error("El anticipo informado no coincide con el ledger financiero del grupo."), { statusCode: 409 });
+        }
+        settlementBreakdown = {
+          documentTotal: documentCents / 100,
+          appliedAdvances: authoritativeAdvanceCents / 100,
+          newCollection: receivedCents / 100,
+        };
+      }
       const hasCuentaCorriente = rows.some((row) => row.method === "cuenta_corriente");
       if (hasCuentaCorriente && (!input.billingEntityType || !input.billingEntityId)) {
         throw invalid("Seleccione la empresa o agencia para el pago por cuenta corriente.");
@@ -2316,7 +2405,7 @@ export class DatabaseStorage implements IStorage {
           return amountCents;
         });
         const conceptsTotalCents = conceptCents.reduce((sum, amount) => sum + amount, 0);
-        if (conceptsTotalCents !== receivedCents) {
+        if (!linkedInvoice && conceptsTotalCents !== receivedCents) {
           throw invalid("Los conceptos del cobro deben coincidir exactamente con el importe recibido.");
         }
         if (input.destination === "master_folio" && receiptConcepts.length !== 1) {
@@ -2326,7 +2415,7 @@ export class DatabaseStorage implements IStorage {
           if (receiptConcepts.length !== allocations.length) {
             throw invalid("Un Pago Grupal debe persistir un concepto por cada habitación distribuida.");
           }
-          if (conceptCents.some((amount, index) => amount !== allocations[index].cents)) {
+          if (!linkedInvoice && conceptCents.some((amount, index) => amount !== allocations[index].cents)) {
             throw invalid("Los importes de los conceptos deben coincidir con la distribución por habitación.");
           }
         }
@@ -2500,6 +2589,7 @@ export class DatabaseStorage implements IStorage {
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
+        settlementBreakdown,
         invoiceId: linkedInvoice ? Number(linkedInvoice.id) : null,
         invoiceRef: linkedInvoice ? JSON.stringify(input.invoiceData) : null,
       } as any).returning();

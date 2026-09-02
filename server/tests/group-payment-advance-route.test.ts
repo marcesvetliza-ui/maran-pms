@@ -245,6 +245,11 @@ describe("POST group payment applies non-fiscal advances", () => {
       expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
         groupId,
         paymentRows: [expect.objectContaining({ amount: "270000.00" })],
+        settlementBreakdown: {
+          documentTotal: 330_000,
+          appliedAdvances: 60_000,
+          newCollection: 270_000,
+        },
       }));
     });
   });
@@ -301,7 +306,61 @@ describe("POST group payment applies non-fiscal advances", () => {
       expect(accepted.status).toBe(200);
       expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
         paymentRows: [expect.objectContaining({ amount: "310000.00" })],
+        settlementBreakdown: {
+          documentTotal: 330_000,
+          appliedAdvances: 60_000,
+          newCollection: 310_000,
+        },
       }));
+    });
+  });
+
+  it("rejects a lower advance split on a valid fiscal close-out collection", async () => {
+    mockStorage.getGroupReservationLedger.mockResolvedValue([{
+      reservationId,
+      reservationCode: "RES-1",
+      guestName: "Huésped",
+      roomNumber: "101",
+      status: "confirmed",
+      nights: 1,
+      accommodationTotal: 360_000,
+      charges: [{ amount: "40000.00", category: "transfer_in", status: "active" }],
+      extrasTotal: 40_000,
+      payments: [{ amount: "90000.00", groupPaymentId: "parent-existing", status: "active" }],
+      paymentsTotal: 90_000,
+    }]);
+    mocks.invoiceSnapshot.mockResolvedValue({
+      sources: [{ id: `room:${reservationId}:accommodation`, eligible: 360_000, invoiced: 30_000, available: 330_000 }],
+      totals: { eligible: 360_000, invoiced: 30_000, available: 330_000 },
+      financial: {
+        operationalTotal: 400_000,
+        collected: 90_000,
+        nonFiscalAdvances: 60_000,
+        operationalBalance: 310_000,
+        invoiced: 30_000,
+        fiscalAvailable: 330_000,
+      },
+      paymentDestinations: [],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...paymentBody("310000.00"),
+          settlementBreakdown: {
+            documentTotal: 330_000,
+            appliedAdvances: 0,
+            newCollection: 310_000,
+          },
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringContaining("no coincide con el ledger"),
+      });
+      expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
     });
   });
 
