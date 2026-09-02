@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { watch } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import archiver from "archiver";
 import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,10 +73,12 @@ async function roomTypeExportTempDirs() {
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function waitForTempDirRemoval(directoryName: string) {
@@ -91,6 +94,8 @@ function waitForTempDirRemoval(directoryName: string) {
     });
   });
 }
+
+const archiveAbort = vi.spyOn(Object.getPrototypeOf(archiver("zip")), "abort");
 
 describe("room type catalog integrity routes", () => {
   beforeEach(() => {
@@ -398,6 +403,78 @@ describe("room type catalog integrity routes", () => {
       clientRequest?.destroy();
       secondPage.resolve({ records: [], hasMore: false });
       await clientClosed?.catch(() => undefined);
+      await app.close();
+    }
+  });
+
+  it("aborts ZIP transmission and removes the temporary directory after the first bytes", async () => {
+    const tempDirsBefore = await roomTypeExportTempDirs();
+    const serverRequestAborted = deferred<void>();
+    const responseFirstBytes = deferred<Buffer>();
+    const responseClosed = deferred<void>();
+    const incompressibleLabel = (recordNumber: number) => {
+      const bytes = Buffer.alloc(8192);
+      for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = (recordNumber * 31 + index * 17) % 256;
+      }
+      return `${recordNumber}-${bytes.toString("base64")}`;
+    };
+    mockStorage.getRoomTypeReferenceExportPage.mockResolvedValue({
+      records: Array.from({ length: 250 }, (_, recordNumber) => ({
+        id: `room-${recordNumber}`,
+        label: incompressibleLabel(recordNumber),
+      })),
+      hasMore: false,
+    });
+
+    const app = await startApp({
+      onRequest: (request) => {
+        request.once("aborted", () => serverRequestAborted.resolve(undefined));
+      },
+    });
+    let clientRequest: http.ClientRequest | undefined;
+    let clientResponse: http.IncomingMessage | undefined;
+
+    try {
+      clientRequest = http.request(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+        { method: "GET" },
+      );
+      clientRequest.once("response", (response) => {
+        clientResponse = response;
+        response.once("data", (chunk) => responseFirstBytes.resolve(Buffer.from(chunk)));
+        response.once("close", () => responseClosed.resolve(undefined));
+        response.once("error", (error) => {
+          if ((error as NodeJS.ErrnoException).code !== "ECONNRESET") {
+            responseFirstBytes.reject(error);
+          }
+        });
+      });
+      clientRequest.once("error", (error) => {
+        if ((error as NodeJS.ErrnoException).code !== "ECONNRESET") {
+          responseFirstBytes.reject(error);
+        }
+      });
+      clientRequest.end();
+
+      const firstChunk = await responseFirstBytes.promise;
+      expect(firstChunk.length).toBeGreaterThan(0);
+
+      const tempDirsDuringExport = await roomTypeExportTempDirs();
+      const createdTempDirs = tempDirsDuringExport.filter((entry) => !tempDirsBefore.includes(entry));
+      expect(createdTempDirs).toHaveLength(1);
+      const tempDirRemoval = waitForTempDirRemoval(createdTempDirs[0]);
+
+      clientResponse!.destroy();
+      await serverRequestAborted.promise;
+      await responseClosed.promise;
+      await tempDirRemoval;
+
+      expect(archiveAbort).toHaveBeenCalled();
+      expect(await roomTypeExportTempDirs()).toEqual(tempDirsBefore);
+    } finally {
+      clientResponse?.destroy();
+      clientRequest?.destroy();
       await app.close();
     }
   });
