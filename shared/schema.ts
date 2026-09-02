@@ -37,6 +37,20 @@ export type RoomTypeReference = {
   count: number;
 };
 
+export type RoomTypeReferencePreviewRecord = {
+  id: string;
+  label: string;
+};
+
+export type RoomTypeReferencePreview = {
+  roomTypeId: string;
+  source: RoomTypeReferenceSource;
+  records: RoomTypeReferencePreviewRecord[];
+  total: number;
+  limit: number;
+  hasMore: boolean;
+};
+
 export type OrphanedRoomTypeReference = {
   roomTypeId: string;
   references: RoomTypeReference[];

@@ -35,7 +35,7 @@ import { IStorage } from "./storage";
 import {
   type User, type InsertUser,
   type Room, type InsertRoom,
-  type RoomType, type InsertRoomType, type RoomTypeReference, type OrphanedRoomTypeReference, type RoomTypeReassignmentResult,
+  type RoomType, type InsertRoomType, type RoomTypeReference, type RoomTypeReferencePreview, type OrphanedRoomTypeReference, type RoomTypeReassignmentResult,
   type RatePlan, type InsertRatePlan, type RatePlanWithRoomType,
   type Company, type InsertCompany,
   type Agency, type InsertAgency,
@@ -290,6 +290,95 @@ export class DatabaseStorage implements IStorage {
 
     return Array.from(orphaned, ([roomTypeId, references]) => ({ roomTypeId, references }))
       .sort((a, b) => a.roomTypeId.localeCompare(b.roomTypeId));
+  }
+
+  async getRoomTypeReferencePreview(
+    roomTypeId: string,
+    source: RoomTypeReference["source"],
+    limit = 50,
+  ): Promise<RoomTypeReferencePreview> {
+    const previewLimit = Math.min(Math.max(Math.trunc(limit) || 50, 1), 100);
+    let totalQuery: Promise<any[]>;
+    let recordsQuery: Promise<any[]>;
+
+    switch (source) {
+      case "rooms":
+        totalQuery = db.select({ count: count() }).from(rooms).where(eq(rooms.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: rooms.id, label: rooms.roomNumber })
+          .from(rooms)
+          .where(eq(rooms.roomTypeId, roomTypeId))
+          .orderBy(asc(rooms.roomNumber), asc(rooms.id))
+          .limit(previewLimit);
+        break;
+      case "rate_plans":
+        totalQuery = db.select({ count: count() }).from(ratePlans).where(eq(ratePlans.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: ratePlans.id, label: ratePlans.name })
+          .from(ratePlans)
+          .where(eq(ratePlans.roomTypeId, roomTypeId))
+          .orderBy(asc(ratePlans.name), asc(ratePlans.id))
+          .limit(previewLimit);
+        break;
+      case "reservations":
+        totalQuery = db.select({ count: count() }).from(reservations).where(eq(reservations.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: reservations.id, label: reservations.reservationCode })
+          .from(reservations)
+          .where(eq(reservations.roomTypeId, roomTypeId))
+          .orderBy(asc(reservations.reservationCode), asc(reservations.id))
+          .limit(previewLimit);
+        break;
+      case "reservation_history":
+        totalQuery = db.select({ count: count() }).from(reservations).where(eq(reservations.originalRoomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: reservations.id, label: reservations.reservationCode })
+          .from(reservations)
+          .where(eq(reservations.originalRoomTypeId, roomTypeId))
+          .orderBy(asc(reservations.reservationCode), asc(reservations.id))
+          .limit(previewLimit);
+        break;
+      case "group_room_blocks":
+        totalQuery = db.select({ count: count() }).from(groupRoomBlocks).where(eq(groupRoomBlocks.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: groupRoomBlocks.id, label: groupRoomBlocks.id })
+          .from(groupRoomBlocks)
+          .where(eq(groupRoomBlocks.roomTypeId, roomTypeId))
+          .orderBy(asc(groupRoomBlocks.id))
+          .limit(previewLimit);
+        break;
+      case "packages":
+        totalQuery = db.select({ count: count() }).from(packages).where(eq(packages.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: packages.id, label: packages.code })
+          .from(packages)
+          .where(eq(packages.roomTypeId, roomTypeId))
+          .orderBy(asc(packages.code), asc(packages.id))
+          .limit(previewLimit);
+        break;
+      case "package_room_prices":
+        totalQuery = db.select({ count: count() }).from(packageRoomPrices).where(eq(packageRoomPrices.roomTypeId, roomTypeId));
+        recordsQuery = db
+          .select({ id: packageRoomPrices.id, label: packageRoomPrices.id })
+          .from(packageRoomPrices)
+          .where(eq(packageRoomPrices.roomTypeId, roomTypeId))
+          .orderBy(asc(packageRoomPrices.id))
+          .limit(previewLimit);
+        break;
+      default:
+        throw new Error(`Origen de referencia no soportado: ${source}`);
+    }
+
+    const [totalRows, records] = await Promise.all([totalQuery, recordsQuery]);
+    const total = Number(totalRows[0]?.count ?? 0);
+    return {
+      roomTypeId,
+      source,
+      records,
+      total,
+      limit: previewLimit,
+      hasMore: total > records.length,
+    };
   }
 
   async reassignRoomTypeReferences(fromRoomTypeId: string, toRoomTypeId: string): Promise<RoomTypeReassignmentResult> {

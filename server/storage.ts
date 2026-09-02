@@ -5,6 +5,7 @@ import {
   type InsertRoom,
   type RoomType,
   type InsertRoomType,
+  type RoomTypeReferencePreview,
   type OrphanedRoomTypeReference,
   type RoomTypeReference,
   type RoomTypeReassignmentResult,
@@ -225,6 +226,7 @@ export interface IStorage {
   getRoomType(id: string): Promise<RoomType | undefined>;
   getRoomTypeReferences(id: string): Promise<RoomTypeReference[]>;
   getOrphanedRoomTypeReferences(): Promise<OrphanedRoomTypeReference[]>;
+  getRoomTypeReferencePreview(roomTypeId: string, source: RoomTypeReference["source"], limit?: number): Promise<RoomTypeReferencePreview>;
   reassignRoomTypeReferences(fromRoomTypeId: string, toRoomTypeId: string): Promise<RoomTypeReassignmentResult>;
   createRoomType(roomType: InsertRoomType): Promise<RoomType>;
   updateRoomType(id: string, roomType: Partial<InsertRoomType>): Promise<RoomType | undefined>;

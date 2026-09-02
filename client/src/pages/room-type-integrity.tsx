@@ -24,6 +24,7 @@ import type {
   OrphanedRoomTypeReference,
   RoomType,
   RoomTypeReference,
+  RoomTypeReferencePreview,
   RoomTypeReassignmentResult,
 } from "@shared/schema";
 
@@ -63,12 +64,42 @@ export default function RoomTypeIntegrityPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [lastResult, setLastResult] = useState<RoomTypeReassignmentResult | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<{
+    roomTypeId: string;
+    source: RoomTypeReference["source"];
+  } | null>(null);
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
   const integrityQuery = useQuery<IntegrityResponse>({
     queryKey: ["/api/room-types/integrity"],
   });
   const roomTypesQuery = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
+  });
+  const previewQuery = useQuery<RoomTypeReferencePreview>({
+    queryKey: [
+      "/api/room-types/integrity/preview",
+      previewSelection?.roomTypeId ?? "",
+      previewSelection?.source ?? "",
+      previewRefreshKey,
+    ],
+    enabled: Boolean(previewSelection),
+    staleTime: 0,
+    queryFn: async () => {
+      if (!previewSelection) {
+        throw new Error("Seleccioná un origen para ver la vista previa");
+      }
+      const params = new URLSearchParams({
+        roomTypeId: previewSelection.roomTypeId,
+        source: previewSelection.source,
+        limit: "50",
+      });
+      const response = await fetch(`/api/room-types/integrity/preview?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      return response.json() as Promise<RoomTypeReferencePreview>;
+    },
   });
 
   const orphanedReferences = integrityQuery.data?.orphanedReferences ?? [];
@@ -99,6 +130,7 @@ export default function RoomTypeIntegrityPage() {
       setLastResult(result);
       setLastError(null);
       setPendingRepair(null);
+      setPreviewSelection(null);
       setConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ["/api/room-types/integrity"] });
       queryClient.invalidateQueries({ queryKey: ["/api/room-types"] });
@@ -125,6 +157,15 @@ export default function RoomTypeIntegrityPage() {
   function selectTarget(orphanId: string, targetId: string) {
     setSelectedTargetBySource((current) => ({ ...current, [orphanId]: targetId }));
     setLastError(null);
+  }
+
+  function togglePreview(roomTypeId: string, source: RoomTypeReference["source"]) {
+    if (previewSelection?.roomTypeId === roomTypeId && previewSelection.source === source) {
+      setPreviewSelection(null);
+      return;
+    }
+    setPreviewSelection({ roomTypeId, source });
+    setPreviewRefreshKey((current) => current + 1);
   }
 
   function openRepairConfirmation(orphan: OrphanedRoomTypeReference) {
@@ -158,6 +199,7 @@ export default function RoomTypeIntegrityPage() {
   function refresh() {
     setLastError(null);
     setLastResult(null);
+    setPreviewSelection(null);
     void integrityQuery.refetch();
     void roomTypesQuery.refetch();
   }
@@ -312,8 +354,62 @@ export default function RoomTypeIntegrityPage() {
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {orphan.references.map((reference) => (
                     <div key={reference.source} className="rounded-md bg-muted/50 px-3 py-2">
-                      <div className="text-sm font-medium">{sourceLabel(reference.source)}</div>
-                      <div className="text-xs text-muted-foreground">{formatCount(reference.count)} cambiarían</div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium">{sourceLabel(reference.source)}</div>
+                          <div className="text-xs text-muted-foreground">{formatCount(reference.count)} cambiarían</div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 shrink-0 px-2 text-xs"
+                          onClick={() => togglePreview(orphan.roomTypeId, reference.source)}
+                          data-testid={`button-preview-${orphan.roomTypeId}-${reference.source}`}
+                        >
+                          <Eye className="mr-1.5 h-3.5 w-3.5" />
+                          {previewSelection?.roomTypeId === orphan.roomTypeId && previewSelection.source === reference.source
+                            ? "Ocultar"
+                            : "Ver registros"}
+                        </Button>
+                      </div>
+                      {previewSelection?.roomTypeId === orphan.roomTypeId && previewSelection.source === reference.source && (
+                        <div className="mt-3 border-t pt-3" data-testid={`preview-${orphan.roomTypeId}-${reference.source}`}>
+                          {previewQuery.isFetching && (
+                            <p className="text-xs text-muted-foreground">Cargando registros…</p>
+                          )}
+                          {previewQuery.error && !previewQuery.isFetching && (
+                            <div className="flex items-center justify-between gap-2 text-xs text-destructive">
+                              <span>No se pudo cargar la vista previa: {parseApiError(previewQuery.error)}</span>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 shrink-0 px-2 text-xs"
+                                onClick={() => void previewQuery.refetch()}
+                              >
+                                Reintentar
+                              </Button>
+                            </div>
+                          )}
+                          {previewQuery.data && !previewQuery.isFetching && (
+                            <>
+                              <p className="mb-2 text-xs text-muted-foreground">
+                                Mostrando {previewQuery.data.records.length} de {previewQuery.data.total} registros.
+                                {previewQuery.data.hasMore && " La lista está acotada; todavía hay más registros."}
+                              </p>
+                              <div className="max-h-48 overflow-y-auto rounded border bg-background p-2">
+                                <ul className="grid gap-1 sm:grid-cols-2">
+                                  {previewQuery.data.records.map((record) => (
+                                    <li key={record.id} className="flex min-w-0 items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1.5 text-xs">
+                                      <span className="truncate" title={record.label}>{record.label}</span>
+                                      <code className="max-w-[45%] shrink-0 truncate text-[10px] text-muted-foreground" title={record.id}>{record.id}</code>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

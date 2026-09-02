@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockStorage = {
   getRoomTypes: vi.fn(),
   getOrphanedRoomTypeReferences: vi.fn(),
+  getRoomTypeReferencePreview: vi.fn(),
   reassignRoomTypeReferences: vi.fn(),
   deleteRoomType: vi.fn(),
 };
@@ -46,6 +47,14 @@ describe("room type catalog integrity routes", () => {
     vi.clearAllMocks();
     mockStorage.getRoomTypes.mockResolvedValue([]);
     mockStorage.getOrphanedRoomTypeReferences.mockResolvedValue([]);
+    mockStorage.getRoomTypeReferencePreview.mockResolvedValue({
+      roomTypeId: "deleted-type",
+      source: "rooms",
+      records: [{ id: "room-1", label: "101" }],
+      total: 1,
+      limit: 50,
+      hasMore: false,
+    });
     mockStorage.reassignRoomTypeReferences.mockResolvedValue({
       fromRoomTypeId: "legacy",
       toRoomTypeId: "double",
@@ -87,6 +96,55 @@ describe("room type catalog integrity routes", () => {
           { roomTypeId: "deleted-type", references: [{ source: "rooms", count: 2 }] },
         ],
       });
+    } finally {
+      app.close();
+    }
+  });
+
+  it("returns a bounded concrete preview for one orphan source", async () => {
+    mockStorage.getRoomTypeReferencePreview.mockResolvedValue({
+      roomTypeId: "deleted-type",
+      source: "rooms",
+      records: [{ id: "room-1", label: "101" }],
+      total: 3,
+      limit: 2,
+      hasMore: true,
+    });
+    const app = await startApp();
+
+    try {
+      const response = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/preview?roomTypeId=deleted-type&source=rooms&limit=2`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        roomTypeId: "deleted-type",
+        source: "rooms",
+        records: [{ id: "room-1", label: "101" }],
+        total: 3,
+        limit: 2,
+        hasMore: true,
+      });
+      expect(mockStorage.getRoomTypeReferencePreview).toHaveBeenCalledWith("deleted-type", "rooms", 2);
+    } finally {
+      app.close();
+    }
+  });
+
+  it("rejects an invalid preview source or unbounded limit", async () => {
+    const app = await startApp();
+
+    try {
+      const invalidSource = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/preview?roomTypeId=deleted-type&source=unknown`,
+      );
+      expect(invalidSource.status).toBe(400);
+
+      const invalidLimit = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/preview?roomTypeId=deleted-type&source=rooms&limit=101`,
+      );
+      expect(invalidLimit.status).toBe(400);
+      expect(mockStorage.getRoomTypeReferencePreview).not.toHaveBeenCalled();
     } finally {
       app.close();
     }

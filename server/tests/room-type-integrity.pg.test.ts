@@ -220,6 +220,41 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
     }
   });
 
+  it("returns concrete identifiers with a bounded preview per source", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const ids = createFixtureIds();
+
+    try {
+      await createFixture(ids);
+
+      await expect(
+        storage.getRoomTypeReferencePreview(ids.fromRoomTypeId, "rooms", 1),
+      ).resolves.toEqual({
+        roomTypeId: ids.fromRoomTypeId,
+        source: "rooms",
+        records: [
+          expect.objectContaining({
+            id: ids.roomIds[0],
+            label: expect.stringContaining("PGI-1-"),
+          }),
+        ],
+        total: 2,
+        limit: 1,
+        hasMore: true,
+      });
+
+      await expect(
+        storage.getRoomTypeReferencePreview(ids.fromRoomTypeId, "reservation_history"),
+      ).resolves.toEqual(expect.objectContaining({
+        total: 1,
+        records: [{ id: ids.reservationIds[1], label: expect.stringContaining("PGI-RES-2-") }],
+        hasMore: false,
+      }));
+    } finally {
+      await cleanupFixture(ids);
+    }
+  });
+
   it("rolls back all source updates when a later update fails", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const ids = createFixtureIds();

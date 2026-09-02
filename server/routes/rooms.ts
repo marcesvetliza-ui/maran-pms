@@ -4,11 +4,21 @@ import { audit } from "../audit";
 import { requireRole } from "../auth";
 import { db } from "../db";
 import { reservations, rooms as roomsTable, guests, guestPreferences, folios, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
+import type { RoomTypeReferenceSource } from "@shared/schema";
 import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
+const ROOM_TYPE_REFERENCE_SOURCES: RoomTypeReferenceSource[] = [
+  "rooms",
+  "rate_plans",
+  "reservations",
+  "reservation_history",
+  "group_room_blocks",
+  "packages",
+  "package_room_prices",
+];
 
 export function registerRoomsRoutes(app: Express) {
   // Room Types
@@ -29,6 +39,34 @@ export function registerRoomsRoutes(app: Express) {
       res.json({ orphanedReferences: await storage.getOrphanedRoomTypeReferences() });
     } catch (error) {
       res.status(500).json({ error: "Error checking room type references" });
+    }
+  });
+
+  app.get("/api/room-types/integrity/preview", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+    const { roomTypeId, source, limit } = req.query;
+    const requestedSource = typeof source === "string" ? source : "";
+    if (
+      typeof roomTypeId !== "string" ||
+      !roomTypeId ||
+      !ROOM_TYPE_REFERENCE_SOURCES.includes(requestedSource as RoomTypeReferenceSource)
+    ) {
+      return res.status(400).json({ error: "roomTypeId y source válidos son requeridos" });
+    }
+
+    const parsedLimit = limit === undefined ? 50 : Number(limit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      return res.status(400).json({ error: "limit debe ser un entero entre 1 y 100" });
+    }
+
+    try {
+      const preview = await storage.getRoomTypeReferencePreview(
+        roomTypeId,
+        requestedSource as RoomTypeReferenceSource,
+        parsedLimit,
+      );
+      res.json(preview);
+    } catch (error) {
+      res.status(500).json({ error: "Error cargando la vista previa de referencias" });
     }
   });
 
