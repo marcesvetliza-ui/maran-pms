@@ -57,3 +57,4 @@
 - [SPA circuit resources](spa-circuit-resources.md) — circuits reserve linked Sauna/Hidromasaje slots under one parent turn/folio; availability changes must lock every occupied cabin.
 - [SPA settlement safety](spa-settlement-safety.md) — room charges never hit Caja; SPA invoices claim their folio before ARCA and only the final link writes Caja/payment.
 - [Fiscal group collection intents](fiscal-group-collection-intents.md) — persist intent before ARCA; only an emitted, atomically claimed invoice may create the group payment and Caja movement.
+- [Authorized repair test layering](authorized-repair-test-layering.md) — repair tests must cross real role middleware and endpoint; mocked UI alone cannot prove authorization or atomicity.

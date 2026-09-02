@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import express from "express";
+import * as http from "node:http";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { storage } from "../db-storage";
@@ -35,6 +37,38 @@ function createFixtureIds(): FixtureIds {
     packageId: `pg-integrity-package-${suffix}`,
     packageRoomPriceIds: [`pg-integrity-price-1-${suffix}`, `pg-integrity-price-2-${suffix}`],
   };
+}
+
+async function startManagerApp() {
+  const { registerRoomsRoutes } = await import("../routes/rooms");
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = {
+      id: "manager-room-type-integrity-pg",
+      username: "manager-integrity-pg",
+      email: "manager-integrity-pg@example.test",
+      fullName: "Manager Integridad PostgreSQL",
+      role: "manager",
+      department: "recepcion",
+      phone: null,
+      isActive: "true",
+    };
+    req.isAuthenticated = () => true;
+    next();
+  });
+  registerRoomsRoutes(app);
+
+  return await new Promise<{ baseUrl: string; close: () => void }>((resolve) => {
+    const server = http.createServer(app);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => server.close(),
+      });
+    });
+  });
 }
 
 async function createFixture(ids: FixtureIds, options: { sourceExists?: boolean } = {}) {
@@ -260,6 +294,7 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
     const ids = createFixtureIds();
     const triggerName = `pg_integrity_fail_${ids.suffix.replaceAll("-", "_")}`;
     const functionName = `${triggerName}_fn`;
+    const app = await startManagerApp();
 
     try {
       await createFixture(ids);
@@ -279,9 +314,18 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
          FOR EACH ROW EXECUTE FUNCTION "${functionName}"()`,
       );
 
-      await expect(
-        storage.reassignRoomTypeReferences(ids.fromRoomTypeId, ids.toRoomTypeId),
-      ).rejects.toThrow("intentional room type reassignment failure");
+      const response = await fetch(`${app.baseUrl}/api/room-types/reassign-references`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromRoomTypeId: ids.fromRoomTypeId,
+          toRoomTypeId: ids.toRoomTypeId,
+        }),
+      });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        error: expect.stringContaining("intentional room type reassignment failure"),
+      });
 
       await expect(readFixtureRoomTypeIds(ids)).resolves.toEqual({
         rooms: [ids.fromRoomTypeId, ids.fromRoomTypeId],
@@ -295,6 +339,7 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
         packageRoomPrices: [ids.fromRoomTypeId, ids.fromRoomTypeId],
       });
     } finally {
+      app.close();
       await pool.query(`DROP TRIGGER IF EXISTS "${triggerName}" ON rate_plans`);
       await pool.query(`DROP FUNCTION IF EXISTS "${functionName}"()`);
       await cleanupFixture(ids);

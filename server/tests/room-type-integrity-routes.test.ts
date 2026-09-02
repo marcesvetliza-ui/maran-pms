@@ -14,9 +14,6 @@ vi.mock("../db-storage", () => ({
   storage: mockStorage,
   getArgentinaToday: () => "2026-09-01",
 }));
-vi.mock("../auth", () => ({
-  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
-}));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 vi.mock("../db", () => ({
   db: {
@@ -28,6 +25,20 @@ async function startApp() {
   const { registerRoomsRoutes } = await import("../routes/rooms");
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = {
+      id: "manager-room-type-integrity",
+      username: "manager-integrity",
+      email: "manager-integrity@example.test",
+      fullName: "Manager Integridad",
+      role: "manager",
+      department: "recepcion",
+      phone: null,
+      isActive: "true",
+    };
+    req.isAuthenticated = () => true;
+    next();
+  });
   registerRoomsRoutes(app);
 
   return await new Promise<{ baseUrl: string; close: () => void }>((resolve) => {
@@ -196,6 +207,44 @@ describe("room type catalog integrity routes", () => {
         toRoomTypeId: "double",
         updated: [{ source: "rooms", count: 2 }],
       });
+    } finally {
+      app.close();
+    }
+  });
+
+  it("allows an authenticated manager to diagnose and repair orphaned references", async () => {
+    mockStorage.getOrphanedRoomTypeReferences.mockResolvedValue([
+      { roomTypeId: "deleted-type", references: [{ source: "rooms", count: 2 }] },
+    ]);
+    mockStorage.reassignRoomTypeReferences.mockResolvedValue({
+      fromRoomTypeId: "deleted-type",
+      toRoomTypeId: "double",
+      updated: [{ source: "rooms", count: 2 }],
+    });
+    const app = await startApp();
+
+    try {
+      const diagnosticResponse = await fetch(`${app.baseUrl}/api/room-types/integrity`);
+      expect(diagnosticResponse.status).toBe(200);
+      expect(await diagnosticResponse.json()).toEqual({
+        orphanedReferences: [
+          { roomTypeId: "deleted-type", references: [{ source: "rooms", count: 2 }] },
+        ],
+      });
+
+      const repairResponse = await fetch(`${app.baseUrl}/api/room-types/reassign-references`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromRoomTypeId: "deleted-type", toRoomTypeId: "double" }),
+      });
+
+      expect(repairResponse.status).toBe(200);
+      expect(await repairResponse.json()).toEqual({
+        fromRoomTypeId: "deleted-type",
+        toRoomTypeId: "double",
+        updated: [{ source: "rooms", count: 2 }],
+      });
+      expect(mockStorage.reassignRoomTypeReferences).toHaveBeenCalledWith("deleted-type", "double");
     } finally {
       app.close();
     }
