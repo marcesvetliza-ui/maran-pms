@@ -136,15 +136,25 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
          VALUES ($1, 'reception', 999999, 'pg-test', NOW() + INTERVAL '1 minute', 'open', 'fixture cierre dirigido', NOW())`,
         [shiftId],
       );
+      await testPool.query(
+        `INSERT INTO group_charges (id, group_id, description, amount, date, category, billing_target)
+         VALUES ($1, $2, 'Cargo general pendiente', '50.00', DATE '2026-09-01', 'otros', 'group')`,
+        [`pgdc-charge-${suffix}`, groupId],
+      );
+      await testPool.query(
+        `INSERT INTO charges (id, reservation_id, description, amount, date, category, status)
+         VALUES ($1, $2, 'Extra de habitación', '20.00', DATE '2026-09-01', 'otros', 'active')`,
+        [`pgdc-room-charge-${suffix}`, reservationIds[0]],
+      );
 
       const result = await storage.recordGroupPayment({
         groupId,
         destination: "group_distribution",
-        paymentRows: [{ method: "efectivo", amount: "100.00", reference: "PG-DIRECTED" }],
+        paymentRows: [{ method: "efectivo", amount: "120.00", reference: "PG-DIRECTED" }],
         date: "2026-09-01",
         reference: "PG-DIRECTED",
         distribution: "selected_rooms",
-        distributionDetail: { [reservationIds[0]]: 100 },
+        distributionDetail: { [reservationIds[0]]: 120 },
         receivedBy: "pg-test",
         cashLabel: "PG cierre dirigido",
         receiptType: "none",
@@ -153,7 +163,7 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
       paymentId = result.groupPayment.id;
       expect(result.closedReservations).toEqual({ processed: 2, checkedIn: 1, confirmed: 1 });
       expect(result.reservationPayments).toHaveLength(1);
-      expect(result.reservationPayments[0]).toMatchObject({ reservationId: reservationIds[0], amount: "100.00" });
+      expect(result.reservationPayments[0]).toMatchObject({ reservationId: reservationIds[0], amount: "120.00" });
 
       const reservationRows = await testPool.query(
         "SELECT id, status FROM reservations WHERE id = ANY($1::text[]) ORDER BY id",
@@ -177,7 +187,7 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
       expect((await testPool.query(
         "SELECT distribution_detail FROM group_payments WHERE id = $1",
         [paymentId],
-      )).rows[0].distribution_detail).toEqual({ [reservationIds[0]]: 100 });
+      )).rows[0].distribution_detail).toEqual({ [reservationIds[0]]: 120 });
       expect((await testPool.query(
         "SELECT reservation_id FROM payments WHERE group_payment_id = $1 ORDER BY reservation_id",
         [paymentId],
@@ -190,6 +200,40 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
         "SELECT COUNT(*)::int AS count FROM housekeeping_tasks WHERE room_id = $1 AND status = 'pending'",
         [roomIds[0]],
       )).rows[0].count).toBe(1);
+      expect((await testPool.query(
+        "SELECT COUNT(*)::int AS count FROM housekeeping_tasks WHERE room_id = $1",
+        [roomIds[1]],
+      )).rows[0].count).toBe(0);
+      expect((await testPool.query(
+        "SELECT amount::numeric AS amount FROM group_charges WHERE group_id = $1",
+        [groupId],
+      )).rows[0].amount).toBe("50.00");
+      expect((await testPool.query(
+        "SELECT status FROM reservations WHERE id = $1",
+        [reservationIds[2]],
+      )).rows[0].status).toBe("checked_in");
+
+      await expect(storage.recordGroupPayment({
+        groupId,
+        destination: "master_folio",
+        paymentRows: [{ method: "efectivo", amount: "299.99", reference: "PG-ROLLBACK" }],
+        date: "2026-09-01",
+        reference: "PG-ROLLBACK",
+        distribution: "master_folio",
+        distributionDetail: { [reservationIds[2]]: 299.99 },
+        receivedBy: "pg-test",
+        cashLabel: "PG rollback cierre dirigido",
+        receiptType: "none",
+        closeReservationIds: [reservationIds[2]],
+      })).rejects.toThrow("asignación debe cubrir exactamente");
+      expect((await testPool.query(
+        "SELECT COUNT(*)::int AS count FROM group_payments WHERE group_id = $1 AND reference = 'PG-ROLLBACK'",
+        [groupId],
+      )).rows[0].count).toBe(0);
+      expect((await testPool.query(
+        "SELECT status FROM reservations WHERE id = $1",
+        [reservationIds[2]],
+      )).rows[0].status).toBe("checked_in");
     } finally {
       await testPool.query("DELETE FROM reservation_changelog WHERE reservation_id = ANY($1::text[])", [reservationIds]);
       await testPool.query("DELETE FROM housekeeping_tasks WHERE room_id = ANY($1::text[])", [roomIds]);
@@ -198,6 +242,8 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
         await testPool.query("DELETE FROM payments WHERE group_payment_id = $1", [paymentId]);
         await testPool.query("DELETE FROM group_payments WHERE id = $1", [paymentId]);
       }
+      await testPool.query("DELETE FROM charges WHERE reservation_id = ANY($1::text[])", [reservationIds]);
+      await testPool.query("DELETE FROM group_charges WHERE group_id = $1", [groupId]);
       await testPool.query("DELETE FROM cash_shifts WHERE id = $1", [shiftId]);
       await testPool.query("DELETE FROM group_reservation_links WHERE group_id = $1", [groupId]);
       await testPool.query("DELETE FROM reservations WHERE id = ANY($1::text[])", [reservationIds]);

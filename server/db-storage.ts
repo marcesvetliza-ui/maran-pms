@@ -2420,18 +2420,16 @@ export class DatabaseStorage implements IStorage {
           });
           if (wasCheckedIn && reservation.roomId) {
             await tx.update(rooms).set({ status: "dirty" }).where(eq(rooms.id, reservation.roomId));
-            try {
-              await tx.insert(housekeepingTasks).values({
-                id: randomUUID(),
-                roomId: reservation.roomId,
-                taskType: "checkout_clean",
-                priority: "high",
-                status: "pending",
-                notes: `Check-out grupal dirigido (pago centralizado) — ${groupName}`,
-                scheduledDate: getArgentinaToday(),
-                createdAt: new Date(),
-              } as any);
-            } catch {}
+            await tx.insert(housekeepingTasks).values({
+              id: randomUUID(),
+              roomId: reservation.roomId,
+              taskType: "checkout_clean",
+              priority: "high",
+              status: "pending",
+              notes: `Check-out grupal dirigido (pago centralizado) — ${groupName}`,
+              scheduledDate: getArgentinaToday(),
+              createdAt: new Date(),
+            } as any);
             checkedIn++;
           } else {
             confirmed++;

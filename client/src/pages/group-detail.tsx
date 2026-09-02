@@ -860,6 +860,7 @@ export default function GroupDetailPage() {
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
   const [groupPaymentCloseReservationIds, setGroupPaymentCloseReservationIds] = useState<string[]>([]);
+  const [groupPaymentCloseAmounts, setGroupPaymentCloseAmounts] = useState<Record<string, string>>({});
   const [groupPaymentDestino, setGroupPaymentDestino] = useState<"distribute" | "master">("distribute");
   const [groupPaymentCcEntityType, setGroupPaymentCcEntityType] = useState<"company" | "agency">("company");
   const [groupPaymentCcEntityId, setGroupPaymentCcEntityId] = useState("");
@@ -895,6 +896,7 @@ export default function GroupDetailPage() {
     setGroupPaymentDistribution("equal");
     setGroupPaymentCloseAll(false);
     setGroupPaymentCloseReservationIds([]);
+    setGroupPaymentCloseAmounts({});
     setGroupPaymentDestino("distribute");
     setGroupPaymentCcEntityType("company");
     setGroupPaymentCcEntityId("");
@@ -1390,6 +1392,10 @@ export default function GroupDetailPage() {
         return { endpoint: `/api/groups/${groupId}/master-payment`, body: {
           paymentRows: rowsPayload,
           receiptType: groupPaymentReceiptType === "sin_comprobante" ? "none" : groupPaymentReceiptType,
+          closeReservationIds: groupPaymentCloseAll ? groupPaymentCloseReservationIds : [],
+          distributionDetail: groupPaymentCloseAll
+            ? Object.fromEntries(groupPaymentCloseReservationIds.map((id) => [id, Number(groupPaymentCloseAmounts[id] || 0)]))
+            : undefined,
           billingEntityType: groupPaymentCcEntityType,
           billingEntityId: groupPaymentCcEntityId || undefined,
           receiverDetails,
@@ -1402,6 +1408,9 @@ export default function GroupDetailPage() {
         distribution: groupPaymentDistribution,
         closeAllRooms: groupPaymentCloseAll,
         closeReservationIds: groupPaymentCloseReservationIds,
+        distributionDetail: groupPaymentCloseAll
+          ? Object.fromEntries(groupPaymentCloseReservationIds.map((id) => [id, Number(groupPaymentCloseAmounts[id] || 0)]))
+          : undefined,
         billingEntityType: groupPaymentCcEntityType,
         billingEntityId: groupPaymentCcEntityId || undefined,
         receiverDetails,
@@ -1835,10 +1844,14 @@ export default function GroupDetailPage() {
     (reservation) => reservation.status === "confirmed" || reservation.status === "checked_in",
   );
   const groupPaymentSelectedBalance = groupPaymentCloseReservationIds.reduce((sum, reservationId) => {
-    const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
-    return sum + Math.max(0, Number(row?.balance || 0));
+    return sum + Math.max(0, Number(groupPaymentCloseAmounts[reservationId] || 0));
   }, 0);
   const groupPaymentHasCloseSelection = !groupPaymentCloseAll || groupPaymentCloseReservationIds.length > 0;
+  const groupPaymentCloseAssignmentsValid = !groupPaymentCloseAll || groupPaymentCloseReservationIds.every((reservationId) => {
+    const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
+    return Math.round(Number(groupPaymentCloseAmounts[reservationId] || 0) * 100)
+      === Math.round(Math.max(0, Number(row?.balance || 0)) * 100);
+  });
   // A fiscal document is backed by the invoice snapshot, not by the cash rows:
   // an earlier advance can leave cash balance at zero while accommodation is
   // still available to document.
@@ -1869,6 +1882,7 @@ export default function GroupDetailPage() {
     && groupPaymentHasRequiredReferences
     && groupPaymentHasConcepts
     && groupPaymentHasCloseSelection
+    && groupPaymentCloseAssignmentsValid
     && !groupPaymentConceptsMismatchPayment
     && !groupPaymentExceedsFiscalAvailable;
 
@@ -3728,9 +3742,9 @@ export default function GroupDetailPage() {
             const nonFiscalAdvances = Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0);
             const requiredCollection = requiredGroupInvoiceCollection(itemsTotal, nonFiscalAdvances);
             const automaticAdvance = Math.max(0, itemsTotal - requiredCollection);
-            const closeCollection = isMaster
-              ? requiredCollection
-              : groupPaymentSelectedBalance;
+            const closeCollection = groupPaymentCloseAll
+              ? groupPaymentSelectedBalance
+              : requiredCollection;
             const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
             const conceptsMismatchPayment = isFiscal
               && itemsTotal > 0
@@ -3739,7 +3753,7 @@ export default function GroupDetailPage() {
                 itemsTotal,
                 nonFiscalAdvances,
                 {
-                  enabled: !isMaster && groupPaymentCloseAll,
+                  enabled: groupPaymentCloseAll,
                   operationalBalance: closeCollection,
                 },
               );
@@ -4400,11 +4414,11 @@ export default function GroupDetailPage() {
                   </div>
                 )}
 
-                {/* 7. DISTRIBUCIÓN + CERRAR HABITACIONES (solo destino = habitaciones) */}
-                {!isMaster && (
-                  <>
-                    <div className="border-t" />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 7. DISTRIBUCIÓN + CIERRE DIRIGIDO */}
+                <>
+                  <div className="border-t" />
+                  <div className={`grid grid-cols-1 ${!isMaster ? "sm:grid-cols-2" : ""} gap-4`}>
+                    {!isMaster && (
                       <div>
                         <Label>Distribución entre habitaciones</Label>
                         <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
@@ -4420,37 +4434,40 @@ export default function GroupDetailPage() {
                             : "Proporcional al saldo pendiente de cada reserva"}
                         </p>
                       </div>
-                      <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
-                        <Checkbox
-                          id="close-all-rooms"
-                          checked={groupPaymentCloseAll}
-                          onCheckedChange={(value) => {
-                            const checked = !!value;
-                            setGroupPaymentCloseAll(checked);
-                            const nextIds = checked ? groupPaymentActiveReservations.map((reservation) => reservation.id) : [];
-                            setGroupPaymentCloseReservationIds(nextIds);
-                            if (checked) {
-                              const amount = nextIds.reduce((sum, reservationId) => {
-                                const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
-                                return sum + Math.max(0, Number(row?.balance || 0));
-                              }, 0);
-                              setGroupPaymentRows((rows) => rows.map((row, index) =>
-                                index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
-                              ));
-                            }
-                          }}
-                          data-testid="checkbox-close-all-rooms"
-                        />
-                        <div className="space-y-1">
-                          <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
-                            Cerrar habitaciones elegidas con este pago
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            Seleccioná las reservas a saldar. Las que están en casa pasan a limpieza; las confirmadas se cierran sin generar limpieza.
-                          </p>
-                        </div>
+                    )}
+                    <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                      <Checkbox
+                        id="close-all-rooms"
+                        checked={groupPaymentCloseAll}
+                        onCheckedChange={(value) => {
+                          const checked = !!value;
+                          setGroupPaymentCloseAll(checked);
+                          const nextIds = checked ? groupPaymentActiveReservations.map((reservation) => reservation.id) : [];
+                          const nextAmounts = Object.fromEntries(nextIds.map((reservationId) => {
+                            const row = folio?.reservations?.find((reservation) => reservation.reservationId === reservationId);
+                            return [reservationId, Math.max(0, Number(row?.balance || 0)).toFixed(2)];
+                          }));
+                          setGroupPaymentCloseReservationIds(nextIds);
+                          setGroupPaymentCloseAmounts(nextAmounts);
+                          if (checked) {
+                            const amount = Object.values(nextAmounts).reduce((sum, value) => sum + Number(value || 0), 0);
+                            setGroupPaymentRows((rows) => rows.map((row, index) =>
+                              index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
+                            ));
+                          }
+                        }}
+                        data-testid="checkbox-close-all-rooms"
+                      />
+                      <div className="space-y-1">
+                        <label htmlFor="close-all-rooms" className="text-sm font-medium cursor-pointer leading-tight">
+                          Cerrar habitaciones elegidas con este pago
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          Confirmá el saldo exacto de cada reserva. Las que están en casa pasan a limpieza; las confirmadas se cierran sin generar limpieza.
+                        </p>
                       </div>
                     </div>
+                  </div>
                     {groupPaymentCloseAll && (
                       <div className="rounded-lg border p-3 space-y-2" data-testid="group-close-room-selection">
                         <div className="flex items-center justify-between gap-3">
@@ -4460,8 +4477,9 @@ export default function GroupDetailPage() {
                         {groupPaymentActiveReservations.map((reservation) => {
                           const folioRow = folio?.reservations?.find((row) => row.reservationId === reservation.id);
                           const selected = groupPaymentCloseReservationIds.includes(reservation.id);
+                          const expectedBalance = Math.max(0, Number(folioRow?.balance || 0));
                           return (
-                            <label key={reservation.id} className="flex items-center justify-between gap-3 rounded-md border p-2 cursor-pointer">
+                            <div key={reservation.id} className="flex items-center justify-between gap-3 rounded-md border p-2">
                               <span className="flex items-center gap-2">
                                 <Checkbox
                                   checked={selected}
@@ -4469,11 +4487,12 @@ export default function GroupDetailPage() {
                                     const nextIds = value
                                       ? [...groupPaymentCloseReservationIds, reservation.id]
                                       : groupPaymentCloseReservationIds.filter((id) => id !== reservation.id);
+                                    const nextAmounts = { ...groupPaymentCloseAmounts };
+                                    if (value) nextAmounts[reservation.id] = expectedBalance.toFixed(2);
+                                    else delete nextAmounts[reservation.id];
                                     setGroupPaymentCloseReservationIds(nextIds);
-                                    const amount = nextIds.reduce((sum, reservationId) => {
-                                      const row = folio?.reservations?.find((item) => item.reservationId === reservationId);
-                                      return sum + Math.max(0, Number(row?.balance || 0));
-                                    }, 0);
+                                    setGroupPaymentCloseAmounts(nextAmounts);
+                                    const amount = nextIds.reduce((sum, reservationId) => sum + Number(nextAmounts[reservationId] || 0), 0);
                                     setGroupPaymentRows((rows) => rows.map((row, index) =>
                                       index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
                                     ));
@@ -4484,17 +4503,40 @@ export default function GroupDetailPage() {
                                   Hab. {reservation.room?.roomNumber || "—"} · {reservation.status === "checked_in" ? "En casa" : "Confirmada"}
                                 </span>
                               </span>
-                              <span className="text-sm font-medium">{fmtMoney(Math.max(0, Number(folioRow?.balance || 0)))}</span>
-                            </label>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">Saldo {fmtMoney(expectedBalance)}</span>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  className="h-8 w-28 text-right"
+                                  disabled={!selected}
+                                  value={groupPaymentCloseAmounts[reservation.id] || ""}
+                                  onChange={(event) => {
+                                    const nextAmounts = { ...groupPaymentCloseAmounts, [reservation.id]: event.target.value };
+                                    setGroupPaymentCloseAmounts(nextAmounts);
+                                    const amount = groupPaymentCloseReservationIds.reduce((sum, reservationId) =>
+                                      sum + Math.max(0, Number(nextAmounts[reservationId] || 0)), 0);
+                                    setGroupPaymentRows((rows) => rows.map((row, index) =>
+                                      index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
+                                    ));
+                                  }}
+                                  aria-label={`Importe para habitación ${reservation.room?.roomNumber || "sin asignar"}`}
+                                  data-testid={`input-close-amount-${reservation.id}`}
+                                />
+                              </div>
+                            </div>
                           );
                         })}
                         {groupPaymentCloseReservationIds.length === 0 && (
                           <p className="text-xs text-destructive">Elegí al menos una habitación para cerrar.</p>
                         )}
+                        {!groupPaymentCloseAssignmentsValid && (
+                          <p className="text-xs text-destructive">Cada importe debe coincidir exactamente con el saldo de su reserva.</p>
+                        )}
                       </div>
                     )}
-                  </>
-                )}
+                </>
 
                 <div className="border-t" />
 
@@ -4518,8 +4560,8 @@ export default function GroupDetailPage() {
                     )}
                     {isFiscal && (
                       <>
-                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobro nuevo requerido</span><span className="font-medium">{fmtMoney(!isMaster && groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
-                        {!isMaster && groupPaymentCloseAll && closeCollection > requiredCollection + 0.009 && (
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobro nuevo requerido</span><span className="font-medium">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
+                        {groupPaymentCloseAll && closeCollection > requiredCollection + 0.009 && (
                           <div className="flex justify-between gap-2 text-xs"><span className="text-muted-foreground">Porción fiscal del cobro</span><span>{fmtMoney(requiredCollection)}</span></div>
                         )}
                       </>
@@ -4573,7 +4615,7 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-group-payment"
             >
               <CreditCard className="mr-2 h-4 w-4" />
-              {groupPaymentMutation.isPending ? "Procesando..." : (groupPaymentDestino === "distribute" && groupPaymentCloseAll) ? "Pagar y Cerrar Habitaciones" : groupPaymentDestino === "master" ? "Registrar Pago al Folio Maestro" : "Registrar Pago"}
+              {groupPaymentMutation.isPending ? "Procesando..." : groupPaymentCloseAll ? "Pagar y Cerrar Habitaciones" : groupPaymentDestino === "master" ? "Registrar Pago al Folio Maestro" : "Registrar Pago"}
             </Button>
           </DialogFooter>
         </DialogContent>

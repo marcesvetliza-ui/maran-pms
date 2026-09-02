@@ -1839,7 +1839,11 @@ export function registerGroupsRoutes(app: Express) {
 
       // Support multi-row payments and keep a single parent movement for the
       // receipt, regardless of how many payment methods the operator uses.
-      const { paymentRows, amount, method, date, reference, notes, receiptType, billingEntityType, billingEntityId, receiverDetails, concepts, invoiceData } = req.body;
+      const {
+        paymentRows, amount, method, date, reference, notes, receiptType,
+        billingEntityType, billingEntityId, receiverDetails, concepts, invoiceData,
+        closeReservationIds: rawCloseReservationIds, distributionDetail: rawDistributionDetail,
+      } = req.body;
       const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
         Array.isArray(paymentRows) && paymentRows.length > 0
           ? paymentRows
@@ -1863,6 +1867,13 @@ export function registerGroupsRoutes(app: Express) {
       const activeRes = group.reservations.filter(
         (r: any) => r.status === "confirmed" || r.status === "checked_in"
       );
+      const activeIds = new Set(activeRes.map((reservation: any) => reservation.id));
+      const closeReservationIds = Array.isArray(rawCloseReservationIds)
+        ? Array.from(new Set(rawCloseReservationIds.map((id: unknown) => String(id))))
+        : [];
+      if (closeReservationIds.some((id) => !activeIds.has(id))) {
+        return res.status(400).json({ error: "Sólo se pueden cerrar habitaciones activas de este grupo." });
+      }
       const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
       const masterPaymentIds = new Set(allGroupPayments
         .filter((payment: any) => payment.destination === "master_folio" || payment.distribution === "master_folio")
@@ -1878,6 +1889,16 @@ export function registerGroupsRoutes(app: Express) {
       // and payments out of every preview before recordGroupPayment performs
       // the authoritative validation under the group row lock.
       const ledgerLines = await storage.getGroupReservationLedger(req.params.groupId);
+      const selectedBalances = new Map(closeReservationIds.map((reservationId) => {
+        const line = ledgerLines.find((item) => item.reservationId === reservationId);
+        return [
+          reservationId,
+          Math.max(0, Number(line
+            ? line.accommodationTotal + line.extrasTotal - line.paymentsTotal
+            : 0)),
+        ];
+      }));
+      const selectedBalance = Array.from(selectedBalances.values()).reduce((sum, balance) => sum + balance, 0);
       const roomAmounts = new Map<string, number>();
       let masterAccommodation = 0;
       let masterExtras = 0;
@@ -1909,9 +1930,15 @@ export function registerGroupsRoutes(app: Express) {
         .filter((payment: any) => masterPaymentIds.has(payment.id))
         .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
       const masterBalance = masterTotal - masterParentPaid - (config === "all" ? directAllPaid : directAccommodationPaid);
-      if (totalAmount > masterBalance + 0.009) {
+      if (closeReservationIds.length === 0 && totalAmount > masterBalance + 0.009) {
         return res.status(400).json({
           error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo del Folio Maestro de $${Math.max(0, masterBalance).toFixed(2)}.`,
+        });
+      }
+      if (closeReservationIds.length > 0
+        && Math.round(totalAmount * 100) !== Math.round(selectedBalance * 100)) {
+        return res.status(400).json({
+          error: `Para cerrar las habitaciones elegidas, el pago debe coincidir exactamente con su saldo de $${selectedBalance.toFixed(2)}.`,
         });
       }
       if (isFiscalGroupReceipt(evidence.receiptType)) {
@@ -1928,17 +1955,31 @@ export function registerGroupsRoutes(app: Express) {
           conceptsTotal,
           nonFiscalAdvances,
         );
-        if (Math.round(totalAmount * 100) !== Math.round(requiredCollection * 100)) {
+        const requiredAmount = closeReservationIds.length > 0 ? selectedBalance : requiredCollection;
+        if (Math.round(totalAmount * 100) !== Math.round(requiredAmount * 100)
+          || (closeReservationIds.length > 0 && totalAmount + 0.009 < requiredCollection)) {
           return res.status(400).json({
-            error: `El cobro nuevo debe ser $${requiredCollection.toFixed(2)}; la diferencia se cubre con adelantos no fiscalizados.`,
+            error: closeReservationIds.length > 0
+              ? `Para cerrar las habitaciones elegidas, el cobro debe ser $${selectedBalance.toFixed(2)} e incluir al menos $${requiredCollection.toFixed(2)} para la factura.`
+              : `El cobro nuevo debe ser $${requiredCollection.toFixed(2)}; la diferencia se cubre con adelantos no fiscalizados.`,
           });
         }
       }
 
-      const allocationEntries = activeRes
-        .map((reservation: any) => ({ id: reservation.id, weight: roomAmounts.get(reservation.id) || 0 }))
-        .filter((entry) => entry.weight > 0);
-      if (groupChargesTotal > 0) allocationEntries.push({ id: "__group_charges__", weight: groupChargesTotal });
+      const confirmedAllocation = closeReservationIds.length > 0
+        ? Object.fromEntries(closeReservationIds.map((reservationId) => [
+            reservationId,
+            Number(rawDistributionDetail?.[reservationId] || 0),
+          ]))
+        : null;
+      const allocationEntries = closeReservationIds.length > 0
+        ? []
+        : activeRes
+            .map((reservation: any) => ({ id: reservation.id, weight: roomAmounts.get(reservation.id) || 0 }))
+            .filter((entry) => entry.weight > 0);
+      if (closeReservationIds.length === 0 && groupChargesTotal > 0) {
+        allocationEntries.push({ id: "__group_charges__", weight: groupChargesTotal });
+      }
        // A historical/checked-out balance remains on the parent receipt.
        // Add its capacity even when active rooms exist, otherwise a valid
        // mixed historical/current balance would be forced onto those rooms.
@@ -1948,20 +1989,29 @@ export function registerGroupsRoutes(app: Express) {
          allocationEntries.push({ id: "__master_balance__", weight: historicalMasterBalance });
        }
        if (allocationEntries.length === 0) allocationEntries.push({ id: "__master_balance__", weight: 1 });
-      const allocation = distributeCents(Math.round(totalAmount * 100), allocationEntries);
+      const allocation = confirmedAllocation
+        ?? distributeCents(Math.round(totalAmount * 100), allocationEntries);
 
       const recorded = await storage.recordGroupPayment({
         groupId: req.params.groupId,
-        destination: "master_folio",
+        // A directed checkout is launched from the Master Folio UI, but its
+        // explicit room allocations are operational room payments. Keeping
+        // them out of master_folio prevents an accommodation-only master from
+        // rejecting room extras or consuming unrelated group charges.
+        destination: closeReservationIds.length > 0 ? "group_distribution" : "master_folio",
         paymentRows: rows,
         date: paymentDate,
         reference: rows.map((row) => String(row.reference || "").trim()).filter(Boolean).join(" / ")
-          || reference || `Pago Folio Maestro — ${group.name}`,
-        distribution: "master_folio",
+          || reference || (closeReservationIds.length > 0
+            ? `Cierre dirigido desde Folio Maestro — ${group.name}`
+            : `Pago Folio Maestro — ${group.name}`),
+        distribution: closeReservationIds.length > 0 ? "selected_rooms" : "master_folio",
         distributionDetail: allocation,
         receivedBy: (req.user as any)?.username || null,
         notes: formatGroupPaymentNotes(notes, evidence.concepts),
-        cashLabel: `Pago Folio Maestro — ${group.name}`,
+        cashLabel: closeReservationIds.length > 0
+          ? `Cierre dirigido desde Folio Maestro — ${group.name}`
+          : `Pago Folio Maestro — ${group.name}`,
         receiptType: evidence.receiptType,
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
@@ -1971,6 +2021,7 @@ export function registerGroupsRoutes(app: Express) {
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
           : null,
+        closeReservationIds: closeReservationIds.length > 0 ? closeReservationIds : undefined,
       });
 
       await audit(req, "create", "groups",
@@ -1985,6 +2036,8 @@ export function registerGroupsRoutes(app: Express) {
         paymentId: recorded.reservationPayments[0]?.id ?? null,
         paymentIds: recorded.reservationPayments.map((payment) => payment.id),
         distributed: recorded.reservationPayments.length,
+        checkoutCount: recorded.closedReservations?.processed || 0,
+        closedReservationIds: closeReservationIds,
       });
     } catch (error: any) {
       console.error("master-payment error:", error);
