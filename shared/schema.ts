@@ -51,6 +51,11 @@ export type RoomTypeReferencePreview = {
   hasMore: boolean;
 };
 
+export type RoomTypeReferenceExportPage = {
+  records: RoomTypeReferencePreviewRecord[];
+  hasMore: boolean;
+};
+
 export type OrphanedRoomTypeReference = {
   roomTypeId: string;
   references: RoomTypeReference[];

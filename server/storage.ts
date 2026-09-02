@@ -6,6 +6,7 @@ import {
   type RoomType,
   type InsertRoomType,
   type RoomTypeReferencePreview,
+  type RoomTypeReferenceExportPage,
   type OrphanedRoomTypeReference,
   type RoomTypeReference,
   type RoomTypeReassignmentResult,
@@ -227,6 +228,12 @@ export interface IStorage {
   getRoomTypeReferences(id: string): Promise<RoomTypeReference[]>;
   getOrphanedRoomTypeReferences(): Promise<OrphanedRoomTypeReference[]>;
   getRoomTypeReferencePreview(roomTypeId: string, source: RoomTypeReference["source"], limit?: number): Promise<RoomTypeReferencePreview>;
+  getRoomTypeReferenceExportPage(
+    roomTypeId: string,
+    source: RoomTypeReference["source"],
+    offset: number,
+    limit: number,
+  ): Promise<RoomTypeReferenceExportPage>;
   reassignRoomTypeReferences(fromRoomTypeId: string, toRoomTypeId: string): Promise<RoomTypeReassignmentResult>;
   createRoomType(roomType: InsertRoomType): Promise<RoomType>;
   updateRoomType(id: string, roomType: Partial<InsertRoomType>): Promise<RoomType | undefined>;

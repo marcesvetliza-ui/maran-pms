@@ -10,6 +10,7 @@ import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
+const ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE = 250;
 const ROOM_TYPE_REFERENCE_SOURCES: RoomTypeReferenceSource[] = [
   "rooms",
   "rate_plans",
@@ -67,6 +68,72 @@ export function registerRoomsRoutes(app: Express) {
       res.json(preview);
     } catch (error) {
       res.status(500).json({ error: "Error cargando la vista previa de referencias" });
+    }
+  });
+
+  app.get("/api/room-types/integrity/export", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+    const { roomTypeId, source } = req.query;
+    const requestedSource = typeof source === "string" ? source : "";
+    if (
+      typeof roomTypeId !== "string" ||
+      !roomTypeId ||
+      !ROOM_TYPE_REFERENCE_SOURCES.includes(requestedSource as RoomTypeReferenceSource)
+    ) {
+      return res.status(400).json({ error: "roomTypeId y source válidos son requeridos" });
+    }
+
+    const safeRoomTypeId = roomTypeId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "desconocido";
+    const filename = `evidencia_tipo_habitacion_${safeRoomTypeId}_${requestedSource}.csv`;
+
+    const csvCell = (value: unknown) => {
+      const text = String(value ?? "");
+      const safeText = /^[\u0000-\u0020]*[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safeText.replaceAll('"', '""')}"`;
+    };
+    const writeChunk = (chunk: string) => {
+      if (res.write(chunk)) return Promise.resolve();
+      return new Promise<void>((resolve) => res.once("drain", resolve));
+    };
+
+    try {
+      let offset = 0;
+      let page = await storage.getRoomTypeReferenceExportPage(
+        roomTypeId,
+        requestedSource as RoomTypeReferenceSource,
+        offset,
+        ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE,
+      );
+
+      res.status(200);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Cache-Control", "no-store");
+      await writeChunk("\uFEFFIdentificador técnico,Etiqueta legible\n");
+
+      while (true) {
+        for (const record of page.records) {
+          await writeChunk(`${csvCell(record.id)},${csvCell(record.label)}\n`);
+        }
+
+        offset += page.records.length;
+        if (!page.hasMore || page.records.length === 0) break;
+
+        page = await storage.getRoomTypeReferenceExportPage(
+          roomTypeId,
+          requestedSource as RoomTypeReferenceSource,
+          offset,
+          ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE,
+        );
+      }
+
+      res.end();
+    } catch (error) {
+      console.error("[room-type-integrity-export] error:", error);
+      if (res.headersSent) {
+        res.destroy(error instanceof Error ? error : new Error("Error exportando referencias"));
+      } else {
+        res.status(500).json({ error: "Error exportando las referencias" });
+      }
     }
   });
 

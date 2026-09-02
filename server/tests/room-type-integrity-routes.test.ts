@@ -6,6 +6,7 @@ const mockStorage = {
   getRoomTypes: vi.fn(),
   getOrphanedRoomTypeReferences: vi.fn(),
   getRoomTypeReferencePreview: vi.fn(),
+  getRoomTypeReferenceExportPage: vi.fn(),
   reassignRoomTypeReferences: vi.fn(),
   deleteRoomType: vi.fn(),
 };
@@ -64,6 +65,10 @@ describe("room type catalog integrity routes", () => {
       records: [{ id: "room-1", label: "101" }],
       total: 1,
       limit: 50,
+      hasMore: false,
+    });
+    mockStorage.getRoomTypeReferenceExportPage.mockResolvedValue({
+      records: [],
       hasMore: false,
     });
     mockStorage.reassignRoomTypeReferences.mockResolvedValue({
@@ -156,6 +161,75 @@ describe("room type catalog integrity routes", () => {
       );
       expect(invalidLimit.status).toBe(400);
       expect(mockStorage.getRoomTypeReferencePreview).not.toHaveBeenCalled();
+    } finally {
+      app.close();
+    }
+  });
+
+  it("streams the complete evidence in pages as escaped CSV", async () => {
+    mockStorage.getRoomTypeReferenceExportPage
+      .mockResolvedValueOnce({
+        records: [
+          { id: "room-1", label: "101, Ala \"Norte\"" },
+          { id: "room-2", label: "102" },
+        ],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        records: [
+          { id: "room-3", label: "=HYPERLINK(\"https://example.test\")" },
+          { id: "+room-4", label: "\t@SUM(1+1)" },
+          { id: "room-5", label: "-1+2" },
+        ],
+        hasMore: false,
+      });
+    const app = await startApp();
+
+    try {
+      const response = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/csv");
+      expect(response.headers.get("content-disposition")).toContain(
+        "evidencia_tipo_habitacion_deleted-type_rooms.csv",
+      );
+      expect(await response.text()).toBe(
+        "Identificador técnico,Etiqueta legible\n" +
+        '"room-1","101, Ala ""Norte"""\n' +
+        '"room-2","102"\n' +
+        "\"room-3\",\"'=HYPERLINK(\"\"https://example.test\"\")\"\n" +
+        "\"'+room-4\",\"'\t@SUM(1+1)\"\n" +
+        "\"room-5\",\"'-1+2\"\n",
+      );
+      expect(mockStorage.getRoomTypeReferenceExportPage).toHaveBeenNthCalledWith(
+        1,
+        "deleted-type",
+        "rooms",
+        0,
+        250,
+      );
+      expect(mockStorage.getRoomTypeReferenceExportPage).toHaveBeenNthCalledWith(
+        2,
+        "deleted-type",
+        "rooms",
+        2,
+        250,
+      );
+    } finally {
+      app.close();
+    }
+  });
+
+  it("rejects an invalid evidence source before accessing storage", async () => {
+    const app = await startApp();
+
+    try {
+      const response = await fetch(
+        `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=unknown`,
+      );
+      expect(response.status).toBe(400);
+      expect(mockStorage.getRoomTypeReferenceExportPage).not.toHaveBeenCalled();
     } finally {
       app.close();
     }

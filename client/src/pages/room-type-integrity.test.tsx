@@ -101,6 +101,23 @@ describe("reparación de integridad de tipos de habitación", () => {
     expect(screen.getByText(/Se actualizaron 3 referencias/)).toBeInTheDocument();
   });
 
+  it("ofrece una descarga completa por cada combinación de tipo huérfano y origen", async () => {
+    renderPage();
+
+    const roomsDownload = await screen.findByTestId(`button-download-${ORPHAN_ID}-rooms`);
+    const reservationsDownload = screen.getByTestId(`button-download-${ORPHAN_ID}-reservations`);
+
+    expect(roomsDownload).toHaveAttribute(
+      "href",
+      `/api/room-types/integrity/export?roomTypeId=${ORPHAN_ID}&source=rooms`,
+    );
+    expect(roomsDownload).toHaveAttribute("download");
+    expect(reservationsDownload).toHaveAttribute(
+      "href",
+      `/api/room-types/integrity/export?roomTypeId=${ORPHAN_ID}&source=reservations`,
+    );
+  });
+
   it("respeta el rechazo explícito y no llama al endpoint de reparación", async () => {
     const user = userEvent.setup();
     renderPage();

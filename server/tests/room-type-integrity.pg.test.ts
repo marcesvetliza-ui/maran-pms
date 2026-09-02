@@ -284,6 +284,30 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
         records: [{ id: ids.reservationIds[1], label: expect.stringContaining("PGI-RES-2-") }],
         hasMore: false,
       }));
+
+      await expect(
+        storage.getRoomTypeReferenceExportPage(ids.fromRoomTypeId, "rooms", 0, 1),
+      ).resolves.toEqual({
+        records: [
+          expect.objectContaining({
+            id: ids.roomIds[0],
+            label: expect.stringContaining("PGI-1-"),
+          }),
+        ],
+        hasMore: true,
+      });
+
+      await expect(
+        storage.getRoomTypeReferenceExportPage(ids.fromRoomTypeId, "rooms", 1, 1),
+      ).resolves.toEqual({
+        records: [
+          expect.objectContaining({
+            id: ids.roomIds[1],
+            label: expect.stringContaining("PGI-2-"),
+          }),
+        ],
+        hasMore: true,
+      });
     } finally {
       await cleanupFixture(ids);
     }

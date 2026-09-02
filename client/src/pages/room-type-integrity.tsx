@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Database,
+  Download,
   Eye,
   RefreshCw,
   ShieldCheck,
@@ -52,6 +53,11 @@ function formatCount(count: number) {
 
 function getTotalReferences(references: RoomTypeReference[]) {
   return references.reduce((total, reference) => total + reference.count, 0);
+}
+
+function referenceExportUrl(roomTypeId: string, source: RoomTypeReference["source"]) {
+  const params = new URLSearchParams({ roomTypeId, source });
+  return `/api/room-types/integrity/export?${params.toString()}`;
 }
 
 export default function RoomTypeIntegrityPage() {
@@ -370,6 +376,16 @@ export default function RoomTypeIntegrityPage() {
                           {previewSelection?.roomTypeId === orphan.roomTypeId && previewSelection.source === reference.source
                             ? "Ocultar"
                             : "Ver registros"}
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-8 shrink-0 px-2 text-xs" asChild>
+                          <a
+                            href={referenceExportUrl(orphan.roomTypeId, reference.source)}
+                            download
+                            data-testid={`button-download-${orphan.roomTypeId}-${reference.source}`}
+                          >
+                            <Download className="mr-1.5 h-3.5 w-3.5" />
+                            Descargar evidencia
+                          </a>
                         </Button>
                       </div>
                       {previewSelection?.roomTypeId === orphan.roomTypeId && previewSelection.source === reference.source && (

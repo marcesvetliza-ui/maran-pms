@@ -35,7 +35,7 @@ import { IStorage } from "./storage";
 import {
   type User, type InsertUser,
   type Room, type InsertRoom,
-  type RoomType, type InsertRoomType, type RoomTypeReference, type RoomTypeReferencePreview, type OrphanedRoomTypeReference, type RoomTypeReassignmentResult,
+  type RoomType, type InsertRoomType, type RoomTypeReference, type RoomTypeReferencePreview, type RoomTypeReferenceExportPage, type OrphanedRoomTypeReference, type RoomTypeReassignmentResult,
   type RatePlan, type InsertRatePlan, type RatePlanWithRoomType,
   type Company, type InsertCompany,
   type Agency, type InsertAgency,
@@ -378,6 +378,77 @@ export class DatabaseStorage implements IStorage {
       total,
       limit: previewLimit,
       hasMore: total > records.length,
+    };
+  }
+
+  async getRoomTypeReferenceExportPage(
+    roomTypeId: string,
+    source: RoomTypeReference["source"],
+    offset: number,
+    limit: number,
+  ): Promise<RoomTypeReferenceExportPage> {
+    const pageOffset = Math.max(Math.trunc(offset) || 0, 0);
+    const pageLimit = Math.min(Math.max(Math.trunc(limit) || 1, 1), 500);
+    let recordsQuery: any;
+
+    switch (source) {
+      case "rooms":
+        recordsQuery = db
+          .select({ id: rooms.id, label: rooms.roomNumber })
+          .from(rooms)
+          .where(eq(rooms.roomTypeId, roomTypeId))
+          .orderBy(asc(rooms.roomNumber), asc(rooms.id));
+        break;
+      case "rate_plans":
+        recordsQuery = db
+          .select({ id: ratePlans.id, label: ratePlans.name })
+          .from(ratePlans)
+          .where(eq(ratePlans.roomTypeId, roomTypeId))
+          .orderBy(asc(ratePlans.name), asc(ratePlans.id));
+        break;
+      case "reservations":
+        recordsQuery = db
+          .select({ id: reservations.id, label: reservations.reservationCode })
+          .from(reservations)
+          .where(eq(reservations.roomTypeId, roomTypeId))
+          .orderBy(asc(reservations.reservationCode), asc(reservations.id));
+        break;
+      case "reservation_history":
+        recordsQuery = db
+          .select({ id: reservations.id, label: reservations.reservationCode })
+          .from(reservations)
+          .where(eq(reservations.originalRoomTypeId, roomTypeId))
+          .orderBy(asc(reservations.reservationCode), asc(reservations.id));
+        break;
+      case "group_room_blocks":
+        recordsQuery = db
+          .select({ id: groupRoomBlocks.id, label: groupRoomBlocks.id })
+          .from(groupRoomBlocks)
+          .where(eq(groupRoomBlocks.roomTypeId, roomTypeId))
+          .orderBy(asc(groupRoomBlocks.id));
+        break;
+      case "packages":
+        recordsQuery = db
+          .select({ id: packages.id, label: packages.code })
+          .from(packages)
+          .where(eq(packages.roomTypeId, roomTypeId))
+          .orderBy(asc(packages.code), asc(packages.id));
+        break;
+      case "package_room_prices":
+        recordsQuery = db
+          .select({ id: packageRoomPrices.id, label: packageRoomPrices.id })
+          .from(packageRoomPrices)
+          .where(eq(packageRoomPrices.roomTypeId, roomTypeId))
+          .orderBy(asc(packageRoomPrices.id));
+        break;
+      default:
+        throw new Error(`Origen de referencia no soportado: ${source}`);
+    }
+
+    const records = await recordsQuery.limit(pageLimit).offset(pageOffset);
+    return {
+      records,
+      hasMore: records.length === pageLimit,
     };
   }
 
