@@ -79,6 +79,36 @@ function paymentBody(amount: string) {
   };
 }
 
+function configureDirectedCloseFixture() {
+  mockStorage.getGroup.mockResolvedValue({
+    id: groupId,
+    name: "Grupo cierre dirigido",
+    reservations: [
+      { id: "room-a", roomId: "physical-a", status: "checked_in" },
+      { id: "room-b", roomId: "physical-b", status: "confirmed" },
+      { id: "room-c", roomId: "physical-c", status: "checked_in" },
+    ],
+  });
+  mockStorage.getGroupReservationLedger.mockResolvedValue([
+    { reservationId: "room-a", accommodationTotal: 100, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    { reservationId: "room-b", accommodationTotal: 200, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+    { reservationId: "room-c", accommodationTotal: 300, extrasTotal: 0, paymentsTotal: 0, payments: [] },
+  ]);
+  mockStorage.getGroupCharges.mockResolvedValue([]);
+  mockStorage.getGroupPayments.mockResolvedValue([]);
+  mocks.invoiceSnapshot.mockResolvedValue({
+    sources: [],
+    totals: { eligible: 0, invoiced: 0, available: 0 },
+    financial: { operationalBalance: 600, nonFiscalAdvances: 0, fiscalAvailable: 0 },
+    paymentDestinations: [],
+  });
+  mocks.recordGroupPayment.mockResolvedValue({
+    groupPayment: { id: "directed-parent", amount: "300.00" },
+    reservationPayments: [{ id: "child-a" }, { id: "child-b" }],
+    closedReservations: { processed: 2, checkedIn: 1, confirmed: 1 },
+  });
+}
+
 describe("POST group payment applies non-fiscal advances", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -276,36 +306,10 @@ describe("POST group payment applies non-fiscal advances", () => {
   });
 
   it("allocates and closes only the selected rooms in a three-room group", async () => {
-    mockStorage.getGroup.mockResolvedValue({
-      id: groupId,
-      name: "Grupo cierre dirigido",
-      reservations: [
-        { id: "room-a", roomId: "physical-a", status: "checked_in" },
-        { id: "room-b", roomId: "physical-b", status: "confirmed" },
-        { id: "room-c", roomId: "physical-c", status: "checked_in" },
-      ],
-    });
-    mockStorage.getGroupReservationLedger.mockResolvedValue([
-      { reservationId: "room-a", accommodationTotal: 100, extrasTotal: 0, paymentsTotal: 0, payments: [] },
-      { reservationId: "room-b", accommodationTotal: 200, extrasTotal: 0, paymentsTotal: 0, payments: [] },
-      { reservationId: "room-c", accommodationTotal: 300, extrasTotal: 0, paymentsTotal: 0, payments: [] },
-    ]);
-    mockStorage.getGroupCharges.mockResolvedValue([]);
-    mockStorage.getGroupPayments.mockResolvedValue([]);
-    mocks.invoiceSnapshot.mockResolvedValue({
-      sources: [],
-      totals: { eligible: 0, invoiced: 0, available: 0 },
-      financial: { operationalBalance: 600, nonFiscalAdvances: 0, fiscalAvailable: 0 },
-      paymentDestinations: [],
-    });
-    mocks.recordGroupPayment.mockResolvedValue({
-      groupPayment: { id: "directed-parent", amount: "300.00" },
-      reservationPayments: [{ id: "child-a" }, { id: "child-b" }],
-      closedReservations: { processed: 2, checkedIn: 1, confirmed: 1 },
-    });
+    configureDirectedCloseFixture();
 
     await withServer(async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/master-payment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -314,6 +318,7 @@ describe("POST group payment applies non-fiscal advances", () => {
           concepts: [{ description: "Cierre dirigido", amount: 300 }],
           paymentRows: [{ method: "cash", amount: "300.00", reference: "CIERRE-AB" }],
           closeReservationIds: ["room-a", "room-b"],
+          distributionDetail: { "room-a": 100, "room-b": 200 },
         }),
       });
       expect(response.status).toBe(200);
@@ -325,6 +330,48 @@ describe("POST group payment applies non-fiscal advances", () => {
         checkoutCount: 2,
         closedReservationIds: ["room-a", "room-b"],
       });
+    });
+  });
+
+  it("rejects an altered selected-room amount without recording the collection", async () => {
+    configureDirectedCloseFixture();
+    const persistedPayments: unknown[] = [];
+    mocks.recordGroupPayment.mockImplementationOnce((input: {
+      paymentRows: Array<{ amount: string }>;
+      distributionDetail: Record<string, number>;
+    }) => {
+      const received = input.paymentRows.reduce((sum, row) => sum + Number(row.amount), 0);
+      const allocated = Object.values(input.distributionDetail).reduce((sum, amount) => sum + Number(amount), 0);
+      if (Math.round(received * 100) !== Math.round(allocated * 100)) {
+        throw Object.assign(new Error("La distribución debe coincidir exactamente con el importe recibido."), { statusCode: 400 });
+      }
+      persistedPayments.push(input);
+      return {
+        groupPayment: { id: "directed-parent", amount: "300.00" },
+        reservationPayments: [{ id: "child-a" }, { id: "child-b" }],
+        closedReservations: { processed: 2, checkedIn: 1, confirmed: 1 },
+      };
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/master-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "sin_comprobante",
+          receiverDetails: { razonSocial: "Grupo cierre dirigido", cuit: "30712345678" },
+          concepts: [{ description: "Cierre dirigido", amount: 300 }],
+          paymentRows: [{ method: "cash", amount: "300.00", reference: "CIERRE-ALTERADO" }],
+          closeReservationIds: ["room-a", "room-b"],
+          distributionDetail: { "room-a": 99, "room-b": 200 },
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: "La distribución debe coincidir exactamente con el importe recibido.",
+      });
+      expect(persistedPayments).toHaveLength(0);
     });
   });
 
