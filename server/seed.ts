@@ -1073,6 +1073,7 @@ export async function refreshRealData() {
         ('1.1.4.01.08.01', 'Ret. Ing Brutos', 'activo'),
         ('1.1.4.01.08.02', 'Percep Ing Brutos', 'activo'),
         ('1.1.4.01.10', 'Retenciones SUSS', 'activo'),
+        ('1.1.4.01.11', 'Retenciones Municipales', 'activo'),
         ('1.1.4.01.15', 'Impuesto Ley 25413', 'activo'),
         ('1.1.4.07.01', 'IVA 21%', 'activo'),
         ('1.1.4.07.02', 'IVA 10,5%', 'activo'),

@@ -2065,6 +2065,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await withTimeout("accounting_accounts.received_retentions seed", T, () =>
+    db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo, activo) VALUES
+      ('1.1.4.01.08.01', 'Ret. Ing Brutos', 'activo', true),
+      ('1.1.4.01.04.01', 'Ret. IVA', 'activo', true),
+      ('1.1.4.01.05', 'Ret Impuestos a las ganancias', 'activo', true),
+      ('1.1.4.01.11', 'Retenciones Municipales', 'activo', true),
+      ('1.1.4.01.10', 'Retenciones SUSS', 'activo', true)
+      ON CONFLICT (codigo) DO UPDATE SET tipo = 'activo', activo = true
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
