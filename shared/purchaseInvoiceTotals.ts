@@ -1,4 +1,13 @@
 export const CARD_SETTLEMENT_TYPE = "LIQ-TARJETA";
+export const RECEIVED_RETENTION_TYPE = "RETENCION";
+
+export const RECEIVED_RETENTION_ACCOUNT_CODES = {
+  iibb: "1.1.4.01.08.01",
+  iva: "1.1.4.01.04.01",
+  ganancias: "1.1.4.01.05",
+  municipal: "1.1.4.01.11",
+  suss: "1.1.4.01.10",
+} as const;
 
 export type PurchaseInvoiceAmountInput = {
   tipoComprobante?: string | null;
@@ -59,6 +68,16 @@ export function isCardSettlement(tipoComprobante?: string | null): boolean {
   return tipoComprobante === CARD_SETTLEMENT_TYPE;
 }
 
+export function isReceivedRetention(tipoComprobante?: string | null): boolean {
+  return tipoComprobante === RECEIVED_RETENTION_TYPE;
+}
+
+export function receivedRetentionAccountCode(subtipo?: string | null): string | null {
+  return RECEIVED_RETENTION_ACCOUNT_CODES[
+    String(subtipo || "").toLowerCase() as keyof typeof RECEIVED_RETENTION_ACCOUNT_CODES
+  ] || null;
+}
+
 export function mapPurchaseInvoiceAmountFields(row: Record<string, unknown>) {
   return {
     montoNeto: formAmount(row.monto_neto),
@@ -109,6 +128,12 @@ export function calculatePurchaseInvoiceAmountsFromNetLines(
 }
 
 export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput): number {
+  // Una retención recibida es un certificado por un crédito fiscal: el importe
+  // ingresado ya es el valor final, igual que en los comprobantes C.
+  if (isReceivedRetention(input.tipoComprobante)) {
+    return roundCurrency(amount(input.montoNeto));
+  }
+
   const baseAndTaxes =
     amount(input.montoNeto) +
     amount(input.montoIva21) +
@@ -134,9 +159,9 @@ export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput)
 }
 
 export function purchaseInvoiceRetentionSide(tipoComprobante?: string | null): "debe" | "haber" {
-  return isCardSettlement(tipoComprobante) ? "debe" : "haber";
+  return isCardSettlement(tipoComprobante) || isReceivedRetention(tipoComprobante) ? "debe" : "haber";
 }
 
 export function shouldRegisterPracticedIibbRetention(tipoComprobante?: string | null): boolean {
-  return !isCardSettlement(tipoComprobante);
+  return !isCardSettlement(tipoComprobante) && !isReceivedRetention(tipoComprobante);
 }

@@ -40,7 +40,9 @@ import {
   calculatePurchaseInvoiceAmountsFromNetLines,
   calculatePurchaseInvoiceTotal,
   isCardSettlement,
+  isReceivedRetention,
   mapPurchaseInvoiceAmountFields,
+  receivedRetentionAccountCode,
 } from "@shared/purchaseInvoiceTotals";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -80,6 +82,7 @@ interface Invoice {
   montoIva25?: string;
   montoExento?: string;
   montoNoGravado?: string;
+  subtipoRetencion?: string;
 }
 
 interface Supplier {
@@ -165,6 +168,7 @@ function camelInvoice(r: any): Invoice {
     observaciones: r.observaciones,
     supplierId: r.supplier_id,
     cuentaContableId: r.cuenta_contable_id,
+    subtipoRetencion: r.subtipo_retencion,
   };
 }
 
@@ -365,7 +369,7 @@ function InvoiceDialog({
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
         centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
-        subtipoRetencion: "",
+        subtipoRetencion: editingInvoice.subtipoRetencion || "",
       });
       setNetoLines(linesFromInvoice(editingInvoice));
       setStep(1);
@@ -435,7 +439,9 @@ function InvoiceDialog({
       f("proveedorNombre", s.razonSocial);
       f("proveedorCuit", s.cuit);
       if (s.alicuotaIibb) f("alicuotaIibbProveedor", String(s.alicuotaIibb));
-      if (s.cuentaContableId) f("cuentaContableId", String(s.cuentaContableId));
+      if (!isReceivedRetention(form.tipoComprobante) && s.cuentaContableId) {
+        f("cuentaContableId", String(s.cuentaContableId));
+      }
     } else {
       f("supplierId", "");
     }
@@ -565,6 +571,11 @@ function InvoiceDialog({
   });
 
   const handleSubmit = () => {
+    if (form.tipoComprobante === "RETENCION" && !form.subtipoRetencion) {
+      toast({ title: "Seleccioná el tipo de retención recibida", variant: "destructive" });
+      setStep(0);
+      return;
+    }
     if (isEditing) {
       patchMut.mutate({ ...form, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
       return;
@@ -593,6 +604,16 @@ function InvoiceDialog({
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
   const isImporteUnico = isFacturaC || isRetencion;
+
+  useEffect(() => {
+    if (!isRetencion) return;
+    const code = receivedRetentionAccountCode(form.subtipoRetencion);
+    const account = code ? accounts.find((candidate) => candidate.codigo === code) : null;
+    const nextId = account ? String(account.id) : "";
+    setForm((current) => current.cuentaContableId === nextId
+      ? current
+      : { ...current, cuentaContableId: nextId });
+  }, [isRetencion, form.subtipoRetencion, accounts]);
 
   return (
     <>
@@ -630,7 +651,14 @@ function InvoiceDialog({
                   <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
                     if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
-                      setForm((p) => ({ ...p, tipoComprobante: v, alicuotaIva: "0", ...ALL_IVA_FIELDS }));
+                      setForm((p) => ({
+                        ...p,
+                        tipoComprobante: v,
+                        alicuotaIva: "0",
+                        cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
+                        subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
+                        ...ALL_IVA_FIELDS,
+                      }));
                     } else {
                       f("tipoComprobante", v);
                     }
@@ -752,12 +780,11 @@ function InvoiceDialog({
               {isRetencion && (
                 <div>
                   <Label>Tipo de Retención</Label>
-                  <Select value={form.subtipoRetencion || "__none__"} onValueChange={(v) => f("subtipoRetencion", v === "__none__" ? "" : v)}>
+                  <Select value={form.subtipoRetencion || undefined} onValueChange={(v) => f("subtipoRetencion", v)}>
                     <SelectTrigger data-testid="select-subtipo-retencion">
                       <SelectValue placeholder="Seleccionar tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">— Sin especificar —</SelectItem>
                       <SelectItem value="municipal">Municipal</SelectItem>
                       <SelectItem value="iibb">Ingresos Brutos (IIBB)</SelectItem>
                       <SelectItem value="ganancias">Ganancias</SelectItem>
@@ -898,18 +925,26 @@ function InvoiceDialog({
               </div>
 
               {/* ── Otros conceptos ── */}
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Exento</Label><Input type="number" step="0.01" value={form.montoExento} onChange={(e) => f("montoExento", e.target.value)} data-testid="input-exento" /></div>
-                <div><Label>No Gravado</Label><Input type="number" step="0.01" value={form.montoNoGravado} onChange={(e) => f("montoNoGravado", e.target.value)} data-testid="input-no-gravado" /></div>
-                <div><Label>Imp. Internos</Label><Input type="number" step="0.01" value={form.impuestosInternos} onChange={(e) => f("impuestosInternos", e.target.value)} data-testid="input-imp-internos" /></div>
-                <div><Label>Ley 25.413</Label><Input type="number" step="0.01" value={form.ley25413} onChange={(e) => f("ley25413", e.target.value)} data-testid="input-ley25413" /></div>
-              </div>
+              {!isRetencion && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>Exento</Label><Input type="number" step="0.01" value={form.montoExento} onChange={(e) => f("montoExento", e.target.value)} data-testid="input-exento" /></div>
+                  <div><Label>No Gravado</Label><Input type="number" step="0.01" value={form.montoNoGravado} onChange={(e) => f("montoNoGravado", e.target.value)} data-testid="input-no-gravado" /></div>
+                  <div><Label>Imp. Internos</Label><Input type="number" step="0.01" value={form.impuestosInternos} onChange={(e) => f("impuestosInternos", e.target.value)} data-testid="input-imp-internos" /></div>
+                  <div><Label>Ley 25.413</Label><Input type="number" step="0.01" value={form.ley25413} onChange={(e) => f("ley25413", e.target.value)} data-testid="input-ley25413" /></div>
+                </div>
+              )}
             </>
           )}
 
           {/* STEP 2: Retenciones / Percepciones */}
           {step === 2 && (
             <>
+              {isRetencion ? (
+                <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  Una retención recibida ya representa el crédito fiscal final. No lleva percepciones ni retenciones adicionales.
+                </div>
+              ) : (
+                <>
               <p className="text-sm font-semibold text-muted-foreground">Percepciones (DEBE)</p>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Percep. IIBB</Label><Input type="number" step="0.01" value={form.percepcionIibb} onChange={(e) => f("percepcionIibb", e.target.value)} data-testid="input-percep-iibb" /></div>
@@ -933,6 +968,8 @@ function InvoiceDialog({
                 <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
               </div>
+                </>
+              )}
             </>
           )}
 
@@ -941,15 +978,23 @@ function InvoiceDialog({
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <Label>Cuenta Contable de Gasto</Label>
-                  <Select value={form.cuentaContableId || "__none__"} onValueChange={(v) => f("cuentaContableId", v === "__none__" ? "" : v)}>
+                  <Label>{isRetencion ? "Cuenta Contable de Activo" : "Cuenta Contable de Gasto"}</Label>
+                  <Select
+                    value={form.cuentaContableId || "__none__"}
+                    disabled={isRetencion}
+                    onValueChange={(v) => f("cuentaContableId", v === "__none__" ? "" : v)}
+                  >
                     <SelectTrigger data-testid="select-cuenta-contable">
                       <SelectValue placeholder="Seleccionar cuenta..." />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">— Sin clasificar —</SelectItem>
                       {accounts
-                        .filter((a) => a.id && a.tipo === "egreso")
+                        .filter((a) => a.id && (
+                          isRetencion
+                            ? a.tipo === "activo" && a.codigo.startsWith("1.1.")
+                            : a.tipo === "egreso"
+                        ))
                         .map((a) => (
                           <SelectItem key={a.id} value={String(a.id)}>
                             {a.codigo} — {a.nombre}
@@ -958,7 +1003,9 @@ function InvoiceDialog({
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".
+                    {isRetencion
+                      ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".'}
                   </p>
                 </div>
                 <div className="col-span-2">
@@ -1298,6 +1345,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     return n !== 0 ? `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—";
   };
   const account = accounts.find((a) => a.id === invoice.cuentaContableId);
+  const isRetencion = isReceivedRetention(invoice.tipoComprobante);
   const ordenesPago: any[] = detail?.ordenesPago || [];
   const isLiquidacionTarjeta = isCardSettlement(invoice.tipoComprobante);
   const retentionValue = (value?: string | number) =>
@@ -1317,7 +1365,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ["Cuenta contable", account ? `${account.codigo} — ${account.nombre}` : "—"],
   ];
   const montos: [string, string][] = [
-    ["Monto Neto (gravado)", fmt2(invoice.montoNeto)],
+    [isRetencion ? "Importe final" : "Monto Neto (gravado)", fmt2(invoice.montoNeto)],
     ["IVA 21%", fmt2(invoice.montoIva21)],
     ["IVA 10.5%", fmt2(invoice.montoIva105)],
     ["IVA 27%", fmt2(invoice.montoIva27)],

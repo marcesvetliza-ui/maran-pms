@@ -47,8 +47,58 @@ import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-cen
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 import {
   calculatePurchaseInvoiceTotal,
+  isReceivedRetention,
+  receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
 } from "@shared/purchaseInvoiceTotals";
+
+function normalizeReceivedRetentionAmounts(body: any, tipoComprobante: string): any {
+  if (!isReceivedRetention(tipoComprobante)) return body;
+  return {
+    ...body,
+    tipoComprobante,
+    alicuotaIva: "0",
+    montoIva27: 0,
+    montoIva21: 0,
+    montoIva105: 0,
+    montoIva5: 0,
+    montoIva25: 0,
+    montoExento: 0,
+    montoNoGravado: 0,
+    impuestosInternos: 0,
+    ley25413: 0,
+    percepcionIibb: 0,
+    percepcionIva: 0,
+    percepcionGanancias: 0,
+    retencionIibb: 0,
+    retencionGanancias: 0,
+    retencionIva: 0,
+    retencionSuss: 0,
+    retencionMunicipal: 0,
+    monotributoCompBC: 0,
+  };
+}
+
+async function resolveReceivedRetentionAccountId(body: any): Promise<number> {
+  const accountCode = receivedRetentionAccountCode(body.subtipoRetencion);
+  if (!accountCode) {
+    throw Object.assign(new Error("Seleccioná el tipo de retención recibida."), { statusCode: 400 });
+  }
+  const result = await db.execute(sql`
+    SELECT id
+    FROM accounting_accounts
+    WHERE codigo = ${accountCode} AND tipo = 'activo' AND activo = true
+    LIMIT 1
+  `);
+  const accountId = Number((result.rows[0] as any)?.id);
+  if (!accountId) {
+    throw Object.assign(
+      new Error(`La cuenta contable ${accountCode} no existe o está inactiva.`),
+      { statusCode: 409 },
+    );
+  }
+  return accountId;
+}
 
 async function enrichGroupCashMovements<T extends { id: string; sourceType: string }>(
   movements: T[],
@@ -2880,7 +2930,10 @@ export async function registerRoutes(
 
   app.post("/api/purchase-invoices", requireAuth, async (req, res) => {
     try {
-      const body = req.body;
+      const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
+      if (isReceivedRetention(body.tipoComprobante)) {
+        body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
+      }
 
       // ── Validar centro de costo contra la lista gestionada ─────────────────
       const centroCosto = body.centroCosto ? String(body.centroCosto).trim() || null : null;
@@ -2996,6 +3049,7 @@ export async function registerRoutes(
         estado: rawInvoice.estado,
         asientoId: rawInvoice.asiento_id,
         observaciones: rawInvoice.observaciones,
+        subtipoRetencion: rawInvoice.subtipo_retencion,
         createdAt: rawInvoice.created_at,
         updatedAt: rawInvoice.updated_at,
       };
@@ -3029,7 +3083,7 @@ export async function registerRoutes(
 
       res.status(201).json(rawInvoice);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -3041,8 +3095,11 @@ export async function registerRoutes(
       if ((existing.rows[0] as any).estado !== "pendiente") {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
-      const body = req.body;
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
+      const body = normalizeReceivedRetentionAmounts(req.body, tipoComprobante);
+      if (isReceivedRetention(tipoComprobante)) {
+        body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
+      }
 
       // ── Validar centro de costo contra la lista gestionada ─────────────────
       const centroCosto = body.centroCosto ? String(body.centroCosto).trim() || null : null;
@@ -3068,6 +3125,7 @@ export async function registerRoutes(
             retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
             monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
+            subtipo_retencion = ${body.subtipoRetencion||null},
             updated_at = NOW()
           WHERE id = ${id}
           RETURNING *
@@ -3108,6 +3166,7 @@ export async function registerRoutes(
           centroCosto: raw.centro_costo,
           estado: raw.estado,
           observaciones: raw.observaciones,
+          subtipoRetencion: raw.subtipo_retencion,
         };
 
         const entryId = await generarAsiento(invoiceForEntry, tx);
@@ -3156,7 +3215,7 @@ export async function registerRoutes(
       });
       res.json(updatedInvoice);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 

@@ -4,6 +4,7 @@ import {
   calculatePurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   purchaseInvoiceRetentionSide,
+  receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
 } from "@shared/purchaseInvoiceTotals";
 
@@ -44,6 +45,24 @@ describe("purchase invoice totals", () => {
     expect(total).toBe(116);
     expect(purchaseInvoiceRetentionSide("FACT-A")).toBe("haber");
     expect(shouldRegisterPracticedIibbRetention("FACT-A")).toBe(true);
+  });
+
+  it("treats a received retention net amount as the final total and maps its asset account", () => {
+    const total = calculatePurchaseInvoiceTotal({
+      tipoComprobante: "RETENCION",
+      montoNeto: "1250.40",
+      montoIva21: "999.00",
+      retencionIibb: "100.00",
+    });
+
+    expect(total).toBe(1250.40);
+    expect(receivedRetentionAccountCode("iibb")).toBe("1.1.4.01.08.01");
+    expect(receivedRetentionAccountCode("iva")).toBe("1.1.4.01.04.01");
+    expect(receivedRetentionAccountCode("ganancias")).toBe("1.1.4.01.05");
+    expect(receivedRetentionAccountCode("municipal")).toBe("1.1.4.01.11");
+    expect(receivedRetentionAccountCode("suss")).toBe("1.1.4.01.10");
+    expect(purchaseInvoiceRetentionSide("RETENCION")).toBe("debe");
+    expect(shouldRegisterPracticedIibbRetention("RETENCION")).toBe(false);
   });
 
   it("preserves every amount used when editing an existing invoice", () => {

@@ -2289,6 +2289,7 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   estado: text("estado").notNull().default("pendiente"),
   asientoId: integer("asiento_id"),
   observaciones: text("observaciones"),
+  subtipoRetencion: text("subtipo_retencion"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
