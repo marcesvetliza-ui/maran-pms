@@ -88,6 +88,15 @@ const MASTER_FOLIO_FIXTURE = {
   groupPayments: [],
 };
 
+const INVOICE_SNAPSHOT_FIXTURE = {
+  sources: [
+    { id: "room:101:accommodation", destination: "Hab. 101", concept: "Alojamiento", available: 100 },
+    { id: "room:102:accommodation", destination: "Hab. 102", concept: "Alojamiento", available: 50 },
+  ],
+  totals: { eligible: 150, invoiced: 0, available: 150 },
+  financial: { nonFiscalAdvances: 0, operationalBalance: 125.5 },
+};
+
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -113,7 +122,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
       const url = String(input);
       if (url.endsWith(`/api/groups/${GROUP_ID}/folio`)) return jsonResponse(FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(MASTER_FOLIO_FIXTURE);
-      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse({});
+      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(INVOICE_SNAPSHOT_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/pending-fiscal-collections`)) return jsonResponse([]);
       if (url.endsWith(`/api/groups/${GROUP_ID}/direct-invoices`)) return jsonResponse([]);
       if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(GROUP_FIXTURE);
@@ -182,5 +191,47 @@ describe("Pago Grupal dialog entry-point modes", () => {
     expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByTestId("input-group-payment-amount-0")).toHaveDisplayValue("");
     expect(screen.getByTestId("input-group-entity-search")).toHaveValue("");
+  });
+
+  it("updates receipt concepts when manually switching destinations repeatedly", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("text-group-name");
+
+    await user.click(screen.getByTestId("button-group-payment"));
+    await user.type(screen.getByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Modo Anterior SA/i }));
+
+    const amount = screen.getByTestId("input-group-payment-amount-0");
+    await user.type(amount, "42");
+    await user.type(screen.getByTestId("input-group-payment-reference-0"), "REC-MODES-001");
+
+    const preview = () => screen.getByTestId("group-advance-breakdown-preview");
+    const detailedConcept = "Hab. 101 — Alojamiento";
+    const globalConcept = "Pago grupal — Grupo Modos de Pago";
+
+    expect(screen.getByTestId("button-group-advance-breakdown-detallados")).toHaveAttribute("aria-pressed", "true");
+    expect(preview()).toHaveTextContent(detailedConcept);
+    expect(preview()).toHaveTextContent("42,00");
+
+    await user.click(screen.getByTestId("button-group-destino-master"));
+    expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("button-group-advance-breakdown-detallados")).toHaveAttribute("aria-pressed", "false");
+    expect(preview()).toHaveTextContent(globalConcept);
+    expect(preview()).not.toHaveTextContent(detailedConcept);
+    expect(amount).toHaveValue(42);
+
+    await user.click(screen.getByTestId("button-group-destino-distribute"));
+    expect(screen.getByTestId("button-group-advance-breakdown-detallados")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "false");
+    expect(preview()).toHaveTextContent(detailedConcept);
+    expect(preview()).not.toHaveTextContent(globalConcept);
+    expect(amount).toHaveValue(42);
+
+    await user.click(screen.getByTestId("button-group-destino-master"));
+    expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "true");
+    expect(preview()).toHaveTextContent(globalConcept);
+    expect(preview()).not.toHaveTextContent(detailedConcept);
+    expect(preview()).toHaveTextContent("42,00");
   });
 });

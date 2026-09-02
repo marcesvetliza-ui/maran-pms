@@ -1040,6 +1040,14 @@ export default function GroupDetailPage() {
     setShowGroupPaymentDialog(true);
   };
 
+  // The payment destination determines the receipt breakdown. Keep this
+  // invariant in one handler so switching destinations inside the mounted
+  // dialog cannot reuse concepts from the previous destination.
+  const changeGroupPaymentDestino = (destino: "distribute" | "master") => {
+    setGroupPaymentDestino(destino);
+    setGroupInvoiceDistribution(destino === "master" ? "none" : "detallados");
+  };
+
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
     queryKey: ["/api/groups", groupId, "folio"],
     queryFn: async () => {
@@ -4105,10 +4113,7 @@ export default function GroupDetailPage() {
                       <Label className="text-sm font-semibold">3. Destino del cobro</Label>
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button"
-                          onClick={() => {
-                            setGroupPaymentDestino("distribute");
-                            setGroupInvoiceDistribution("detallados");
-                          }}
+                          onClick={() => changeGroupPaymentDestino("distribute")}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${!isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                             aria-pressed={!isMaster}
                           data-testid="button-group-destino-distribute">
@@ -4117,8 +4122,7 @@ export default function GroupDetailPage() {
                         </button>
                         <button type="button"
                           onClick={() => {
-                            setGroupPaymentDestino("master");
-                            setGroupInvoiceDistribution("none");
+                            changeGroupPaymentDestino("master");
                             // Factura T only covers accommodation-only master folios.
                             if (groupPaymentReceiptType === "factura_t" && masterFolio?.config !== "accommodation") {
                               setGroupPaymentReceiptType("factura_b");
@@ -4185,7 +4189,7 @@ export default function GroupDetailPage() {
                         ))}
                       </div>
                       {groupPaymentGrossPaymentTotal > 0 && (
-                        <div className="space-y-1 rounded-lg border bg-muted/20 p-2 text-xs">
+                        <div className="space-y-1 rounded-lg border bg-muted/20 p-2 text-xs" data-testid="group-advance-breakdown-preview">
                           {(groupPaymentReceiptConcepts.length > 0
                             ? groupPaymentReceiptConcepts
                             : [{ descripcion: `Anticipo grupo ${group?.name || groupId}`, precioUnitario: groupPaymentGrossPaymentTotal }]
