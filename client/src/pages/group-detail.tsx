@@ -1017,6 +1017,29 @@ export default function GroupDetailPage() {
     return true;
   }
 
+  type GroupPaymentDialogPreset = {
+    destino: "distribute" | "master";
+    invoiceDistribution: "none" | "detallados";
+    rows?: Array<{ method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string }>;
+    prefillReceptor?: boolean;
+  };
+
+  // Every entry point must establish the complete initial mode. Keeping the
+  // destination and receipt breakdown together prevents a reused mounted
+  // dialog from showing the previous entry point's mode.
+  const openGroupPaymentDialog = (preset: GroupPaymentDialogPreset) => {
+    resetGroupPaymentDialogFields();
+    if (preset.rows) {
+      setGroupPaymentRows(preset.rows);
+    }
+    setGroupPaymentDestino(preset.destino);
+    setGroupInvoiceDistribution(preset.invoiceDistribution);
+    if (preset.prefillReceptor) {
+      prefillGroupReceptorFromBillingEntity();
+    }
+    setShowGroupPaymentDialog(true);
+  };
+
   const { data: folio, isLoading: folioLoading } = useQuery<GroupFolioData>({
     queryKey: ["/api/groups", groupId, "folio"],
     queryFn: async () => {
@@ -1937,9 +1960,11 @@ export default function GroupDetailPage() {
             variant="default"
             onClick={async () => {
               await refreshGroupBillingState();
-              resetGroupPaymentDialogFields();
-              prefillGroupReceptorFromBillingEntity();
-              setShowGroupPaymentDialog(true);
+              openGroupPaymentDialog({
+                destino: "distribute",
+                invoiceDistribution: "detallados",
+                prefillReceptor: true,
+              });
             }}
             disabled={groupPaymentMutation.isPending}
             data-testid="button-group-payment"
@@ -2523,13 +2548,13 @@ export default function GroupDetailPage() {
                             // "Pagar Folio Maestro" opens the unified "Pago Grupal" dialog
                             // pre-set to destino="master" (Aplicar al Folio Maestro) — the
                             // dedicated legacy dialog was retired in favor of this toggle.
-                            resetGroupPaymentDialogFields();
                             const balance = masterFolio.masterBalance;
-                            setGroupPaymentRows([{method: "cash", amount: balance > 0 ? String(balance.toFixed(2)) : "", reference: ""}]);
-                            setGroupPaymentDestino("master");
-                            setGroupInvoiceDistribution("none");
-                            prefillGroupReceptorFromBillingEntity();
-                            setShowGroupPaymentDialog(true);
+                            openGroupPaymentDialog({
+                              destino: "master",
+                              invoiceDistribution: "none",
+                              rows: [{method: "cash", amount: balance > 0 ? String(balance.toFixed(2)) : "", reference: ""}],
+                              prefillReceptor: true,
+                            });
                           }}
                           disabled={masterFolio.masterBalance <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01}
                           data-testid="button-master-payment"
@@ -4085,6 +4110,7 @@ export default function GroupDetailPage() {
                             setGroupInvoiceDistribution("detallados");
                           }}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${!isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                            aria-pressed={!isMaster}
                           data-testid="button-group-destino-distribute">
                           <p className="font-medium">Distribuir entre habitaciones</p>
                           <p className="text-xs text-muted-foreground mt-0.5">Se aplica al saldo de cada reserva activa</p>
@@ -4099,6 +4125,7 @@ export default function GroupDetailPage() {
                             }
                           }}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                            aria-pressed={isMaster}
                           data-testid="button-group-destino-master">
                           <p className="font-medium">Aplicar al Folio Maestro</p>
                           <p className="text-xs text-muted-foreground mt-0.5">Con este pago se salda el Folio Maestro del grupo</p>
@@ -4149,6 +4176,7 @@ export default function GroupDetailPage() {
                             type="button"
                             onClick={() => setGroupInvoiceDistribution(option.value)}
                             className={`rounded-md border px-2 py-2 text-left text-xs transition-colors ${groupInvoiceDistribution === option.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                            aria-pressed={groupInvoiceDistribution === option.value}
                             data-testid={`button-group-advance-breakdown-${option.value}`}
                           >
                             <p className="font-semibold">{option.label}</p>
