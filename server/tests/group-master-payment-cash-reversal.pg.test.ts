@@ -150,6 +150,12 @@ async function readGroupPayment(groupPaymentId: string) {
   return result.rows;
 }
 
+async function readGroupPaymentsForGroup(groupId: string) {
+  if (!testPool) throw new Error("DATABASE_URL no está configurado");
+  const result = await testPool.query("SELECT id FROM group_payments WHERE group_id = $1", [groupId]);
+  return result.rows;
+}
+
 runIfDatabaseIsConfigured("PostgreSQL real: Caja stops showing income when a group master payment is reversed", () => {
   beforeAll(async () => {
     if (!testPool) return;
@@ -219,6 +225,31 @@ runIfDatabaseIsConfigured("PostgreSQL real: Caja stops showing income when a gro
       expect(afterDelete[0].motivo_anulacion.length).toBeGreaterThan(0);
     } finally {
       await cleanupFixture(fixture, groupPaymentId);
+    }
+  }, 15_000);
+
+  it("rejects a room breakdown for a master-folio receipt before persisting the group payment", async () => {
+    const fixture = await createFixture();
+    try {
+      const { storage } = await import("../db-storage");
+
+      await expect(storage.recordGroupPayment({
+        groupId: fixture.groupId,
+        destination: "master_folio",
+        paymentRows: [{ method: "efectivo", amount: "150.00", reference: "PG-MASTER-INVALID-BREAKDOWN" }],
+        date: "2026-08-26",
+        reference: "Desglose inválido de Folio Maestro",
+        distribution: "master_folio",
+        distributionDetail: { __group_charges__: 150 },
+        concepts: [
+          { description: "Habitación 101", amount: 75 },
+          { description: "Habitación 102", amount: 75 },
+        ],
+      })).rejects.toThrow(/único concepto global/i);
+
+      expect(await readGroupPaymentsForGroup(fixture.groupId)).toEqual([]);
+    } finally {
+      await cleanupFixture(fixture, null);
     }
   }, 15_000);
 });

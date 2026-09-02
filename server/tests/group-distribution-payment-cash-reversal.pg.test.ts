@@ -31,6 +31,7 @@ const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe
 type Fixture = {
   groupId: string;
   reservationId: string;
+  additionalReservationId?: string;
 };
 
 const testPool = process.env.DATABASE_URL
@@ -70,13 +71,16 @@ async function stopApp() {
   httpServer = null;
 }
 
-async function createFixture(): Promise<Fixture> {
+async function createFixture(withSecondReservation = false): Promise<Fixture> {
   if (!testPool) throw new Error("DATABASE_URL no está configurado");
 
   const suffix = randomUUID();
   const fixture: Fixture = {
     groupId: `pg-distribution-cash-group-${suffix}`,
     reservationId: `pg-distribution-cash-reservation-${suffix}`,
+    ...(withSecondReservation
+      ? { additionalReservationId: `pg-distribution-cash-reservation-2-${suffix}` }
+      : {}),
   };
 
   await testPool.query(
@@ -109,19 +113,42 @@ async function createFixture(): Promise<Fixture> {
     [`pg-distribution-link-${suffix}`, fixture.groupId, fixture.reservationId],
   );
 
+  if (fixture.additionalReservationId) {
+    await testPool.query(
+      `INSERT INTO reservations
+        (id, reservation_code, guest_id, room_type_id, room_id, check_in_date, check_out_date,
+         total_room_amount, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, DATE '2026-08-26', DATE '2026-08-27', '150.00', 'confirmed', NOW())`,
+      [
+        fixture.additionalReservationId,
+        `PGDIST-RES-2-${suffix}`,
+        `pg-distribution-guest-2-${suffix}`,
+        `pg-distribution-room-type-2-${suffix}`,
+        `pg-distribution-room-2-${suffix}`,
+      ],
+    );
+    await testPool.query(
+      `INSERT INTO group_reservation_links (id, group_id, reservation_id) VALUES ($1, $2, $3)`,
+      [`pg-distribution-link-2-${suffix}`, fixture.groupId, fixture.additionalReservationId],
+    );
+  }
+
   return fixture;
 }
 
 async function cleanupFixture(fixture: Fixture, groupPaymentId: string | null) {
   if (!testPool) return;
+  const reservationIds = [fixture.reservationId, fixture.additionalReservationId].filter(
+    (id): id is string => Boolean(id),
+  );
   if (groupPaymentId) {
     await testPool.query("DELETE FROM cash_movements WHERE payment_id = $1", [groupPaymentId]);
     await testPool.query("DELETE FROM payments WHERE group_payment_id = $1", [groupPaymentId]);
     await testPool.query("DELETE FROM group_payments WHERE id = $1", [groupPaymentId]);
   }
-  await testPool.query("DELETE FROM payments WHERE reservation_id = $1", [fixture.reservationId]);
-  await testPool.query("DELETE FROM group_reservation_links WHERE reservation_id = $1", [fixture.reservationId]);
-  await testPool.query("DELETE FROM reservations WHERE id = $1", [fixture.reservationId]);
+  await testPool.query("DELETE FROM payments WHERE reservation_id = ANY($1::text[])", [reservationIds]);
+  await testPool.query("DELETE FROM group_reservation_links WHERE reservation_id = ANY($1::text[])", [reservationIds]);
+  await testPool.query("DELETE FROM reservations WHERE id = ANY($1::text[])", [reservationIds]);
   await testPool.query("DELETE FROM groups WHERE id = $1", [fixture.groupId]);
 }
 
@@ -254,6 +281,43 @@ runIfDatabaseIsConfigured("PostgreSQL real: Caja stops showing income when a dir
       expect(afterDelete[0].motivo_anulacion.length).toBeGreaterThan(0);
     } finally {
       await cleanupFixture(fixture, groupPaymentId);
+    }
+  }, 15_000);
+
+  it("rejects a global concept for a multi-room distribution before persisting any financial row", async () => {
+    const fixture = await createFixture(true);
+    try {
+      const { storage } = await import("../db-storage");
+
+      await expect(storage.recordGroupPayment({
+        groupId: fixture.groupId,
+        destination: "group_distribution",
+        paymentRows: [{ method: "efectivo", amount: "150.00", reference: "PG-DIST-INVALID-CONCEPT" }],
+        date: "2026-08-26",
+        reference: "Concepto global inválido en Pago Grupal",
+        distribution: "proportional",
+        distributionDetail: {
+          [fixture.reservationId]: 75,
+          [fixture.additionalReservationId!]: 75,
+        },
+        concepts: [{ description: "Folio Maestro — Grupo PostgreSQL", amount: 150 }],
+      })).rejects.toThrow(/concepto por cada habitación/i);
+
+      expect((await testPool!.query(
+        "SELECT id FROM group_payments WHERE group_id = $1",
+        [fixture.groupId],
+      )).rows).toEqual([]);
+      expect((await testPool!.query(
+        "SELECT id FROM payments WHERE reservation_id = ANY($1::text[])",
+        [[fixture.reservationId, fixture.additionalReservationId]],
+      )).rows).toEqual([]);
+      expect((await testPool!.query(
+        `SELECT id FROM cash_movements
+         WHERE source_type = 'group_payment' AND source_id = $1`,
+        [fixture.groupId],
+      )).rows).toEqual([]);
+    } finally {
+      await cleanupFixture(fixture, null);
     }
   }, 15_000);
 });
