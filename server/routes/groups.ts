@@ -173,6 +173,14 @@ function validateGroupPaymentEvidence(
   if (normalizedConcepts.length === 0) {
     throw Object.assign(new Error("Debe informar al menos un concepto con detalle e importe positivo."), { statusCode: 400 });
   }
+  const paymentCents = Math.round(paymentRowsGrossTotal(rows as Array<{ amount: string; retention?: { monto: number } | null }>) * 100);
+  const conceptCents = normalizedConcepts.reduce((sum, concept) => sum + Math.round(concept.amount * 100), 0);
+  if (!isFiscal && conceptCents !== paymentCents) {
+    throw Object.assign(
+      new Error("Los conceptos del recibo deben coincidir exactamente con el total cobrado."),
+      { statusCode: 400 },
+    );
+  }
   const raw = receiverDetails && typeof receiverDetails === "object" ? receiverDetails as Record<string, unknown> : {};
   const receiver = {
     razonSocial: String(raw.razonSocial || "").trim().replace(/\s+/g, " "),

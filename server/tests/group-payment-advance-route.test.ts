@@ -159,6 +159,25 @@ describe("POST group payment applies non-fiscal advances", () => {
     });
   });
 
+  it("rejects a non-fiscal receipt whose structured concepts differ by one cent", async () => {
+    await withServer(async (baseUrl) => {
+      const body = paymentBody("270000.00");
+      body.receiptType = "none";
+      body.invoiceData = undefined;
+      body.concepts = [{ description: "Anticipo grupal", amount: 269999.99 }];
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringMatching(/coincidir exactamente/i),
+      });
+      expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
+    });
+  });
+
   it("confirms the collection against the emitted invoice even when that invoice already consumed the fiscal availability", async () => {
     mocks.invoiceSnapshot.mockResolvedValueOnce({
       sources: [],

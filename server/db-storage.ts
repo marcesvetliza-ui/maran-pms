@@ -1867,7 +1867,7 @@ export class DatabaseStorage implements IStorage {
           throw invalid("La factura confirmada no tiene un identificador válido.");
         }
         const invoiceRows = await tx.execute(sql`
-          SELECT id, group_id, group_payment_id, estado, tipo_comprobante, monto_total,
+          SELECT id, group_id, group_payment_id, estado, tipo_comprobante, monto_total, items,
                  cliente_razon_social, cliente_cuit, cliente_dni
           FROM sales_invoices
           WHERE id = ${invoiceId}
@@ -1888,7 +1888,7 @@ export class DatabaseStorage implements IStorage {
           throw invalid("El tipo de la factura confirmada no coincide con el comprobante elegido.");
         }
         if (input.invoiceTotal != null
-          && Math.abs(Number(linkedInvoice.monto_total || 0) - Number(input.invoiceTotal || 0)) > 0.02) {
+          && cents(linkedInvoice.monto_total || 0) !== cents(input.invoiceTotal || 0)) {
           throw invalid("El total de la factura confirmada no coincide con los conceptos del cobro.");
         }
         const normalizeDocument = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -2235,6 +2235,22 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
+      const confirmedConcepts = linkedInvoice
+        ? (Array.isArray(linkedInvoice.items) ? linkedInvoice.items : [])
+            .map((item: any) => ({
+              description: String(item?.descripcion || item?.description || "").trim(),
+              amount: cents(item?.subtotal ?? (Number(item?.precioUnitario || 0) * Number(item?.cantidad || 1))) / 100,
+            }))
+            .filter((item: any) => item.description && cents(item.amount) > 0)
+        : (input.concepts || []);
+      if (linkedInvoice) {
+        const inputConceptCents = (input.concepts || []).reduce((sum, concept) => sum + cents(concept.amount), 0);
+        const confirmedConceptCents = confirmedConcepts.reduce((sum: number, concept: any) => sum + cents(concept.amount), 0);
+        if (inputConceptCents !== confirmedConceptCents || confirmedConceptCents !== cents(linkedInvoice.monto_total || 0)) {
+          throw invalid("Los conceptos del cobro no coinciden con el snapshot confirmado de la factura.");
+        }
+      }
+
       const [groupPayment] = await tx.insert(groupPayments).values({
         groupId: input.groupId,
         amount: (receivedCents / 100).toFixed(2),
@@ -2249,7 +2265,7 @@ export class DatabaseStorage implements IStorage {
         billingEntityType: input.billingEntityType || null,
         billingEntityId: input.billingEntityId || null,
         paymentMethodDetail: rows,
-        concepts: input.concepts || null,
+        concepts: confirmedConcepts.length > 0 ? confirmedConcepts : null,
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,

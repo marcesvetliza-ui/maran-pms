@@ -109,6 +109,7 @@ import {
   buildGroupInvoiceItems,
   exceedsGroupInvoiceAvailable,
   groupInvoicePaymentMatchesConcepts,
+  groupPaymentConceptsMatchTotal,
   requiredGroupInvoiceCollection,
 } from "@/lib/group-invoice-allocation";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
@@ -881,7 +882,7 @@ export default function GroupDetailPage() {
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentDraft, setPendingGroupPaymentDraft] = useState<{ endpoint: string; body: Record<string, any> } | null>(null);
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
-  const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("none");
+  const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("detallados");
   const [showCancelledRes, setShowCancelledRes] = useState(false);
 
   // Full reset of the "Pago Grupal" dialog's form state. Must run whenever that dialog's
@@ -897,7 +898,7 @@ export default function GroupDetailPage() {
     setGroupPaymentDestino("distribute");
     setGroupPaymentCcEntityType("company");
     setGroupPaymentCcEntityId("");
-    setGroupInvoiceDistribution("none");
+    setGroupInvoiceDistribution("detallados");
     setGroupPaymentReceptorType("company");
     setGroupPaymentReceptorLocked(false);
     setGroupPaymentGuestId(null);
@@ -1359,16 +1360,25 @@ export default function GroupDetailPage() {
             : undefined,
         }));
       const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+      const grossPaymentTotal = validRows.reduce((sum, row) =>
+        sum + (parseFloat(row.amount || "0") || 0)
+        + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0);
+      const receiptConceptItems = buildGroupInvoiceItems(
+        groupInvoiceSnapshot?.sources ?? [],
+        groupInvoiceDistribution,
+        group?.name || groupId,
+        grossPaymentTotal,
+      );
       const concepts = isFiscal
         ? groupPaymentItems
             .filter((item) => item.descripcion.trim() && item.subtotal > 0)
             .map((item) => ({ description: item.descripcion.trim(), amount: item.subtotal }))
-        : [{
-            description: `Anticipo grupo ${group?.name || groupId}`,
-            amount: validRows.reduce((sum, row) =>
-              sum + (parseFloat(row.amount || "0") || 0)
-              + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0),
-          }];
+        : (receiptConceptItems.length > 0
+            ? receiptConceptItems.map((item) => ({ description: item.descripcion, amount: item.precioUnitario }))
+            : [{ description: `Anticipo grupo ${group?.name || groupId}`, amount: grossPaymentTotal }]);
+      if (!isFiscal && !groupPaymentConceptsMatchTotal(concepts, grossPaymentTotal)) {
+        throw new Error("El detalle del recibo no coincide con el total del anticipo.");
+      }
       const receiverDetails = {
         razonSocial: groupPaymentRazonSocial || undefined,
         cuit: groupPaymentCuit.replace(/-/g, "") || undefined,
@@ -1805,6 +1815,12 @@ export default function GroupDetailPage() {
   const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) =>
     s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
   const groupPaymentGrossPaymentTotal = groupPaymentRowsTotal + groupPaymentRetentionsTotal;
+  const groupPaymentReceiptConcepts = buildGroupInvoiceItems(
+    groupInvoiceSnapshot?.sources ?? [],
+    groupInvoiceDistribution,
+    group?.name || groupId,
+    groupPaymentGrossPaymentTotal,
+  );
   const groupPaymentItemsTotal = groupPaymentItems.reduce((s, it) => s + it.subtotal, 0);
   const groupPaymentFiscalAvailable = availableGroupInvoiceTotal(groupInvoiceSnapshot?.sources ?? []);
   const groupPaymentNonFiscalAdvances = Number(groupInvoiceSnapshot?.financial?.nonFiscalAdvances ?? 0);
@@ -2497,6 +2513,7 @@ export default function GroupDetailPage() {
                             const balance = masterFolio.masterBalance;
                             setGroupPaymentRows([{method: "cash", amount: balance > 0 ? String(balance.toFixed(2)) : "", reference: ""}]);
                             setGroupPaymentDestino("master");
+                            setGroupInvoiceDistribution("none");
                             prefillGroupReceptorFromBillingEntity();
                             setShowGroupPaymentDialog(true);
                           }}
@@ -3975,10 +3992,9 @@ export default function GroupDetailPage() {
                     <button type="button"
                       onClick={() => {
                         setGroupPaymentReceiptType("sin_comprobante");
-                        const advanceAmount = Number(groupInvoiceSnapshot?.financial?.operationalBalance ?? priorBalance);
-                        setGroupPaymentRows((rows) => rows.map((row, index) =>
-                          index === 0 ? { ...row, amount: advanceAmount > 0 ? String(advanceAmount) : "" } : { ...row, amount: "" }
-                        ));
+                        setGroupInvoiceDistribution(groupPaymentDestino === "master" ? "none" : "detallados");
+                        setGroupPaymentRows((rows) => rows.map((row) => ({ ...row, amount: "" })));
+                        setGroupPaymentItems([gNewItem()]);
                       }}
                       className={`rounded-md border px-3 py-2 text-sm font-medium text-left transition-colors ${!isFiscal ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                       data-testid="button-group-sin-comprobante">
@@ -4050,7 +4066,10 @@ export default function GroupDetailPage() {
                       <Label className="text-sm font-semibold">3. Destino del cobro</Label>
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button"
-                          onClick={() => setGroupPaymentDestino("distribute")}
+                          onClick={() => {
+                            setGroupPaymentDestino("distribute");
+                            setGroupInvoiceDistribution("detallados");
+                          }}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${!isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                           data-testid="button-group-destino-distribute">
                           <p className="font-medium">Distribuir entre habitaciones</p>
@@ -4059,6 +4078,7 @@ export default function GroupDetailPage() {
                         <button type="button"
                           onClick={() => {
                             setGroupPaymentDestino("master");
+                            setGroupInvoiceDistribution("none");
                             // Factura T only covers accommodation-only master folios.
                             if (groupPaymentReceiptType === "factura_t" && masterFolio?.config !== "accommodation") {
                               setGroupPaymentReceiptType("factura_b");
@@ -4095,7 +4115,54 @@ export default function GroupDetailPage() {
                   </>
                 )}
 
-                {/* 5. CONCEPTOS */}
+                {/* 5. DETALLE DEL RECIBO / CONCEPTOS FISCALES */}
+                {!isFiscal && (
+                  <>
+                    <div className="border-t" />
+                    <div className="space-y-2" data-testid="group-advance-breakdown">
+                      <Label className="text-sm font-semibold">5. Detalle del recibo</Label>
+                      <p className="text-xs text-muted-foreground">
+                        El anticipo puede ser parcial. El detalle se calcula desde el total ingresado, sin exigir una carga manual por habitación.
+                      </p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { value: "none", label: "Sin desglose", desc: "Un concepto global" },
+                          { value: "totalizados", label: "Totalizados", desc: "Alojamiento + consumos" },
+                          { value: "detallados", label: "Detallados", desc: "Por habitación y cargo" },
+                        ] as const).map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setGroupInvoiceDistribution(option.value)}
+                            className={`rounded-md border px-2 py-2 text-left text-xs transition-colors ${groupInvoiceDistribution === option.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
+                            data-testid={`button-group-advance-breakdown-${option.value}`}
+                          >
+                            <p className="font-semibold">{option.label}</p>
+                            <p className="mt-0.5 text-muted-foreground">{option.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+                      {groupPaymentGrossPaymentTotal > 0 && (
+                        <div className="space-y-1 rounded-lg border bg-muted/20 p-2 text-xs">
+                          {(groupPaymentReceiptConcepts.length > 0
+                            ? groupPaymentReceiptConcepts
+                            : [{ descripcion: `Anticipo grupo ${group?.name || groupId}`, precioUnitario: groupPaymentGrossPaymentTotal }]
+                          ).map((concept, index) => (
+                            <div key={`${concept.descripcion}-${index}`} className="flex justify-between gap-3">
+                              <span>{concept.descripcion}</span>
+                              <span className="font-medium tabular-nums">{fmtMoney(concept.precioUnitario)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between border-t pt-1 font-semibold">
+                            <span>Total del recibo</span>
+                            <span>{fmtMoney(groupPaymentGrossPaymentTotal)}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 {isFiscal && (
                   <>
                     <div className="border-t" />

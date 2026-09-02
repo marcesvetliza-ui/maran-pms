@@ -5,6 +5,7 @@ import {
   buildGroupInvoiceItems,
   exceedsGroupInvoiceAvailable,
   groupInvoicePaymentMatchesConcepts,
+  groupPaymentConceptsMatchTotal,
   requiredGroupInvoiceCollection,
 } from "./group-invoice-allocation";
 
@@ -34,6 +35,19 @@ describe("group invoice concepts from snapshot availability", () => {
   it("accepts the exact available cents and rejects one cent more", () => {
     expect(exceedsGroupInvoiceAvailable(330000, 330000)).toBe(false);
     expect(exceedsGroupInvoiceAvailable(330000.01, 330000)).toBe(true);
+  });
+
+  it.each(["none", "totalizados", "detallados"] as const)(
+    "builds a partial 60000 snapshot to the cent in %s mode",
+    (distribution) => {
+      const items = buildGroupInvoiceItems(sources, distribution, "Convención", 60000);
+      expect(items.reduce((sum, item) => sum + item.precioUnitario, 0)).toBe(60000);
+    },
+  );
+
+  it("compares receipt concepts with the collected total in cents", () => {
+    expect(groupPaymentConceptsMatchTotal([{ amount: 10.01 }, { amount: 20 }], 30.01)).toBe(true);
+    expect(groupPaymentConceptsMatchTotal([{ amount: 10.01 }, { amount: 20 }], 30.02)).toBe(false);
   });
 
   it("applies the existing advance and requires only the operational collection", () => {

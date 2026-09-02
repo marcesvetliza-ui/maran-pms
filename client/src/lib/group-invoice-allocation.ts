@@ -31,25 +31,38 @@ export function buildGroupInvoiceItems(
   sources: GroupInvoiceSourceDetail[],
   distribution: GroupInvoiceDistribution,
   groupName = "",
+  requestedTotal?: number,
 ): GroupInvoiceGeneratedItem[] {
   const available = sources
     .filter((source) => cents(source.available) > 0)
     .map((source) => ({ ...source, available: cents(source.available) / 100 }));
-  const total = availableGroupInvoiceTotal(available);
+  const availableCents = cents(availableGroupInvoiceTotal(available));
+  const requestedCents = requestedTotal == null ? availableCents : Math.max(0, cents(requestedTotal));
+  const totalCents = Math.min(availableCents, requestedCents);
+  const total = totalCents / 100;
   if (total <= 0) return [];
 
   if (distribution === "none") {
     return [{ descripcion: `Pago grupal — ${groupName}`.trim(), precioUnitario: total }];
   }
+  let remainingCents = totalCents;
+  const partialSources = available
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((source) => {
+      const amountCents = Math.min(remainingCents, cents(source.available));
+      remainingCents -= amountCents;
+      return { ...source, available: amountCents / 100 };
+    })
+    .filter((source) => cents(source.available) > 0);
   if (distribution === "detallados") {
-    return available.map((source) => ({
+    return partialSources.map((source) => ({
       descripcion: [source.destination, source.concept].filter(Boolean).join(" — ") || "Concepto grupal",
       precioUnitario: source.available,
     }));
   }
 
   const buckets = new Map<string, number>();
-  for (const source of available) {
+  for (const source of partialSources) {
     const text = `${source.id} ${source.concept || ""} ${source.destination || ""}`;
     const label = /accommodation|alojamiento|hospedaje|habitaci[oó]n/i.test(text)
       ? "Alojamiento Grupal"
@@ -60,6 +73,13 @@ export function buildGroupInvoiceItems(
     descripcion,
     precioUnitario: amountCents / 100,
   }));
+}
+
+export function groupPaymentConceptsMatchTotal(
+  concepts: Array<{ amount: number }>,
+  total: number,
+): boolean {
+  return concepts.reduce((sum, concept) => sum + cents(concept.amount), 0) === cents(total);
 }
 
 export function exceedsGroupInvoiceAvailable(conceptsTotal: number, available: number): boolean {
