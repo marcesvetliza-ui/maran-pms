@@ -2117,6 +2117,10 @@ export class DatabaseStorage implements IStorage {
       }
 
       const rows = input.paymentRows.filter((row) => cents(row.amount) > 0);
+      if (input.concepts != null && !Array.isArray(input.concepts)) {
+        throw invalid("Los conceptos del cobro deben ser una lista válida.");
+      }
+      const receiptConcepts = input.concepts || [];
       // A retención (IIBB/Ganancias) withheld by the payer settles part of the
       // debt without moving cash, so — like the single-reservation Prefactura
       // flow — every balance/allocation check below must treat the row's
@@ -2297,6 +2301,30 @@ export class DatabaseStorage implements IStorage {
       if (input.destination === "group_distribution" && allocations.some((allocation) => allocation.reservationId.startsWith("__"))) {
         throw invalid("Un Pago Grupal solo puede distribuirse entre habitaciones activas del grupo.");
       }
+      if (receiptConcepts.length > 0) {
+        const conceptCents = receiptConcepts.map((concept) => {
+          const amountCents = cents((concept as any)?.amount);
+          if (!String((concept as any)?.description || "").trim() || amountCents <= 0) {
+            throw invalid("Cada concepto del cobro debe incluir una descripción e importe positivo.");
+          }
+          return amountCents;
+        });
+        const conceptsTotalCents = conceptCents.reduce((sum, amount) => sum + amount, 0);
+        if (conceptsTotalCents !== receivedCents) {
+          throw invalid("Los conceptos del cobro deben coincidir exactamente con el importe recibido.");
+        }
+        if (input.destination === "master_folio" && receiptConcepts.length !== 1) {
+          throw invalid("El Folio Maestro debe persistir un único concepto global.");
+        }
+        if (input.destination === "group_distribution") {
+          if (receiptConcepts.length !== allocations.length) {
+            throw invalid("Un Pago Grupal debe persistir un concepto por cada habitación distribuida.");
+          }
+          if (conceptCents.some((amount, index) => amount !== allocations[index].cents)) {
+            throw invalid("Los importes de los conceptos deben coincidir con la distribución por habitación.");
+          }
+        }
+      }
       // Build one rounded matrix for methods × destinations. Splitting every
       // destination independently can turn a one-cent card amount into two
       // cents across two rooms. This preserves both row (method) and column
@@ -2437,7 +2465,7 @@ export class DatabaseStorage implements IStorage {
             .filter((item: any) => item.description && cents(item.amount) > 0)
         : [];
       if (linkedInvoice) {
-        const inputConceptCents = (input.concepts || []).reduce((sum, concept) => sum + cents(concept.amount), 0);
+        const inputConceptCents = receiptConcepts.reduce((sum, concept) => sum + cents(concept.amount), 0);
         const confirmedConceptCents = confirmedInvoiceConcepts.reduce((sum: number, concept: any) => sum + cents(concept.amount), 0);
         if (inputConceptCents !== confirmedConceptCents || confirmedConceptCents !== cents(linkedInvoice.monto_total || 0)) {
           throw invalid("Los conceptos del cobro no coinciden con el snapshot confirmado de la factura.");
@@ -2447,7 +2475,6 @@ export class DatabaseStorage implements IStorage {
       // group-payment receipt has a separate presentation contract: its
       // concepts were normalized by the API according to the payment
       // destination and must not be replaced by the invoice's breakdown.
-      const receiptConcepts = input.concepts || [];
 
       const [groupPayment] = await tx.insert(groupPayments).values({
         groupId: input.groupId,

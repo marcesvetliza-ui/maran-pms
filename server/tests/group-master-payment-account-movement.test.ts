@@ -296,6 +296,24 @@ describe("group master payment and current-account reversal", () => {
     expect(recorded.groupPayment.retentionDetail).toEqual([{ tipo: "iibb", monto: 4.01 }]);
   });
 
+  it("rejects a room breakdown when storing a Folio Maestro receipt directly", async () => {
+    const { storage } = await import("../db-storage");
+    await expect(storage.recordGroupPayment({
+      groupId: GROUP_ID,
+      destination: "master_folio",
+      paymentRows: [{ method: "efectivo", amount: "10.01", reference: "MASTER-DIRECTO" }],
+      date: "2026-08-26",
+      reference: "Pago Folio Maestro directo",
+      distribution: "master_folio",
+      distributionDetail: { __master_balance__: 10.01 },
+      concepts: [
+        { description: "Habitación 101", amount: 5 },
+        { description: "Habitación 102", amount: 5.01 },
+      ],
+    })).rejects.toThrow(/único concepto global/i);
+    expect(state.groupPayment).toBeNull();
+  });
+
   it("keeps mixed master receipts and current-account cargos in sync when reversing", async () => {
     const groupPayment = await recordMixedMasterPayment();
 

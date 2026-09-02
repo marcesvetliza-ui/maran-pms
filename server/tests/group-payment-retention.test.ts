@@ -230,6 +230,23 @@ describe("group payment retentions settle the debt they claim to cover", () => {
     expect(totalApplied).toBeCloseTo(100, 2);
   });
 
+  it("rejects a global concept when storing a multi-room group distribution directly", async () => {
+    reservationRows = [room(ROOM_A, 5000, "101"), room(ROOM_B, 5000, "102")];
+
+    const { storage } = await import("../db-storage");
+    await expect(storage.recordGroupPayment({
+      groupId: GROUP_ID,
+      destination: "group_distribution",
+      paymentRows: [{ method: "transferencia", amount: "100.00", reference: "PG-DIRECTO" }],
+      date: "2026-08-26",
+      reference: "Pago grupal directo",
+      distribution: "proportional",
+      distributionDetail: { [ROOM_A]: 50, [ROOM_B]: 50 },
+      concepts: [{ description: "Folio Maestro — Grupo Test", amount: 100 }],
+    })).rejects.toThrow(/concepto por cada habitación/i);
+    expect(state.groupPayment).toBeNull();
+  });
+
   it("rejects a retención attached to a cuenta_corriente row instead of silently dropping it", async () => {
     const app = await startApp();
     try {
