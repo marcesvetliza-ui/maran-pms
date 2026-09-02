@@ -58,6 +58,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "invoice_ref",
       "retention_detail",
       "settlement_breakdown",
+      "settlement_breakdown_status",
+      "settlement_breakdown_note",
       "receipt_number",
       "concepts",
     ],
@@ -1717,7 +1719,112 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("group_payments.settlement_breakdown", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS settlement_breakdown jsonb`)
+    db.execute(sql`
+      ALTER TABLE group_payments
+        ADD COLUMN IF NOT EXISTS settlement_breakdown jsonb,
+        ADD COLUMN IF NOT EXISTS settlement_breakdown_status text,
+        ADD COLUMN IF NOT EXISTS settlement_breakdown_note text
+    `)
+  );
+
+  // Recover only immutable splits explicitly persisted before fiscal
+  // authorization. No balance-based inference is allowed: a later collection
+  // can exceed the fiscal document while still applying prior advances.
+  await withTimeout("group_payments.settlement_breakdown_backfill", T, () =>
+    db.execute(sql`
+      WITH fiscal_receipts AS (
+        SELECT
+          gp.id AS payment_id,
+          gp.amount AS payment_amount,
+          si.monto_total AS invoice_total,
+          si.group_payment_intent #> '{body,settlementBreakdown}' AS intended
+        FROM group_payments gp
+        LEFT JOIN LATERAL (
+          SELECT matched.monto_total, matched.group_payment_intent
+          FROM (
+            SELECT
+              candidate.id,
+              candidate.monto_total,
+              candidate.group_payment_intent,
+              count(*) OVER () AS candidate_count
+            FROM sales_invoices candidate
+            WHERE candidate.estado = 'emitida'
+              AND candidate.group_id = gp.group_id
+              AND (
+                candidate.id = gp.invoice_id
+                OR candidate.group_payment_id = gp.id
+                OR candidate.id::text = substring(
+                  gp.invoice_ref
+                  FROM '"id"\s*:\s*([0-9]+)'
+                )
+              )
+          ) matched
+          WHERE matched.candidate_count = 1
+          LIMIT 1
+        ) si ON true
+        WHERE gp.settlement_breakdown IS NULL
+          AND (
+            lower(COALESCE(gp.receipt_type, '')) IN (
+              'factura_a', 'factura_b', 'factura_mipyme_a', 'factura_t'
+            )
+            OR gp.invoice_id IS NOT NULL
+            OR NULLIF(gp.invoice_ref, '') IS NOT NULL
+          )
+      ),
+      valid_intents AS (
+        SELECT
+          payment_id,
+          jsonb_build_object(
+            'documentTotal', round((intended->>'documentTotal')::numeric, 2),
+            'appliedAdvances', round((intended->>'appliedAdvances')::numeric, 2),
+            'newCollection', round((intended->>'newCollection')::numeric, 2)
+          ) AS breakdown
+        FROM fiscal_receipts
+        WHERE jsonb_typeof(intended) = 'object'
+          AND (intended->>'documentTotal') ~ '^-?[0-9]+([.][0-9]+)?$'
+          AND (intended->>'appliedAdvances') ~ '^-?[0-9]+([.][0-9]+)?$'
+          AND (intended->>'newCollection') ~ '^-?[0-9]+([.][0-9]+)?$'
+          AND round((intended->>'documentTotal')::numeric, 2) > 0
+          AND round((intended->>'appliedAdvances')::numeric, 2) >= 0
+          AND round((intended->>'appliedAdvances')::numeric, 2)
+            <= round((intended->>'documentTotal')::numeric, 2)
+          AND round((intended->>'documentTotal')::numeric, 2)
+            = round(invoice_total::numeric, 2)
+          AND round((intended->>'newCollection')::numeric, 2)
+            = round(payment_amount::numeric, 2)
+          AND round((intended->>'newCollection')::numeric, 2)
+            >= round(
+              (intended->>'documentTotal')::numeric
+                - (intended->>'appliedAdvances')::numeric,
+              2
+            )
+      )
+      UPDATE group_payments gp
+      SET
+        settlement_breakdown = valid.breakdown,
+        settlement_breakdown_status = CASE
+          WHEN valid.payment_id IS NOT NULL THEN 'reconstructed_from_fiscal_intent'
+          ELSE 'not_reconstructible'
+        END,
+        settlement_breakdown_note = CASE
+          WHEN valid.payment_id IS NOT NULL
+            THEN 'Desglose histórico reconstruido desde la intención fiscal persistida.'
+          ELSE 'No existe una intención fiscal con desglose suficiente y coincidente; no se infirieron importes.'
+        END
+      FROM fiscal_receipts fiscal
+      LEFT JOIN valid_intents valid ON valid.payment_id = fiscal.payment_id
+      WHERE gp.id = fiscal.payment_id
+        AND gp.settlement_breakdown IS NULL;
+
+      UPDATE group_payments
+      SET settlement_breakdown_status = 'captured_at_settlement',
+          settlement_breakdown_note = COALESCE(
+            settlement_breakdown_note,
+            'Desglose capturado al confirmar el cobro.'
+          )
+      WHERE settlement_breakdown IS NOT NULL
+        AND settlement_breakdown_status IS NULL;
+    `)
   );
 
   // Receipt numbers are generated only for newly issued parent receipts.

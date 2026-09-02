@@ -670,6 +670,10 @@ export type GroupCharge = typeof groupCharges.$inferSelect;
 
 // Group Payments (Pagos del folio grupal)
 export type GroupPaymentDestination = "group_distribution" | "master_folio";
+export type GroupPaymentSettlementStatus =
+  | "captured_at_settlement"
+  | "reconstructed_from_fiscal_intent"
+  | "not_reconstructible";
 export const groupPayments = pgTable("group_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   // Issued once by PostgreSQL. Legacy rows deliberately remain NULL and use
@@ -710,6 +714,11 @@ export const groupPayments = pgTable("group_payments", {
     appliedAdvances: number;
     newCollection: number;
   }>(),
+  // Audit provenance for the immutable split. Historic fiscal receipts that
+  // lack sufficient evidence are explicitly marked instead of receiving an
+  // inferred amount.
+  settlementBreakdownStatus: text("settlement_breakdown_status").$type<GroupPaymentSettlementStatus>(),
+  settlementBreakdownNote: text("settlement_breakdown_note"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   receiptNumberUnique: uniqueIndex("group_payments_receipt_number_unique")

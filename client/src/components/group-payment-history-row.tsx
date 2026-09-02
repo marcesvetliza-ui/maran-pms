@@ -72,6 +72,7 @@ export function GroupPaymentHistoryRow({
     ? `Recibo #${String(receiptNumber).padStart(6, "0")}`
     : `Recibo ${String(gp.id || "").slice(0, 8).toUpperCase()}`;
   const breakdown = gp.settlementBreakdown;
+  const breakdownUnavailable = gp.settlementBreakdownStatus === "not_reconstructible";
   const documentTotal = Number(breakdown?.documentTotal ?? gp.amount) || 0;
   const appliedAdvances = Number(breakdown?.appliedAdvances ?? 0) || 0;
   const newCollection = Number(breakdown?.newCollection ?? gp.amount) || 0;
@@ -107,11 +108,20 @@ export function GroupPaymentHistoryRow({
         {receiverName && <span className="text-xs text-muted-foreground">→ {receiverName}</span>}
         {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
         {gp.notes && <span className="text-xs text-muted-foreground whitespace-pre-line">{gp.notes}</span>}
-        <span className="text-xs text-muted-foreground" data-testid={`group-payment-breakdown-${gp.id}`}>
-          Comprobante: <strong>{documentTotal.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
-          {" · "}Anticipos: <strong>{appliedAdvances.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
-          {" · "}Cobro nuevo: <strong>{newCollection.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
-        </span>
+        {breakdownUnavailable ? (
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-400" data-testid={`group-payment-breakdown-${gp.id}`}>
+            Desglose histórico no reconstruible · Cobro registrado: {Number(gp.amount || 0).toLocaleString("es-AR", { style: "currency", currency: "ARS" })}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground" data-testid={`group-payment-breakdown-${gp.id}`}>
+            Comprobante: <strong>{documentTotal.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+            {" · "}Anticipos: <strong>{appliedAdvances.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+            {" · "}Cobro nuevo: <strong>{newCollection.toLocaleString("es-AR", { style: "currency", currency: "ARS" })}</strong>
+            {gp.settlementBreakdownStatus === "reconstructed_from_fiscal_intent"
+              ? " · Reconstruido desde intención fiscal"
+              : null}
+          </span>
+        )}
         {Array.isArray(gp.retentionDetail) && gp.retentionDetail.map((ret: any, retIdx: number) => {
           if (!ret?.monto) return null;
           const retLabel = ret.tipo === "iibb" ? "Ret. IIBB" : ret.tipo === "ganancias" ? "Ret. Ganancias" : ret.tipo ? `Ret. ${ret.tipo}` : null;

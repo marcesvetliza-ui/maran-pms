@@ -14,6 +14,8 @@ export interface GroupPaymentReceiptData {
       appliedAdvances: number;
       newCollection: number;
     } | null;
+    settlementBreakdownStatus?: "captured_at_settlement" | "reconstructed_from_fiscal_intent" | "not_reconstructible" | null;
+    settlementBreakdownNote?: string | null;
   };
   roomDistribution: Array<{ roomNumber?: string | null; guestName?: string | null; reservationCode?: string | null; amount: number }>;
 }
@@ -55,6 +57,7 @@ export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptDa
     const invoice = json(data.payment.invoiceRef);
     const nc = json(data.payment.invoiceNcRef);
     const storedBreakdown = object(data.payment.settlementBreakdown);
+    const breakdownUnavailable = data.payment.settlementBreakdownStatus === "not_reconstructible";
     const conceptTotal = concepts.reduce((sum: number, concept: any) => sum + (Number(concept?.amount) || 0), 0);
     const documentTotal = Number(storedBreakdown.documentTotal)
       || (Object.keys(invoice).length ? conceptTotal : Number(data.payment.amount) || 0);
@@ -67,9 +70,19 @@ export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptDa
       .text(`Recibo Nº ${data.receiptNumber ?? `LEG-${data.legacyId}`}   |   Fecha: ${data.payment.date}`);
     write(`Grupo: ${data.group.name}${data.group.code ? ` (${data.group.code})` : ""}`, true);
     heading("Desglose del cobro");
-    write(`Total del comprobante: ${money(documentTotal)}`, true);
-    write(`Anticipos aplicados: ${money(appliedAdvances)}`);
-    write(`Cobro nuevo: ${money(newCollection)}`, true);
+    if (breakdownUnavailable) {
+      write("Desglose histórico no reconstruible", true);
+      write(data.payment.settlementBreakdownNote
+        || "No existe evidencia fiscal suficiente para separar anticipos aplicados y cobro nuevo sin inferir importes.");
+      write(`Cobro registrado: ${money(data.payment.amount)}`, true);
+    } else {
+      write(`Total del comprobante: ${money(documentTotal)}`, true);
+      write(`Anticipos aplicados: ${money(appliedAdvances)}`);
+      write(`Cobro nuevo: ${money(newCollection)}`, true);
+      if (data.payment.settlementBreakdownStatus === "reconstructed_from_fiscal_intent") {
+        write("Origen: reconstruido desde la intención fiscal persistida.");
+      }
+    }
     heading("Receptor y recepción");
     write(`Receptor: ${receiver.razonSocial || "No informado"}${receiver.cuit ? ` — CUIT ${receiver.cuit}` : receiver.dni ? ` — DNI ${receiver.dni}` : ""}`);
     if (receiver.condicionIva) write(`Condición IVA: ${receiver.condicionIva}`);

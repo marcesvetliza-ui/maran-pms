@@ -2772,6 +2772,7 @@ export default function GroupDetailPage() {
                                appliedAdvances: 0,
                                newCollection: Number(gp.amount) || 0,
                              };
+                            const settlementUnavailable = gp.settlementBreakdownStatus === "not_reconstructible";
                             // NC button: show only when there's an invoice with a known DB id and no NC yet
                             const canEmitNc = invoiceRefParsed?.id && !ncRefParsed;
                             return (
@@ -2804,11 +2805,20 @@ export default function GroupDetailPage() {
                                     <span className="text-xs text-muted-foreground">→ {receiverName}</span>
                                   )}
                                   {gp.reference && <span className="text-xs text-muted-foreground italic">{gp.reference}</span>}
-                                   <span className="text-xs text-muted-foreground" data-testid={`master-payment-breakdown-${gp.id}`}>
-                                     Comprobante: <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
-                                     {" · "}Anticipos: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
-                                     {" · "}Cobro nuevo: <strong>{fmtMoney(Number(settlement.newCollection) || 0)}</strong>
-                                   </span>
+                                  {settlementUnavailable ? (
+                                    <span className="text-xs font-medium text-amber-700 dark:text-amber-400" data-testid={`master-payment-breakdown-${gp.id}`}>
+                                      Desglose histórico no reconstruible · Cobro registrado: {fmtMoney(Number(gp.amount) || 0)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground" data-testid={`master-payment-breakdown-${gp.id}`}>
+                                      Comprobante: <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
+                                      {" · "}Anticipos: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
+                                      {" · "}Cobro nuevo: <strong>{fmtMoney(Number(settlement.newCollection) || 0)}</strong>
+                                      {gp.settlementBreakdownStatus === "reconstructed_from_fiscal_intent"
+                                        ? " · Reconstruido desde intención fiscal"
+                                        : null}
+                                    </span>
+                                  )}
                                   {/* Retención (IIBB/Ganancias) withheld on the Folio Maestro / group-charges
                                       portion of this payment — no room to carry it on payments.notes, so it's
                                       stored on the group_payments row itself (retentionDetail). */}

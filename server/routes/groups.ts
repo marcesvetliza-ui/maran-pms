@@ -2774,15 +2774,22 @@ export function registerGroupsRoutes(app: Express) {
                 appliedAdvances: 0,
                 newCollection: Number(p.amount) || 0,
               };
+          const settlementUnavailable = (p as any).settlementBreakdownStatus === "not_reconstructible";
           doc.fontSize(9).font("Helvetica-Bold")
             .text(`${fmtAR(p.date)}${p.reference ? ` — ${p.reference}` : ""}`, 50, y)
             .text(`$${Number(settlement.newCollection || 0).toLocaleString("es-AR")}`, 455, y, { align: "right", width: 100 });
           y += 14;
-          doc.fontSize(7.5).font("Helvetica").fillColor("#555555")
+          doc.fontSize(7.5).font(settlementUnavailable ? "Helvetica-Bold" : "Helvetica")
+            .fillColor(settlementUnavailable ? "#92400e" : "#555555")
             .text(
-              `Comprobante: $${Number(settlement.documentTotal || 0).toLocaleString("es-AR")}  ·  `
-              + `Anticipos aplicados: $${Number(settlement.appliedAdvances || 0).toLocaleString("es-AR")}  ·  `
-              + `Cobro nuevo: $${Number(settlement.newCollection || 0).toLocaleString("es-AR")}`,
+              settlementUnavailable
+                ? `Desglose histórico no reconstruible · Cobro registrado: $${Number(p.amount || 0).toLocaleString("es-AR")}`
+                : `Comprobante: $${Number(settlement.documentTotal || 0).toLocaleString("es-AR")}  ·  `
+                  + `Anticipos aplicados: $${Number(settlement.appliedAdvances || 0).toLocaleString("es-AR")}  ·  `
+                  + `Cobro nuevo: $${Number(settlement.newCollection || 0).toLocaleString("es-AR")}`
+                  + ((p as any).settlementBreakdownStatus === "reconstructed_from_fiscal_intent"
+                    ? "  ·  Reconstruido desde intención fiscal"
+                    : ""),
               60,
               y,
               { width: 495 },

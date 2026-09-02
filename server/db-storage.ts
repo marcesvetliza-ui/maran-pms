@@ -2590,6 +2590,8 @@ export class DatabaseStorage implements IStorage {
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
         settlementBreakdown,
+        settlementBreakdownStatus: "captured_at_settlement",
+        settlementBreakdownNote: "Desglose capturado al confirmar el cobro.",
         invoiceId: linkedInvoice ? Number(linkedInvoice.id) : null,
         invoiceRef: linkedInvoice ? JSON.stringify(input.invoiceData) : null,
       } as any).returning();
@@ -6035,6 +6037,9 @@ export class DatabaseStorage implements IStorage {
       invoiceNcRef: groupPayments.invoiceNcRef,
       receiverDetails: groupPayments.receiverDetails,
       retentionDetail: groupPayments.retentionDetail,
+      settlementBreakdown: groupPayments.settlementBreakdown,
+      settlementBreakdownStatus: groupPayments.settlementBreakdownStatus,
+      settlementBreakdownNote: groupPayments.settlementBreakdownNote,
     })
       .from(groupPayments)
       .leftJoin(groups, eq(groups.id, groupPayments.groupId))
