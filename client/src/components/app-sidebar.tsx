@@ -207,6 +207,7 @@ const menuSections = [
     titulo: "Configuración",
     items: [
       { label: "Configuración",          icon: Settings,      href: "/administration",      roles: ["admin"] },
+      { label: "Reparar tipos de habitación", icon: Wrench,   href: "/admin/room-types/integrity", roles: ["admin","manager"] },
       { label: "Correo & Backup",        icon: Mail,          href: "/email-config",        roles: ["admin"] },
       { label: "Países (AFIP)",          icon: Globe,         href: "/admin/countries",     roles: ["admin"] },
       { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin"] },

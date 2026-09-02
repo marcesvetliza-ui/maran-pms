@@ -37,21 +37,20 @@ function createFixtureIds(): FixtureIds {
   };
 }
 
-async function createFixture(ids: FixtureIds) {
+async function createFixture(ids: FixtureIds, options: { sourceExists?: boolean } = {}) {
   if (!pool) throw new Error("DATABASE_URL no está configurado");
 
   await pool.query(
     `INSERT INTO room_types (id, code, name)
-     VALUES ($1, $2, $3), ($4, $5, $6)`,
-    [
-      ids.fromRoomTypeId,
-      `PGI-F-${ids.suffix}`,
-      "PG Integrity origen",
-      ids.toRoomTypeId,
-      `PGI-T-${ids.suffix}`,
-      "PG Integrity destino",
-    ],
+     VALUES ($1, $2, $3)`,
+    [ids.toRoomTypeId, `PGI-T-${ids.suffix}`, "PG Integrity destino"],
   );
+  if (options.sourceExists) {
+    await pool.query(
+      `INSERT INTO room_types (id, code, name) VALUES ($1, $2, $3)`,
+      [ids.fromRoomTypeId, `PGI-F-${ids.suffix}`, "PG Integrity origen"],
+    );
+  }
 
   await pool.query(
     `INSERT INTO rooms (id, room_number, room_type_id, status)
@@ -262,6 +261,89 @@ runIfDatabaseIsConfigured("room type reference reassignment", () => {
       });
     } finally {
       await pool.query(`DROP TRIGGER IF EXISTS "${triggerName}" ON rate_plans`);
+      await pool.query(`DROP FUNCTION IF EXISTS "${functionName}"()`);
+      await cleanupFixture(ids);
+    }
+  });
+
+  it("rejects a stale diagnostic when the source now exists in the catalog", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const ids = createFixtureIds();
+
+    try {
+      await createFixture(ids, { sourceExists: true });
+
+      await expect(
+        storage.reassignRoomTypeReferences(ids.fromRoomTypeId, ids.toRoomTypeId),
+      ).rejects.toThrow("El tipo de habitación de origen ya existe en el catálogo");
+
+      await expect(readFixtureRoomTypeIds(ids)).resolves.toEqual({
+        rooms: [ids.fromRoomTypeId, ids.fromRoomTypeId],
+        ratePlans: [ids.fromRoomTypeId, ids.fromRoomTypeId],
+        reservations: [
+          { roomTypeId: ids.fromRoomTypeId, originalRoomTypeId: null },
+          { roomTypeId: ids.toRoomTypeId, originalRoomTypeId: ids.fromRoomTypeId },
+        ],
+        groupBlocks: [ids.fromRoomTypeId],
+        packages: [ids.fromRoomTypeId],
+        packageRoomPrices: [ids.fromRoomTypeId, ids.fromRoomTypeId],
+      });
+    } finally {
+      await cleanupFixture(ids);
+    }
+  });
+
+  it("prevents a concurrent destination deletion from creating new orphaned references", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const ids = createFixtureIds();
+    const triggerName = `pg_integrity_slow_${ids.suffix.replaceAll("-", "_")}`;
+    const functionName = `${triggerName}_fn`;
+
+    try {
+      await createFixture(ids);
+      await pool.query(
+        "UPDATE reservations SET room_type_id = $1 WHERE id = $2",
+        [ids.fromRoomTypeId, ids.reservationIds[1]],
+      );
+      await pool.query(
+        `CREATE OR REPLACE FUNCTION "${functionName}"()
+         RETURNS trigger
+         LANGUAGE plpgsql
+         AS $$
+         BEGIN
+           PERFORM pg_sleep(0.25);
+           RETURN NEW;
+         END;
+         $$`,
+      );
+      await pool.query(
+        `CREATE TRIGGER "${triggerName}"
+         BEFORE UPDATE OF room_type_id ON rooms
+         FOR EACH ROW EXECUTE FUNCTION "${functionName}"()`,
+      );
+
+      const reassignment = storage.reassignRoomTypeReferences(ids.fromRoomTypeId, ids.toRoomTypeId);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const deletion = storage.deleteRoomType(ids.toRoomTypeId);
+
+      await expect(reassignment).resolves.toEqual(expect.objectContaining({
+        fromRoomTypeId: ids.fromRoomTypeId,
+        toRoomTypeId: ids.toRoomTypeId,
+      }));
+      await expect(deletion).resolves.toEqual(expect.objectContaining({
+        deleted: false,
+        references: expect.arrayContaining([
+          expect.objectContaining({ source: "rooms", count: 2 }),
+        ]),
+      }));
+
+      const target = await pool.query("SELECT id FROM room_types WHERE id = $1", [ids.toRoomTypeId]);
+      expect(target.rows).toHaveLength(1);
+      await expect(readFixtureRoomTypeIds(ids)).resolves.toEqual(expect.objectContaining({
+        rooms: [ids.toRoomTypeId, ids.toRoomTypeId],
+      }));
+    } finally {
+      await pool.query(`DROP TRIGGER IF EXISTS "${triggerName}" ON rooms`);
       await pool.query(`DROP FUNCTION IF EXISTS "${functionName}"()`);
       await cleanupFixture(ids);
     }

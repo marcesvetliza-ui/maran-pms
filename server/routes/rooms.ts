@@ -24,7 +24,7 @@ export function registerRoomsRoutes(app: Express) {
   // Diagnostic endpoint for legacy rows created before room-type references
   // were protected. It intentionally exposes the source/count so an admin
   // can resolve each orphan without guessing which records are affected.
-  app.get("/api/room-types/integrity", requireRole(ROOMS_WRITE_ROLES), async (_req, res) => {
+  app.get("/api/room-types/integrity", requireRole(ROOM_TYPE_ADMIN_ROLES), async (_req, res) => {
     try {
       res.json({ orphanedReferences: await storage.getOrphanedRoomTypeReferences() });
     } catch (error) {
@@ -77,7 +77,11 @@ export function registerRoomsRoutes(app: Express) {
       res.json(result);
     } catch (error: any) {
       const message = error?.message || "Error reassigning room type references";
-      const status = message.includes("destino no existe") || message.includes("origen y destino") ? 400 : 500;
+      const status = message.includes("origen ya existe")
+        ? 409
+        : message.includes("destino no existe") || message.includes("origen y destino")
+          ? 400
+          : 500;
       res.status(status).json({ error: message });
     }
   });

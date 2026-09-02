@@ -142,4 +142,26 @@ describe("room type catalog integrity routes", () => {
       app.close();
     }
   });
+
+  it("reports a stale diagnostic when the source is no longer orphaned", async () => {
+    mockStorage.reassignRoomTypeReferences.mockRejectedValue(
+      new Error("El tipo de habitación de origen ya existe en el catálogo; actualice el diagnóstico"),
+    );
+    const app = await startApp();
+
+    try {
+      const response = await fetch(`${app.baseUrl}/api/room-types/reassign-references`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromRoomTypeId: "restored-type", toRoomTypeId: "double" }),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "El tipo de habitación de origen ya existe en el catálogo; actualice el diagnóstico",
+      });
+    } finally {
+      app.close();
+    }
+  });
 });

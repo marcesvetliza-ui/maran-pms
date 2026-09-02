@@ -18,6 +18,7 @@ const Dashboard = lazy(() => import("@/pages/dashboard"));
 const OperacionesPage = lazy(() => import("@/pages/operaciones"));
 const PlanningPage = lazy(() => import("@/pages/planning"));
 const RoomsPage = lazy(() => import("@/pages/rooms"));
+const RoomTypeIntegrityPage = lazy(() => import("@/pages/room-type-integrity"));
 const ReservationsPage = lazy(() => import("@/pages/reservations"));
 const GuestsPage = lazy(() => import("@/pages/guests"));
 const CheckInPage = lazy(() => import("@/pages/check-in"));
@@ -195,6 +196,7 @@ function Router() {
         <Route path="/operaciones" component={OperacionesPage} />
         <Route path="/planning" component={PlanningPage} />
         <Route path="/rooms" component={RoomsPage} />
+        <Route path="/admin/room-types/integrity">{() => <AdminRoute component={RoomTypeIntegrityPage} />}</Route>
         <Route path="/reservations" component={ReservationsPage} />
         <Route path="/new-reservation" component={NewReservationPage} />
         <Route path="/guests" component={GuestsPage} />

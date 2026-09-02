@@ -223,7 +223,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  private async getRoomTypeReferenceRows() {
+  private async getRoomTypeReferenceRows(database: any = db) {
     const [
       roomRows,
       ratePlanRows,
@@ -233,13 +233,13 @@ export class DatabaseStorage implements IStorage {
       packageRows,
       packageRoomPriceRows,
     ] = await Promise.all([
-      db.select({ roomTypeId: rooms.roomTypeId }).from(rooms),
-      db.select({ roomTypeId: ratePlans.roomTypeId }).from(ratePlans),
-      db.select({ roomTypeId: reservations.roomTypeId }).from(reservations),
-      db.select({ roomTypeId: reservations.originalRoomTypeId }).from(reservations).where(isNotNull(reservations.originalRoomTypeId)),
-      db.select({ roomTypeId: groupRoomBlocks.roomTypeId }).from(groupRoomBlocks),
-      db.select({ roomTypeId: packages.roomTypeId }).from(packages).where(isNotNull(packages.roomTypeId)),
-      db.select({ roomTypeId: packageRoomPrices.roomTypeId }).from(packageRoomPrices),
+      database.select({ roomTypeId: rooms.roomTypeId }).from(rooms),
+      database.select({ roomTypeId: ratePlans.roomTypeId }).from(ratePlans),
+      database.select({ roomTypeId: reservations.roomTypeId }).from(reservations),
+      database.select({ roomTypeId: reservations.originalRoomTypeId }).from(reservations).where(isNotNull(reservations.originalRoomTypeId)),
+      database.select({ roomTypeId: groupRoomBlocks.roomTypeId }).from(groupRoomBlocks),
+      database.select({ roomTypeId: packages.roomTypeId }).from(packages).where(isNotNull(packages.roomTypeId)),
+      database.select({ roomTypeId: packageRoomPrices.roomTypeId }).from(packageRoomPrices),
     ]);
 
     return [
@@ -253,14 +253,18 @@ export class DatabaseStorage implements IStorage {
     ];
   }
 
-  async getRoomTypeReferences(id: string): Promise<RoomTypeReference[]> {
-    const sources = await this.getRoomTypeReferenceRows();
+  private async getRoomTypeReferencesWith(database: any, id: string): Promise<RoomTypeReference[]> {
+    const sources = await this.getRoomTypeReferenceRows(database);
     return sources
       .map(({ source, rows }) => ({
         source,
-        count: rows.filter(row => row.roomTypeId === id).length,
+        count: rows.filter((row: { roomTypeId: string | null }) => row.roomTypeId === id).length,
       }))
       .filter(reference => reference.count > 0);
+  }
+
+  async getRoomTypeReferences(id: string): Promise<RoomTypeReference[]> {
+    return this.getRoomTypeReferencesWith(db, id);
   }
 
   async getOrphanedRoomTypeReferences(): Promise<OrphanedRoomTypeReference[]> {
@@ -292,11 +296,30 @@ export class DatabaseStorage implements IStorage {
     if (fromRoomTypeId === toRoomTypeId) {
       throw new Error("El tipo de origen y destino deben ser diferentes");
     }
-    const target = await this.getRoomType(toRoomTypeId);
-    if (!target) throw new Error("El tipo de habitación destino no existe");
 
     const updated: RoomTypeReference[] = [];
     await db.transaction(async (tx) => {
+      const [source] = await tx
+        .select({ id: roomTypes.id })
+        .from(roomTypes)
+        .where(eq(roomTypes.id, fromRoomTypeId))
+        .for("key share");
+      if (source) {
+        throw new Error("El tipo de habitación de origen ya existe en el catálogo; actualice el diagnóstico");
+      }
+
+      // Keep the destination row locked until every reference has been
+      // updated. deleteRoomType acquires the same lock before checking usage,
+      // so a concurrent deletion must observe the newly committed references.
+      const [target] = await tx
+        .select({ id: roomTypes.id })
+        .from(roomTypes)
+        .where(eq(roomTypes.id, toRoomTypeId))
+        .for("update");
+      if (!target) {
+        throw new Error("El tipo de habitación destino no existe; actualice el diagnóstico");
+      }
+
       const replacements: Array<{
         source: RoomTypeReference["source"];
         count: number;
@@ -346,16 +369,26 @@ export class DatabaseStorage implements IStorage {
           updated.push({ source: replacement.source, count: replacement.count });
         }
       }
-    });
+    }, { isolationLevel: "serializable" });
 
     return { fromRoomTypeId, toRoomTypeId, updated };
   }
 
   async deleteRoomType(id: string): Promise<{ deleted: boolean; references: RoomTypeReference[] }> {
-    const references = await this.getRoomTypeReferences(id);
-    if (references.length > 0) return { deleted: false, references };
-    const result = await db.delete(roomTypes).where(eq(roomTypes.id, id));
-    return { deleted: (result.rowCount ?? 0) > 0, references: [] };
+    return db.transaction(async (tx) => {
+      const [roomType] = await tx
+        .select({ id: roomTypes.id })
+        .from(roomTypes)
+        .where(eq(roomTypes.id, id))
+        .for("update");
+      if (!roomType) return { deleted: false, references: [] };
+
+      const references = await this.getRoomTypeReferencesWith(tx, id);
+      if (references.length > 0) return { deleted: false, references };
+
+      const result = await tx.delete(roomTypes).where(eq(roomTypes.id, id));
+      return { deleted: (result.rowCount ?? 0) > 0, references: [] };
+    });
   }
 
   async getRatePlans(): Promise<RatePlanWithRoomType[]> {
