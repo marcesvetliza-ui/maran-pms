@@ -608,7 +608,7 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview }: {
+export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
   open: boolean;
   onClose: () => void;
   config: any;
@@ -661,6 +661,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   compactMode?: boolean;
   /** Emit directly after validation instead of showing a redundant review step. */
   skipReview?: boolean;
+  /** Explicit identity for a mounted dialog that can switch between operations. */
+  operationKey?: string;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -698,6 +700,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
   const [emittedInvoiceData, setEmittedInvoiceData] = useState<any>(null);
   const originalRecipientRef = useRef<Record<string, string>>({});
   const saveRecipientOnEmitRef = useRef(false);
+  const initializedOperationRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
@@ -713,8 +716,37 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
       }).slice(0, 8)
     : [];
 
+  const dialogOperationKey = JSON.stringify({
+    operationKey: operationKey ?? null,
+    paymentId: paymentId ?? null,
+    spaAccountId: spaAccountId ?? null,
+    groupId: groupId ?? null,
+    groupPaymentId: groupPaymentId ?? null,
+    groupPaymentGroupId: groupPaymentGroupId ?? null,
+    groupPaymentDraft: groupPaymentDraft ?? null,
+    initialValues: initialValues ?? null,
+    billingEntityType: billingEntityType ?? null,
+    billingEntityId: billingEntityId ?? null,
+    recipientProfile: recipientProfile ?? null,
+    compactMode: !!compactMode,
+    allowedTipos: allowedTipos ?? null,
+  });
+
   useEffect(() => {
-    if (open && initialValues) {
+    if (!open) {
+      if (initializedOperationRef.current !== null) resetForm();
+      initializedOperationRef.current = null;
+      return;
+    }
+    if (initializedOperationRef.current === dialogOperationKey) return;
+
+    // A mounted dialog can be reused by another payment. Reset first so omitted
+    // fields never inherit values, review flags or emitted/link state from the
+    // previous operation. The stable signature also avoids wiping user edits
+    // merely because the parent recreated initialValues on a normal render.
+    initializedOperationRef.current = dialogOperationKey;
+    resetForm();
+    if (initialValues) {
       if (initialValues.razonSocial !== undefined) setRazonSocial(initialValues.razonSocial);
       if (initialValues.cuit !== undefined) setCuit(initialValues.cuit);
       if (initialValues.dni !== undefined) setDni(initialValues.dni);
@@ -755,15 +787,12 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         setShowConfirm(true);
       }
     }
-    if (open) {
-      // Set entity info from props if provided (e.g. from grupos module)
-      if (billingEntityType && billingEntityId) {
-        setSelectedEntityInfo({ type: billingEntityType, id: billingEntityId });
-      }
+    // Set entity info from props if provided (e.g. from grupos module).
+    if (billingEntityType && billingEntityId) {
+      setSelectedEntityInfo({ type: billingEntityType, id: billingEntityId });
     }
-    if (!open) resetForm();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialValues]);
+  }, [open, dialogOperationKey]);
 
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
@@ -1535,7 +1564,9 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               </p>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowConfirm(false)}>← Editar</Button>
+              <Button variant="outline" onClick={() => setShowConfirm(false)} data-testid="button-invoice-edit">
+                ← Editar
+              </Button>
               <Button
                 onClick={() => {
                   if (!duplicateAmountAcknowledged) {
@@ -1839,7 +1870,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+          <Button variant="outline" onClick={handleClose} data-testid="button-invoice-cancel">Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || faNeedsCuit} data-testid="btn-emitir-confirmar">
             {skipReview ? "Emitir comprobante" : "Revisar →"}
           </Button>
@@ -1963,6 +1994,17 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   const isReservationInvoice = Boolean(invoice?.reserva_id);
   const isSourceMappedInvoice = isReservationInvoice || Boolean(invoice?.group_id && invoice?.source_charge_amounts);
+
+  useEffect(() => {
+    // NotaCreditoDialog is shared by several invoice lists and can receive a
+    // different invoiceId without unmounting. Never carry a reason, partial
+    // amount, selected charge or warning into the newly selected invoice.
+    setMotivo("");
+    setModoParcial(false);
+    setMontoParcial("");
+    setNcItems([]);
+    setMappingWarning(null);
+  }, [invoiceId]);
 
   useEffect(() => {
     if (!invoice || !isSourceMappedInvoice) {
@@ -2240,7 +2282,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
           <div className="space-y-1"><Label>Motivo *</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
         <DialogFooter className="shrink-0 border-t px-6 py-4">
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button variant="outline" onClick={onClose} data-testid="button-nc-cancel">Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || montoInvalido} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
             {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNC}`}
           </Button>
