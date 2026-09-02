@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
-import { Receipt, FileX } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Receipt, FileX, Printer } from "lucide-react";
 
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Efectivo",
@@ -65,11 +66,20 @@ export function GroupPaymentHistoryRow({
     ? gp.paymentMethodDetail.map((row: any) => PAYMENT_METHOD_LABELS[row.method] || row.method).join(" + ")
     : PAYMENT_METHOD_LABELS[gp.method] || gp.method;
   const destinoLabel = gp.destination === "master_folio" ? "Folio Maestro" : "Distribuido entre habitaciones";
+  const receiptNumber = gp.receiptNumber ?? gp.receipt_number;
+  const groupId = gp.groupId ?? gp.group_id;
+  const receiptDisplay = receiptNumber != null
+    ? `Recibo #${String(receiptNumber).padStart(6, "0")}`
+    : `Recibo ${String(gp.id || "").slice(0, 8).toUpperCase()}`;
   return (
     <div className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-history-${gp.id}`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-muted-foreground">{gp.date}</span>
         {groupName && <Badge variant="default" className="text-xs">{groupName}</Badge>}
+        <Badge variant="outline" className="text-xs font-mono gap-1">
+          <Receipt className="h-3 w-3" />
+          {receiptDisplay}
+        </Badge>
         <Badge variant="secondary">{methodsLabel}</Badge>
         <Badge variant="outline" className="text-xs">{destinoLabel}</Badge>
         {receiptLabel && (
@@ -104,7 +114,23 @@ export function GroupPaymentHistoryRow({
           );
         })}
       </div>
-      <span className="font-semibold text-green-600 shrink-0 ml-2">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+      <div className="flex items-center gap-2 shrink-0 ml-2">
+        {groupId && gp.id && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="Ver o reimprimir recibo"
+            aria-label={`Ver ${receiptDisplay}`}
+            onClick={() => window.open(`/api/groups/${groupId}/payments/${gp.id}/receipt.pdf`, "_blank", "noopener,noreferrer")}
+            data-testid={`button-group-payment-receipt-${gp.id}`}
+          >
+            <Printer className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        <span className="font-semibold text-green-600">${parseFloat(gp.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+      </div>
     </div>
   );
 }

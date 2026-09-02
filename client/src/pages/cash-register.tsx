@@ -89,6 +89,7 @@ type CashMovement = {
   shiftId: number;
   area: string;
   sourceType: string;
+  sourceId?: string;
   sourceLabel?: string;
   paymentMethod: string;
   amount: number;
@@ -110,6 +111,9 @@ type CashMovement = {
   invoiceType?: string | null;
   invoicePointOfSale?: number | null;
   invoiceNumber?: number | null;
+  invoiceId?: number | null;
+  groupPaymentId?: string | null;
+  advanceNumber?: number | string | null;
 };
 
 type ShiftDetail = {
@@ -168,10 +172,15 @@ const TURNO_TIPO_OPTIONS = [
   { value: "tarde",  label: "Tarde",  hours: "14:00 – 22:00" },
   { value: "noche",  label: "Noche",  hours: "22:00 – 06:00" },
 ];
+const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
 
 function formatShiftLabel(shift: CashShift): string {
   const d = new Date(shift.openedAt);
-  const day = DIAS_SEMANA[d.getDay()];
+  const weekday = new Intl.DateTimeFormat("es-AR", {
+    weekday: "long",
+    timeZone: ARGENTINA_TIME_ZONE,
+  }).format(d);
+  const day = weekday.charAt(0).toUpperCase() + weekday.slice(1);
   if (shift.turnoTipo) {
     const tipo = TURNO_TIPO_OPTIONS.find(t => t.value === shift.turnoTipo);
     return `${day} ${tipo ? tipo.label : shift.turnoTipo}`;
@@ -190,19 +199,32 @@ function formatCurrency(value: number): string {
 
 function formatTime(dateStr: string): string {
   const d = new Date(dateStr);
-  return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: ARGENTINA_TIME_ZONE,
+  });
 }
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
-  return d.toLocaleDateString("es-AR");
+  return d.toLocaleDateString("es-AR", { timeZone: ARGENTINA_TIME_ZONE });
 }
 
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
-  const datepart = d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const timepart = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const datepart = d.toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: ARGENTINA_TIME_ZONE,
+  });
+  const timepart = d.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: ARGENTINA_TIME_ZONE,
+  });
   return `${datepart} ${timepart}`;
 }
 
@@ -210,6 +232,15 @@ function formatInvoiceReference(movement: CashMovement): string | null {
   if (movement.invoicePointOfSale == null || movement.invoiceNumber == null) return null;
   const number = `${String(movement.invoicePointOfSale).padStart(4, "0")}-${String(movement.invoiceNumber).padStart(8, "0")}`;
   return movement.invoiceType ? `${movement.invoiceType} ${number}` : number;
+}
+
+function formatAdvanceReference(movement: CashMovement): string | null {
+  if (movement.sourceType !== "group_payment") return null;
+  if (movement.advanceNumber != null && String(movement.advanceNumber).trim()) {
+    return `Anticipo #${String(movement.advanceNumber).padStart(6, "0")}`;
+  }
+  if (movement.groupPaymentId) return `Anticipo ${movement.groupPaymentId.slice(0, 8).toUpperCase()}`;
+  return "Anticipo grupal";
 }
 
 const METHOD_ALIASES: Record<string, string> = {
@@ -854,7 +885,15 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>{m.description || m.sourceLabel || "-"}</TableCell>
+                        <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>
+                          <div>{m.description || m.sourceLabel || "-"}</div>
+                          {m.sourceType === "group_payment" && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {formatAdvanceReference(m)}
+                              {formatInvoiceReference(m) ? ` · ${formatInvoiceReference(m)}` : ""}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className={m.anulado ? "text-muted-foreground" : ""}>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
                           {m.anulado ? (
@@ -912,6 +951,10 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                                     <span className="font-medium text-foreground">Destinatario:</span>{" "}
                                     {m.recipientName || (m.groupDestination === "master_folio" ? "Folio Maestro" : "Habitaciones del grupo")}
                                   </div>
+                                  <div>
+                                    <span className="font-medium text-foreground">Recibo:</span>{" "}
+                                    {formatAdvanceReference(m)}
+                                  </div>
                                   <div><span className="font-medium text-foreground">Monto efectivo recibido:</span> {formatCurrency(Number(m.amount) || 0)}</div>
                                   {m.economicTotal != null && (
                                     <div><span className="font-medium text-foreground">Total económico/fiscal:</span> {formatCurrency(Number(m.economicTotal) || 0)}</div>
@@ -921,6 +964,20 @@ function AreaTab({ area, config }: { area: string; config: CashConfig }) {
                                   )}
                                   {formatInvoiceReference(m) && (
                                     <div><span className="font-medium text-foreground">Comprobante:</span> {formatInvoiceReference(m)}</div>
+                                  )}
+                                  {m.sourceId && m.groupPaymentId && (
+                                    <div>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => window.open(`/api/groups/${m.sourceId}/payments/${m.groupPaymentId}/receipt.pdf`, "_blank", "noopener,noreferrer")}
+                                      >
+                                        <Printer className="h-3 w-3 mr-1" />
+                                        Ver recibo
+                                      </Button>
+                                    </div>
                                   )}
                                 </>
                               )}

@@ -419,6 +419,7 @@ export interface IStorage {
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;
     receiverDetails?: Record<string, string | undefined> | null;
+    concepts?: Array<{ description: string; amount: number }> | null;
     invoiceData?: Record<string, any> | null;
     invoiceTotal?: number | null;
     closeReservationIds?: string[];

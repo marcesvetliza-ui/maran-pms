@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   authorizationError: null as string | null,
   reconciliationUpdateCount: 0,
   billingConfig: { arcaAmbiente: "ficticio", puntoVenta: 1 } as any,
+  schemaError: null as Error | null,
+  schemaChecks: 0,
 }));
 
 vi.mock("../db", () => ({
@@ -65,6 +67,13 @@ vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => state.billingConfig),
 }));
 
+vi.mock("../migrate", () => ({
+  assertFinancialSchemaReady: vi.fn(() => {
+    state.schemaChecks++;
+    if (state.schemaError) throw state.schemaError;
+  }),
+}));
+
 vi.mock("../billing/wsaaClient", () => ({
   getTokenAuth: vi.fn(async () => ({ token: "token", sign: "sign" })),
 }));
@@ -87,6 +96,8 @@ describe("recoverable reservation credit-note emission", () => {
     state.authorizationError = null;
     state.reconciliationUpdateCount = 0;
     state.billingConfig = { arcaAmbiente: "ficticio", puntoVenta: 1 };
+    state.schemaError = null;
+    state.schemaChecks = 0;
   });
 
   afterEach(() => {
@@ -166,5 +177,37 @@ describe("recoverable reservation credit-note emission", () => {
       notaCreditoId: 12,
       sourceChargeAmounts: { "charge-1": 100 },
     });
+  });
+
+  it("rejects a recoverable invoice before numbering or persistence when the financial schema is outdated", async () => {
+    state.schemaError = Object.assign(
+      new Error("El esquema financiero no está actualizado."),
+      { statusCode: 503, code: "FINANCIAL_SCHEMA_NOT_READY" },
+    );
+
+    await expect(emitirFactura({
+      tipoComprobante: "FB",
+      cliente: { razonSocial: "Empresa", condicionIva: "Consumidor Final" },
+      items: [{
+        descripcion: "Alojamiento grupal",
+        cantidad: 1,
+        precioUnitario: 100,
+        alicuotaIva: "no_gravado",
+        subtotalNeto: 0,
+        subtotal: 100,
+      }],
+      groupId: "group-1",
+      groupPaymentIntent: {
+        endpoint: "/api/groups/group-1/payment",
+        body: { paymentRows: [{ method: "cash", amount: "100.00" }] },
+      },
+    })).rejects.toMatchObject({
+      statusCode: 503,
+      code: "FINANCIAL_SCHEMA_NOT_READY",
+    });
+
+    expect(state.schemaChecks).toBe(1);
+    expect(state.events).toEqual([]);
+    expect(state.insertValues).toEqual([]);
   });
 });

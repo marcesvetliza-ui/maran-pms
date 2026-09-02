@@ -7,6 +7,7 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
+import { generateGroupPaymentReceiptPdf } from "../groupPaymentReceiptPdf";
 import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupInvoiceCompositionSources, getGroupInvoiceSnapshot, getPersistedGroupInvoiceCompositionSources } from "../billing/groupInvoiceScope";
 import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
@@ -1044,6 +1045,7 @@ export function registerGroupsRoutes(app: Express) {
 
   app.get("/api/groups/:groupId/pending-fiscal-collections", requireAuth, async (req, res) => {
     try {
+      assertFinancialSchemaReady();
       const result = await db.execute(sql`
         SELECT id, items, group_payment_intent
         FROM sales_invoices
@@ -1060,7 +1062,11 @@ export function registerGroupsRoutes(app: Express) {
       })));
     } catch (error) {
       console.error("[pending-fiscal-collections] Error:", error);
-      res.status(500).json({ error: "No se pudieron recuperar los cobros fiscales pendientes" });
+      const typedError = error as any;
+      res.status(typedError?.statusCode || 500).json({
+        error: typedError?.message || "No se pudieron recuperar los cobros fiscales pendientes",
+        ...(typedError?.code ? { code: typedError.code } : {}),
+      });
     }
   });
 
@@ -1198,6 +1204,7 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
+        concepts: evidence.concepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)
@@ -1505,6 +1512,57 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // A receipt belongs to its parent group payment, never to one of the
+  // room-level allocation rows. Checking both path ids prevents a valid
+  // authenticated user from retrieving another group's receipt by UUID.
+  app.get("/api/groups/:groupId/payments/:paymentId/receipt.pdf", requireAuth, async (req, res) => {
+    try {
+      const group = await storage.getGroup(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+      const groupPayments = await storage.getGroupPayments(req.params.groupId);
+      const payment = groupPayments.find((entry: any) => entry.id === req.params.paymentId);
+      if (!payment) return res.status(404).json({ error: "Recibo de pago grupal no encontrado" });
+
+      const ledger = await storage.getGroupReservationLedger(req.params.groupId);
+      const distribution = payment.distributionDetail && typeof payment.distributionDetail === "object"
+        ? payment.distributionDetail as Record<string, unknown> : {};
+      const roomDistribution = Object.entries(distribution)
+        .filter(([reservationId, amount]) => !reservationId.startsWith("__") && Number(amount) > 0)
+        .map(([reservationId, amount]) => {
+          const room = ledger.find((line) => line.reservationId === reservationId);
+          return {
+            roomNumber: room?.roomNumber,
+            guestName: room?.guestName,
+            reservationCode: room?.reservationCode,
+            amount: Number(amount),
+          };
+        });
+      // Room retentions live on allocation notes, whereas a master-only
+      // retention lives on the parent. Combine them only for presentation.
+      const roomRetentions = ledger.flatMap((line) => line.payments
+        .filter((row: any) => row.groupPaymentId === payment.id)
+        .map((row: any) => parsePaymentRetention(row.notes))
+        .filter((retention): retention is { tipo: string; monto: number } => Boolean(retention)));
+      const pdf = await generateGroupPaymentReceiptPdf({
+        receiptNumber: (payment as any).receiptNumber ?? null,
+        legacyId: payment.id,
+        group: { name: (group as any).name || "Grupo", code: (group as any).groupCode },
+        payment: {
+          ...(payment as any),
+          retentionDetail: [...parseGroupPaymentRetentions((payment as any).retentionDetail), ...roomRetentions],
+        },
+        roomDistribution,
+      });
+      const receiptToken = (payment as any).receiptNumber ?? payment.id;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="recibo-grupal-${receiptToken}.pdf"`);
+      res.send(pdf);
+    } catch (error: any) {
+      console.error("[group-payment-receipt] Error:", error);
+      res.status(error?.statusCode || 500).json({ error: error?.message || "No se pudo generar el recibo grupal" });
+    }
+  });
+
   app.post("/api/groups/:groupId/payment/v2", requireAuth, async (req, res) => {
     try {
       assertFinancialSchemaReady();
@@ -1543,6 +1601,7 @@ export function registerGroupsRoutes(app: Express) {
         cashLabel: `Pago Grupal — ${req.params.groupId}`,
         receiptType: evidence.receiptType,
         receiverDetails: evidence.receiver,
+        concepts: evidence.concepts,
       });
 
       await audit(req, "create", "groups",
@@ -1899,6 +1958,7 @@ export function registerGroupsRoutes(app: Express) {
         billingEntityType: billingEntityType || null,
         billingEntityId: billingEntityId || null,
         receiverDetails: evidence.receiver,
+        concepts: evidence.concepts,
         invoiceData: isFiscalGroupReceipt(evidence.receiptType) ? invoiceData : null,
         invoiceTotal: isFiscalGroupReceipt(evidence.receiptType)
           ? evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0)

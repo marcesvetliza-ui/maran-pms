@@ -58,6 +58,8 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
 
   const result = await db.execute(sql`
     SELECT cm.id,
+           gp.id AS "groupPaymentId",
+           gp.receipt_number AS "advanceNumber",
            g.name AS "groupName",
            g.group_code AS "groupCode",
            gp.destination AS "groupDestination",
@@ -69,7 +71,8 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
            END AS "retentionTotal",
            invoice.tipo_comprobante AS "invoiceType",
            invoice.punto_venta AS "invoicePointOfSale",
-           invoice.numero AS "invoiceNumber"
+           invoice.numero AS "invoiceNumber",
+           invoice.id AS "invoiceId"
     FROM cash_movements cm
     JOIN group_payments gp ON gp.id = cm.payment_id
     JOIN groups g ON g.id = gp.group_id

@@ -20,6 +20,17 @@ async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): 
 
 export const FINANCIAL_SCHEMA_REQUIREMENTS = {
   columns: {
+    sales_invoices: [
+      "id",
+      "estado",
+      "items",
+      "group_id",
+      "group_payment_id",
+      "group_payment_intent",
+      "reconciliation_status",
+      "reconciliation_error",
+      "reconciliation_updated_at",
+    ],
     account_movements: [
       "id",
       "entity_type",
@@ -46,10 +57,17 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "receiver_details",
       "invoice_ref",
       "retention_detail",
+      "receipt_number",
+      "concepts",
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
   },
   indexes: {
+    sales_invoices: [
+      "sales_invoices_group_id_idx",
+      "sales_invoices_group_payment_id_idx",
+      "idx_sales_invoices_nc_reconciliation_pending",
+    ],
     account_movements: [
       "idx_account_movements_entity",
       "account_movements_group_payment_id_idx",
@@ -58,7 +76,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "idx_account_movement_allocations_cargo",
       "idx_account_movement_allocations_pago",
     ],
-    group_payments: ["group_payments_group_id_idx"],
+    group_payments: ["group_payments_group_id_idx", "group_payments_receipt_number_unique"],
     payments: ["payments_group_payment_id_idx"],
   },
 } as const;
@@ -1674,6 +1692,34 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // was silently dropped instead of just recorded elsewhere.
   await withTimeout("group_payments.retention_detail", T, () =>
     db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS retention_detail jsonb`)
+  );
+
+  // Receipt numbers are generated only for newly issued parent receipts.
+  // Do not backfill historic UUID receipts: their immutable display fallback
+  // is intentionally handled by the receipt renderer.
+  await withTimeout("group_payments.receipt_number_and_concepts", T, () =>
+    db.execute(sql`
+      CREATE SEQUENCE IF NOT EXISTS group_payments_receipt_number_seq;
+      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS receipt_number integer;
+      ALTER TABLE group_payments
+        ALTER COLUMN receipt_number SET DEFAULT nextval('group_payments_receipt_number_seq'::regclass);
+      CREATE UNIQUE INDEX IF NOT EXISTS group_payments_receipt_number_unique
+        ON group_payments (receipt_number) WHERE receipt_number IS NOT NULL;
+      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS concepts jsonb;
+      CREATE OR REPLACE FUNCTION prevent_group_payment_receipt_number_change()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.receipt_number IS DISTINCT FROM OLD.receipt_number THEN
+          RAISE EXCEPTION 'group payment receipt_number is immutable';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS group_payments_receipt_number_immutable ON group_payments;
+      CREATE TRIGGER group_payments_receipt_number_immutable
+        BEFORE UPDATE ON group_payments
+        FOR EACH ROW EXECUTE FUNCTION prevent_group_payment_receipt_number_change();
+    `)
   );
 
   // group_invoices: facturas emitidas directamente desde el Resumen del Grupo (sin pago asociado)

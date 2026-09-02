@@ -5,6 +5,7 @@ import { getBillingConfig } from "./billingConfig";
 import { generateFakeCAE } from "./fakeArca";
 import { callARCA } from "./arcaClient";
 import { getArgentinaToday } from "../db-storage";
+import { assertFinancialSchemaReady } from "../migrate";
 
 export interface InvoiceItem {
   descripcion: string;
@@ -197,6 +198,12 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
   const recoverableCreditNote = Boolean(data.recoverableCreditNote || data.recoveryInvoiceId);
   const recoverableBeforeAuthorization = recoverableCreditNote || Boolean(data.spaAccountId) || Boolean(data.groupPaymentIntent);
+  if (recoverableBeforeAuthorization) {
+    // A recoverable fiscal draft depends on the live sales_invoices recovery
+    // columns. Fail before numbering or contacting ARCA when a timed-out
+    // incremental migration left production on an older schema.
+    assertFinancialSchemaReady();
+  }
 
   const puntoVenta =
     data.puntoVentaOverride ??

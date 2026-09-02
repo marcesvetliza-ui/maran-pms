@@ -1830,6 +1830,7 @@ export class DatabaseStorage implements IStorage {
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;
     receiverDetails?: Record<string, string | undefined> | null;
+    concepts?: Array<{ description: string; amount: number }> | null;
     invoiceData?: Record<string, any> | null;
     invoiceTotal?: number | null;
     closeReservationIds?: string[];
@@ -2248,6 +2249,7 @@ export class DatabaseStorage implements IStorage {
         billingEntityType: input.billingEntityType || null,
         billingEntityId: input.billingEntityId || null,
         paymentMethodDetail: rows,
+        concepts: input.concepts || null,
         destination: input.destination,
         receiverDetails: input.receiverDetails || null,
         retentionDetail: retentionDetail.length > 0 ? retentionDetail : null,
@@ -5669,6 +5671,7 @@ export class DatabaseStorage implements IStorage {
 
     const rows = await db.select({
       id: groupPayments.id,
+      receiptNumber: groupPayments.receiptNumber,
       groupId: groupPayments.groupId,
       groupName: groups.name,
       groupCode: groups.groupCode,
@@ -5678,6 +5681,7 @@ export class DatabaseStorage implements IStorage {
       reference: groupPayments.reference,
       distribution: groupPayments.distribution,
       paymentMethodDetail: groupPayments.paymentMethodDetail,
+      concepts: groupPayments.concepts,
       destination: groupPayments.destination,
       receiptType: groupPayments.receiptType,
       billingEntityType: groupPayments.billingEntityType,

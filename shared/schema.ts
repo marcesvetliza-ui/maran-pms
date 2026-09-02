@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -653,6 +653,9 @@ export type GroupCharge = typeof groupCharges.$inferSelect;
 export type GroupPaymentDestination = "group_distribution" | "master_folio";
 export const groupPayments = pgTable("group_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Issued once by PostgreSQL. Legacy rows deliberately remain NULL and use
+  // their UUID as a display fallback rather than being retroactively numbered.
+  receiptNumber: integer("receipt_number").default(sql`nextval('group_payments_receipt_number_seq'::regclass)`),
   groupId: varchar("group_id").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   method: text("method").notNull(),
@@ -669,6 +672,7 @@ export const groupPayments = pgTable("group_payments", {
   billingEntityType: text("billing_entity_type"), // "company" | "agency" — who received the fiscal comprobante
   billingEntityId: varchar("billing_entity_id"),  // FK to companies or agencies
   paymentMethodDetail: jsonb("payment_method_detail"), // [{method, amount, reference}] for multi-method splits
+  concepts: jsonb("concepts"), // validated [{description, amount}] receipt concepts
   // The parent payment is the financial source of truth. Reservation payments
   // linked through groupPaymentId are merely its allocations.
   destination: text("destination").$type<GroupPaymentDestination>().notNull().default("group_distribution"),
@@ -680,9 +684,15 @@ export const groupPayments = pgTable("group_payments", {
   // column exists only so the non-room portion isn't silently discarded.
   retentionDetail: jsonb("retention_detail"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  receiptNumberUnique: uniqueIndex("group_payments_receipt_number_unique")
+    .on(table.receiptNumber)
+    .where(sql`${table.receiptNumber} IS NOT NULL`),
+}));
 
-export const insertGroupPaymentSchema = createInsertSchema(groupPayments).omit({ id: true, createdAt: true });
+// receiptNumber is database-issued and must not be supplied or changed by
+// application inserts.
+export const insertGroupPaymentSchema = createInsertSchema(groupPayments).omit({ id: true, receiptNumber: true, createdAt: true });
 export type InsertGroupPayment = z.infer<typeof insertGroupPaymentSchema>;
 export type GroupPayment = typeof groupPayments.$inferSelect;
 

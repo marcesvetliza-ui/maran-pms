@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   recordGroupPayment: vi.fn(),
   invoiceSnapshot: vi.fn(),
+  assertFinancialSchemaReady: vi.fn(),
 }));
 
 const groupId = "group-advance-exact";
@@ -27,7 +28,7 @@ vi.mock("../billing/groupInvoiceScope", () => ({
   assertMasterFacturaTAllowed: vi.fn(),
   getGroupInvoiceSnapshot: mocks.invoiceSnapshot,
 }));
-vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
+vi.mock("../migrate", () => ({ assertFinancialSchemaReady: mocks.assertFinancialSchemaReady }));
 vi.mock("../auth", () => ({
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { username: "tester" };
@@ -81,6 +82,7 @@ function paymentBody(amount: string) {
 describe("POST group payment applies non-fiscal advances", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertFinancialSchemaReady.mockImplementation(() => undefined);
     mockStorage.getGroup.mockResolvedValue({
       id: groupId,
       name: "Grupo adelantos",
@@ -304,6 +306,55 @@ describe("POST group payment applies non-fiscal advances", () => {
         checkoutCount: 2,
         closedReservationIds: ["room-a", "room-b"],
       });
+    });
+  });
+
+  it("returns a clear 503 and does not query pending fiscal collections when the schema is outdated", async () => {
+    mocks.assertFinancialSchemaReady.mockImplementationOnce(() => {
+      throw Object.assign(
+        new Error("El esquema financiero no está actualizado."),
+        { statusCode: 503, code: "FINANCIAL_SCHEMA_NOT_READY" },
+      );
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/pending-fiscal-collections`);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "El esquema financiero no está actualizado.",
+        code: "FINANCIAL_SCHEMA_NOT_READY",
+      });
+    });
+
+    expect(mocks.assertFinancialSchemaReady).toHaveBeenCalledTimes(1);
+    expect((await import("../db")).db.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a parent receipt that is absent from the requested group", async () => {
+    mockStorage.getGroupPayments.mockResolvedValueOnce([
+      { id: "parent-from-another-group", amount: "10.00" },
+    ]);
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payments/requested-parent/receipt.pdf`);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Recibo de pago grupal no encontrado" });
+    });
+  });
+
+  it("renders the authenticated parent receipt as a PDF", async () => {
+    mockStorage.getGroupPayments.mockResolvedValueOnce([{
+      id: "parent-receipt", receiptNumber: 42, amount: "120.00", date: "2026-08-31",
+      method: "transfer", receiverDetails: { razonSocial: "Empresa", cuit: "30712345678" },
+      paymentMethodDetail: [{ method: "transfer", amount: "120.00", reference: "TR-42" }],
+      concepts: [{ description: "Alojamiento", amount: 120 }],
+      distributionDetail: { [reservationId]: 120 },
+    }]);
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payments/parent-receipt/receipt.pdf`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("application/pdf");
+      expect(response.headers.get("content-disposition")).toContain("recibo-grupal-42.pdf");
+      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(100);
     });
   });
 });
