@@ -3,8 +3,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import {
   Users,
   Settings,
@@ -351,7 +350,7 @@ function IncidenciasTab() {
                     </TableCell>
                     <TableCell className="text-sm">{incident.reportedBy}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {new Date(incident.reportedAt).toLocaleDateString("es-AR")}
+                      {formatHotelDateTime(incident.reportedAt)}
                     </TableCell>
                     <TableCell>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -467,12 +466,12 @@ function IncidenciasTab() {
               </div>
               <div className="text-xs text-muted-foreground">
                 Reportado por <strong>{selectedIncident.reportedBy}</strong> el{" "}
-                {new Date(selectedIncident.reportedAt).toLocaleString("es-AR")}
+                {formatHotelDateTime(selectedIncident.reportedAt)}
               </div>
               {selectedIncident.resolvedAt && (
                 <div className="text-xs text-muted-foreground">
                   Resuelto por <strong>{selectedIncident.resolvedBy}</strong> el{" "}
-                  {new Date(selectedIncident.resolvedAt).toLocaleString("es-AR")}
+                  {formatHotelDateTime(selectedIncident.resolvedAt)}
                 </div>
               )}
               <div className="border-t pt-4 space-y-3">
@@ -664,7 +663,7 @@ function NightAuditTab() {
                   {STATUS_LABEL_NA[status.lastAudit.status]} — {status.lastAudit.auditDate}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {new Date(status.lastAudit.executedAt).toLocaleString("es-AR")}
+                  {formatHotelDateTime(status.lastAudit.executedAt)}
                 </p>
               </div>
             ) : (
@@ -790,7 +789,7 @@ function NightAuditTab() {
                   <TableRow key={audit.id}>
                     <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {new Date(audit.executedAt).toLocaleString("es-AR")}
+                      {formatHotelDateTime(audit.executedAt)}
                       {audit.isManual && <Badge variant="outline" className="ml-1 text-[10px]">manual</Badge>}
                     </TableCell>
                     <TableCell className="text-sm">{audit.executedBy}</TableCell>
@@ -1311,7 +1310,7 @@ export default function AdministrationPage() {
                         <TableCell className="capitalize">{log.module}</TableCell>
                         <TableCell className="text-muted-foreground">{log.description}</TableCell>
                         <TableCell className="text-muted-foreground">
-                          {format(new Date(log.timestamp), "dd/MM HH:mm", { locale: es })}
+                          {formatHotelDateTime(log.timestamp, { includeYear: false })}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1379,7 +1378,7 @@ export default function AdministrationPage() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {user.lastLogin
-                            ? format(new Date(user.lastLogin), "dd/MM/yyyy HH:mm", { locale: es })
+                            ? formatHotelDateTime(user.lastLogin)
                             : "Nunca"}
                         </TableCell>
                         <TableCell className="text-right">
@@ -1476,7 +1475,7 @@ export default function AdministrationPage() {
                             {setting.description || "-"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {format(new Date(setting.updatedAt), "dd/MM/yyyy HH:mm", { locale: es })}
+                            {formatHotelDateTime(setting.updatedAt)}
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
@@ -1690,7 +1689,7 @@ export default function AdministrationPage() {
                         className={isAlert ? "bg-destructive/10 border-l-4 border-l-destructive" : undefined}
                       >
                         <TableCell className="text-muted-foreground whitespace-nowrap">
-                          {format(new Date(log.timestamp), "dd/MM/yyyy HH:mm:ss", { locale: es })}
+                          {formatHotelDateTime(log.timestamp, { includeSeconds: true })}
                         </TableCell>
                         <TableCell className="font-medium">{log.userName || "Sistema"}</TableCell>
                         <TableCell>
