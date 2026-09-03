@@ -230,6 +230,38 @@ describe("group payment retentions settle the debt they claim to cover", () => {
     expect(totalApplied).toBeCloseTo(100, 2);
   });
 
+  it("creates one Caja movement per tender row, all linked only to the parent receipt", async () => {
+    reservationRows = [room(ROOM_A, 5000, "101"), room(ROOM_B, 5000, "102")];
+
+    const { storage } = await import("../db-storage");
+    const recorded = await storage.recordGroupPayment({
+      groupId: GROUP_ID,
+      destination: "group_distribution",
+      paymentRows: [
+        { method: "efectivo", amount: "40.00" },
+        { method: "transferencia", amount: "60.00" },
+      ],
+      date: "2026-08-26",
+      reference: "Anticipo mixto",
+      distribution: "equal",
+      distributionDetail: { [ROOM_A]: 50, [ROOM_B]: 50 },
+    });
+
+    expect(recorded.reservationPayments).toHaveLength(4);
+    expect(state.cashMovements).toEqual([
+      expect.objectContaining({
+        paymentId: recorded.groupPayment.id,
+        paymentMethod: "efectivo",
+        amount: "40.00",
+      }),
+      expect.objectContaining({
+        paymentId: recorded.groupPayment.id,
+        paymentMethod: "transferencia",
+        amount: "60.00",
+      }),
+    ]);
+  });
+
   it("rejects a global concept when storing a multi-room group distribution directly", async () => {
     reservationRows = [room(ROOM_A, 5000, "101"), room(ROOM_B, 5000, "102")];
 

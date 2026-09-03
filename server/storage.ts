@@ -424,6 +424,7 @@ export interface IStorage {
     distributionDetail: Record<string, number>;
     receivedBy?: string | null;
     notes?: string | null;
+    cashLabel?: string | null;
     receiptType?: string | null;
     billingEntityType?: "company" | "agency" | null;
     billingEntityId?: string | null;

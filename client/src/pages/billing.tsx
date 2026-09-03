@@ -608,9 +608,11 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
   open: boolean;
   onClose: () => void;
+  /** Return a compact group confirmation to its originating payment draft. */
+  onBackToSource?: () => void;
   config: any;
   initialValues?: EmitirFacturaInitialValues;
   onSuccess?: (invoiceData?: any) => void;
@@ -933,6 +935,24 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
     ng: round2(brutos.ng),
   };
   const totalPreview = round2(brutos.bruto21 + brutos.bruto105 + brutos.exento + brutos.ng);
+  const groupSettlementPreview = groupPaymentDraft ? (() => {
+    const priorAdvancesApplied = Math.min(
+      totalPreview,
+      Math.max(0, Number(groupPaymentDraft.body.settlementBreakdown?.appliedAdvances || 0)),
+    );
+    // This is the collection that will be persisted with the group payment.
+    // It is deliberately separate from the gross fiscal document amount.
+    const newCollection = (groupPaymentDraft.body.paymentRows || []).reduce(
+      (sum: number, row: any) => sum + Number(row.amount || 0) + Number(row.retention?.monto || 0),
+      0,
+    );
+    return {
+      grossFiscalDocument: totalPreview,
+      priorAdvancesApplied,
+      newCollection: round2(newCollection),
+      totalSettled: round2(priorAdvancesApplied + newCollection),
+    };
+  })() : null;
 
   const finalizedGroupPaymentBody = (invoice: any) => {
     if (!groupPaymentDraft) return {};
@@ -1457,7 +1477,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
           <div className="space-y-4">
             {groupInvoiceSources && groupInvoiceSources.length > 0 && (
               <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-800 dark:bg-violet-950/20">
-                <p className="mb-2 text-sm font-semibold text-violet-900 dark:text-violet-200">Disponibilidad fiscal del grupo</p>
+                <p className="mb-1 text-sm font-semibold text-violet-900 dark:text-violet-200">Distribución de fuentes fiscales</p>
+                <p className="mb-2 text-xs text-violet-800 dark:text-violet-300">Define qué servicios respaldan el comprobante; no distribuye el cobro entre habitaciones.</p>
                 <div className="max-h-40 space-y-1 overflow-y-auto text-xs">
                   {groupInvoiceSources.map((source) => (
                     <div key={source.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3">
@@ -1472,7 +1493,8 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
             )}
             {groupPaymentDestinations && groupPaymentDestinations.length > 0 && (
               <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 dark:border-sky-800 dark:bg-sky-950/20">
-                <p className="mb-2 text-sm font-semibold text-sky-900 dark:text-sky-200">Cobros grupales</p>
+                <p className="mb-1 text-sm font-semibold text-sky-900 dark:text-sky-200">Asignación operativa del cobro</p>
+                <p className="mb-2 text-xs text-sky-800 dark:text-sky-300">Muestra el destino operativo registrado. No implica reparto igualitario.</p>
                 <div className="space-y-1 text-xs">
                   {groupPaymentDestinations.map((destination) => (
                     <div key={destination.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3">
@@ -1525,7 +1547,7 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                     </div>
                   ))}
                   <div className="flex justify-between border-t pt-2 text-sm font-bold">
-                    <span>Total fiscal desglosado</span>
+                    <span>Total del documento fiscal</span>
                     <span>${fPeso(groupCompositionPreview.total)}</span>
                   </div>
                 </div>
@@ -1550,8 +1572,17 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
                 </div>
               )}
               <div className="flex justify-between font-bold text-sm pt-1">
-                <span>TOTAL:</span><span>${fPeso(totalPreview)}</span>
+                <span>TOTAL DEL DOCUMENTO FISCAL:</span><span>${fPeso(totalPreview)}</span>
               </div>
+              {groupSettlementPreview && (
+                <div className="space-y-1 border-t pt-2 text-sm" data-testid="group-invoice-settlement-summary">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Aplicación y cobro</p>
+                  <div className="flex justify-between"><span>Total documento fiscal (bruto)</span><span className="font-medium">${fPeso(groupSettlementPreview.grossFiscalDocument)}</span></div>
+                  <div className="flex justify-between text-amber-700 dark:text-amber-400"><span>Anticipos no fiscales previos aplicados (ya cobrados)</span><span>-${fPeso(groupSettlementPreview.priorAdvancesApplied)}</span></div>
+                  <div className="flex justify-between text-emerald-700 dark:text-emerald-400"><span>Nuevo cobro</span><span>${fPeso(groupSettlementPreview.newCollection)}</span></div>
+                  <div className="flex justify-between border-t pt-1 font-bold"><span>Total liquidado</span><span>${fPeso(groupSettlementPreview.totalSettled)}</span></div>
+                </div>
+              )}
               {(cashArea || showPaymentMethod) && (
                 <div className="text-xs text-muted-foreground pt-1 border-t">
                   Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}
@@ -1564,7 +1595,11 @@ export function EmitirFacturaDialog({ open, onClose, config, initialValues, onSu
               </p>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowConfirm(false)} data-testid="button-invoice-edit">
+              <Button
+                variant="outline"
+                onClick={() => onBackToSource ? onBackToSource() : setShowConfirm(false)}
+                data-testid="button-invoice-edit"
+              >
                 ← Editar
               </Button>
               <Button

@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,8 @@ const RESERVATION_ID = "reservation-payment-dialog-mode-ui-001";
 const { apiRequestMock } = vi.hoisted(() => ({
   apiRequestMock: vi.fn(),
 }));
+
+let pendingFiscalCollections: any[] = [];
 
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>("@/lib/queryClient");
@@ -91,10 +93,10 @@ const MASTER_FOLIO_FIXTURE = {
 const INVOICE_SNAPSHOT_FIXTURE = {
   sources: [
     { id: "room:101:accommodation", destination: "Hab. 101", concept: "Alojamiento", available: 100 },
-    { id: "room:102:accommodation", destination: "Hab. 102", concept: "Alojamiento", available: 50 },
+    { id: "room:102:accommodation", destination: "Hab. 102", concept: "Alojamiento", available: 260 },
   ],
-  totals: { eligible: 150, invoiced: 0, available: 150 },
-  financial: { nonFiscalAdvances: 0, operationalBalance: 125.5 },
+  totals: { eligible: 360, invoiced: 0, available: 360 },
+  financial: { nonFiscalAdvances: 60, operationalBalance: 300 },
 };
 
 function jsonResponse(body: unknown) {
@@ -117,13 +119,14 @@ describe("Pago Grupal dialog entry-point modes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    pendingFiscalCollections = [];
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith(`/api/groups/${GROUP_ID}/folio`)) return jsonResponse(FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(MASTER_FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(INVOICE_SNAPSHOT_FIXTURE);
-      if (url.endsWith(`/api/groups/${GROUP_ID}/pending-fiscal-collections`)) return jsonResponse([]);
+      if (url.endsWith(`/api/groups/${GROUP_ID}/pending-fiscal-collections`)) return jsonResponse(pendingFiscalCollections);
       if (url.endsWith(`/api/groups/${GROUP_ID}/direct-invoices`)) return jsonResponse([]);
       if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(GROUP_FIXTURE);
       if (url.endsWith("/api/bed-types")) return jsonResponse([]);
@@ -166,6 +169,42 @@ describe("Pago Grupal dialog entry-point modes", () => {
     expect(screen.getByTestId("button-group-advance-breakdown-detallados")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByTestId("input-group-payment-amount-0")).toHaveValue(125.5);
     expect(screen.getByTestId("input-group-entity-search")).toHaveValue("");
+  });
+
+  it("recovers an older emitted fiscal invoice using its advance split rather than its stale gross payment row", async () => {
+    pendingFiscalCollections = [{
+      id: 901,
+      items: [{ descripcion: "Servicios grupales", cantidad: 1, precioUnitario: 360, subtotal: 360 }],
+      intent: {
+        endpoint: `/api/groups/${GROUP_ID}/payment`,
+        body: {
+          receiptType: "factura_b",
+          paymentRows: [{ method: "cash", amount: "360.00", reference: "FINAL-360" }],
+          concepts: [{ description: "Servicios grupales", amount: 360 }],
+          settlementBreakdown: { documentTotal: 360, appliedAdvances: 60, newCollection: 360 },
+        },
+      },
+    }];
+
+    renderPage();
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith(
+      "POST",
+      `/api/groups/${GROUP_ID}/payment`,
+      expect.objectContaining({
+        paymentRows: [expect.objectContaining({ amount: "300.00" })],
+        concepts: [{ description: "Servicios grupales", amount: 360 }],
+        settlementBreakdown: {
+          documentTotal: 360,
+          appliedAdvances: 60,
+          newCollection: 300,
+        },
+        invoiceData: {
+          id: 901,
+          groupPaymentIntent: pendingFiscalCollections[0].intent,
+        },
+      }),
+    ));
   });
 
   it("opens from Pagar Folio Maestro in Sin desglose and resets before opening Pago Grupal", async () => {
@@ -233,5 +272,37 @@ describe("Pago Grupal dialog entry-point modes", () => {
     expect(preview()).toHaveTextContent(globalConcept);
     expect(preview()).not.toHaveTextContent(detailedConcept);
     expect(preview()).toHaveTextContent("42,00");
+  });
+
+  it("keeps the gross fiscal total separate from a prior advance and returns Edit to the payment draft", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("text-group-name");
+
+    await user.click(screen.getByTestId("button-group-payment"));
+    await user.type(screen.getByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Modo Anterior SA/i }));
+    await user.click(screen.getByTestId("button-group-con-comprobante"));
+
+    const paymentSummary = screen.getByTestId("group-fiscal-amount-summary");
+    expect(paymentSummary).toHaveTextContent("Total documento fiscal (bruto)");
+    expect(paymentSummary).toHaveTextContent("360,00");
+    expect(paymentSummary).toHaveTextContent("Anticipos no fiscales previos aplicados");
+    expect(paymentSummary).toHaveTextContent("60,00");
+    expect(paymentSummary).toHaveTextContent("Nuevo cobro requerido");
+    expect(paymentSummary).toHaveTextContent("300,00");
+
+    await user.click(screen.getByTestId("button-confirm-group-payment"));
+    const confirmation = await screen.findByTestId("group-invoice-settlement-summary");
+    expect(confirmation).toHaveTextContent("Total documento fiscal (bruto)");
+    expect(confirmation).toHaveTextContent("Anticipos no fiscales previos aplicados (ya cobrados)");
+    expect(confirmation).toHaveTextContent("Nuevo cobro");
+    expect(confirmation).toHaveTextContent("Total liquidado");
+    expect(confirmation).toHaveTextContent("360,00");
+    expect(confirmation).toHaveTextContent("300,00");
+
+    await user.click(screen.getByTestId("button-invoice-edit"));
+    expect(await screen.findByRole("heading", { name: "Pago Grupal" })).toBeInTheDocument();
+    expect(screen.getByTestId("input-group-payment-amount-0")).toHaveValue(300);
   });
 });

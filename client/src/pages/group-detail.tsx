@@ -1104,9 +1104,17 @@ export default function GroupDetailPage() {
       const oldTotal = (intent.body.concepts || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
       const newTotal = finalConcepts.reduce((sum: number, item: any) => sum + item.amount, 0);
       const sourceRows = intent.body.paymentRows || [];
-      const originalGross = sourceRows.reduce((sum: number, row: any) =>
-        sum + Number(row.amount || 0) + Number(row.retention?.monto || 0), 0);
-      const targetGrossCents = Math.round((originalGross + newTotal - oldTotal) * 100);
+      // An emitted invoice can have been created by an older client which put
+      // its gross document amount in paymentRows even though an advance had
+      // already settled part of it. The persisted settlement breakdown is the
+      // authoritative recovery instruction: never recreate that overpayment
+      // from the stale payment rows. This also keeps an operator's edited
+      // invoice total aligned with the original advance application.
+      const appliedAdvances = Math.min(
+        newTotal,
+        Math.max(0, Number(intent.body.settlementBreakdown?.appliedAdvances || 0)),
+      );
+      const targetGrossCents = Math.round((newTotal - appliedAdvances) * 100);
       const retentionCents = Math.round(sourceRows.reduce((sum: number, row: any) =>
         sum + Number(row.retention?.monto || 0), 0) * 100);
       if (targetGrossCents <= retentionCents || targetGrossCents <= 0) {
@@ -1137,7 +1145,15 @@ export default function GroupDetailPage() {
         ...intent.body,
         paymentRows,
         concepts: finalConcepts,
-        invoiceData: { id: invoiceId },
+        settlementBreakdown: {
+          documentTotal: newTotal,
+          appliedAdvances,
+          newCollection: targetGrossCents / 100,
+        },
+        // The post-emission snapshot no longer has a non-fiscal advance (the
+        // invoice consumes fiscal availability). Supply its persisted intent
+        // so the server can validate the same advance split on recovery.
+        invoiceData: { id: invoiceId, groupPaymentIntent: intent },
       }).then(() => {
         queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-fiscal-collections"] });
         queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
@@ -2594,7 +2610,7 @@ export default function GroupDetailPage() {
                             {masterFolio.config === "accommodation" ? "Alojamiento + Cargos grupales" : "Todo incluido"}
                           </Badge>
                         </CardTitle>
-                          <CardDescription>Destino del cobro del organizador del grupo</CardDescription>
+                          <CardDescription>Asignación operativa de cargos y cobros del organizador; no modifica el total fiscal del comprobante.</CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
                         <Button
@@ -2640,7 +2656,7 @@ export default function GroupDetailPage() {
                         <p className="text-lg font-bold text-orange-700 dark:text-orange-400">${masterFolio.groupChargesTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       <div className="rounded-lg bg-green-50 dark:bg-green-950/30 p-3 border border-green-200 dark:border-green-800">
-                        <p className="text-xs text-muted-foreground mb-1">Pagado</p>
+                        <p className="text-xs text-muted-foreground mb-1">Cobrado operativo</p>
                         <p className="text-lg font-bold text-green-700 dark:text-green-400">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       <div className={`rounded-lg p-3 border col-span-2 sm:col-span-1 ${masterFolio.masterBalance > 0.01 ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800" : "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"}`}>
@@ -2670,7 +2686,7 @@ export default function GroupDetailPage() {
                           </div>
                         ))}
                         <div className="flex items-center justify-between px-3 py-2 text-sm bg-muted/30 font-semibold">
-                          <span>El saldo de cada habitación descuenta sus pagos y anticipos asignados</span>
+                          <span>El saldo descuenta pagos y anticipos según su asignación operativa registrada</span>
                           <span>Total alojamiento: {fmtMoney(masterFolio.masterAccommodation)}</span>
                         </div>
                       </div>
@@ -2811,9 +2827,10 @@ export default function GroupDetailPage() {
                                     </span>
                                   ) : (
                                     <span className="text-xs text-muted-foreground" data-testid={`master-payment-breakdown-${gp.id}`}>
-                                      Comprobante: <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
-                                      {" · "}Anticipos: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
+                                       Documento fiscal (bruto): <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
+                                       {" · "}Anticipos no fiscales previos aplicados: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
                                       {" · "}Cobro nuevo: <strong>{fmtMoney(Number(settlement.newCollection) || 0)}</strong>
+                                       {" · "}Total liquidado: <strong>{fmtMoney(Number(settlement.appliedAdvances || 0) + Number(settlement.newCollection || 0))}</strong>
                                       {gp.settlementBreakdownStatus === "reconstructed_from_fiscal_intent"
                                         ? " · Reconstruido desde intención fiscal"
                                         : null}
@@ -3234,7 +3251,7 @@ export default function GroupDetailPage() {
                                         </div>
                                       ))}
                                       <div className="flex justify-between border-t pt-2 text-sm font-bold">
-                                        <span>Total fiscal desglosado</span>
+                                        <span>Total del documento fiscal</span>
                                         <span>${Number(inv.groupComposition.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                                       </div>
                                     </div>
@@ -3261,6 +3278,7 @@ export default function GroupDetailPage() {
                   {/* Totales resumen */}
                   {folio && masterFolio.rooms.length > 0 && (
                     <div className="mt-3 rounded-lg border bg-muted/30 px-4 py-3">
+                      <p className="text-xs text-muted-foreground">Resumen operativo del grupo: cobros y saldo. El total fiscal se consulta en los comprobantes emitidos.</p>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                         <div>
                           <p className="text-xs text-muted-foreground">Total alojamiento</p>
@@ -3271,7 +3289,7 @@ export default function GroupDetailPage() {
                           <p className="font-bold">${folio.totals.extras.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Total pagos</p>
+                          <p className="text-xs text-muted-foreground">Cobrado operativo</p>
                           <p className="font-bold text-green-600">${folio.totals.payments.toLocaleString("es-AR", { minimumFractionDigits: 0 })}</p>
                         </div>
                         {folio.voidMovementsTotal > 0 && (
@@ -3941,21 +3959,21 @@ export default function GroupDetailPage() {
 
             return (
               <div className="space-y-5">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
                   <div>
                     <p className="text-xs text-muted-foreground">Saldo operativo</p>
                     <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Disponible para facturar</p>
+                      <p className="text-xs text-muted-foreground">Fuentes fiscales disponibles</p>
                     <p className="font-semibold text-primary">{fmtMoney(Number(groupInvoiceSnapshot?.totals?.available ?? 0))}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Adelantos no fiscalizados</p>
+                      <p className="text-xs text-muted-foreground">Anticipos no fiscales previos</p>
                     <p className="font-semibold text-amber-600">{fmtMoney(nonFiscalAdvances)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Total cobrado ahora</p>
+                      <p className="text-xs text-muted-foreground">Nuevo cobro</p>
                     <p className="font-semibold">{fmtMoney(rowsTotal + retentionsTotal)}</p>
                   </div>
                 </div>
@@ -4422,18 +4440,21 @@ export default function GroupDetailPage() {
                       {/* Total preview */}
                       <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm" data-testid="group-fiscal-amount-summary">
                         <div>
-                          <p className="text-xs text-muted-foreground">Total del comprobante</p>
+                          <p className="text-xs text-muted-foreground">Total documento fiscal (bruto)</p>
                           <p className="font-semibold">{fmtMoney(itemsTotal)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Anticipos aplicados</p>
+                          <p className="text-xs text-muted-foreground">Anticipos no fiscales previos aplicados</p>
                           <p className="font-semibold text-amber-600">{fmtMoney(automaticAdvance)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Cobro nuevo requerido</p>
+                          <p className="text-xs text-muted-foreground">Nuevo cobro requerido</p>
                           <p className="font-semibold text-green-600">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</p>
                         </div>
                       </div>
+                      <p className="text-xs text-muted-foreground">
+                        El anticipo ya fue cobrado: se aplica a la liquidación, pero no reduce el total del documento fiscal.
+                      </p>
                       {exceedsFiscalAvailable && (
                         <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1" data-testid="text-items-payment-mismatch">
                           <AlertTriangle className="h-3 w-3 shrink-0" />
@@ -4550,18 +4571,18 @@ export default function GroupDetailPage() {
                   <div className={`grid grid-cols-1 ${!isMaster ? "sm:grid-cols-2" : ""} gap-4`}>
                     {!isMaster && (
                       <div>
-                        <Label>Distribución entre habitaciones</Label>
+                        <Label>Asignación operativa entre habitaciones</Label>
                         <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
                           <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="equal">Partes iguales</SelectItem>
+                            <SelectItem value="equal">Partes iguales (operativo)</SelectItem>
                             <SelectItem value="proportional">Proporcional al saldo</SelectItem>
                           </SelectContent>
                         </Select>
                         <p className="text-xs text-muted-foreground mt-1">
                           {groupPaymentDistribution === "equal"
-                            ? "Partes iguales entre reservas activas"
-                            : "Proporcional al saldo pendiente de cada reserva"}
+                            ? "Solo asignación operativa entre reservas activas; no altera las fuentes fiscales."
+                            : "Asignación operativa proporcional al saldo pendiente; no altera las fuentes fiscales."}
                         </p>
                       </div>
                     )}
@@ -4593,7 +4614,7 @@ export default function GroupDetailPage() {
                           Cerrar habitaciones elegidas con este pago
                         </label>
                         <p className="text-xs text-muted-foreground">
-                          Confirmá el saldo exacto de cada reserva. Las que están en casa pasan a limpieza; las confirmadas se cierran sin generar limpieza.
+                          Confirmá el saldo exacto de cada reserva. Esta asignación es dirigida por habitación (no se reparte en partes iguales). Las que están en casa pasan a limpieza; las confirmadas se cierran sin generar limpieza.
                         </p>
                       </div>
                     </div>
@@ -4683,14 +4704,14 @@ export default function GroupDetailPage() {
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Destino</span><span className="font-medium">{isMaster ? "Folio Maestro" : "Distribución entre habitaciones"}</span></div>
                     )}
                     {isFiscal && (
-                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Conceptos</span><span className="font-medium">{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Total documento fiscal (bruto)</span><span className="font-medium">{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span></div>
                     )}
                     {isFiscal && automaticAdvance > 0 && (
-                      <div className="flex justify-between gap-2 text-amber-700 dark:text-amber-400"><span>Adelantos aplicados</span><span className="font-medium">-{fmtMoney(automaticAdvance)}</span></div>
+                      <div className="flex justify-between gap-2 text-amber-700 dark:text-amber-400"><span>Anticipos no fiscales previos aplicados (ya cobrados)</span><span className="font-medium">-{fmtMoney(automaticAdvance)}</span></div>
                     )}
                     {isFiscal && (
                       <>
-                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobro nuevo requerido</span><span className="font-medium">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Nuevo cobro requerido</span><span className="font-medium">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
                         {groupPaymentCloseAll && closeCollection > requiredCollection + 0.009 && (
                           <div className="flex justify-between gap-2 text-xs"><span className="text-muted-foreground">Porción fiscal del cobro</span><span>{fmtMoney(requiredCollection)}</span></div>
                         )}
@@ -4704,6 +4725,12 @@ export default function GroupDetailPage() {
                       <span>{isFiscal ? "Nuevo cobro informado" : "Total del anticipo"}</span>
                       <span>{fmtMoney(rowsTotal + retentionsTotal)}</span>
                     </div>
+                    {isFiscal && (
+                      <div className="flex justify-between gap-2 border-t pt-1 font-semibold" data-testid="group-payment-total-settled">
+                        <span>Total liquidado</span>
+                        <span>{fmtMoney(automaticAdvance + rowsTotal + retentionsTotal)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 </fieldset>
@@ -4762,6 +4789,11 @@ export default function GroupDetailPage() {
             setPendingGroupPaymentDraft(null);
             setGroupFacturaFromResumen(false);
             resetGroupPaymentDialogFields();
+          }}
+          onBackToSource={groupFacturaFromResumen ? undefined : () => {
+            setShowGroupFacturaDialog(false);
+            setPendingGroupPaymentDraft(null);
+            setShowGroupPaymentDialog(true);
           }}
           config={billingConfig}
           allowedTipos={
@@ -4841,6 +4873,11 @@ export default function GroupDetailPage() {
               setShowMasterFacturaDialog(false);
               setPendingGroupPaymentDraft(null);
               resetGroupPaymentDialogFields();
+            }}
+            onBackToSource={() => {
+              setShowMasterFacturaDialog(false);
+              setPendingGroupPaymentDraft(null);
+              setShowGroupPaymentDialog(true);
             }}
             config={billingConfig}
             allowedTipos={allowedTiposMap[groupPaymentReceiptType] ?? ["FB"]}

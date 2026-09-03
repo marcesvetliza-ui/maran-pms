@@ -302,6 +302,26 @@ function formatGroupPaymentNotes(
   return note ? `${note}\nConceptos: ${conceptText}` : `Conceptos: ${conceptText}`;
 }
 
+/**
+ * Once a group has financial evidence its room structure is part of that
+ * evidence: removing a block (or unlinking a room, which can remove its last
+ * block) would make historic allocations and fiscal sources ambiguous.
+ */
+async function assertGroupStructureCanChange(groupId: string): Promise<void> {
+  const result = await db.execute(sql`
+    SELECT (
+      EXISTS (SELECT 1 FROM group_payments WHERE group_id = ${groupId})
+      OR EXISTS (SELECT 1 FROM sales_invoices WHERE group_id = ${groupId})
+    ) AS has_financial_activity
+  `);
+  if ((result.rows[0] as any)?.has_financial_activity) {
+    throw Object.assign(
+      new Error("No se puede modificar el bloqueo ni desasignar habitaciones: el grupo ya tiene cobros o comprobantes fiscales registrados."),
+      { statusCode: 409 },
+    );
+  }
+}
+
 // Helper: get or create the single placeholder guest for a group
 async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
   const code = `GROUP-${groupId}`;
@@ -825,8 +845,14 @@ export function registerGroupsRoutes(app: Express) {
       // Get block info before deletion to cancel its placeholder reservations
       const [block] = await db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.id, req.params.id));
       if (!block) return res.status(404).json({ error: "Group block not found" });
+      await assertGroupStructureCanChange(block.groupId);
 
-      // Cancel placeholder reservations that would exceed remaining capacity
+      // Determine the placeholders to release before removing the block. The
+      // destructive block operation itself is deliberately performed first:
+      // its storage-level transaction repeats the financial guard, so a
+      // concurrent receipt cannot leave reservations/rooms mutated after the
+      // endpoint returns a 409.
+      const reservationsToCancel: any[] = [];
       const group = await storage.getGroup(block.groupId);
       if (group) {
         const placeholderCode = `GROUP-${block.groupId}`;
@@ -841,20 +867,38 @@ export function registerGroupsRoutes(app: Express) {
         );
 
         // Cancel excess placeholder reservations (beyond remaining capacity)
-        const toCancel = allPlaceholders.slice(remainingCapacity);
-        for (const res of toCancel) {
-          await storage.updateReservation(res.id, { status: "cancelled" });
-          if (res.roomId) {
-            await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, res.roomId));
-          }
-        }
+        reservationsToCancel.push(...allPlaceholders.slice(remainingCapacity));
       }
 
-      const deleted = await storage.deleteGroupBlock(req.params.id);
+      const deleted = await db.transaction(async (tx) => {
+        // Serialize the activity recheck with group-payment recording before
+        // changing either the block or its placeholder reservations.
+        await tx.execute(sql`SELECT id FROM groups WHERE id = ${block.groupId} FOR UPDATE`);
+        const activity = await tx.execute(sql`
+          SELECT (
+            EXISTS (SELECT 1 FROM group_payments WHERE group_id = ${block.groupId})
+            OR EXISTS (SELECT 1 FROM sales_invoices WHERE group_id = ${block.groupId})
+          ) AS has_financial_activity
+        `);
+        if ((activity.rows[0] as any)?.has_financial_activity) {
+          throw Object.assign(
+            new Error("No se puede modificar el bloqueo ni desasignar habitaciones: el grupo ya tiene cobros o comprobantes fiscales registrados."),
+            { statusCode: 409 },
+          );
+        }
+        for (const reservation of reservationsToCancel) {
+          await tx.update(reservationsTable).set({ status: "cancelled" }).where(eq(reservationsTable.id, reservation.id));
+          if (reservation.roomId) {
+            await tx.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
+          }
+        }
+        const result = await tx.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, req.params.id));
+        return (result.rowCount ?? 0) > 0;
+      });
       if (!deleted) return res.status(404).json({ error: "Group block not found" });
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting group block" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error deleting group block" });
     }
   });
 
@@ -1259,10 +1303,12 @@ export function registerGroupsRoutes(app: Express) {
       const balancesById = new Map(balances.map((item) => [item.id, item.balance]));
       const selectedBalance = requestedCloseIds.reduce((sum, id) => sum + (balancesById.get(id) || 0), 0);
       const totalBalance = Math.max(0, operational.balance);
+      let nonFiscalAdvancesForAllocation = 0;
       if (isFiscalGroupReceipt(evidence.receiptType)) {
         const conceptsTotal = evidence.concepts.reduce((sum, concept) => sum + concept.amount, 0);
         const fiscalAvailable = invoiceSnapshot.financial?.fiscalAvailable ?? invoiceSnapshot.totals.available;
         const nonFiscalAdvances = invoiceSnapshot.financial?.nonFiscalAdvances ?? 0;
+        nonFiscalAdvancesForAllocation = Math.max(0, Number(nonFiscalAdvances) || 0);
         // Once ARCA confirmed the invoice, that same document already consumes
         // its source availability. recordGroupPayment validates and claims the
         // persisted invoice atomically, so comparing it again with the reduced
@@ -1304,7 +1350,16 @@ export function registerGroupsRoutes(app: Express) {
             .map((item) => [item.id, Number(item.balance.toFixed(2))]))
         : distributeCents(
             Math.round(totalAmount * 100),
-            balances.map((item) => ({ id: item.id, weight: distribution === "proportional" ? item.balance : 1 }))
+            // An earlier advance may have been explicitly directed to a room.
+            // Allocate this final collection against each room's *remaining*
+            // balance, rather than re-equalizing the total and moving that
+            // directed credit to other rooms.
+            balances.map((item) => ({
+              id: item.id,
+              weight: distribution === "proportional" || nonFiscalAdvancesForAllocation > 0
+                ? item.balance
+                : 1,
+            }))
           );
       const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
         destination: "group_distribution",
@@ -2317,6 +2372,7 @@ export function registerGroupsRoutes(app: Express) {
       if (!["confirmed", "pending", "tentative"].includes(reservation.status)) {
         return res.status(400).json({ error: "Solo se pueden desasignar reservas confirmadas, pendientes o tentativas" });
       }
+      await assertGroupStructureCanChange(groupId);
 
       // Verificar que no tenga cargos extras antes de desasignar
       const chargesCheck = await db.execute(sql`
@@ -2332,35 +2388,41 @@ export function registerGroupsRoutes(app: Express) {
         });
       }
 
-      // Cancel the reservation
-      await storage.updateReservation(reservationId, { status: "cancelled" });
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT id FROM groups WHERE id = ${groupId} FOR UPDATE`);
+        const activity = await tx.execute(sql`
+          SELECT (
+            EXISTS (SELECT 1 FROM group_payments WHERE group_id = ${groupId})
+            OR EXISTS (SELECT 1 FROM sales_invoices WHERE group_id = ${groupId})
+          ) AS has_financial_activity
+        `);
+        if ((activity.rows[0] as any)?.has_financial_activity) {
+          throw Object.assign(
+            new Error("No se puede modificar el bloqueo ni desasignar habitaciones: el grupo ya tiene cobros o comprobantes fiscales registrados."),
+            { statusCode: 409 },
+          );
+        }
+        await tx.update(reservationsTable).set({ status: "cancelled" }).where(eq(reservationsTable.id, reservationId));
+        if (reservation.roomId) {
+          await tx.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
+        }
 
-      // Free the room
-      if (reservation.roomId) {
-        await db.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
-      }
-
-      // Auto-adjust group block: decrement quantity so ghost disappears from planning
-      try {
-        const blocks = await db.select().from(groupRoomBlocks)
+        // Auto-adjust group block: decrement quantity so ghost disappears from planning.
+        const blocks = await tx.select().from(groupRoomBlocks)
           .where(eq(groupRoomBlocks.groupId, groupId));
         const resRoomTypeId = (reservation as any).room?.roomTypeId ?? (reservation as any).roomTypeId;
         const matchingBlock = blocks.find(b => b.roomTypeId === resRoomTypeId);
         if (matchingBlock) {
           if (matchingBlock.quantity <= 1) {
-            await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
+            await tx.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
           } else {
-            await db.update(groupRoomBlocks)
+            await tx.update(groupRoomBlocks)
               .set({ quantity: matchingBlock.quantity - 1 })
               .where(eq(groupRoomBlocks.id, matchingBlock.id));
           }
         }
-      } catch (e) {
-        console.error("[unassign] Error ajustando bloque de grupo:", e);
-      }
-
-      // Remove the group link
-      await db.delete(groupReservationLinks).where(eq(groupReservationLinks.reservationId, reservationId));
+        await tx.delete(groupReservationLinks).where(eq(groupReservationLinks.reservationId, reservationId));
+      });
 
       await audit(req, "delete", "groups",
         `Reserva ${reservation.reservationCode} desasignada del grupo ${group.name}`,
@@ -2370,7 +2432,9 @@ export function registerGroupsRoutes(app: Express) {
       res.json({ success: true });
     } catch (error: any) {
       console.error("unassign-reservation error:", error);
-      res.status(500).json({ error: "Error al desasignar reserva" });
+      res.status(error?.statusCode || 500).json({
+        error: error?.message || "Error al desasignar reserva",
+      });
     }
   });
 

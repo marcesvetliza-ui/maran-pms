@@ -158,6 +158,55 @@ import { getGroupInvoiceSnapshot } from "./billing/groupInvoiceScope";
 import { buildGroupRoomFinancialSnapshot } from "@shared/groupFinancial";
 import { computeGroupOperationalLedger } from "./billing/groupOperationalLedger";
 
+export type GroupIntentSettlement = {
+  documentTotal: number;
+  appliedAdvances: number;
+  newCollection: number;
+};
+
+/**
+ * Validates the immutable fiscal intent, with one deliberately narrow recovery
+ * for intents written by the legacy client that copied documentTotal into
+ * newCollection despite applying an advance.
+ */
+export function reconcileGroupPaymentIntentSettlement(
+  intended: GroupIntentSettlement,
+  requested: GroupIntentSettlement,
+  received: number,
+): GroupIntentSettlement {
+  const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
+  const intendedDocument = cents(intended.documentTotal);
+  const intendedAdvance = cents(intended.appliedAdvances);
+  const intendedCollection = cents(intended.newCollection);
+  const requestedDocument = cents(requested.documentTotal);
+  const requestedAdvance = cents(requested.appliedAdvances);
+  const requestedCollection = cents(requested.newCollection);
+  const receivedCollection = cents(received);
+  const normalMatch =
+    intendedDocument === requestedDocument
+    && intendedAdvance === requestedAdvance
+    && intendedCollection === requestedCollection
+    && requestedCollection === receivedCollection;
+  const legacyMatch =
+    intendedDocument === requestedDocument
+    && intendedAdvance === requestedAdvance
+    && intendedCollection === intendedDocument
+    && intendedAdvance > 0
+    && requestedCollection === intendedDocument - intendedAdvance
+    && requestedCollection === receivedCollection;
+  if (!normalMatch && !legacyMatch) {
+    throw Object.assign(
+      new Error("El desglose del cobro no coincide con la intención fiscal confirmada."),
+      { statusCode: 409 },
+    );
+  }
+  return {
+    documentTotal: intendedDocument / 100,
+    appliedAdvances: intendedAdvance / 100,
+    newCollection: receivedCollection / 100,
+  };
+}
+
 export class DatabaseStorage implements IStorage {
 
   // Reservation Companions
@@ -1890,8 +1939,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteGroupBlock(id: string): Promise<boolean> {
-    const result = await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return db.transaction(async (tx) => {
+      const block = await tx.execute(sql`
+        SELECT group_id
+        FROM group_room_blocks
+        WHERE id = ${id}
+        FOR UPDATE
+      `);
+      const groupId = (block.rows[0] as any)?.group_id;
+      if (!groupId) return false;
+      // recordGroupPayment locks this same row before it writes a parent
+      // receipt. Holding it makes the activity check and block deletion one
+      // decision relative to incoming group collections.
+      await tx.execute(sql`
+        SELECT id FROM groups
+        WHERE id = ${groupId}
+        FOR UPDATE
+      `);
+      const activity = await tx.execute(sql`
+        SELECT (
+          EXISTS (SELECT 1 FROM group_payments WHERE group_id = ${groupId})
+          OR EXISTS (SELECT 1 FROM sales_invoices WHERE group_id = ${groupId})
+        ) AS has_financial_activity
+      `);
+      if ((activity.rows[0] as any)?.has_financial_activity) {
+        throw Object.assign(
+          new Error("No se puede eliminar el bloqueo: el grupo ya tiene cobros o comprobantes fiscales registrados."),
+          { statusCode: 409 },
+        );
+      }
+      const result = await tx.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, id));
+      return (result.rowCount ?? 0) > 0;
+    });
   }
 
   async getGroupReservationLinks(groupId: string): Promise<GroupReservationLink[]> {
@@ -2183,18 +2262,11 @@ export class DatabaseStorage implements IStorage {
         const intended = intent?.body?.settlementBreakdown;
         if (intended) {
           hasAuthoritativeIntent = true;
-          if (
-            cents(intended.documentTotal) !== documentCents
-            || cents(intended.appliedAdvances) !== advanceCents
-            || cents(intended.newCollection) !== newCollectionCents
-          ) {
-            throw Object.assign(new Error("El desglose del cobro no coincide con la intención fiscal confirmada."), { statusCode: 409 });
-          }
-          settlementBreakdown = {
-            documentTotal: cents(intended.documentTotal) / 100,
-            appliedAdvances: cents(intended.appliedAdvances) / 100,
-            newCollection: cents(intended.newCollection) / 100,
-          };
+          settlementBreakdown = reconcileGroupPaymentIntentSettlement(
+            intended,
+            settlementBreakdown,
+            receivedCents / 100,
+          );
         }
       }
       if (linkedInvoice && !hasAuthoritativeIntent) {
@@ -2628,6 +2700,9 @@ export class DatabaseStorage implements IStorage {
         if (!shiftId) {
           throw Object.assign(new Error("No hay un turno de recepción abierto para registrar el cobro."), { statusCode: 409 });
         }
+        // Each tender row is a distinct Caja movement so cash, cards and
+        // transfers remain reconcilable. They all link to the one parent
+        // receipt; room-level payment rows below are allocations only.
         for (const row of cashRows) {
           await tx.insert(cashMovements).values({
             id: randomUUID(),
@@ -2642,6 +2717,7 @@ export class DatabaseStorage implements IStorage {
             registeredBy: input.receivedBy || null,
             receiptType: input.receiptType || null,
             paymentId: groupPayment.id,
+            receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
           } as any).returning();
         }
       }

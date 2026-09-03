@@ -254,6 +254,76 @@ describe("POST group payment applies non-fiscal advances", () => {
     });
   });
 
+  it("keeps a directed advance on its room when allocating the final fiscal collection", async () => {
+    mockStorage.getGroup.mockResolvedValue({
+      id: groupId,
+      name: "Grupo con anticipo dirigido",
+      reservations: [
+        { id: "room-a", roomId: "physical-a", status: "confirmed" },
+        { id: "room-b", roomId: "physical-b", status: "confirmed" },
+      ],
+    });
+    mockStorage.getGroupReservationLedger.mockResolvedValue([
+      {
+        reservationId: "room-a", reservationCode: "RES-A", roomNumber: "101",
+        accommodationTotal: 180, extrasTotal: 0, paymentsTotal: 60,
+        payments: [{ amount: "60.00", groupPaymentId: "advance-parent", status: "active" }],
+      },
+      {
+        reservationId: "room-b", reservationCode: "RES-B", roomNumber: "102",
+        accommodationTotal: 180, extrasTotal: 0, paymentsTotal: 0, payments: [],
+      },
+    ]);
+    mockStorage.getGroupPayments.mockResolvedValue([{
+      id: "advance-parent", amount: "60.00", destination: "group_distribution",
+      distributionDetail: { "room-a": 60 },
+    }]);
+    mocks.invoiceSnapshot.mockResolvedValue({
+      sources: [],
+      totals: { eligible: 360, invoiced: 0, available: 360 },
+      financial: {
+        operationalTotal: 360, collected: 60, nonFiscalAdvances: 60,
+        operationalBalance: 300, invoiced: 0, fiscalAvailable: 360,
+      },
+      paymentDestinations: [],
+    });
+    mocks.recordGroupPayment.mockResolvedValue({
+      groupPayment: { id: "final-parent", amount: "300.00" },
+      reservationPayments: [{ id: "final-a" }, { id: "final-b" }],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "factura_b",
+          receiverDetails: {
+            razonSocial: "Empresa de prueba", cuit: "30712345678",
+            condicionIva: "Responsable Inscripto", domicilio: "Domicilio de prueba",
+          },
+          // The immutable fiscal document continues to cover all services.
+          concepts: [{ description: "Servicios grupales", amount: 360 }],
+          paymentRows: [{ method: "cash", amount: "300.00", reference: "FINAL-300" }],
+          distribution: "equal",
+          invoiceData: { id: 901, tipoComprobante: "FB", puntoVenta: 1, numero: 123 },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+    });
+
+    expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+      invoiceTotal: 360,
+      distributionDetail: { "room-a": 120, "room-b": 180 },
+      settlementBreakdown: {
+        documentTotal: 360,
+        appliedAdvances: 60,
+        newCollection: 300,
+      },
+    }));
+  });
+
   it.each(["269999.99", "270000.01"])("rejects a one-cent collection difference: %s", async (amount) => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
