@@ -71,4 +71,4 @@ VITE_SENTRY_DSN = "https://bd10e666e243e7233618a0a334941e10@o4511450783612928.in
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 60000
+timeoutMs = 180000

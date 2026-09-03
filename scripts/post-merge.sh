@@ -1,9 +1,10 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-npm install
+npm install --no-audit --no-fund
 
-# drizzle-kit push can prompt for confirmation when adding constraints to
-# existing tables. Pipe a newline so it always picks the safe default
-# ("add the constraint without truncating the table") without hanging.
-printf '\n' | npm run db:push
+# Use the application's idempotent migration path. Unlike drizzle-kit push,
+# this command never opens destructive confirmation prompts.
+npm run db:migrate:ci
+
+npm run build
