@@ -12,6 +12,7 @@ import { assertGroupPaymentInvoiceScope, assertMasterFacturaTAllowed, getGroupIn
 import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
+import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
 import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 
@@ -1483,15 +1484,16 @@ export function registerGroupsRoutes(app: Express) {
         .map((invoice) => {
           const sourceAmounts = parseSourceAmountMap(invoice.sourceChargeAmounts);
           const persistedSources = getPersistedGroupInvoiceCompositionSources(invoice.items);
-          return {
+          return exposeInvoiceReconciliation({
             ...invoice,
+            groupReconciliationLinked: Boolean(invoice.groupPaymentId),
             groupComposition: Object.keys(sourceAmounts).length > 0
               ? buildGroupInvoiceComposition(
                   persistedSources.length > 0 ? persistedSources : compositionSources,
                   sourceAmounts,
                 )
               : buildUnavailableGroupInvoiceComposition(invoice.montoTotal),
-          };
+          });
         });
       res.json(invoices);
     } catch (error: any) {
@@ -1630,6 +1632,15 @@ export function registerGroupsRoutes(app: Express) {
           ))
           .returning();
         if (!updated) throw Object.assign(new Error("El cobro fue vinculado a una factura por otra operación. Actualice la pantalla."), { statusCode: 409 });
+        if (storedInvoice.reconciliationStatus === "pendiente" && storedInvoice.groupPaymentIntent) {
+          await tx.update(salesInvoicesTable)
+            .set({
+              reconciliationStatus: "conciliada",
+              reconciliationError: null,
+              reconciliationUpdatedAt: new Date(),
+            })
+            .where(eq(salesInvoicesTable.id, storedInvoice.id));
+        }
         return { payment, updated };
       });
       await audit(req, "update", "groups", `Factura vinculada al cobro grupal: $${payment.amount}`, {

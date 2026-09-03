@@ -2151,7 +2151,8 @@ export class DatabaseStorage implements IStorage {
         }
         const invoiceRows = await tx.execute(sql`
           SELECT id, group_id, group_payment_id, estado, tipo_comprobante, monto_total, items,
-                 group_payment_intent,
+                 group_payment_intent, reconciliation_status, reconciliation_error,
+                 reconciliation_updated_at,
                  cliente_razon_social, cliente_cuit, cliente_dni
           FROM sales_invoices
           WHERE id = ${invoiceId}
@@ -2199,6 +2200,15 @@ export class DatabaseStorage implements IStorage {
             .limit(1);
           if (!existingPayment) {
             throw Object.assign(new Error("La factura ya fue reclamada por otro cobro grupal."), { statusCode: 409 });
+          }
+          if (linkedInvoice.reconciliation_status === "pendiente" && linkedInvoice.group_payment_intent) {
+            await tx.update(salesInvoices)
+              .set({
+                reconciliationStatus: "conciliada",
+                reconciliationError: null,
+                reconciliationUpdatedAt: new Date(),
+              })
+              .where(eq(salesInvoices.id, Number(linkedInvoice.id)));
           }
           const reservationPayments = await tx.select()
             .from(payments)
@@ -2669,8 +2679,18 @@ export class DatabaseStorage implements IStorage {
       } as any).returning();
 
       if (linkedInvoice) {
+        const reconciliationUpdate = linkedInvoice.group_payment_intent
+          ? {
+              reconciliationStatus: "conciliada",
+              reconciliationError: null,
+              reconciliationUpdatedAt: new Date(),
+            }
+          : {};
         const [claimedInvoice] = await tx.update(salesInvoices)
-          .set({ groupPaymentId: groupPayment.id })
+          .set({
+            groupPaymentId: groupPayment.id,
+            ...reconciliationUpdate,
+          })
           .where(and(
             eq(salesInvoices.id, Number(linkedInvoice.id)),
             eq(salesInvoices.groupId, input.groupId),

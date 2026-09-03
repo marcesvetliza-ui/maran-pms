@@ -6,6 +6,7 @@ import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { allocateGroupInvoiceSources, grossItemsTotal } from "@/lib/group-invoice-allocation";
 import { buildGroupInvoiceComposition, type GroupInvoiceCompositionKind } from "@shared/groupInvoiceComposition";
+import { formatInvoiceCreatedTime, isInvoiceReconciliationPending } from "@/lib/invoicePresentation";
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
@@ -64,13 +65,6 @@ function fDate(d: string | undefined | null) {
   if (!d) return "—";
   const dt = new Date(d + "T12:00:00");
   return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
-}
-
-function fCreatedTime(d: string | undefined | null) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return "—";
-  return dt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function padNum(n: number | undefined, len: number) {
@@ -416,7 +410,7 @@ export default function BillingPage() {
                               </td>
                               <td className="px-3 py-2 text-xs whitespace-nowrap">
                                 <div><span className="text-muted-foreground">Fiscal:</span> {fDate(f.fecha_emision)}</div>
-                                <div><span className="text-muted-foreground">Creado:</span> {fCreatedTime(f.created_at)}</div>
+                                <div><span className="text-muted-foreground">Creado:</span> {formatInvoiceCreatedTime(f.created_at)}</div>
                               </td>
                               <td className="px-3 py-2">
                                 <div className="font-medium text-xs truncate max-w-[160px]">{f.cliente_razon_social}</div>
@@ -434,7 +428,7 @@ export default function BillingPage() {
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
                               <td className="px-3 py-2">
-                                {f.reconciliation_status === "pendiente" ? (
+                                {isInvoiceReconciliationPending(f) ? (
                                   <div>
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar

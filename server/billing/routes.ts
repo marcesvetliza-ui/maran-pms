@@ -23,6 +23,7 @@ import {
 import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
 import { assertFinancialSchemaReady } from "../migrate";
+import { exposeInvoiceReconciliation } from "./reconciliationPresentation";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 const SPA_INVOICE_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"];
@@ -138,15 +139,6 @@ async function findLegacyInvoiceGroupId(invoiceId: number): Promise<string | nul
 
 function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
   return invoice?.[snakeCase] ?? invoice?.[camelCase];
-}
-
-function exposeReconciliationError(invoice: any) {
-  const reconciliationError = invoiceValue(invoice, "reconciliation_error", "reconciliationError") ?? null;
-  return {
-    ...invoice,
-    reconciliation_error: reconciliationError,
-    reconciliationError,
-  };
 }
 
 function getCreditSourceAmounts(invoice: any): Record<string, number> | null {
@@ -599,7 +591,12 @@ export function registerBillingRoutes(app: Express) {
                orig.cliente_razon_social AS original_cliente_razon_social,
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
-               orig.estado           AS original_estado
+               orig.estado           AS original_estado,
+               EXISTS (
+                 SELECT 1
+                 FROM group_payments gp
+                 WHERE gp.invoice_id = si.id
+               ) AS group_reconciliation_linked
         FROM sales_invoices si
         LEFT JOIN pos_configs pc ON pc.numero = si.punto_venta
         LEFT JOIN groups g ON g.id = si.group_id
@@ -610,7 +607,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY si.created_at DESC
         LIMIT 200
       `);
-      res.json(rows.rows.map((row: any) => exposeReconciliationError(row)));
+      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -637,7 +634,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
         LIMIT 100
       `);
-      res.json(rows.rows.map((row: any) => exposeReconciliationError(row)));
+      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
     } catch (error: any) {
       res.status(500).json({ error: error.message || "No se pudieron cargar las conciliaciones pendientes" });
     }
@@ -788,7 +785,12 @@ export function registerBillingRoutes(app: Express) {
                orig.cliente_razon_social AS original_cliente_razon_social,
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
-               orig.estado           AS original_estado
+               orig.estado           AS original_estado,
+               EXISTS (
+                 SELECT 1
+                 FROM group_payments gp
+                 WHERE gp.invoice_id = si.id
+               ) AS group_reconciliation_linked
         FROM sales_invoices si
         LEFT JOIN sales_invoices orig
                ON orig.id = si.nota_credito_id
@@ -816,7 +818,7 @@ export function registerBillingRoutes(app: Express) {
           : buildUnavailableGroupInvoiceComposition(invoice.monto_total)
         : undefined;
       res.json({
-        ...exposeReconciliationError(invoice),
+        ...exposeInvoiceReconciliation(invoice),
         ...(composition ? { groupComposition: composition } : {}),
       });
     } catch (e: any) {
