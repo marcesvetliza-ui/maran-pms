@@ -6706,6 +6706,7 @@ export class DatabaseStorage implements IStorage {
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
       ...data,
+      receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
     }).returning();
     return movement;
   }
@@ -6725,6 +6726,7 @@ export class DatabaseStorage implements IStorage {
       registeredBy: registeredBy || null,
       receiptType: receiptType || null,
       paymentId: paymentId || null,
+      receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
     }).returning();
     return movement;
   }

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2134,6 +2134,8 @@ export const insertCashShiftSchema = createInsertSchema(cashShifts).omit({ id: t
 export type InsertCashShift = z.infer<typeof insertCashShiftSchema>;
 export type CashShift = typeof cashShifts.$inferSelect;
 
+export const cashMovementsReceiptNumberSequence = pgSequence("cash_movements_receipt_number_seq");
+
 export const cashMovements = pgTable("cash_movements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   shiftId: varchar("shift_id"),
@@ -2145,8 +2147,9 @@ export const cashMovements = pgTable("cash_movements", {
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
   movementType: text("movement_type").notNull().default("income"),
   receiptType: text("receipt_type"),
-  // Issued by PostgreSQL so parallel cash registrations cannot reuse a number.
-  receiptNumber: text("receipt_number").default(sql`nextval('cash_movements_receipt_number_seq'::regclass)::text`),
+  // Issued explicitly from a PostgreSQL sequence during insertion. Keeping the
+  // sequence off the column DEFAULT avoids a malformed Publish schema diff.
+  receiptNumber: text("receipt_number"),
   proveedor: text("proveedor"),
   expenseCategory: text("expense_category"),
   registeredBy: text("registered_by"),
