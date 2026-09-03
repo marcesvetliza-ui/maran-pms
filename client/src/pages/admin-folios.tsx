@@ -24,6 +24,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FolioViewer from "@/components/FolioViewer";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
+import { formatHotelDateTime, formatHotelTime } from "@/lib/hotelTime";
 
 // ─── Transfer description link helper ────────────────────────────────────────
 
@@ -181,13 +182,11 @@ function formatCurrency(n: number | string) {
 }
 
 function formatDateFull(iso: string) {
-  try { return format(new Date(iso), "dd/MM/yy HH:mm", { locale: es }); }
-  catch { return iso; }
+  return formatHotelDateTime(iso);
 }
 
 function formatTime(iso: string) {
-  try { return format(new Date(iso), "HH:mm", { locale: es }); }
-  catch { return ""; }
+  return formatHotelTime(iso);
 }
 
 function addDays(dateStr: string, n: number) {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
+import { formatHotelTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -328,7 +329,7 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
   const [cuentaContableId, setCuentaContableId] = useState("");
   const [centroCosto, setCentroCosto] = useState("");
   const [fecha, setFecha] = useState(today());
-  const [hora, setHora] = useState(format(new Date(), "HH:mm"));
+  const [hora, setHora] = useState(formatHotelTime(new Date()));
 
   const { data: cuentas = [] } = useQuery<any[]>({
     queryKey: ["/api/accounting-accounts"],
@@ -355,7 +356,7 @@ function NuevoMovimientoDialog({ open, onClose }: { open: boolean; onClose: () =
     setCuentaContableId("");
     setCentroCosto("");
     setFecha(today());
-    setHora(format(new Date(), "HH:mm"));
+    setHora(formatHotelTime(new Date()));
   };
 
   const signo = tipo.startsWith("ingreso") ? "+" : "-";

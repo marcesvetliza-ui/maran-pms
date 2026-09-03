@@ -16,6 +16,13 @@ describe("horarios operativos del hotel", () => {
     expect(formatHotelDateTime(timestamp, { includeSeconds: true })).toBe("03/09/2026 22:30:45");
   });
 
+  it("formatea aperturas y movimientos administrativos en la misma hora del hotel", () => {
+    const openedAt = new Date("2026-09-04T01:30:00.000Z");
+
+    expect(formatHotelDateTime(openedAt)).toBe("03/09/2026 22:30");
+    expect(formatHotelTime(openedAt)).toBe("22:30");
+  });
+
   it("no interpreta fechas calendario como marcas horarias", () => {
     const calendarDate = "2026-09-04";
 
