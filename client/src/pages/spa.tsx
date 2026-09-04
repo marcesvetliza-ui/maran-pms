@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useAuth } from "@/App";
@@ -1637,7 +1638,7 @@ export default function SpaPage() {
     const profName = professional ? `${professional.name} ${professional.lastName || ""}`.trim() : "";
     const price = treatment ? `$${fmtMoney(treatment.price)}` : "$0";
     const notes = apt.notes || "";
-    const now = format(new Date(), "dd/MM/yyyy HH:mm");
+    const now = formatHotelDateTime(new Date());
 
     const buildCopy = (copyLabel: string, withSignature: boolean) => `
       <div class="copy">

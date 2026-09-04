@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -161,8 +162,7 @@ function formatCurrency(value: string | number) {
 }
 
 function formatDate(iso: string) {
-  try { return format(new Date(iso), "dd/MM/yy HH:mm", { locale: es }); }
-  catch { return iso; }
+  return formatHotelDateTime(iso, { twoDigitYear: true });
 }
 
 function movementIcon(type: string) {

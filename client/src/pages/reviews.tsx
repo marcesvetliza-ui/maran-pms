@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   MessageSquare,
@@ -377,7 +378,7 @@ function ReviewDetailDialog({
               )}
 
               <p className="text-xs text-muted-foreground">
-                Analizado: {new Date(review.analyzedAt).toLocaleString("es-AR")}
+                Analizado: {formatHotelDateTime(review.analyzedAt)}
               </p>
             </>
           )}

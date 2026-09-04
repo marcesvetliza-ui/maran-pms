@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import {
   formatReservationInvoiceRef,
   getAvailableReservationAdvancePayments,
@@ -4443,8 +4444,7 @@ function ReservationDetailDialog({
             ) : (
               <div className="space-y-1">
                 {changelog.map((entry: any) => {
-                  const date = new Date(entry.fecha);
-                  const dateStr = `${String(date.getDate()).padStart(2,"0")}/${String(date.getMonth()+1).padStart(2,"0")}/${date.getFullYear()} ${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`;
+                   const dateStr = formatHotelDateTime(entry.fecha);
                   const tipoColors: Record<string,string> = {
                     fecha: "bg-blue-50 dark:bg-blue-900/20 border-blue-200",
                     habitacion: "bg-purple-50 dark:bg-purple-900/20 border-purple-200",
@@ -5989,11 +5989,7 @@ export default function ReservationsPage() {
                         </TableCell>
                         <TableCell>
                           {log.cancellationDate
-                            ? new Date(log.cancellationDate).toLocaleString("es-AR", {
-                                day: "2-digit", month: "2-digit", year: "numeric",
-                                hour: "2-digit", minute: "2-digit",
-                                timeZone: "America/Argentina/Buenos_Aires",
-                              })
+                            ? formatHotelDateTime(log.cancellationDate)
                             : "—"}
                         </TableCell>
                         <TableCell>{log.cancelledBy || "—"}</TableCell>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { useAuth } from "@/App";
@@ -2098,7 +2099,7 @@ export default function Housekeeping() {
                       </div>
                       <div className="flex items-center gap-3 mt-0.5">
                         <p className="text-xs text-muted-foreground">
-                          {new Date(loan.lentAt!).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                          {formatHotelDateTime(loan.lentAt, { includeYear: false })}
                         </p>
                         {loan.notes && <p className="text-xs text-muted-foreground italic truncate max-w-[200px]">{loan.notes}</p>}
                       </div>

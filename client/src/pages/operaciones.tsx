@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { formatHotelTime } from "@/lib/hotelTime";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -26,9 +27,7 @@ function formatCurrency(n: number) {
 }
 
 function formatTime(dateStr: string) {
-  return new Date(dateStr).toLocaleTimeString("es-AR", {
-    hour: "2-digit", minute: "2-digit", timeZone: "America/Argentina/Buenos_Aires",
-  });
+  return formatHotelTime(dateStr);
 }
 
 export default function OperacionesPage() {

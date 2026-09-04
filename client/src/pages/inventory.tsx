@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -591,7 +592,7 @@ ${(movement.items || []).map(i => `    <tr>
     </tr>
   </tbody>
 </table>
-<div class="footer">Generado: ${new Date().toLocaleString("es-AR")} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
+<div class="footer">Generado: ${formatHotelDateTime(new Date())} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
 <script>window.onload=function(){window.print()}<\/script>
 </body></html>`;
     const w = window.open("", "_blank");
@@ -1132,7 +1133,7 @@ ${(movement.items || []).map(i => `    <tr>
                     {filtered.slice(0, 200).map((movement) => (
                       <tr key={movement.id} className="border-t" data-testid={`movement-${movement.id}`}>
                         <td className="p-3 text-sm">
-                          {new Date(movement.createdAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                          {formatHotelDateTime(movement.createdAt, { includeYear: false })}
                         </td>
                         <td className="p-3 font-medium text-sm">{movement.item?.name || "N/A"}</td>
                         <td className="p-3">

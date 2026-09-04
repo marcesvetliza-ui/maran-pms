@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getArgentinaToday } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -274,7 +275,7 @@ export default function DailyReportPage() {
             <div className="text-right">
               <p style={{ fontSize: "10pt", fontWeight: "bold" }}>PLANILLA OPERATIVA DIARIA</p>
               <p style={{ fontSize: "8.5pt", textTransform: "capitalize" }}>{fmtDateLong(date)}</p>
-              <p style={{ fontSize: "7pt", color: "#555" }}>Impreso: {new Date().toLocaleString("es-AR")}</p>
+              <p style={{ fontSize: "7pt", color: "#555" }}>Impreso: {formatHotelDateTime(new Date())}</p>
             </div>
           </div>
         </div>
@@ -519,7 +520,7 @@ export default function DailyReportPage() {
 
             {/* ── Pie de página impresión ── */}
             <div className="hidden print:block mt-6 pt-3 border-t border-gray-300 text-center text-gray-400" style={{ fontSize: "6.5pt" }}>
-              Planilla Operativa Diaria — Maran Suites &amp; Towers · Generado el {new Date().toLocaleString("es-AR")}
+              Planilla Operativa Diaria — Maran Suites &amp; Towers · Generado el {formatHotelDateTime(new Date())}
             </div>
           </>
         )}

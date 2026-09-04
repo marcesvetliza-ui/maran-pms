@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -16,7 +17,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { 
   Plus, 
@@ -1592,7 +1593,7 @@ export default function MaintenancePage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Reportada</p>
                   <p className="font-medium">
-                    {format(parseISO(selectedOrder.reportedAt), "dd/MM/yyyy HH:mm", { locale: es })}
+                    {formatHotelDateTime(selectedOrder.reportedAt)}
                   </p>
                 </div>
                 <div>
@@ -1604,7 +1605,7 @@ export default function MaintenancePage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Completada</p>
                   <p className="font-medium">
-                    {format(parseISO(selectedOrder.completedAt), "dd/MM/yyyy HH:mm", { locale: es })}
+                    {formatHotelDateTime(selectedOrder.completedAt)}
                   </p>
                 </div>
               )}

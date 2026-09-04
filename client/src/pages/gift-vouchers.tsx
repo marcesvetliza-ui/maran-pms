@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { fmtMoney } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -639,7 +640,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
           </div>
           <Separator />
           <div className="grid grid-cols-2 gap-3">
-            <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Emitido</p><p>{format(new Date(voucher.issuedAt), "dd/MM/yyyy HH:mm")}</p></div>
+            <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Emitido</p><p>{formatHotelDateTime(voucher.issuedAt)}</p></div>
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Vence</p><p>{voucher.expiresAt ? format(new Date(voucher.expiresAt + "T12:00:00"), "dd/MM/yyyy") : "—"}</p></div>
             {voucher.pricePaid && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Precio cobrado</p><p className="font-mono">${fmtMoney(voucher.pricePaid)}</p></div>}
             {voucher.paymentMethod && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Forma de pago</p><p className="capitalize">{voucher.paymentMethod}</p></div>}
@@ -648,7 +649,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             <>
               <Separator />
               <div className="grid grid-cols-2 gap-3">
-                {voucher.usedAt && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Usado el</p><p>{format(new Date(voucher.usedAt), "dd/MM/yyyy HH:mm")}</p></div>}
+                {voucher.usedAt && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Usado el</p><p>{formatHotelDateTime(voucher.usedAt)}</p></div>}
                 {voucher.usedBy && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Canjeado por</p><p>{voucher.usedBy}</p></div>}
                 {voucher.usedNotes && <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Notas de uso</p><p>{voucher.usedNotes}</p></div>}
               </div>

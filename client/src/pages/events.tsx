@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/App";
 import { fmtMoney } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
@@ -2281,7 +2282,7 @@ export default function EventsPage() {
                     <Receipt className="h-12 w-12 mx-auto text-purple-500 mb-3" />
                     <h4 className="font-bold text-lg">Evento Facturado</h4>
                     <p className="text-muted-foreground">
-                      Comprobante: {selectedEvent.receiptType} | Cerrado: {selectedEvent.closedAt ? safeFormatDate(selectedEvent.closedAt, "d MMM yyyy HH:mm", { locale: es }) : ""}
+                      Comprobante: {selectedEvent.receiptType} | Cerrado: {selectedEvent.closedAt ? formatHotelDateTime(selectedEvent.closedAt) : ""}
                     </p>
                     <div className="mt-4 grid grid-cols-2 gap-4 max-w-sm mx-auto">
                       <div>
@@ -3173,7 +3174,7 @@ export default function EventsPage() {
                       <p className="text-sm text-muted-foreground">
                         Comprobante: <span className="font-medium">{selectedTable.receiptType || "—"}</span>
                         {selectedTable.closedAt && (
-                          <> · Cerrada: {safeFormatDate(selectedTable.closedAt, "d MMM yyyy HH:mm", { locale: es })}</>
+                          <> · Cerrada: {formatHotelDateTime(selectedTable.closedAt)}</>
                         )}
                       </p>
                       <div className="flex gap-2">

@@ -1,6 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getLocalToday, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import {
   DoorOpen,
   Users,
@@ -55,9 +56,7 @@ const fmtDate = (d: string | null | undefined): string =>
   d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
 
 const fmtDateTime = (d: string | Date | null | undefined): string => {
-  if (!d) return "—";
-  const dt = typeof d === "string" ? new Date(d) : d;
-  return isNaN(dt.getTime()) ? "—" : dt.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return formatHotelDateTime(d);
 };
 
 function StatCard({

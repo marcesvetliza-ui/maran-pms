@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { formatHotelDateTime, formatHotelTime } from "@/lib/hotelTime";
 import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -203,12 +204,7 @@ function formatCurrency(value: number): string {
 }
 
 function formatTime(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: ARGENTINA_TIME_ZONE,
-  });
+  return formatHotelTime(dateStr);
 }
 
 function formatDate(dateStr: string): string {
@@ -218,19 +214,7 @@ function formatDate(dateStr: string): string {
 
 function formatDateTime(dateStr: string): string {
   if (!dateStr) return "-";
-  const d = new Date(dateStr);
-  const datepart = d.toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: ARGENTINA_TIME_ZONE,
-  });
-  const timepart = d.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: ARGENTINA_TIME_ZONE,
-  });
-  return `${datepart} ${timepart}`;
+  return formatHotelDateTime(dateStr);
 }
 
 function formatInvoiceReference(movement: CashMovement): string | null {
@@ -486,7 +470,7 @@ ${methodBoxes}
 ${anulSection}
 
 <div style="text-align:center;margin-top:20px;padding-top:10px;border-top:1px solid #eee;font-size:10px;color:#aaa">
-  Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers
+  Generado el ${formatHotelDateTime(new Date())} | Maran Suites & Towers
 </div>
 <script>window.onload=function(){window.print();}<\/script>
 </body></html>`;
@@ -1585,8 +1569,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                   </h4>
                   <div className="space-y-1 text-xs">
                     {changelogHoy.map((entry: any) => {
-                      const d = new Date(entry.fecha);
-                      const hora = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+                       const hora = formatHotelTime(entry.fecha);
                       return (
                         <div key={entry.id} className="flex items-start gap-2 py-1 border-b border-dashed border-muted-foreground/20" data-testid={`changelog-hoy-${entry.id}`}>
                           <span className="text-muted-foreground w-10 shrink-0">{hora}</span>
@@ -1989,7 +1972,7 @@ ${Object.entries(totalPorMetodo).map(([m, v]) => `<tr><td>${PAYMENT_METHOD_MAP[m
 <table><thead><tr><th>Área</th><th>Descripción</th><th>Referencia</th><th>Método</th><th>Monto</th></tr></thead><tbody>
 ${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${m.descripcion || "-"}</td><td>${m.referencia || "-"}</td><td>${PAYMENT_METHOD_MAP[m.metodo] || m.metodo}</td><td>${formatCurrency(m.monto)}</td></tr>`).join("")}
 </tbody></table>
-<div class="footer">Generado el ${new Date().toLocaleString("es-AR")} | Maran Suites & Towers</div>
+<div class="footer">Generado el ${formatHotelDateTime(new Date())} | Maran Suites & Towers</div>
 <script>window.onload=function(){window.print();}<\/script>
 </body></html>`;
   const w = window.open("", "_blank");
@@ -2159,7 +2142,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
             Night Audit — {audit.auditDate}
           </DialogTitle>
           <DialogDescription>
-            Ejecutado el {new Date(audit.executedAt).toLocaleString("es-AR")} por {audit.executedBy}
+            Ejecutado el {formatHotelDateTime(audit.executedAt)} por {audit.executedBy}
             {audit.isManual && <Badge variant="outline" className="ml-2 text-[10px]">manual</Badge>}
           </DialogDescription>
         </DialogHeader>
@@ -2340,7 +2323,7 @@ function NightAuditTab() {
                 <p className={`text-sm font-medium ${NA_STATUS_COLOR[status.lastAudit.status]}`}>
                   {NA_STATUS_LABEL[status.lastAudit.status]} — {status.lastAudit.auditDate}
                 </p>
-                <p className="text-xs text-muted-foreground">{new Date(status.lastAudit.executedAt).toLocaleString("es-AR")}</p>
+                <p className="text-xs text-muted-foreground">{formatHotelDateTime(status.lastAudit.executedAt)}</p>
               </div>
             ) : <p className="text-sm text-muted-foreground">Sin registros</p>}
           </CardContent>
@@ -2429,7 +2412,7 @@ function NightAuditTab() {
                   <TableRow key={audit.id}>
                     <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {new Date(audit.executedAt).toLocaleString("es-AR")}
+                      {formatHotelDateTime(audit.executedAt)}
                       {audit.isManual && <Badge variant="outline" className="ml-1 text-[10px]">manual</Badge>}
                     </TableCell>
                     <TableCell className="text-sm">{audit.executedBy}</TableCell>

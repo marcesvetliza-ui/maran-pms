@@ -10,7 +10,7 @@ function parseTimestamp(value: TimestampValue): Date | null {
 
 export function formatHotelDateTime(
   value: TimestampValue,
-  options: { includeYear?: boolean; includeSeconds?: boolean } = {},
+  options: { includeYear?: boolean; includeSeconds?: boolean; twoDigitYear?: boolean } = {},
 ): string {
   const date = parseTimestamp(value);
   if (!date) return "—";
@@ -19,11 +19,11 @@ export function formatHotelDateTime(
     timeZone: HOTEL_TIME_ZONE,
     day: "2-digit",
     month: "2-digit",
-    year: "numeric",
+    year: options.twoDigitYear ? "2-digit" : "numeric",
     hour: "2-digit",
     minute: "2-digit",
     ...(options.includeSeconds ? { second: "2-digit" as const } : {}),
-    hour12: false,
+    hourCycle: "h23",
   }).formatToParts(date);
   const valueOf = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
@@ -45,6 +45,6 @@ export function formatHotelTime(value: TimestampValue): string {
     timeZone: HOTEL_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   }).format(date);
 }

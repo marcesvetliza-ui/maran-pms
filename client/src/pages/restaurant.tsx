@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
+import { formatHotelDateTime, formatHotelTime } from "@/lib/hotelTime";
 import { useAuth } from "@/App";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -2260,7 +2261,7 @@ export default function RestaurantPage() {
     <hr>
     <p style="font-size:12px;margin:4px 0"><b>Mesa/Pedido:</b> ${esc(order.orderLabel || String(order.orderNumber))}</p>
     ${order.waiterName ? `<p style="font-size:12px;margin:4px 0"><b>Mozo:</b> ${esc(order.waiterName)}</p>` : ""}
-    <p style="font-size:12px;margin:4px 0"><b>Fecha:</b> ${esc(format(new Date(), "dd/MM/yyyy HH:mm"))}</p>
+    <p style="font-size:12px;margin:4px 0"><b>Fecha:</b> ${esc(formatHotelDateTime(new Date()))}</p>
     <hr>
     <table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th style="text-align:right">Total</th></tr></thead>
     <tbody>${rows}</tbody></table>
@@ -2311,7 +2312,7 @@ export default function RestaurantPage() {
     <hr>
     <p class="meta"><b>Mesa/Pedido:</b> ${esc(order?.orderLabel || String(order?.orderNumber || ""))}</p>
     ${order?.waiterName ? `<p class="meta"><b>Mozo:</b> ${esc(order.waiterName)}</p>` : ""}
-    <p class="meta"><b>Hora:</b> ${new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</p>
+    <p class="meta"><b>Hora:</b> ${formatHotelTime(new Date())}</p>
     <hr>
     <table>
       <thead><tr><th>Ítem ANULADO</th><th style="text-align:center">Cant.</th><th>Obs.</th></tr></thead>
@@ -2639,7 +2640,7 @@ export default function RestaurantPage() {
                                     <Badge variant="outline" className="text-xs">{order.orderNumber}</Badge>
                                   </div>
                                   <div className="text-xs text-muted-foreground mt-0.5">
-                                    Mozo: {order.waiterName || "—"} | {new Date(order.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+                                    Mozo: {order.waiterName || "—"} | {formatHotelTime(order.openedAt)}
                                     {order.items && order.items.length > 0 && ` | ${order.items.length} items`}
                                   </div>
                                 </div>
@@ -2933,7 +2934,7 @@ export default function RestaurantPage() {
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Clock className="h-4 w-4 text-muted-foreground" />
-                      Abierto: {new Date(order.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+                      Abierto: {formatHotelTime(order.openedAt)}
                     </div>
                     <div className="pt-2 border-t flex items-center justify-between">
                       <span className="font-semibold">Total:</span>
@@ -3137,7 +3138,7 @@ export default function RestaurantPage() {
                       <thead><tr><th>Hora</th><th>Huésped / Notas</th><th style="text-align:center">Pers.</th><th style="text-align:center">Mesa</th><th>Teléfono</th><th style="text-align:center">Estado</th><th style="text-align:center">Seña</th></tr></thead>
                       <tbody>${rows || "<tr><td colspan='7' style='text-align:center;padding:20px;color:#999'>Sin reservas para este día</td></tr>"}</tbody>
                     </table>
-                    <div class="footer">Generado: ${new Date().toLocaleString("es-AR")}</div>
+                    <div class="footer">Generado: ${formatHotelDateTime(new Date())}</div>
                     </body></html>`);
                     w.document.close();
                     w.print();
@@ -4371,7 +4372,7 @@ export default function RestaurantPage() {
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
                   <span>Mozo: {getUpdatedOrder()?.waiterName || "—"}</span>
                   <span>|</span>
-                  <span>Abierto: {currentOrder ? new Date(currentOrder.openedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+                  <span>Abierto: {currentOrder ? formatHotelTime(currentOrder.openedAt) : ""}</span>
                   <span>|</span>
                   {editingCovers ? (
                     <span className="flex items-center gap-1">

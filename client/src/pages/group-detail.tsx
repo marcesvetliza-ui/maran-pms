@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -1775,7 +1776,7 @@ export default function GroupDetailPage() {
       <h2>Rooming List</h2>
     </div>
     <div style="text-align:right;font-size:11px;color:#777;">
-      Generado el ${new Date().toLocaleString("es-AR")}
+      Generado el ${formatHotelDateTime(new Date())}
     </div>
   </div>
   <div class="info-panel">
@@ -3719,7 +3720,7 @@ export default function GroupDetailPage() {
             )}
 
             <div className="text-xs text-muted-foreground text-center pt-4 border-t">
-              Generado el {new Date().toLocaleString("es-AR")} | Maran Suites & Towers
+              Generado el {formatHotelDateTime(new Date())} | Maran Suites & Towers
             </div>
           </div>
 

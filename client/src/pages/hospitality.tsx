@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -407,7 +408,7 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
               </p>
               {(alert as any).status === "in_progress" && alert.acknowledgedBy && (
                 <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                  En proceso — {alert.acknowledgedBy} {alert.acknowledgedAt ? `· ${new Date(alert.acknowledgedAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : ""}
+                  En proceso — {alert.acknowledgedBy} {alert.acknowledgedAt ? `· ${formatHotelDateTime(alert.acknowledgedAt, { includeYear: false })}` : ""}
                 </p>
               )}
             </div>

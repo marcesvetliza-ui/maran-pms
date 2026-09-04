@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -531,7 +532,7 @@ export default function EmailConfigPage() {
                           l.type === "reminder" ? "Recordatorio" : "Post-checkout"
                         }</Badge>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {l.sentAt ? new Date(l.sentAt).toLocaleString("es-AR") : ""}
+                          {l.sentAt ? formatHotelDateTime(l.sentAt) : ""}
                         </p>
                       </div>
                     </div>
@@ -906,7 +907,7 @@ function BackupTab() {
                     <tr key={log.id} data-testid={`row-backup-log-${log.id}`}
                       className="hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-                        {new Date(log.createdAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" })}
+                        {formatHotelDateTime(log.createdAt)}
                       </td>
                       <td className="px-3 py-2">
                         {BACKUP_TYPE_LABEL[log.type] ?? log.type}

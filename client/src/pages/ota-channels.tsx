@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { fmtMoney } from "@/lib/utils";
+import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -450,7 +451,7 @@ export default function OTAChannelsPage() {
                 </div>
                 {selectedChannel.lastSyncAt && (
                   <div className="text-sm text-muted-foreground">
-                    Última sincronización: {new Date(selectedChannel.lastSyncAt).toLocaleString("es-AR")}
+                    Última sincronización: {formatHotelDateTime(selectedChannel.lastSyncAt)}
                   </div>
                 )}
               </div>
