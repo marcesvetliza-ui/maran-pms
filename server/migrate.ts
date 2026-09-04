@@ -65,6 +65,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
     invoice_counters: [],
+    purchase_invoices: ["subtipo_retencion"],
   },
   indexes: {
     sales_invoices: [
@@ -355,6 +356,10 @@ export async function runMigrations() {
 
   await withTimeout("cash_shifts.turno_tipo", T, () =>
     db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`)
+  );
+
+  await withTimeout("purchase_invoices.subtipo_retencion", T, () =>
+    db.execute(sql`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS subtipo_retencion text`)
   );
 
   // Older databases allowed more than one counter for the same fiscal
