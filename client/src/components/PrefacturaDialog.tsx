@@ -42,11 +42,20 @@ interface PrefacturaFolioData {
   roomRate: string;
   roomTotal: number;
   charges: any[];
+  fiscalAdjustments?: any[];
   totalCharges: number;
   payments: any[];
   totalPayments: number;
   grandTotal: number;
   balance: number;
+  financialSummary?: {
+    operationalServices: number;
+    netInvoiced: number;
+    historicalPayments: number;
+    releasedAvailableAdvance: number;
+    pendingGrossInvoice: number;
+    newCollectionNeeded: number;
+  };
 }
 
 interface PaymentRow {
@@ -577,19 +586,31 @@ export function PrefacturaDialog({
   useEffect(() => {
     if (open) {
       setStep(1);
+      setDoCheckout(true);
       setEmittedInvoice(null);
       setCheckoutDone(false);
       setCheckoutFailed(false);
       setPaymentRegistered(false);
       setSubmitError(null);
+      setSelectedIds(new Set());
       setItemDescriptions({});
       setEditingId(null);
+      setEditingValue("");
+      setPaymentRows([{ id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" }]);
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
       setSaleCondition("contado");
+      setTransferDialogOpen(false);
+      setTransferCharge(null);
+      setShowBulkTransfer(false);
+      setShowPartialWarning(false);
+      setRevertCharge(null);
+      setRevertDialogOpen(false);
+      setNcDialogOpen(false);
+      setNdDialogOpen(false);
       folioInitializedRef.current = false;
     }
-  }, [open]);
+  }, [open, reservationId]);
 
   // When folio loads or balance changes: sync selected items and payment amount.
   //
@@ -1411,7 +1432,7 @@ export function PrefacturaDialog({
                         const m = c.description?.match(/\[rev:([^\]]+)\]/);
                         if (m) reversedIds.add(m[1]);
                       });
-                      return (folio.charges || []).map((charge: any) => {
+                      return (folio.charges || []).filter((charge: any) => charge.category !== "adjustment").map((charge: any) => {
                         const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
                         const isReversal = charge.description?.includes("[rev:") ?? false;
                         const alreadyReversed = reversedIds.has(String(charge.id));
@@ -1440,24 +1461,46 @@ export function PrefacturaDialog({
                         );
                       });
                     })()}
+                    {(folio.fiscalAdjustments || []).map((adjustment: any) => (
+                      <TableRow key={adjustment.id} className="bg-amber-50/50 dark:bg-amber-950/10">
+                        <TableCell />
+                        <TableCell className="text-sm text-amber-800 dark:text-amber-200">
+                          Nota de Crédito fiscal — {adjustment.description.replace(/\s*\[nc:[^\]]+\]/, "")}
+                        </TableCell>
+                        <TableCell className="text-right text-sm font-medium text-amber-700 dark:text-amber-300">
+                          ${fmtMoney(Math.abs(parseFloat(adjustment.amount) || 0))}
+                        </TableCell>
+                        <TableCell colSpan={3} className="text-xs text-muted-foreground">
+                          No modifica el valor operativo del servicio
+                        </TableCell>
+                      </TableRow>
+                    ))}
                     {/* Payments / advances already made */}
                     {(folio.payments || []).length > 0 && (
                       <>
                         <TableRow className="bg-muted/20">
                           <TableCell colSpan={6} className="py-1 px-3 text-xs text-muted-foreground font-medium">Cobros ya registrados</TableCell>
                         </TableRow>
-                        {(folio.payments || []).map((p: any) => (
-                          <TableRow key={p.id} className="opacity-60">
+                        {(folio.payments || []).map((p: any) => {
+                          const available = availableAdvancePayments.find(advance => String(advance.id) === String(p.id));
+                          return (
+                          <TableRow key={p.id} className="opacity-80">
                             <TableCell />
                             <TableCell className="text-sm">
-                              {PAYMENT_METHOD_LABELS[p.method] || p.method}
+                              Cobro histórico · {PAYMENT_METHOD_LABELS[p.method] || p.method}
                               {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
+                              {available?.releasedFromCreditedInvoice && (
+                                <span className="block text-xs text-amber-700 dark:text-amber-300">
+                                  NC liberó ${fmtMoney(available.availableAdvanceAmount)} como anticipo disponible
+                                </span>
+                              )}
                             </TableCell>
                             <TableCell className="text-right text-sm text-green-700 dark:text-green-400" colSpan={4}>
                               − ${fmtMoney(p.amount)}
                             </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </>
                     )}
                   </TableBody>
@@ -1465,7 +1508,7 @@ export function PrefacturaDialog({
                 {/* Totals row */}
                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Pendiente de facturación</div>
+                    <div className="text-muted-foreground text-xs">A facturar (bruto)</div>
                     <div className="font-bold">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">
@@ -1473,7 +1516,7 @@ export function PrefacturaDialog({
                     <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(selectedAlreadyPaid)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Pendiente de cobro</div>
+                    <div className="text-muted-foreground text-xs">Nuevo cobro requerido</div>
                     <div className={`font-bold text-base ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
                       ${fmtMoney(selectedBalance)}
                     </div>
@@ -1481,7 +1524,9 @@ export function PrefacturaDialog({
                 </div>
                 {(folio.payments || []).length > 0 && (
                   <p className="px-4 pb-3 text-xs text-muted-foreground">
-                    Los anticipos reducen solamente el cobro. El importe a facturar se calcula con el saldo fiscal pendiente de cada cargo.
+                    Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} ·
+                    {" "}anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}.
+                    {" "}El anticipo reduce solamente el nuevo cobro; el importe a facturar conserva el servicio bruto.
                   </p>
                 )}
                 <div className="border-t px-4 py-2 flex justify-end">

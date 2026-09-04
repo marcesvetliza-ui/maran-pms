@@ -384,6 +384,45 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     expect(screen.queryByText(/check-out completado/i)).not.toBeInTheDocument();
   });
 
+  it("resets the checkout option when the dialog is closed and reopened", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const props = {
+      onClose,
+      reservationId: RESERVATION_ID,
+      reservation: CONFLICT_RESERVATION,
+      mode: "checkout" as const,
+      onCheckoutComplete: vi.fn(),
+    };
+    const view = render(
+      <Wrapper>
+        <PrefacturaDialog open {...props} />
+      </Wrapper>,
+    );
+
+    const checkoutCheckbox = await screen.findByRole("checkbox", {
+      name: /hacer check-out al confirmar/i,
+    });
+    expect(checkoutCheckbox).toBeChecked();
+    await user.click(checkoutCheckbox);
+    expect(checkoutCheckbox).not.toBeChecked();
+
+    view.rerender(
+      <Wrapper>
+        <PrefacturaDialog open={false} {...props} />
+      </Wrapper>,
+    );
+    view.rerender(
+      <Wrapper>
+        <PrefacturaDialog open {...props} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => expect(screen.getByRole("checkbox", {
+      name: /hacer check-out al confirmar/i,
+    })).toBeChecked());
+  });
+
   it("does NOT call onCheckoutComplete when checkout fails", async () => {
     const user = userEvent.setup();
     const { onCheckoutComplete } = renderDialog();

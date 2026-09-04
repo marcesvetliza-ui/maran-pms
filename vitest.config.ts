@@ -9,7 +9,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./client/src/test/setup.ts"],
     css: false,
-    include: ["client/src/**/*.test.{ts,tsx}"],
+    include: [
+      "client/src/**/*.test.{ts,tsx}",
+      "shared/**/*.test.{ts,tsx}",
+    ],
     exclude: ["node_modules/**", ".cache/**", "dist/**"],
   },
   resolve: {

@@ -1,6 +1,7 @@
 const SALE_INVOICE_TYPES = new Set(["FA", "FB", "FC", "FT", "FM"]);
 
 export type ReservationChargeLike = {
+  amount?: string | number | null;
   category?: string | null;
   description?: string | null;
   status?: string | null;
@@ -172,4 +173,37 @@ export function getAvailableReservationAdvanceTotal(
 ): number {
   return getAvailableReservationAdvancePayments(payments, invoices)
     .reduce((sum, payment) => sum + payment.availableAdvanceAmount, 0);
+}
+
+/**
+ * Financial views must keep the operational folio and fiscal history separate:
+ * an NC reduces the fiscal document, but it never removes a service or creates
+ * a cash refund.  The released part of an historical payment is an advance
+ * that may be applied to the next invoice.
+ */
+export function getReservationFinancialSummary(
+  roomTotal: number,
+  charges: ReservationChargeLike[] = [],
+  payments: ReservationPaymentLike[] = [],
+  invoices: ReservationInvoiceLike[] = [],
+) {
+  const operationalExtraCharges = getOperationalReservationCharges(charges)
+    .reduce((sum, charge: any) => sum + (Number(charge.amount) || 0), 0);
+  const operationalServices = Number(roomTotal || 0) + operationalExtraCharges;
+  const activePayments = payments.filter(payment => payment.status !== "anulado");
+  const historicalPayments = activePayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const netInvoiced = getNetReservationInvoicedTotal(invoices);
+  const releasedAvailableAdvance = getAvailableReservationAdvanceTotal(activePayments, invoices);
+  const pendingGrossInvoice = Math.max(0, operationalServices - netInvoiced);
+
+  return {
+    operationalServices: Number(operationalServices.toFixed(2)),
+    netInvoiced: Number(netInvoiced.toFixed(2)),
+    historicalPayments: Number(historicalPayments.toFixed(2)),
+    releasedAvailableAdvance: Number(releasedAvailableAdvance.toFixed(2)),
+    pendingGrossInvoice: Number(pendingGrossInvoice.toFixed(2)),
+    // This is the operational balance before applying a released advance.
+    pendingGrossCollection: Number(Math.max(0, operationalServices - historicalPayments).toFixed(2)),
+    newCollectionNeeded: Number(Math.max(0, pendingGrossInvoice - releasedAvailableAdvance).toFixed(2)),
+  };
 }

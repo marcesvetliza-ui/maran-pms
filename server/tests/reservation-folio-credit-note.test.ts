@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   dbResponses: [] as Array<{ rows: any[] }>,
+  dbError: null as Error | null,
   pdfPayloads: [] as any[],
 }));
 
@@ -80,7 +81,10 @@ vi.mock("../db-storage", () => ({
 }));
 vi.mock("../db", () => ({
   db: {
-    execute: vi.fn(async () => state.dbResponses.shift() ?? { rows: [] }),
+    execute: vi.fn(async () => {
+      if (state.dbError) throw state.dbError;
+      return state.dbResponses.shift() ?? { rows: [] };
+    }),
     select: vi.fn(),
     update: vi.fn(),
     insert: vi.fn(),
@@ -89,7 +93,10 @@ vi.mock("../db", () => ({
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
 vi.mock("../auth", () => ({
-  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (req: any, res: any, next: () => void) => {
+    if (req.headers["x-test-auth"] === "authenticated") return next();
+    return res.status(401).json({ error: "No autenticado" });
+  },
 }));
 vi.mock("../billing/invoiceService", () => ({ emitirFactura: vi.fn() }));
 vi.mock("../billing/invoicePdf", async (importOriginal) => {
@@ -174,6 +181,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
 
 beforeEach(() => {
   state.dbResponses = [];
+  state.dbError = null;
   state.pdfPayloads = [];
   vi.clearAllMocks();
 });
@@ -183,9 +191,43 @@ afterEach(() => {
 });
 
 describe("reservation folio after a total credit note", () => {
+  it("rejects an unauthenticated folio request", async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/reservations/reservation-1/folio`);
+      expect(response.status).toBe(401);
+    });
+    expect(storage.getReservation).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when invoice history cannot be read for the JSON folio", async () => {
+    state.dbError = new Error("sales_invoices unavailable");
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/reservations/reservation-1/folio`, {
+        headers: { "x-test-auth": "authenticated" },
+      });
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body).toMatchObject({ error: "Error fetching folio" });
+      expect(body.financialSummary).toBeUndefined();
+    });
+  });
+
+  it("fails closed without generating a PDF when invoice history cannot be read", async () => {
+    state.dbError = new Error("sales_invoices unavailable");
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/reservations/reservation-1/folio/pdf`, {
+        headers: { "x-test-auth": "authenticated" },
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("content-type")).not.toContain("application/pdf");
+    });
+    expect(state.pdfPayloads).toHaveLength(0);
+  });
+
   it("keeps operational totals in JSON and sends the same reconciled totals to the account-summary PDF", async () => {
     await withServer(async (baseUrl) => {
-      const folioResponse = await fetch(`${baseUrl}/api/reservations/reservation-1/folio`);
+      const authHeaders = { "x-test-auth": "authenticated" };
+      const folioResponse = await fetch(`${baseUrl}/api/reservations/reservation-1/folio`, { headers: authHeaders });
       expect(folioResponse.status).toBe(200);
       await expect(folioResponse.json()).resolves.toMatchObject({
         roomTotal: 143000,
@@ -202,7 +244,7 @@ describe("reservation folio after a total credit note", () => {
         { rows: [{ id: "folio-1" }] },
         { rows: [] },
       ];
-      const pdfResponse = await fetch(`${baseUrl}/api/reservations/reservation-1/folio/pdf`);
+      const pdfResponse = await fetch(`${baseUrl}/api/reservations/reservation-1/folio/pdf`, { headers: authHeaders });
       expect(pdfResponse.status).toBe(200);
       expect(pdfResponse.headers.get("content-type")).toContain("application/pdf");
 

@@ -18,6 +18,7 @@ import {
   getAvailableReservationAdvancePayments,
   getAvailableReservationAdvanceTotal,
   getNetReservationInvoicedTotal,
+  getReservationFinancialSummary,
   getOperationalReservationCharges,
   isReservationCreditNoteAdjustment,
 } from "@shared/reservationFolio";
@@ -890,15 +891,24 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Get reservation folio (charges summary)
-  app.get("/api/reservations/:id/folio", async (req, res) => {
+  app.get("/api/reservations/:id/folio", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
       }
 
-      const chargesList = await storage.getCharges(req.params.id);
-      const paymentsList = await storage.getPayments(req.params.id);
+      const [chargesList, paymentsList, invoicesResult] = await Promise.all([
+        storage.getCharges(req.params.id),
+        storage.getPayments(req.params.id),
+        db.execute(sql`
+          SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
+          FROM sales_invoices
+          WHERE reserva_id = ${req.params.id}
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
+            AND estado IN ('emitida','parcial','anulada')
+        `),
+      ]);
       const operationalCharges = getOperationalReservationCharges(chargesList);
       const creditNoteAdjustments = chargesList.filter(isReservationCreditNoteAdjustment);
       const totalCharges = operationalCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
@@ -910,6 +920,12 @@ export function registerReservationsRoutes(app: Express) {
         : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
       const grandTotal = roomTotal + totalCharges;
       const balance = grandTotal - totalPayments;
+      const financialSummary = getReservationFinancialSummary(
+        roomTotal,
+        chargesList,
+        paymentsList,
+        invoicesResult.rows as any[],
+      );
 
       res.json({
         reservationCode: reservation.reservationCode,
@@ -927,6 +943,7 @@ export function registerReservationsRoutes(app: Express) {
         totalPayments,
         grandTotal,
         balance,
+        financialSummary,
       });
     } catch (error) {
       res.status(500).json({ error: "Error fetching folio" });
@@ -951,7 +968,7 @@ export function registerReservationsRoutes(app: Express) {
             AND tipo_comprobante IN ('FA','FB','FC','FT','FM','NCA','NCB','NCC','NCT','NCM')
             AND estado IN ('emitida','parcial','anulada')
           ORDER BY created_at ASC
-        `).catch(() => ({ rows: [] })),
+        `),
       ]);
       const emittedInvoices = (invoicesResult.rows as any[]).map((r: any) => ({
         id: Number(r.id),
@@ -997,6 +1014,7 @@ export function registerReservationsRoutes(app: Express) {
       const balance = grandTotal - totalPayments;
       const netInvoiced = getNetReservationInvoicedTotal(emittedInvoices);
       const availableAdvance = getAvailableReservationAdvanceTotal(activePayments, emittedInvoices);
+      const financialSummary = getReservationFinancialSummary(roomTotal, chargesList, paymentsList, emittedInvoices);
 
       const printedAt = formatArgentinaDateTime(new Date());
 
@@ -1019,6 +1037,8 @@ export function registerReservationsRoutes(app: Express) {
         netInvoiced,
         availableAdvance,
         pendingBilling: Math.max(0, grandTotal - netInvoiced),
+        historicalPayments: financialSummary.historicalPayments,
+        newCollectionNeeded: financialSummary.newCollectionNeeded,
         printedAt,
       }, config);
 
@@ -1057,6 +1077,7 @@ export function registerReservationsRoutes(app: Express) {
         WHERE si.reserva_id = ${req.params.id}
           AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
           AND estado IN ('emitida', 'parcial', 'anulada')
+          AND COALESCE(monto_total::numeric, 0) > 0
         ORDER BY si.created_at DESC
       `);
       res.json(rows.rows);
@@ -1097,6 +1118,7 @@ export function registerReservationsRoutes(app: Express) {
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
           AND nc.estado IN ('emitida', 'parcial', 'anulada')
           AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status = 'conciliada')
+          AND COALESCE(nc.monto_total::numeric, 0) > COALESCE(nc.monto_acreditado::numeric, 0)
         ORDER BY nc.created_at ASC
       `);
       res.json(rows.rows);

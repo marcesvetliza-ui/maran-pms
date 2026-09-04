@@ -1544,6 +1544,9 @@ export function registerBillingRoutes(app: Express) {
       const montoYaAcreditado = parseFloat(original.monto_acreditado || "0");
       const saldoPendiente = montoTotal - montoYaAcreditado;
 
+      if (!Number.isFinite(montoTotal) || montoTotal <= 0.009) {
+        return res.status(400).json({ error: "No se puede emitir una Nota de Crédito sobre un comprobante sin importe" });
+      }
       // Guard: invoice already fully credited
       if (montoYaAcreditado >= montoTotal - 0.009) {
         return res.status(400).json({ error: "La factura ya fue acreditada en su totalidad" });
