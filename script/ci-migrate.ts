@@ -13,6 +13,17 @@
  * Usage: DATABASE_URL=postgres://... npx tsx script/ci-migrate.ts
  */
 import { runMigrations, verifyFinancialSchema } from "../server/migrate";
+import { db } from "../server/db";
+import { sql } from "drizzle-orm";
+
+const REQUIRED_ACCOUNT_CODES = [
+  "1.1.1.01",
+  "1.1.4.01.04.01",
+  "1.1.4.01.05",
+  "1.1.4.01.08.01",
+  "2.1.1.01",
+  "4.2.1.08.05.02",
+];
 
 async function main() {
   if (!process.env.DATABASE_URL) {
@@ -30,6 +41,20 @@ async function main() {
       missingColumns: status.missingColumns,
       missingIndexes: status.missingIndexes,
     });
+    process.exit(1);
+  }
+
+  const accounts = await db.execute(sql`
+    SELECT codigo
+    FROM accounting_accounts
+    WHERE codigo IN (${sql.join(REQUIRED_ACCOUNT_CODES.map((code) => sql`${code}`), sql`, `)})
+  `);
+  const foundAccountCodes = new Set(
+    (accounts.rows as Array<{ codigo: string }>).map((account) => account.codigo),
+  );
+  const missingAccountCodes = REQUIRED_ACCOUNT_CODES.filter((code) => !foundAccountCodes.has(code));
+  if (missingAccountCodes.length > 0) {
+    console.error("[ci-migrate] Faltan cuentas contables canónicas tras las migraciones:", missingAccountCodes);
     process.exit(1);
   }
 

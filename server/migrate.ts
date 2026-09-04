@@ -64,6 +64,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "concepts",
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
+    invoice_counters: [],
   },
   indexes: {
     sales_invoices: [
@@ -81,6 +82,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     ],
     group_payments: ["group_payments_group_id_idx", "group_payments_receipt_number_unique"],
     payments: ["payments_group_payment_id_idx"],
+    invoice_counters: ["invoice_counters_tipo_comprobante_punto_venta_unique"],
   },
 } as const;
 
@@ -353,6 +355,33 @@ export async function runMigrations() {
 
   await withTimeout("cash_shifts.turno_tipo", T, () =>
     db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`)
+  );
+
+  // Older databases allowed more than one counter for the same fiscal
+  // document/point-of-sale pair. Keep the row that has issued the furthest
+  // number before enforcing the invariant used by the atomic counter UPSERT.
+  await withTimeout("invoice_counters.deduplicate", T, () =>
+    db.execute(sql`
+      WITH ranked_counters AS (
+        SELECT
+          id,
+          row_number() OVER (
+            PARTITION BY tipo_comprobante, punto_venta
+            ORDER BY ultimo_numero DESC NULLS LAST, id DESC
+          ) AS duplicate_rank
+        FROM invoice_counters
+      )
+      DELETE FROM invoice_counters counters
+      USING ranked_counters ranked
+      WHERE counters.id = ranked.id
+        AND ranked.duplicate_rank > 1
+    `)
+  );
+  await withTimeout("invoice_counters.unique_pair", T, () =>
+    db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS invoice_counters_tipo_comprobante_punto_venta_unique
+      ON invoice_counters (tipo_comprobante, punto_venta)
+    `)
   );
 
   await withTimeout("charge_types (create)", T, () =>
@@ -2209,6 +2238,24 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ('1.1.4.01.11', 'Retenciones Municipales', 'activo', true),
       ('1.1.4.01.10', 'Retenciones SUSS', 'activo', true)
       ON CONFLICT (codigo) DO UPDATE SET tipo = 'activo', activo = true
+    `)
+  );
+
+  // These are the base accounts used by the accounting flows. Keep an
+  // operator's existing account name on conflict while restoring the
+  // canonical type and active state if an earlier partial seed created it.
+  await withTimeout("accounting_accounts.canonical_base seed", T, () =>
+    db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo, activo) VALUES
+      ('1.1.1.01', 'Caja', 'activo', true),
+      ('1.1.4.01.04.01', 'Ret. IVA', 'activo', true),
+      ('1.1.4.01.05', 'Ret Impuestos a las ganancias', 'activo', true),
+      ('1.1.4.01.08.01', 'Ret. Ing Brutos', 'activo', true),
+      ('2.1.1.01', 'Proveedores a Pagar', 'pasivo', true),
+      ('4.2.1.08.05.02', 'Gastos Comerciales', 'egreso', true)
+      ON CONFLICT (codigo) DO UPDATE
+      SET tipo = EXCLUDED.tipo,
+          activo = true
     `)
   );
 

@@ -30,6 +30,7 @@ const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe
 type Fixture = {
   groupId: string;
   groupChargeId: string;
+  cashShiftId: string;
 };
 
 const testPool = process.env.DATABASE_URL
@@ -76,6 +77,7 @@ async function createFixture(): Promise<Fixture> {
   const fixture: Fixture = {
     groupId: `pg-cash-reversal-group-${suffix}`,
     groupChargeId: `pg-cash-reversal-charge-${suffix}`,
+    cashShiftId: `pg-cash-reversal-shift-${suffix}`,
   };
 
   await testPool.query(
@@ -94,6 +96,12 @@ async function createFixture(): Promise<Fixture> {
      VALUES ($1, $2, 'Cargo de grupo de prueba', '150.00', DATE '2026-08-26', 'otros', 'group')`,
     [fixture.groupChargeId, fixture.groupId],
   );
+  await testPool.query(
+    `INSERT INTO cash_shifts
+      (id, area, shift_number, opened_by, opened_at, status, notes, created_at)
+     VALUES ($1, 'reception', 999999, 'pg-test', NOW(), 'open', 'fixture cash reversal', NOW())`,
+    [fixture.cashShiftId],
+  );
 
   return fixture;
 }
@@ -107,6 +115,7 @@ async function cleanupFixture(fixture: Fixture, groupPaymentId: string | null) {
   }
   await testPool.query("DELETE FROM group_charges WHERE id = $1", [fixture.groupChargeId]);
   await testPool.query("DELETE FROM groups WHERE id = $1", [fixture.groupId]);
+  await testPool.query("DELETE FROM cash_shifts WHERE id = $1", [fixture.cashShiftId]);
 }
 
 async function postMasterPayment(fixture: Fixture) {

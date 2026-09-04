@@ -32,6 +32,7 @@ type Fixture = {
   groupId: string;
   reservationId: string;
   additionalReservationId?: string;
+  cashShiftId: string;
 };
 
 const testPool = process.env.DATABASE_URL
@@ -78,6 +79,7 @@ async function createFixture(withSecondReservation = false): Promise<Fixture> {
   const fixture: Fixture = {
     groupId: `pg-distribution-cash-group-${suffix}`,
     reservationId: `pg-distribution-cash-reservation-${suffix}`,
+    cashShiftId: `pg-distribution-cash-shift-${suffix}`,
     ...(withSecondReservation
       ? { additionalReservationId: `pg-distribution-cash-reservation-2-${suffix}` }
       : {}),
@@ -133,6 +135,13 @@ async function createFixture(withSecondReservation = false): Promise<Fixture> {
     );
   }
 
+  await testPool.query(
+    `INSERT INTO cash_shifts
+      (id, area, shift_number, opened_by, opened_at, status, notes, created_at)
+     VALUES ($1, 'reception', 999999, 'pg-test', NOW(), 'open', 'fixture cash reversal', NOW())`,
+    [fixture.cashShiftId],
+  );
+
   return fixture;
 }
 
@@ -150,6 +159,7 @@ async function cleanupFixture(fixture: Fixture, groupPaymentId: string | null) {
   await testPool.query("DELETE FROM group_reservation_links WHERE reservation_id = ANY($1::text[])", [reservationIds]);
   await testPool.query("DELETE FROM reservations WHERE id = ANY($1::text[])", [reservationIds]);
   await testPool.query("DELETE FROM groups WHERE id = $1", [fixture.groupId]);
+  await testPool.query("DELETE FROM cash_shifts WHERE id = $1", [fixture.cashShiftId]);
 }
 
 async function postGroupDistributionPayment(fixture: Fixture) {
