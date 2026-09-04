@@ -25,6 +25,7 @@ import {
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
 import PDFDocument from "pdfkit";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
+import { canonicalInvoiceReference, canonicalPaymentLinkState } from "../billing/invoiceLinkIntegrity";
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -1605,7 +1606,7 @@ export function registerReservationsRoutes(app: Express) {
   app.get("/api/reservations/:reservationId/charges", async (req, res) => {
     try {
       const includeAnulados = req.query.includeAnulados === "true";
-      const result = includeAnulados
+      let result = includeAnulados
         ? await storage.getAllChargesIncludingAnulados(req.params.reservationId)
         : await storage.getCharges(req.params.reservationId);
       res.json(result);
@@ -2389,9 +2390,46 @@ export function registerReservationsRoutes(app: Express) {
   app.get("/api/reservations/:reservationId/payments", async (req, res) => {
     try {
       const includeAnulados = req.query.includeAnulados === "true";
-      const result = includeAnulados
+      let result = includeAnulados
         ? await storage.getAllPaymentsIncludingAnulados(req.params.reservationId)
         : await storage.getPayments(req.params.reservationId);
+      // invoice_ref used to be written only after the browser received the
+      // ARCA response.  Recover the durable pre-ARCA claim here so the owner
+      // screen remains actionable after a close/reload even if that PATCH
+      // never reached us.
+      const paymentIds = result.map((payment: any) => String(payment.id)).filter(Boolean);
+      if (paymentIds.length) {
+        const pending = await db.execute(sql`
+          SELECT DISTINCT ON (payment_id)
+            payment_id, id, tipo_comprobante, punto_venta, numero, cae, monto_total, estado
+          FROM sales_invoices
+          WHERE payment_id = ANY(${paymentIds}::varchar[])
+            AND estado IN ('emitida', 'autorizacion_pendiente')
+          ORDER BY payment_id, created_at DESC, id DESC
+        `);
+        const byPayment = new Map((pending.rows as any[]).map((invoice) => [
+          String(invoice.payment_id),
+          {
+            id: Number(invoice.id),
+            tipoComprobante: invoice.tipo_comprobante,
+            puntoVenta: Number(invoice.punto_venta),
+            numero: Number(invoice.numero),
+            cae: invoice.cae,
+            montoTotal: invoice.monto_total,
+            authorizationPending: invoice.estado === "autorizacion_pendiente",
+          },
+        ]));
+        result = result.map((payment: any) => {
+          const invoice = byPayment.get(String(payment.id));
+          if (!invoice || payment.invoiceRef || payment.invoice_ref) return payment;
+          return {
+            ...payment,
+            ...(invoice.authorizationPending
+              ? { pendingAuthorization: invoice }
+              : { pendingInvoiceLink: invoice, invoiceLinkFailed: true }),
+          };
+        });
+      }
       res.json(result);
     } catch (error) {
       res.status(500).json({ error: "Error fetching payments" });
@@ -2694,17 +2732,54 @@ export function registerReservationsRoutes(app: Express) {
     try {
       const { invoiceData } = req.body;
       if (!invoiceData) return res.status(400).json({ error: "invoiceData requerido" });
-      const payResult = await db.execute(sql`SELECT id FROM payments WHERE id = ${req.params.id}`);
+      const payResult = await db.execute(sql`SELECT id, reservation_id FROM payments WHERE id = ${req.params.id}`);
       if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
+      if (!Number.isInteger(Number(invoiceData.id)) || Number(invoiceData.id) <= 0) {
+        return res.status(400).json({ error: "invoiceData.id requerido" });
+      }
+      const invoiceResult = await db.execute(sql`
+        SELECT id, payment_id, reserva_id, estado, reconciliation_status,
+               tipo_comprobante, punto_venta, numero, cae, cae_fecha_vto, monto_total
+        FROM sales_invoices WHERE id = ${Number(invoiceData.id)} LIMIT 1
+      `);
+      const invoice = invoiceResult.rows[0] as any;
+      if (!invoice || invoice.estado !== "emitida") {
+        return res.status(409).json({ error: "La factura todavía no está autorizada" });
+      }
+      if (invoice.payment_id && String(invoice.payment_id) !== req.params.id) {
+        return res.status(409).json({ error: "La factura fue emitida para otro pago" });
+      }
+      // New flows must carry the pre-ARCA claim.  A legacy invoice is accepted
+      // only when it belongs to the same reservation and is not already named
+      // by another payment's persisted reference.
+      if (!invoice.payment_id) {
+        if (String(invoice.reserva_id || "") !== String((payResult.rows[0] as any).reservation_id || "")) {
+          return res.status(409).json({ error: "La factura no pertenece a la reserva de este pago" });
+        }
+        const claimedElsewhere = await db.execute(sql`
+          SELECT 1 FROM payments
+          WHERE id <> ${req.params.id}
+            AND invoice_ref IS NOT NULL
+            AND invoice_ref::jsonb ->> 'id' = ${String(invoiceData.id)}
+          LIMIT 1
+        `);
+        if (claimedElsewhere.rows.length) return res.status(409).json({ error: "La factura ya está vinculada a otro pago" });
+      }
+      const canonicalRef = canonicalInvoiceReference(invoice);
       const updated = await db.execute(sql`
         UPDATE payments
-        SET invoice_ref = ${JSON.stringify(invoiceData)},
+        SET invoice_ref = ${JSON.stringify(canonicalRef)},
             invoice_link_failed = false
         WHERE id = ${req.params.id} RETURNING *
       `);
       const updatedPay = updated.rows[0] as any;
-      res.json(updatedPay);
-
+      if (invoice.payment_id && invoice.reconciliation_status === "pendiente") {
+        await db.execute(sql`
+          UPDATE sales_invoices
+          SET reconciliation_status = 'conciliada', reconciliation_error = NULL, reconciliation_updated_at = now()
+          WHERE id = ${Number(invoiceData.id)}
+        `);
+      }
       // Propagate invoice_ref to the associated group_payment when this payment was created
       // as part of a group payment distribution. Uses the deterministic group_payment_id FK
       // set at payment creation time — no heuristic matching.
@@ -2712,15 +2787,98 @@ export function registerReservationsRoutes(app: Express) {
         try {
           await db.execute(sql`
             UPDATE group_payments
-            SET invoice_ref = ${JSON.stringify(invoiceData)}
+            SET invoice_ref = ${JSON.stringify(canonicalRef)}
             WHERE id = ${updatedPay.group_payment_id}
           `);
         } catch (propagateErr) {
           console.error("[invoice-link] Failed to propagate invoice_ref to group_payment:", propagateErr);
         }
       }
+      res.json(updatedPay);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/payments/:id/resume-invoice", requireAuth, async (req, res) => {
+    let lockClient: any = null;
+    let lockKey = "";
+    try {
+      const owner = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id} LIMIT 1`);
+      const reservationId = String((owner.rows[0] as any)?.reservation_id || "");
+      if (!reservationId) return res.status(404).json({ error: "Pago no encontrado" });
+      lockKey = `folio-invoice:${reservationId}`;
+      lockClient = await pool.connect();
+      await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+      // Re-read under the exact folio lock used by issuance. Concurrent resume
+      // requests serialize, and waiters return the already finalized invoice.
+      const result = await db.execute(sql`
+        SELECT si.* FROM sales_invoices si
+        JOIN payments p ON p.id = si.payment_id
+        WHERE si.payment_id = ${req.params.id}
+          AND p.reservation_id = si.reserva_id
+        LIMIT 1
+      `);
+      const draft = result.rows[0] as any;
+      if (!draft) return res.status(404).json({ error: "No hay una autorización pendiente para este pago" });
+      const alreadyResumed = draft.estado === "emitida";
+      if (draft.estado !== "autorizacion_pendiente") {
+        if (!alreadyResumed) {
+          return res.status(409).json({ error: "El comprobante ya no está disponible para reanudar" });
+        }
+      }
+      const invoice = alreadyResumed ? draft : await emitirFactura({
+        tipoComprobante: draft.tipo_comprobante,
+        cliente: { razonSocial: draft.cliente_razon_social, cuit: draft.cliente_cuit || undefined, dni: draft.cliente_dni || undefined, condicionIva: draft.cliente_condicion_iva, domicilio: draft.cliente_domicilio || undefined },
+        items: draft.items,
+        reservaId: draft.reserva_id || undefined,
+        paymentId: req.params.id,
+        puntoVentaOverride: Number(draft.punto_venta),
+        cashFormaPago: draft.cash_forma_pago || undefined,
+        sourceChargeIds: Array.isArray(draft.source_charge_ids) ? draft.source_charge_ids : undefined,
+        sourceChargeAmounts: draft.source_charge_amounts || undefined,
+        observaciones: draft.observaciones || undefined,
+        recoveryInvoiceId: Number(draft.id),
+      } as any);
+      // Linking is part of recovery, not a second browser best-effort step.
+      // These idempotent updates stay inside the folio advisory lock and do
+      // not create payments, allocations, Caja, or Cuenta Corriente effects.
+      const recoveryState = canonicalPaymentLinkState(invoice as any);
+      const canonicalRef = recoveryState.invoice;
+      const linked = await db.transaction(async (tx) => {
+        const paymentResult = await tx.execute(sql`
+          UPDATE payments
+          SET invoice_ref = ${recoveryState.invoiceRef}, invoice_link_failed = ${recoveryState.invoiceLinkFailed}
+          WHERE id = ${req.params.id}
+            AND reservation_id = ${reservationId}
+          RETURNING *
+        `);
+        const payment = paymentResult.rows[0] as any;
+        if (!payment) throw Object.assign(new Error("Pago no encontrado"), { statusCode: 404 });
+        await tx.execute(sql`
+          UPDATE sales_invoices
+          SET reconciliation_status = ${recoveryState.reconciliationStatus},
+              reconciliation_error = ${recoveryState.reconciliationError},
+              reconciliation_updated_at = now()
+          WHERE id = ${Number((invoice as any).id)} AND payment_id = ${req.params.id}
+        `);
+        if (payment.group_payment_id) {
+          await tx.execute(sql`
+            UPDATE group_payments
+            SET invoice_ref = ${JSON.stringify(canonicalRef)}
+            WHERE id = ${payment.group_payment_id}
+          `);
+        }
+        return payment;
+      });
+      res.json({ invoice: canonicalRef, payment: linked, linked: true, alreadyResumed });
+    } catch (e: any) {
+      res.status(e?.statusCode || 500).json({ error: e?.message || "No se pudo reanudar la autorización ARCA" });
+    } finally {
+      if (lockClient) {
+        await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+        lockClient.release();
+      }
     }
   });
 

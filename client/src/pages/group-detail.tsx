@@ -1097,7 +1097,80 @@ export default function GroupDetailPage() {
     queryKey: ["/api/groups", groupId, "pending-fiscal-collections"],
     enabled: !!groupId,
   });
+  const { data: pendingDirectInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "pending-direct-invoices"],
+    enabled: !!groupId,
+  });
+  const { data: pendingPaymentInvoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "pending-payment-invoices"],
+    enabled: !!groupId,
+  });
+  const { data: pendingGroupAuthorizations = [] } = useQuery<any[]>({
+    queryKey: ["/api/groups", groupId, "pending-authorizations"],
+    enabled: !!groupId,
+  });
   const recoveringFiscalInvoices = useRef(new Set<number>());
+  const recoveringDirectInvoices = useRef(new Set<number>());
+  const recoveringPaymentInvoices = useRef(new Set<number>());
+  const recoveringGroupAuthorizations = useRef(new Set<number>());
+
+  useEffect(() => {
+    for (const invoice of pendingDirectInvoices) {
+      const invoiceId = Number(invoice?.id);
+      if (!invoiceId || recoveringDirectInvoices.current.has(invoiceId)) continue;
+      recoveringDirectInvoices.current.add(invoiceId);
+      apiRequest("POST", `/api/groups/${groupId}/direct-invoice`, {
+        invoiceData: {
+          id: invoiceId,
+          tipoComprobante: invoice.tipo_comprobante ?? invoice.tipoComprobante,
+          puntoVenta: Number(invoice.punto_venta ?? invoice.puntoVenta),
+          numero: Number(invoice.numero),
+        },
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-direct-invoices"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "direct-invoices"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"] });
+      }).catch(() => recoveringDirectInvoices.current.delete(invoiceId));
+    }
+  }, [pendingDirectInvoices, groupId, queryClient]);
+
+  useEffect(() => {
+    for (const invoice of pendingPaymentInvoices) {
+      const invoiceId = Number(invoice?.id);
+      const paymentId = String(invoice?.group_payment_id ?? invoice?.groupPaymentId ?? "");
+      if (!invoiceId || !paymentId || recoveringPaymentInvoices.current.has(invoiceId)) continue;
+      recoveringPaymentInvoices.current.add(invoiceId);
+      apiRequest("PATCH", `/api/groups/${groupId}/payments/${paymentId}/invoice`, {
+        invoiceData: {
+          id: invoiceId,
+          tipoComprobante: invoice.tipo_comprobante ?? invoice.tipoComprobante,
+          puntoVenta: Number(invoice.punto_venta ?? invoice.puntoVenta),
+          numero: Number(invoice.numero),
+        },
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-payment-invoices"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+      }).catch(() => recoveringPaymentInvoices.current.delete(invoiceId));
+    }
+  }, [pendingPaymentInvoices, groupId, queryClient]);
+
+  useEffect(() => {
+    for (const draft of pendingGroupAuthorizations) {
+      const invoiceId = Number(draft?.id);
+      if (!invoiceId || recoveringGroupAuthorizations.current.has(invoiceId)) continue;
+      recoveringGroupAuthorizations.current.add(invoiceId);
+      apiRequest("POST", `/api/groups/${groupId}/invoices/${invoiceId}/resume-authorization`, {})
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-authorizations"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-fiscal-collections"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-payment-invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-direct-invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"] });
+        })
+        .catch(() => recoveringGroupAuthorizations.current.delete(invoiceId));
+    }
+  }, [pendingGroupAuthorizations, groupId, queryClient]);
 
   useEffect(() => {
     for (const pending of pendingFiscalCollections) {

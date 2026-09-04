@@ -2633,6 +2633,18 @@ function ReservationDetailDialog({
       toast({ title: "Error", description: "No se pudo vincular la factura. Intente nuevamente.", variant: "destructive" });
     },
   });
+  const resumePaymentInvoiceMutation = useMutation({
+    mutationFn: async (paymentId: string) => {
+      const res = await apiRequest("POST", `/api/payments/${paymentId}/resume-invoice`, {});
+      if (!res.ok) throw new Error("No se pudo reanudar la autorización");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchPayments();
+      toast({ title: "Autorización reanudada", description: "Se recuperó la factura pendiente sin emitir otra." });
+    },
+    onError: () => toast({ title: "No se pudo reanudar", description: "La autorización sigue pendiente; intentá nuevamente.", variant: "destructive" }),
+  });
 
   const transferChargeMutation = useMutation({
     mutationFn: async ({ chargeId, targetReservationId }: { chargeId: string; targetReservationId: string }) => {
@@ -4018,17 +4030,20 @@ function ReservationDetailDialog({
                 </div>
               )}
 
-              {payments?.some((p: any) => p.invoiceLinkFailed) && (
+              {payments?.some((p: any) => p.invoiceLinkFailed || p.pendingAuthorization) && (
                 <div className="flex items-start gap-2 p-2 mx-0 mb-1 rounded-md bg-orange-50 border border-orange-300 dark:bg-orange-950/30 dark:border-orange-700 text-xs text-orange-800 dark:text-orange-300" data-testid="invoice-link-failed-banner">
                   <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-orange-600" />
-                  <span>Hay <strong>{payments.filter((p: any) => p.invoiceLinkFailed).length}</strong> pago(s) con factura emitida pero no vinculada. Usá «Re-vincular» para corregirlo.</span>
+                  <span>Hay pagos con autorización o vínculo fiscal pendiente. Recuperalos desde la fila; no emitas otra factura.</span>
                 </div>
               )}
               <div className="divide-y max-h-[120px] overflow-y-auto">
                 {payments?.map((payment) => {
                   const isAnulado = (payment as any).status === "anulado";
                   const linkFailed = !!(payment as any).invoiceLinkFailed;
-                  const invoiceRef = parseReservationInvoiceRef((payment as any).invoiceRef ?? (payment as any).invoice_ref);
+                  const pendingAuthorization = (payment as any).pendingAuthorization;
+                  const invoiceRef = parseReservationInvoiceRef(
+                    (payment as any).invoiceRef ?? (payment as any).invoice_ref ?? (payment as any).pendingInvoiceLink
+                  );
                   const invoiceBadgeText = invoiceRef && !linkFailed
                     ? formatReservationInvoiceRef(invoiceRef)
                     : null;
@@ -4040,6 +4055,11 @@ function ReservationDetailDialog({
                       {linkFailed && !isAnulado && (
                         <Badge variant="outline" className="text-xs text-orange-700 border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-600">
                           <AlertTriangle className="h-2.5 w-2.5 mr-1" />Vínculo pendiente
+                        </Badge>
+                      )}
+                      {pendingAuthorization && !isAnulado && (
+                        <Badge variant="outline" className="text-xs text-orange-700 border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-600">
+                          <AlertTriangle className="h-2.5 w-2.5 mr-1" />Autorización pendiente
                         </Badge>
                       )}
                       {invoiceBadgeText && !isAnulado && (
@@ -4060,6 +4080,17 @@ function ReservationDetailDialog({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`font-medium ${isAnulado ? "line-through text-muted-foreground" : "text-green-600"}`}>${fmtMoney(payment.amount)}</span>
+                      {pendingAuthorization && !isAnulado && (
+                        <Button
+                          size="sm" variant="outline"
+                          className="h-6 text-xs px-2 border-orange-400 text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-600"
+                          disabled={resumePaymentInvoiceMutation.isPending}
+                          onClick={() => resumePaymentInvoiceMutation.mutate(payment.id)}
+                          data-testid={`button-resume-payment-invoice-${payment.id}`}
+                        >
+                          <Undo2 className="h-3 w-3 mr-1" />Reanudar
+                        </Button>
+                      )}
                       {linkFailed && !isAnulado && invoiceRef && (
                         <Button
                           size="sm"
@@ -4143,6 +4174,7 @@ function ReservationDetailDialog({
                         config={billingConfig}
                         initialValues={advanceInitial}
                         paymentId={invoicingPaymentId || undefined}
+                        reservationId={reservation.id}
                         showPaymentMethod
                         hideAddItems
                         lockItems

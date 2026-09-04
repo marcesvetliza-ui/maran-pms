@@ -2515,6 +2515,10 @@ export const salesInvoices = pgTable("sales_invoices", {
   modoFicticio: boolean("modo_ficticio").default(true),
   estado: text("estado").default("emitida"),
   reservaId: varchar("reserva_id"),
+  // Reservation payment claimed before ARCA.  Unlike invoice_ref (which is a
+  // post-issuance display link), this is the durable ownership claim used to
+  // resume an interrupted payment invoice without issuing another document.
+  paymentId: varchar("payment_id"),
   // Group invoices persist their owner at issuance time. Linking the display
   // row afterwards is not enough to protect concurrent emissions.
   groupId: varchar("group_id"),

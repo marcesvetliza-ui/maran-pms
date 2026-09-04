@@ -602,7 +602,7 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -617,6 +617,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   allowCuentaCorriente?: boolean;
   requiresEmission?: boolean;
   paymentId?: string;
+  /** Reservation owner required for a payment-linked fiscal claim. */
+  reservationId?: string;
   /** SPA folio that must be closed and linked after invoice emission. */
   spaAccountId?: string;
   /** When set, the emitted invoice will be automatically linked to the group folio (for invoices emitted from the Resumen del Grupo without a payment) */
@@ -716,6 +718,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const dialogOperationKey = JSON.stringify({
     operationKey: operationKey ?? null,
     paymentId: paymentId ?? null,
+    reservationId: reservationId ?? null,
     spaAccountId: spaAccountId ?? null,
     groupId: groupId ?? null,
     groupPaymentId: groupPaymentId ?? null,
@@ -1366,6 +1369,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
       items,
+      ...(paymentId ? { paymentId } : {}),
+      ...(reservationId ? { reservaId: reservationId } : {}),
       puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,

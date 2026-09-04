@@ -24,9 +24,11 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "id",
       "estado",
       "items",
+      "payment_id",
       "group_id",
       "group_payment_id",
       "group_payment_intent",
+      "spa_account_id",
       "reconciliation_status",
       "reconciliation_error",
       "reconciliation_updated_at",
@@ -71,6 +73,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     sales_invoices: [
       "sales_invoices_group_id_idx",
       "sales_invoices_group_payment_id_idx",
+      "sales_invoices_payment_id_idx",
       "idx_sales_invoices_nc_reconciliation_pending",
     ],
     account_movements: [
@@ -1927,6 +1930,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       CREATE INDEX IF NOT EXISTS sales_invoices_group_payment_id_idx
         ON sales_invoices (group_payment_id)
         WHERE group_payment_id IS NOT NULL;
+    `)
+  );
+
+  // Reservation-payment ownership is captured before ARCA just like group and
+  // SPA ownership.  A payment has one fiscal document: the unique claim closes
+  // the concurrent-tab window before an outbound ARCA request is made.
+  await withTimeout("sales_invoices.payment_invoice_scope", T, () =>
+    db.execute(sql`
+      ALTER TABLE sales_invoices
+        ADD COLUMN IF NOT EXISTS payment_id varchar;
+      CREATE UNIQUE INDEX IF NOT EXISTS sales_invoices_payment_id_idx
+        ON sales_invoices (payment_id)
+        WHERE payment_id IS NOT NULL;
     `)
   );
 

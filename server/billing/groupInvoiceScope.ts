@@ -251,7 +251,7 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
       FROM sales_invoices si
       WHERE si.group_id = ${groupId}
         AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
-        AND si.estado IN ('emitida', 'parcial')
+        AND si.estado IN ('emitida', 'parcial', 'autorizacion_pendiente')
     `),
     db.execute(sql`
       SELECT gp.id, gp.amount, gp.destination, gp.invoice_id,
@@ -448,7 +448,7 @@ export async function assertGroupPaymentInvoiceEligibility(
              SELECT 1 FROM sales_invoices active_invoice
              WHERE (active_invoice.group_payment_id = gp.id OR active_invoice.id = gp.invoice_id)
                AND active_invoice.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
-               AND active_invoice.estado IN ('emitida', 'parcial')
+                AND active_invoice.estado IN ('emitida', 'parcial', 'autorizacion_pendiente')
                AND COALESCE(active_invoice.monto_total, 0)::numeric > COALESCE(active_invoice.monto_acreditado, 0)::numeric + 0.009
            ) AS has_active_claim
     FROM group_payments gp

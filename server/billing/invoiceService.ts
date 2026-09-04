@@ -33,6 +33,8 @@ export interface NewInvoiceData {
   };
   items: InvoiceItem[];
   reservaId?: string;
+  /** Reservation payment this document must be linked to after authorization. */
+  paymentId?: string;
   /** Group that owns this invoice's fiscal sources. */
   groupId?: string;
   /** Parent group collection being invoiced, if any. */
@@ -199,7 +201,15 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
   const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
-  const recoverableBeforeAuthorization = recoverableFiscalAdjustment || Boolean(data.spaAccountId) || Boolean(data.groupPaymentIntent);
+  // All operational owners are captured in the local draft before ARCA.  The
+  // later link is deliberately idempotent, but must never be the only place
+  // where ownership is recorded.
+  const recoverableBeforeAuthorization = recoverableFiscalAdjustment
+    || Boolean(data.paymentId)
+    || Boolean(data.groupId)
+    || Boolean(data.groupPaymentId)
+    || Boolean(data.spaAccountId)
+    || Boolean(data.groupPaymentIntent);
   if (recoverableBeforeAuthorization) {
     // A recoverable fiscal draft depends on the live sales_invoices recovery
     // columns. Fail before numbering or contacting ARCA when a timed-out
@@ -243,6 +253,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       modoFicticio,
       estado: "autorizacion_pendiente",
       reservaId: data.reservaId || null,
+      paymentId: data.paymentId || null,
       groupId: data.groupId || null,
       groupPaymentId: data.groupPaymentId || null,
       groupPaymentIntent: data.groupPaymentIntent || null,
@@ -416,6 +427,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     modoFicticio,
     estado: "emitida",
     reservaId: data.reservaId || null,
+    paymentId: data.paymentId || null,
     groupId: data.groupId || null,
     groupPaymentId: data.groupPaymentId || null,
     groupPaymentIntent: data.groupPaymentIntent || null,

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations, cashMovements as cashMovementsTable } from "@shared/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
@@ -17,6 +17,8 @@ import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, require
 import { allocateBalanceCappedGroupRooms } from "@shared/groupRoomAllocation";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
+import { emitirFactura } from "../billing/invoiceService";
+import { assertInvoiceEmittedForLink, canonicalInvoiceReference } from "../billing/invoiceLinkIntegrity";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -1235,6 +1237,87 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // Existing group payments are created before their invoice dialog.  If the
+  // browser disappears after ARCA, the invoice's pre-authorization
+  // group_payment_id is enough to finish the idempotent association.
+  app.get("/api/groups/:groupId/pending-payment-invoices", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.monto_total, si.cae, si.group_payment_id
+        FROM sales_invoices si
+        JOIN group_payments gp ON gp.id = si.group_payment_id
+        WHERE si.group_id = ${req.params.groupId}
+          AND si.estado = 'emitida'
+          AND gp.group_id = ${req.params.groupId}
+          AND (gp.invoice_id IS NULL OR gp.invoice_id <> si.id)
+        ORDER BY si.created_at DESC, si.id DESC
+      `);
+      res.json(rows.rows);
+    } catch (error) {
+      res.status(500).json({ error: "No se pudieron recuperar los vínculos de cobro pendientes" });
+    }
+  });
+
+  app.get("/api/groups/:groupId/pending-authorizations", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, tipo_comprobante, punto_venta, numero, monto_total, group_payment_id
+        FROM sales_invoices
+        WHERE group_id = ${req.params.groupId} AND estado = 'autorizacion_pendiente'
+        ORDER BY created_at DESC, id DESC
+      `);
+      res.json(rows.rows);
+    } catch {
+      res.status(500).json({ error: "No se pudieron recuperar las autorizaciones pendientes" });
+    }
+  });
+
+  app.post("/api/groups/:groupId/invoices/:invoiceId/resume-authorization", requireAuth, async (req, res) => {
+    let lockClient: any = null;
+    const lockKey = `group-invoice:${req.params.groupId}`;
+    try {
+      lockClient = await pool.connect();
+      await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+      // Re-read only after acquiring the same cross-instance lock used by the
+      // normal billing route. A waiter observes the winner's finalized row and
+      // returns it instead of making a second ARCA request.
+      const result = await db.execute(sql`
+        SELECT * FROM sales_invoices
+        WHERE id = ${Number(req.params.invoiceId)}
+          AND group_id = ${req.params.groupId}
+        LIMIT 1
+      `);
+      const draft = result.rows[0] as any;
+      if (!draft) return res.status(404).json({ error: "No hay una autorización pendiente para este grupo" });
+      if (draft.estado === "emitida") return res.json({ invoice: draft, alreadyResumed: true });
+      if (draft.estado !== "autorizacion_pendiente") {
+        return res.status(409).json({ error: "El comprobante ya no está disponible para reanudar" });
+      }
+      const invoice = await emitirFactura({
+        tipoComprobante: draft.tipo_comprobante,
+        cliente: { razonSocial: draft.cliente_razon_social, cuit: draft.cliente_cuit || undefined, dni: draft.cliente_dni || undefined, condicionIva: draft.cliente_condicion_iva, domicilio: draft.cliente_domicilio || undefined },
+        items: draft.items,
+        groupId: req.params.groupId,
+        groupPaymentId: draft.group_payment_id || undefined,
+        groupPaymentIntent: draft.group_payment_intent || undefined,
+        puntoVentaOverride: Number(draft.punto_venta),
+        cashFormaPago: draft.cash_forma_pago || undefined,
+        sourceChargeIds: Array.isArray(draft.source_charge_ids) ? draft.source_charge_ids : undefined,
+        sourceChargeAmounts: parseSourceAmountMap(draft.source_charge_amounts),
+        observaciones: draft.observaciones || undefined,
+        recoveryInvoiceId: Number(draft.id),
+      } as any);
+      res.json({ invoice });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "No se pudo reanudar la autorización ARCA" });
+    } finally {
+      if (lockClient) {
+        await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+        lockClient.release();
+      }
+    }
+  });
+
   app.post("/api/groups/:groupId/payment", requireAuth, async (req, res) => {
     try {
       const group = await storage.getGroup(req.params.groupId);
@@ -1450,6 +1533,28 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // A direct invoice owns group_id/source allocations before ARCA, whereas the
+  // group_invoices row is only the post-authorization display link.  Expose
+  // the gap explicitly so the group screen can safely resume it after reload.
+  app.get("/api/groups/:groupId/pending-direct-invoices", requireAuth, async (req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.monto_total, si.cae
+        FROM sales_invoices si
+        LEFT JOIN group_invoices gi ON gi.sales_invoice_id = si.id
+        WHERE si.group_id = ${req.params.groupId}
+          AND si.group_payment_id IS NULL
+          AND si.group_payment_intent IS NULL
+          AND si.estado = 'emitida'
+          AND gi.id IS NULL
+        ORDER BY si.created_at DESC, si.id DESC
+      `);
+      res.json(rows.rows);
+    } catch (error) {
+      res.status(500).json({ error: "No se pudieron recuperar las facturas directas pendientes" });
+    }
+  });
+
   // Every fiscal document issued for the group, including payment-linked
   // invoices, direct invoices, credit notes and reissues. The composition is
   // always rebuilt from the document's persisted source map, never from the
@@ -1519,17 +1624,17 @@ export function registerGroupsRoutes(app: Express) {
 
       // Verify the invoice was actually issued through our system (salesInvoices table)
       const [storedInvoice] = await db
-        .select({
-          id: salesInvoicesTable.id,
-          groupId: salesInvoicesTable.groupId,
-          groupPaymentId: salesInvoicesTable.groupPaymentId,
-          sourceChargeAmounts: salesInvoicesTable.sourceChargeAmounts,
-        })
+        .select()
         .from(salesInvoicesTable)
         .where(eq(salesInvoicesTable.id, Number(invoiceId)))
         .limit(1);
       if (!storedInvoice) {
         return res.status(400).json({ error: "El comprobante indicado no existe en el sistema" });
+      }
+      try {
+        assertInvoiceEmittedForLink(storedInvoice as any);
+      } catch (error: any) {
+        return res.status(error.statusCode || 409).json({ error: error.message });
       }
       if (storedInvoice.groupId !== req.params.groupId || storedInvoice.groupPaymentId || !storedInvoice.sourceChargeAmounts) {
         return res.status(409).json({
@@ -1540,6 +1645,7 @@ export function registerGroupsRoutes(app: Express) {
       // Verify the group exists
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+      const canonicalRef = canonicalInvoiceReference(storedInvoice as any);
 
       // Idempotent upsert: if this salesInvoiceId is already linked, return the existing row
       const [created] = await db
@@ -1547,12 +1653,12 @@ export function registerGroupsRoutes(app: Express) {
         .values({
           groupId: req.params.groupId,
           salesInvoiceId: Number(invoiceId),
-          invoiceRef: JSON.stringify(invoiceData),
+          invoiceRef: JSON.stringify(canonicalRef),
           notes: notes ?? null,
         })
         .onConflictDoUpdate({
           target: groupInvoicesTable.salesInvoiceId,
-          set: { groupId: req.params.groupId, invoiceRef: JSON.stringify(invoiceData), notes: notes ?? null },
+          set: { groupId: req.params.groupId, invoiceRef: JSON.stringify(canonicalRef), notes: notes ?? null },
         })
         .returning();
       res.json(created);
@@ -1583,7 +1689,9 @@ export function registerGroupsRoutes(app: Express) {
           .where(eq(salesInvoicesTable.id, Number(invoiceData.id)))
           .limit(1);
         if (!storedInvoice) throw Object.assign(new Error("El comprobante indicado no existe en el sistema"), { statusCode: 400 });
+        assertInvoiceEmittedForLink(storedInvoice as any);
         assertGroupPaymentInvoiceScope(storedInvoice, payment, req.params.groupId);
+        const canonicalRef = canonicalInvoiceReference(storedInvoice as any);
         const receiver = (payment.receiverDetails || {}) as Record<string, string | undefined>;
         const normalizeCuit = (value?: string | null) => String(value || "").replace(/\D/g, "");
         const normalizeDocument = (value?: string | null) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -1622,7 +1730,7 @@ export function registerGroupsRoutes(app: Express) {
         if (usedByAnotherPayment) throw Object.assign(new Error("Esta factura ya está vinculada a otro cobro grupal."), { statusCode: 409 });
 
         const [updated] = await tx.update(groupPaymentsTable)
-          .set({ invoiceId: storedInvoice.id, invoiceRef: JSON.stringify(invoiceData) })
+          .set({ invoiceId: storedInvoice.id, invoiceRef: JSON.stringify(canonicalRef) })
           .where(and(
             eq(groupPaymentsTable.id, payment.id),
             payment.invoiceId

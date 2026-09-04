@@ -14,3 +14,9 @@ After ARCA emits a group invoice, the UI may let the operator leave a failed lin
 **Why:** Persisting the intent is not enough if the mounted group screen still has a stale empty recovery query; closing immediately can hide the pending collection until an incidental reload and invite an accidental re-emission.
 
 **How to apply:** Block duplicate submission while linking. On link failure, refetch the group's pending fiscal collections before enabling return; other invoice-link flows without equivalent durable discovery must remain retry-only.
+
+Authorization recovery and operational linking are one state machine: recovery is incomplete until the owner record points to the canonical emitted invoice.
+
+**Why:** ARCA success alone does not restore the application relationship, and competing retries or client-provided fiscal data can create duplicate authorization attempts or false links.
+
+**How to apply:** Serialize issuance and recovery under the same owner scope, finish the owner link before reporting recovery success, trust only stored emitted invoices, and keep every replay idempotent.
