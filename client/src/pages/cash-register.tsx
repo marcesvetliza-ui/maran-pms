@@ -2409,7 +2409,7 @@ function NightAuditTab() {
               </TableHeader>
               <TableBody>
                 {(history as any[]).map((audit) => (
-                  <TableRow key={audit.id}>
+                  <TableRow key={audit.id} data-testid={`row-night-audit-${audit.id}`}>
                     <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatHotelDateTime(audit.executedAt)}

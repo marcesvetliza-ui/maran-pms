@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "lint:dates": "bash script/check-date-patterns.sh",
     "test:dates": "bash script/test-check-date-patterns.sh",
+    "test:e2e:timezone": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para la prueba E2E de zona horaria.' >&2; exit 1; fi; playwright test --config playwright.timezone.config.ts",
     "lint:workflows": "node script/check-workflows.mjs",
     "test:workflows": "node script/test-check-workflows.mjs"
   },
@@ -110,6 +111,7 @@
     "zod-validation-error": "^3.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@replit/vite-plugin-cartographer": "^0.4.4",
     "@replit/vite-plugin-dev-banner": "^0.1.1",
     "@replit/vite-plugin-runtime-error-modal": "^0.0.3",

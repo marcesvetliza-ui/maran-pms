@@ -62,3 +62,4 @@
 - [Publish sequence defaults](publish-sequence-defaults.md) — avoid sequence-backed text column defaults with PostgreSQL casts; Publish can truncate the introspected expression.
 - [Group structure financial lock](group-structure-financial-lock.md) — block deletion and room unlinking must stop once group financial evidence exists and serialize with collections.
 - [Server timestamps in Argentina](server-argentina-timestamps.md) — visible server timestamps use one Buenos Aires formatter; plain YYYY-MM-DD values remain calendar dates.
+- [Read-only Caja E2E setup](read-only-cash-e2e.md) — bypass asynchronous POS/parte prompts deterministically so browser checks never open or close real shifts.
