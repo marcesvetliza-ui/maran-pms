@@ -41,6 +41,7 @@ const group = {
   reservations: [{
     id: PLACEHOLDER_RESERVATION_ID,
     roomId: ORIGINAL_ROOM_ID,
+    roomTypeId: "room-type-ui-001",
     room: {
       id: ORIGINAL_ROOM_ID,
       roomNumber: "101",
