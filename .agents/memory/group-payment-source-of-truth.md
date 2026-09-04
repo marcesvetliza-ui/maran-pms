@@ -14,3 +14,9 @@ For directed checkout initiated from the master folio, record the receipt as an 
 **Why:** A global master receipt is scoped by the master configuration (often accommodation-only), so it cannot settle room extras required for a zero-balance checkout. A weighted distribution can also use shared services or general charges to settle the wrong reservation, and swallowing a housekeeping insert failure commits only part of the checkout.
 
 **How to apply:** Require cent-exact per-reservation assignments, revalidate each selected room under the group lock, and let any allocation or housekeeping failure roll back the parent receipt and every status change.
+
+Automatic group-payment allocation previews and persistence must use one shared, balance-capped, cent-exact algorithm and the same effective mode. Directed room selection must never rewrite the chosen payment-method rows.
+
+**Why:** Separate client/server allocators can show a room split that is not saved, especially with unequal balances, prior advances, or remainder cents. Rewriting rows can silently turn a mixed tender into the wrong Caja composition.
+
+**How to apply:** Resolve advance-driven proportional mode once, allocate no room above its balance, distribute remainder cents deterministically, and validate directed-room totals against—without mutating—the original tender and retention rows.

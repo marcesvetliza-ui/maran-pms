@@ -27,7 +27,8 @@ vi.mock("wouter", async () => {
   };
 });
 
-import GroupDetailPage from "./group-detail";
+import GroupDetailPage, { calculateGroupCajaToday } from "./group-detail";
+import { allocateBalanceCappedGroupRooms, resolveAutomaticGroupRoomAllocationMode } from "@shared/groupRoomAllocation";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -146,6 +147,41 @@ describe("Pago Grupal dialog entry-point modes", () => {
     }));
 
     apiRequestMock.mockImplementation(async () => jsonResponse({ success: true }));
+  });
+
+  it("calculates Caja only from tender rows, excluding cuenta corriente", () => {
+    expect(calculateGroupCajaToday([
+      { method: "cash", amount: "100" },
+      { method: "transfer", amount: "200" },
+      { method: "cuenta_corriente", amount: "75" },
+    ])).toBe(300);
+    // Retentions are separate settlement fields and never belong in this
+    // tender-only calculation.
+    expect(calculateGroupCajaToday([
+      { method: "cash", amount: "300" },
+      { method: "cuenta_corriente", amount: "60" },
+      { method: "retencion", amount: "40" },
+      { method: "other", amount: "25" },
+    ])).toBe(300);
+  });
+
+  it("keeps room application previews cent-exact and balance-capped", () => {
+    expect(allocateBalanceCappedGroupRooms(60.01, [
+      { id: "room-a", balance: 10.01 },
+      { id: "room-b", balance: 100 },
+      { id: "room-c", balance: 100 },
+    ], "equal").allocations).toEqual({ "room-a": 10.01, "room-b": 25, "room-c": 25 });
+    expect(allocateBalanceCappedGroupRooms(0.04, [
+      { id: "room-a", balance: 0.01 },
+      { id: "room-b", balance: 0.02 },
+      { id: "room-c", balance: 100 },
+    ], "proportional").allocations).toEqual({ "room-a": 0, "room-b": 0, "room-c": 0.04 });
+    expect(allocateBalanceCappedGroupRooms(0.05, [
+      { id: "room-a", balance: 1 },
+      { id: "room-b", balance: 1 },
+      { id: "room-c", balance: 1 },
+    ], "proportional").allocations).toEqual({ "room-a": 0.02, "room-b": 0.02, "room-c": 0.01 });
+    expect(resolveAutomaticGroupRoomAllocationMode("equal", true)).toBe("proportional");
   });
 
   it("opens from Pago Grupal in Detallados and clears the previous operation on reopen", async () => {
@@ -285,19 +321,20 @@ describe("Pago Grupal dialog entry-point modes", () => {
     await user.click(screen.getByTestId("button-group-con-comprobante"));
 
     const paymentSummary = screen.getByTestId("group-fiscal-amount-summary");
+    expect(screen.getByTestId("group-room-application-preview")).toHaveTextContent("Aplicación prevista por habitación");
     expect(paymentSummary).toHaveTextContent("Total documento fiscal (bruto)");
     expect(paymentSummary).toHaveTextContent("360,00");
     expect(paymentSummary).toHaveTextContent("Anticipos no fiscales previos aplicados");
     expect(paymentSummary).toHaveTextContent("60,00");
-    expect(paymentSummary).toHaveTextContent("Nuevo cobro requerido");
+    expect(paymentSummary).toHaveTextContent("Cobro de hoy");
     expect(paymentSummary).toHaveTextContent("300,00");
 
     await user.click(screen.getByTestId("button-confirm-group-payment"));
     const confirmation = await screen.findByTestId("group-invoice-settlement-summary");
     expect(confirmation).toHaveTextContent("Total documento fiscal (bruto)");
     expect(confirmation).toHaveTextContent("Anticipos no fiscales previos aplicados (ya cobrados)");
-    expect(confirmation).toHaveTextContent("Nuevo cobro");
-    expect(confirmation).toHaveTextContent("Total liquidado");
+    expect(confirmation).toHaveTextContent("Cobro de hoy");
+    expect(confirmation).toHaveTextContent("Total cubierto");
     expect(confirmation).toHaveTextContent("360,00");
     expect(confirmation).toHaveTextContent("300,00");
 

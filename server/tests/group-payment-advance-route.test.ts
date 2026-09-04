@@ -324,6 +324,139 @@ describe("POST group payment applies non-fiscal advances", () => {
     }));
   });
 
+  it("persists only the new 300000 collection for a 3 x 120000 invoice after a 60000 advance", async () => {
+    const rooms = ["room-a", "room-b", "room-c"];
+    mockStorage.getGroup.mockResolvedValue({
+      id: groupId,
+      name: "Grupo fiscal canónico",
+      reservations: rooms.map((id, index) => ({
+        id,
+        roomId: `physical-${index + 1}`,
+        status: "confirmed",
+      })),
+    });
+    mockStorage.getGroupReservationLedger.mockResolvedValue(rooms.map((reservationId, index) => ({
+      reservationId,
+      reservationCode: `CANON-${index + 1}`,
+      roomNumber: String(101 + index),
+      accommodationTotal: 120_000,
+      extrasTotal: 0,
+      paymentsTotal: 20_000,
+      payments: [{ amount: "20000.00", groupPaymentId: "advance-parent", status: "active" }],
+    })));
+    mockStorage.getGroupCharges.mockResolvedValue([]);
+    mockStorage.getGroupPayments.mockResolvedValue([{
+      id: "advance-parent",
+      amount: "60000.00",
+      destination: "group_distribution",
+      distributionDetail: Object.fromEntries(rooms.map((id) => [id, 20_000])),
+    }]);
+    mocks.invoiceSnapshot.mockResolvedValue({
+      sources: [],
+      totals: { eligible: 360_000, invoiced: 360_000, available: 0 },
+      financial: {
+        operationalTotal: 360_000,
+        collected: 60_000,
+        nonFiscalAdvances: 60_000,
+        operationalBalance: 300_000,
+        invoiced: 360_000,
+        fiscalAvailable: 0,
+      },
+      paymentDestinations: [],
+    });
+    mocks.recordGroupPayment.mockResolvedValue({
+      groupPayment: { id: "canonical-final-parent", amount: "300000.00" },
+      reservationPayments: rooms.map((id) => ({ id: `canonical-${id}` })),
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "factura_b",
+          receiverDetails: {
+            razonSocial: "Empresa de prueba",
+            cuit: "30712345678",
+            condicionIva: "Responsable Inscripto",
+          },
+          // ARCA already confirmed this 360000 document. The follow-up
+          // collection is its unpaid portion, not the document total.
+          concepts: [{ description: "Alojamiento grupal", amount: 360_000 }],
+          paymentRows: [{ method: "cash", amount: "300000.00", reference: "CANON-300" }],
+          distribution: "equal",
+          invoiceData: { id: 901, tipoComprobante: "FB", puntoVenta: 1, numero: 123 },
+        }),
+      });
+      expect(response.status).toBe(200);
+    });
+
+    expect(mocks.recordGroupPayment).toHaveBeenCalledTimes(1);
+    expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+      invoiceData: expect.objectContaining({ id: 901 }),
+      invoiceTotal: 360_000,
+      paymentRows: [expect.objectContaining({ amount: "300000.00" })],
+      distributionDetail: { "room-a": 100_000, "room-b": 100_000, "room-c": 100_000 },
+      settlementBreakdown: {
+        documentTotal: 360_000,
+        appliedAdvances: 60_000,
+        newCollection: 300_000,
+      },
+    }));
+  });
+
+  it.each([
+    ["equal", { "room-a": 10, "room-b": 25, "room-c": 25 }],
+    ["proportional", { "room-a": 6.67, "room-b": 20, "room-c": 33.33 }],
+  ] as const)("matches shared %s automatic allocation for unequal room balances", async (distribution, expectedAllocation) => {
+    const rooms = [
+      { id: "room-a", balance: 10 },
+      { id: "room-b", balance: 30 },
+      { id: "room-c", balance: 50 },
+    ];
+    mockStorage.getGroup.mockResolvedValue({
+      id: groupId,
+      name: "Grupo saldos desiguales",
+      reservations: rooms.map((room) => ({ id: room.id, roomId: `physical-${room.id}`, status: "confirmed" })),
+    });
+    mockStorage.getGroupReservationLedger.mockResolvedValue(rooms.map((room) => ({
+      reservationId: room.id,
+      reservationCode: room.id,
+      roomNumber: room.id,
+      accommodationTotal: room.balance,
+      extrasTotal: 0,
+      paymentsTotal: 0,
+      payments: [],
+    })));
+    mockStorage.getGroupCharges.mockResolvedValue([]);
+    mockStorage.getGroupPayments.mockResolvedValue([]);
+    mocks.invoiceSnapshot.mockResolvedValue({
+      sources: [],
+      totals: { eligible: 90, invoiced: 0, available: 90 },
+      financial: { operationalTotal: 90, collected: 0, nonFiscalAdvances: 0, operationalBalance: 90, fiscalAvailable: 90 },
+      paymentDestinations: [],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiptType: "none",
+          receiverDetails: { razonSocial: "Empresa de prueba", cuit: "30712345678" },
+          concepts: [{ description: "Cobro grupal", amount: 60 }],
+          paymentRows: [{ method: "cash", amount: "60.00", reference: "UNEQUAL-60" }],
+          distribution,
+        }),
+      });
+      expect(response.status).toBe(200);
+    });
+
+    expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({
+      distributionDetail: expectedAllocation,
+    }));
+  });
+
   it.each(["269999.99", "270000.01"])("rejects a one-cent collection difference: %s", async (amount) => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/groups/${groupId}/payment`, {
@@ -686,6 +819,43 @@ describe("POST group payment applies non-fiscal advances", () => {
 
     expect(mocks.assertFinancialSchemaReady).toHaveBeenCalledTimes(1);
     expect((await import("../db")).db.execute).not.toHaveBeenCalled();
+  });
+
+  it("exposes the persisted fiscal intent needed to resume a group collection after its dialog closes", async () => {
+    const pendingIntent = {
+      endpoint: `/api/groups/${groupId}/payment`,
+      body: {
+        receiptType: "factura_b",
+        paymentRows: [{ method: "cash", amount: "300000.00", reference: "CANON-300" }],
+        distribution: "equal",
+        distributionDetail: { "room-a": 100000, "room-b": 100000, "room-c": 100000 },
+        settlementBreakdown: {
+          documentTotal: 360000,
+          appliedAdvances: 60000,
+          newCollection: 300000,
+        },
+      },
+    };
+    const database = (await import("../db")).db;
+    (database.execute as any).mockResolvedValueOnce({
+      rows: [{
+        id: 901,
+        items: [{ descripcion: "Alojamiento grupal", subtotal: 360000 }],
+        group_payment_intent: pendingIntent,
+      }],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${groupId}/pending-fiscal-collections`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual([{
+        id: 901,
+        items: [{ descripcion: "Alojamiento grupal", subtotal: 360000 }],
+        intent: pendingIntent,
+      }]);
+    });
+
+    expect(database.execute).toHaveBeenCalledTimes(1);
   });
 
   it("does not expose a parent receipt that is absent from the requested group", async () => {

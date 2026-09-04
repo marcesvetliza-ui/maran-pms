@@ -114,6 +114,10 @@ import {
   requiredGroupInvoiceCollection,
 } from "@/lib/group-invoice-allocation";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
+import {
+  allocateBalanceCappedGroupRooms,
+  resolveAutomaticGroupRoomAllocationMode,
+} from "@shared/groupRoomAllocation";
 import type { 
   GroupWithDetails, 
   GroupStatus, 
@@ -182,6 +186,16 @@ function gItemsFromSimple(simples: Array<{ descripcion: string; precioUnitario: 
     const base = s.precioUnitario;
     return { descripcion: s.descripcion, cantidad: 1, precioUnitario: base, alicuotaIva: "21" as const, subtotalNeto: Number((base / 1.21).toFixed(2)), subtotal: base };
   });
+}
+
+/** Caja only receives tender rows; retentions and cuenta corriente settle the
+ * document but do not represent an ingreso a Caja. */
+const GROUP_CAJA_TENDER_METHODS = new Set(["cash", "transfer", "credit_card", "debit_card", "check"]);
+
+export function calculateGroupCajaToday(rows: Array<{ method: string; amount?: string | number }>): number {
+  return rows
+    .filter((row) => GROUP_CAJA_TENDER_METHODS.has(row.method))
+    .reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
 }
 
 const fmtDate = (d: string) => {
@@ -2831,7 +2845,7 @@ export default function GroupDetailPage() {
                                        Documento fiscal (bruto): <strong>{fmtMoney(Number(settlement.documentTotal) || 0)}</strong>
                                        {" · "}Anticipos no fiscales previos aplicados: <strong>{fmtMoney(Number(settlement.appliedAdvances) || 0)}</strong>
                                       {" · "}Cobro nuevo: <strong>{fmtMoney(Number(settlement.newCollection) || 0)}</strong>
-                                       {" · "}Total liquidado: <strong>{fmtMoney(Number(settlement.appliedAdvances || 0) + Number(settlement.newCollection || 0))}</strong>
+                                       {" · "}Total cubierto: <strong>{fmtMoney(Number(settlement.appliedAdvances || 0) + Number(settlement.newCollection || 0))}</strong>
                                       {gp.settlementBreakdownStatus === "reconstructed_from_fiscal_intent"
                                         ? " · Reconstruido desde intención fiscal"
                                         : null}
@@ -3845,6 +3859,7 @@ export default function GroupDetailPage() {
             const isEntityReceptor = groupPaymentReceptorType === "company" || groupPaymentReceptorType === "agency";
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
             const retentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
+            const cajaToday = calculateGroupCajaToday(groupPaymentRows);
             const groupHasCheckIn = group.reservations.some((r: any) => r.status === "checked_in");
             const masterAvailable = !!masterFolio && masterFolio.config !== "none" && groupHasCheckIn;
             const isMaster = groupPaymentDestino === "master";
@@ -3885,6 +3900,26 @@ export default function GroupDetailPage() {
             const closeCollection = groupPaymentCloseAll
               ? groupPaymentSelectedBalance
               : requiredCollection;
+            const applicationTotal = groupPaymentCloseAll ? closeCollection : rowsTotal + retentionsTotal;
+            const roomBalances = groupPaymentActiveReservations.map((reservation: any) => ({
+              id: reservation.id,
+              reservation,
+              amount: Math.max(0, Number(folio?.reservations?.find((row: any) => row.reservationId === reservation.id)?.balance || 0)),
+            }));
+            const effectiveAllocationMode = resolveAutomaticGroupRoomAllocationMode(
+              groupPaymentDistribution,
+              nonFiscalAdvances > 0,
+            );
+            const cappedApplications = allocateBalanceCappedGroupRooms(
+              applicationTotal,
+              roomBalances.map((row) => ({ id: row.id, balance: row.amount })),
+              groupPaymentDistribution,
+              nonFiscalAdvances > 0,
+            );
+            const roomApplicationPreview = roomBalances.map((row, index) => ({
+              ...row,
+              applied: cappedApplications.allocations[row.id] || 0,
+            }));
             const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
             const conceptsMismatchPayment = isFiscal
               && itemsTotal > 0
@@ -4212,20 +4247,20 @@ export default function GroupDetailPage() {
                     </div>
                   )}
                 </div>
-                {/* 3. DESTINO DEL COBRO */}
+                {/* 3. PRIMARY APPLICATION MODE */}
                 {masterAvailable && (
                   <>
                     <div className="border-t" />
                     <div className="space-y-2">
-                      <Label className="text-sm font-semibold">3. Destino del cobro</Label>
+                      <Label className="text-sm font-semibold">3. Aplicación principal del cobro</Label>
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button"
                           onClick={() => changeGroupPaymentDestino("distribute")}
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${!isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                             aria-pressed={!isMaster}
                           data-testid="button-group-destino-distribute">
-                          <p className="font-medium">Distribuir entre habitaciones</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Se aplica al saldo de cada reserva activa</p>
+                          <p className="font-medium">Cobro distribuido en habitaciones</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Distribuye al saldo de las reservas activas</p>
                         </button>
                         <button type="button"
                           onClick={() => {
@@ -4238,8 +4273,8 @@ export default function GroupDetailPage() {
                           className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${isMaster ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-muted-foreground"}`}
                             aria-pressed={isMaster}
                           data-testid="button-group-destino-master">
-                          <p className="font-medium">Aplicar al Folio Maestro</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">Con este pago se salda el Folio Maestro del grupo</p>
+                          <p className="font-medium">Cobro dirigido al Folio Maestro</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Concentra el cobro en el folio del grupo</p>
                         </button>
                       </div>
                     </div>
@@ -4438,8 +4473,29 @@ export default function GroupDetailPage() {
                         ))}
                       </div>}
 
+                      {!isMaster && roomApplicationPreview.length > 0 && (
+                        <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3 space-y-2" data-testid="group-room-application-preview">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">Aplicación prevista por habitación</p>
+                            <span className="text-xs text-muted-foreground">
+                              {effectiveAllocationMode === "proportional"
+                                ? "Proporcional al saldo restante"
+                                : "Partes iguales"}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {roomApplicationPreview.map(({ reservation, applied }) => (
+                              <div key={reservation.id} className="rounded-md border bg-background px-2 py-1.5">
+                                <p className="text-xs text-muted-foreground">Hab. {reservation.room?.roomNumber || "—"}</p>
+                                <p className="font-semibold tabular-nums">{fmtMoney(applied)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Total preview */}
-                      <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm" data-testid="group-fiscal-amount-summary">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm" data-testid="group-fiscal-amount-summary">
                         <div>
                           <p className="text-xs text-muted-foreground">Total documento fiscal (bruto)</p>
                           <p className="font-semibold">{fmtMoney(itemsTotal)}</p>
@@ -4449,8 +4505,12 @@ export default function GroupDetailPage() {
                           <p className="font-semibold text-amber-600">{fmtMoney(automaticAdvance)}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Nuevo cobro requerido</p>
+                          <p className="text-xs text-muted-foreground">Cobro de hoy</p>
                           <p className="font-semibold text-green-600">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total cubierto</p>
+                          <p className="font-semibold">{fmtMoney(automaticAdvance + (groupPaymentCloseAll ? closeCollection : requiredCollection))}</p>
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground">
@@ -4572,16 +4632,18 @@ export default function GroupDetailPage() {
                   <div className={`grid grid-cols-1 ${!isMaster ? "sm:grid-cols-2" : ""} gap-4`}>
                     {!isMaster && (
                       <div>
-                        <Label>Asignación operativa entre habitaciones</Label>
-                        <Select value={groupPaymentDistribution} onValueChange={setGroupPaymentDistribution}>
+                        <Label>Modo automático entre habitaciones</Label>
+                        <Select value={effectiveAllocationMode} onValueChange={setGroupPaymentDistribution}>
                           <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="equal">Partes iguales (operativo)</SelectItem>
-                            <SelectItem value="proportional">Proporcional al saldo</SelectItem>
+                            {nonFiscalAdvances <= 0 && <SelectItem value="equal">Partes iguales</SelectItem>}
+                            <SelectItem value="proportional">
+                              {nonFiscalAdvances > 0 ? "Proporcional al saldo restante (por anticipo previo)" : "Proporcional al saldo"}
+                            </SelectItem>
                           </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {groupPaymentDistribution === "equal"
+                          <p className="text-xs text-muted-foreground mt-1">
+                          {effectiveAllocationMode === "equal"
                             ? "Solo asignación operativa entre reservas activas; no altera las fuentes fiscales."
                             : "Asignación operativa proporcional al saldo pendiente; no altera las fuentes fiscales."}
                         </p>
@@ -4601,12 +4663,6 @@ export default function GroupDetailPage() {
                           }));
                           setGroupPaymentCloseReservationIds(nextIds);
                           setGroupPaymentCloseAmounts(nextAmounts);
-                          if (checked) {
-                            const amount = Object.values(nextAmounts).reduce((sum, value) => sum + Number(value || 0), 0);
-                            setGroupPaymentRows((rows) => rows.map((row, index) =>
-                              index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
-                            ));
-                          }
                         }}
                         data-testid="checkbox-close-all-rooms"
                       />
@@ -4619,6 +4675,11 @@ export default function GroupDetailPage() {
                         </p>
                       </div>
                     </div>
+                    {groupPaymentCloseAll && Math.abs(closeCollection - (rowsTotal + retentionsTotal)) > 0.009 && (
+                      <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200" data-testid="directed-close-amount-warning">
+                        El cierre dirigido totaliza {fmtMoney(closeCollection)}, pero los medios de pago y retenciones suman {fmtMoney(rowsTotal + retentionsTotal)}. Revisá el desajuste: los medios de pago no se modificaron automáticamente.
+                      </div>
+                    )}
                   </div>
                     {groupPaymentCloseAll && (
                       <div className="rounded-lg border p-3 space-y-2" data-testid="group-close-room-selection">
@@ -4644,10 +4705,6 @@ export default function GroupDetailPage() {
                                     else delete nextAmounts[reservation.id];
                                     setGroupPaymentCloseReservationIds(nextIds);
                                     setGroupPaymentCloseAmounts(nextAmounts);
-                                    const amount = nextIds.reduce((sum, reservationId) => sum + Number(nextAmounts[reservationId] || 0), 0);
-                                    setGroupPaymentRows((rows) => rows.map((row, index) =>
-                                      index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
-                                    ));
                                   }}
                                   data-testid={`checkbox-close-reservation-${reservation.id}`}
                                 />
@@ -4667,11 +4724,6 @@ export default function GroupDetailPage() {
                                   onChange={(event) => {
                                     const nextAmounts = { ...groupPaymentCloseAmounts, [reservation.id]: event.target.value };
                                     setGroupPaymentCloseAmounts(nextAmounts);
-                                    const amount = groupPaymentCloseReservationIds.reduce((sum, reservationId) =>
-                                      sum + Math.max(0, Number(nextAmounts[reservationId] || 0)), 0);
-                                    setGroupPaymentRows((rows) => rows.map((row, index) =>
-                                      index === 0 ? { ...row, amount: amount > 0 ? amount.toFixed(2) : "" } : { ...row, amount: "" }
-                                    ));
                                   }}
                                   aria-label={`Importe para habitación ${reservation.room?.roomNumber || "sin asignar"}`}
                                   data-testid={`input-close-amount-${reservation.id}`}
@@ -4702,7 +4754,7 @@ export default function GroupDetailPage() {
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Punto de Venta</span><span className="font-medium">{groupPaymentPvNum ? `PV ${groupPaymentPvNum.padStart(4, "0")}` : "Por defecto"}</span></div>
                     )}
                     {masterAvailable && (
-                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Destino</span><span className="font-medium">{isMaster ? "Folio Maestro" : "Distribución entre habitaciones"}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Aplicación</span><span className="font-medium">{isMaster ? "Dirigida al Folio Maestro" : "Automática entre habitaciones"}</span></div>
                     )}
                     {isFiscal && (
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Total documento fiscal (bruto)</span><span className="font-medium">{fmtMoney(groupPaymentItems.reduce((s, it) => s + it.subtotal, 0))}</span></div>
@@ -4712,7 +4764,7 @@ export default function GroupDetailPage() {
                     )}
                     {isFiscal && (
                       <>
-                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Nuevo cobro requerido</span><span className="font-medium">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobro de hoy</span><span className="font-medium">{fmtMoney(groupPaymentCloseAll ? closeCollection : requiredCollection)}</span></div>
                         {groupPaymentCloseAll && closeCollection > requiredCollection + 0.009 && (
                           <div className="flex justify-between gap-2 text-xs"><span className="text-muted-foreground">Porción fiscal del cobro</span><span>{fmtMoney(requiredCollection)}</span></div>
                         )}
@@ -4723,12 +4775,12 @@ export default function GroupDetailPage() {
                       <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Retenciones</span><span className="font-medium">{fmtMoney(retentionsTotal)}</span></div>
                     )}
                     <div className="flex justify-between gap-2 border-t pt-1 font-semibold">
-                      <span>{isFiscal ? "Nuevo cobro informado" : "Total del anticipo"}</span>
-                      <span>{fmtMoney(rowsTotal + retentionsTotal)}</span>
+                      <span>{isFiscal ? (cajaToday > 0 ? "Ingreso a Caja hoy" : "Sin ingreso a Caja") : "Total del anticipo"}</span>
+                      <span>{isFiscal ? fmtMoney(cajaToday) : fmtMoney(rowsTotal + retentionsTotal)}</span>
                     </div>
                     {isFiscal && (
                       <div className="flex justify-between gap-2 border-t pt-1 font-semibold" data-testid="group-payment-total-settled">
-                        <span>Total liquidado</span>
+                        <span>Total cubierto</span>
                         <span>{fmtMoney(automaticAdvance + rowsTotal + retentionsTotal)}</span>
                       </div>
                     )}

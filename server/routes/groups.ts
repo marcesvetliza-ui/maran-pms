@@ -14,6 +14,7 @@ import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger
 import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
 import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
+import { allocateBalanceCappedGroupRooms } from "@shared/groupRoomAllocation";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
@@ -1350,19 +1351,16 @@ export function registerGroupsRoutes(app: Express) {
             .map((id) => ({ id, balance: balancesById.get(id) || 0 }))
             .filter((item) => item.balance > 0)
             .map((item) => [item.id, Number(item.balance.toFixed(2))]))
-        : distributeCents(
-            Math.round(totalAmount * 100),
+        : allocateBalanceCappedGroupRooms(
+            totalAmount,
             // An earlier advance may have been explicitly directed to a room.
             // Allocate this final collection against each room's *remaining*
             // balance, rather than re-equalizing the total and moving that
             // directed credit to other rooms.
-            balances.map((item) => ({
-              id: item.id,
-              weight: distribution === "proportional" || nonFiscalAdvancesForAllocation > 0
-                ? item.balance
-                : 1,
-            }))
-          );
+            balances.map((item) => ({ id: item.id, balance: item.balance })),
+            distribution,
+            nonFiscalAdvancesForAllocation > 0,
+          ).allocations;
       const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
         destination: "group_distribution",
         concepts: evidence.concepts,

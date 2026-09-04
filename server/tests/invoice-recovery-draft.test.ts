@@ -138,6 +138,45 @@ describe("recoverable reservation credit-note emission", () => {
     expect(invoice).toMatchObject({ id: 44, estado: "emitida" });
   });
 
+  it("persists a group-payment recovery instruction before ARCA authorization", async () => {
+    const groupPaymentIntent = {
+      endpoint: "/api/groups/group-canonical/payment",
+      body: {
+        paymentRows: [{ method: "cash", amount: "300000.00", reference: "CANON-300" }],
+        distributionDetail: { "room-1": 100000, "room-2": 100000, "room-3": 100000 },
+        settlementBreakdown: {
+          documentTotal: 360000,
+          appliedAdvances: 60000,
+          newCollection: 300000,
+        },
+      },
+    };
+
+    const invoice = await emitirFactura({
+      tipoComprobante: "FB",
+      cliente: { razonSocial: "Empresa canónica", cuit: "30712345678", condicionIva: "Responsable Inscripto" },
+      items: [{
+        descripcion: "Alojamiento grupal",
+        cantidad: 1,
+        precioUnitario: 360000,
+        alicuotaIva: "no_gravado",
+        subtotalNeto: 0,
+        subtotal: 360000,
+      }],
+      groupId: "group-canonical",
+      groupPaymentIntent,
+    });
+
+    expect(state.events).toEqual(["execute", "insert-draft", "update"]);
+    expect(state.insertValues[0]).toMatchObject({
+      groupId: "group-canonical",
+      groupPaymentIntent,
+      estado: "autorizacion_pendiente",
+      reconciliationStatus: "pendiente",
+    });
+    expect(invoice).toMatchObject({ id: 44, estado: "emitida" });
+  });
+
   it("keeps the pending draft and stores the ARCA error when authorization fails after saving it", async () => {
     state.billingConfig = {
       arcaAmbiente: "homologacion",

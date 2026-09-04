@@ -692,6 +692,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [emitted, setEmitted] = useState(false);
   const [linkPending, setLinkPending] = useState(false);
   const [linkError, setLinkError] = useState(false);
+  const [groupRecoveryReady, setGroupRecoveryReady] = useState(false);
   const [linkRetrying, setLinkRetrying] = useState(false);
   const [emittedInvoiceData, setEmittedInvoiceData] = useState<any>(null);
   const originalRecipientRef = useRef<Record<string, string>>({});
@@ -1094,10 +1095,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             onClose(); resetForm();
           } else {
             setLinkError(true);
+            await refreshGroupDraftRecovery();
           }
         } catch {
           setLinkPending(false);
           setLinkError(true);
+          await refreshGroupDraftRecovery();
         }
       } else if (groupPaymentId && groupPaymentGroupId) {
         setEmittedInvoiceData(data);
@@ -1160,6 +1163,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
     setShowRecipientChangeWarning(false); setPendingEntity(null); setShowEntityChangeWarning(false);
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
+    setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
   }
@@ -1170,9 +1174,20 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const ambiente: AmbienteMode = config?.arcaAmbiente ?? "ficticio";
   const faNeedsCuit = isFA && !cuit.replace(/-/g, ""); // FA/FM requires a CUIT before proceeding
 
+  async function refreshGroupDraftRecovery() {
+    if (!groupPaymentGroupId) return;
+    setGroupRecoveryReady(false);
+    await queryClient.invalidateQueries({
+      queryKey: ["/api/groups", groupPaymentGroupId, "pending-fiscal-collections"],
+    });
+    setGroupRecoveryReady(true);
+  }
+
   function handleClose() {
-    if (linkPending || linkError) {
-      // Linking in progress or link failed — don't allow silent close
+    if (linkPending || (linkError && (!groupPaymentDraft || !groupRecoveryReady))) {
+      // The fiscal emission is complete, but the idempotent link request is
+      // still running. Non-group flows have no durable recovery handoff, so
+      // keep them open until retry succeeds.
       return;
     }
     if (requiresEmission && !emitted) {
@@ -1224,6 +1239,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           onClose(); resetForm();
         } else {
           toast({ title: "Reintento fallido", description: "No se pudo confirmar el cobro. Caja no fue modificada.", variant: "destructive" });
+          await refreshGroupDraftRecovery();
         }
       } else if (groupPaymentId && groupPaymentGroupId) {
         const linkRes = await apiRequest(
@@ -1255,6 +1271,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       }
     } catch {
       toast({ title: "Reintento fallido", description: "Error de red. Intente nuevamente.", variant: "destructive" });
+      if (groupPaymentDraft && groupPaymentGroupId) await refreshGroupDraftRecovery();
     } finally {
       setLinkRetrying(false);
     }
@@ -1434,28 +1451,29 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               </div>
             </div>
 
-            {/* Error: link to payment failed */}
-            <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+            {/* The fiscal emission is complete even when the operational link
+                needs reconciliation. Keep this state actionable, never a dead
+                end and never imply that the invoice should be emitted again. */}
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
               <div className="text-sm flex-1">
-                <p className="font-semibold text-red-800 dark:text-red-300">{(groupId || groupPaymentGroupId) ? "No se pudo vincular la factura al folio del grupo" : "No se pudo vincular la factura al pago"}</p>
-                <p className="text-red-700 dark:text-red-400 text-xs mt-1">
-                  {(groupId || groupPaymentGroupId)
-                    ? "La factura fue generada correctamente en ARCA, pero ocurrió un error al registrarla en el folio del grupo. Puede reintentar ahora."
-                    : "La factura fue generada correctamente en ARCA, pero ocurrió un error al asociarla al registro de pago. Puede reintentar ahora o cerrar y vincularlo manualmente desde el panel de pagos."}
-                </p>
+                <p className="font-semibold text-amber-900 dark:text-amber-200">Vínculo operativo pendiente</p>
+                <p className="text-amber-800 dark:text-amber-300 text-xs mt-1">La factura ya fue emitida. El vínculo con el folio quedó pendiente de conciliación; podés reintentar el vínculo o volver al grupo. No emitas otra factura.</p>
               </div>
             </div>
 
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              {!groupPaymentDraft && (
+              {groupPaymentDraft && groupRecoveryReady && (
                 <Button
                   variant="outline"
                   onClick={() => { onClose(); resetForm(); }}
                   data-testid="btn-cerrar-sin-vincular"
                 >
-                  Cerrar sin vincular
+                  Volver al grupo
                 </Button>
+              )}
+              {groupPaymentDraft && !groupRecoveryReady && (
+                <span className="text-xs text-muted-foreground self-center">Actualizando recuperación pendiente…</span>
               )}
               <Button
                 onClick={handleRetryLink}
@@ -1573,8 +1591,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Aplicación y cobro</p>
                   <div className="flex justify-between"><span>Total documento fiscal (bruto)</span><span className="font-medium">${fPeso(groupSettlementPreview.grossFiscalDocument)}</span></div>
                   <div className="flex justify-between text-amber-700 dark:text-amber-400"><span>Anticipos no fiscales previos aplicados (ya cobrados)</span><span>-${fPeso(groupSettlementPreview.priorAdvancesApplied)}</span></div>
-                  <div className="flex justify-between text-emerald-700 dark:text-emerald-400"><span>Nuevo cobro</span><span>${fPeso(groupSettlementPreview.newCollection)}</span></div>
-                  <div className="flex justify-between border-t pt-1 font-bold"><span>Total liquidado</span><span>${fPeso(groupSettlementPreview.totalSettled)}</span></div>
+                  <div className="flex justify-between text-emerald-700 dark:text-emerald-400"><span>Cobro de hoy</span><span>${fPeso(groupSettlementPreview.newCollection)}</span></div>
+                  <div className="flex justify-between border-t pt-1 font-bold"><span>Total cubierto</span><span>${fPeso(groupSettlementPreview.totalSettled)}</span></div>
                 </div>
               )}
               {(cashArea || showPaymentMethod) && (
@@ -1611,7 +1629,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 disabled={mutation.isPending}
                 data-testid="btn-confirmar-emitir"
               >
-                {mutation.isPending ? "Emitiendo..." : "Confirmar y emitir PDF"}
+                {mutation.isPending
+                  ? "Emitiendo..."
+                  : groupSettlementPreview
+                    ? `Confirmar factura ${fPeso(groupSettlementPreview.grossFiscalDocument)} · cobrar hoy ${fPeso(groupSettlementPreview.newCollection)}`
+                    : "Confirmar y emitir PDF"}
               </Button>
             </DialogFooter>
           </div>

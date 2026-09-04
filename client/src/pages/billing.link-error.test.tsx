@@ -171,7 +171,7 @@ describe("EmitirFacturaDialog — link-failure error banner", () => {
 
     // Wait for the link attempt to complete and the error state to be set
     await waitFor(
-      () => expect(screen.queryByText("No se pudo vincular la factura al pago")).toBeInTheDocument(),
+      () => expect(screen.queryByText("Vínculo operativo pendiente")).toBeInTheDocument(),
       { timeout: 5000 }
     );
 
@@ -182,35 +182,35 @@ describe("EmitirFacturaDialog — link-failure error banner", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("shows the error banner with both action buttons", async () => {
+  it("keeps non-group link errors retry-only", async () => {
     const user = userEvent.setup();
     renderDialog();
 
     await fillAndSubmitForm(user);
 
     await waitFor(
-      () => expect(screen.queryByText("No se pudo vincular la factura al pago")).toBeInTheDocument(),
+      () => expect(screen.queryByText("Vínculo operativo pendiente")).toBeInTheDocument(),
       { timeout: 5000 }
     );
 
     // Error banner text is visible
     expect(
-      screen.getByText(/No se pudo vincular la factura al pago/i)
+      screen.getByText(/La factura ya fue emitida.*No emitas otra factura/i)
     ).toBeInTheDocument();
 
-    // Both action buttons are present
+    // Only retry is offered without durable group draft recovery.
     expect(screen.getByTestId("btn-reintentar-vinculo")).toBeInTheDocument();
-    expect(screen.getByTestId("btn-cerrar-sin-vincular")).toBeInTheDocument();
+    expect(screen.queryByTestId("btn-cerrar-sin-vincular")).not.toBeInTheDocument();
   });
 
-  it("does NOT close when the Radix close button (X) is clicked", async () => {
+  it("does not close non-group link errors via the Radix close button (X)", async () => {
     const user = userEvent.setup();
     const { onClose } = renderDialog();
 
     await fillAndSubmitForm(user);
 
     await waitFor(
-      () => expect(screen.queryByText("No se pudo vincular la factura al pago")).toBeInTheDocument(),
+      () => expect(screen.queryByText("Vínculo operativo pendiente")).toBeInTheDocument(),
       { timeout: 5000 }
     );
 
@@ -220,45 +220,37 @@ describe("EmitirFacturaDialog — link-failure error banner", () => {
       await user.click(closeBtn);
     }
 
-    // Dialog must remain open; onClose must not have been called
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("does NOT close when Escape is pressed", async () => {
+  it("does not close non-group link errors with Escape", async () => {
     const user = userEvent.setup();
     const { onClose } = renderDialog();
 
     await fillAndSubmitForm(user);
 
     await waitFor(
-      () => expect(screen.queryByText("No se pudo vincular la factura al pago")).toBeInTheDocument(),
+      () => expect(screen.queryByText("Vínculo operativo pendiente")).toBeInTheDocument(),
       { timeout: 5000 }
     );
 
     // Press Escape
     await user.keyboard("{Escape}");
 
-    // The dialog guard (handleClose returns early when linkError is true)
-    // means the dialog should still be open
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("closes normally via 'Cerrar sin vincular' button", async () => {
-    const user = userEvent.setup();
+  it("does not expose a close action without durable group recovery", async () => {
     const { onClose } = renderDialog();
 
-    await fillAndSubmitForm(user);
+    await fillAndSubmitForm(userEvent.setup());
 
     await waitFor(
-      () => expect(screen.queryByTestId("btn-cerrar-sin-vincular")).toBeInTheDocument(),
+      () => expect(screen.queryByText("Vínculo operativo pendiente")).toBeInTheDocument(),
       { timeout: 5000 }
     );
 
-    // The "Cerrar sin vincular" button should call onClose directly (bypassing the guard)
-    await user.click(screen.getByTestId("btn-cerrar-sin-vincular"));
-
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("btn-cerrar-sin-vincular")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
