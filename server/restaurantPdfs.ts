@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
+import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -82,7 +83,7 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
     doc.fillColor("#333333").fontSize(13).font("Helvetica-Bold")
       .text(data.orderLabel || `Pedido ${data.orderNumber}`, infoBoxX, y + 16, { width: infoBoxW, align: "center" });
     doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
-      .text(new Date().toLocaleDateString("es-AR"), infoBoxX, y + 34, { width: infoBoxW, align: "center" });
+      .text(formatArgentinaDate(new Date()), infoBoxX, y + 34, { width: infoBoxW, align: "center" });
 
     // Left info column
     doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
@@ -98,8 +99,8 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
 
     // ── RECEIPT META ─────────────────────────────────────────────────────────
     const closedStr = data.closedAt
-      ? new Date(data.closedAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
-      : new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+      ? formatArgentinaDateTime(data.closedAt)
+      : formatArgentinaDateTime(new Date());
 
     const receiptLabel = data.receiptType ? (receiptTypeLabels[data.receiptType] || data.receiptType) : "Ticket";
 
@@ -185,7 +186,7 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
       .text(HOTEL_ADDRESS, margin, footerY + 22, { width: contentW });
     doc.fillColor("#aadddd").fontSize(6.8).font("Helvetica")
       .text(HOTEL_PHONE, margin, footerY + 32, { width: contentW });
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fillColor("#888888").fontSize(6).font("Helvetica")
       .text(`Generado el ${ts}`, margin, footerY + 42, { width: contentW, align: "right" });
 

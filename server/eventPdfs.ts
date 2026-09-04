@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import type { EventWithDetails } from "@shared/schema";
 import { assetPath } from "./utils/assetPath";
+import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -49,7 +50,7 @@ function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, 
   // Right: website
   doc.fillColor("#ffffff").fontSize(9.5).font("Helvetica-Bold")
     .text(HOTEL_WEB, pageW - margin - 110, footerY + 23, { width: 110, align: "right" });
-  const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+  const ts = formatArgentinaDateTime(new Date());
   doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
     .text(`Generado el ${ts}`, margin, footerY + 50, { width: contentW, align: "center" });
   return footerY;
@@ -163,7 +164,7 @@ export async function generateTablesResumenPdf(
     doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
       .text(eventCode, codeBoxX, titleY + 17, { width: codeBoxW, align: "center" });
     doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
-      .text(new Date().toLocaleDateString("es-AR"), codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
+      .text(formatArgentinaDate(new Date()), codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
 
     y = titleY + 48;
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
@@ -355,7 +356,7 @@ export async function generateTableReceiptPdf(
     doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
       .text(tableLabel, codeBoxX, titleY + 17, { width: codeBoxW, align: "center" });
     doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
-      .text(new Date().toLocaleDateString("es-AR"), codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
+      .text(formatArgentinaDate(new Date()), codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
 
     let y = titleY + 50;
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
@@ -369,7 +370,7 @@ export async function generateTableReceiptPdf(
 
     // Receipt type + closed date
     const closedStr = table.closedAt
-      ? new Date(table.closedAt).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+      ? formatArgentinaDate(table.closedAt)
       : "—";
     doc.fillColor("#555555").fontSize(8.5).font("Helvetica")
       .text(`Comprobante: ${receiptTypeLabel(table.receiptType)}  ·  Cerrada: ${closedStr}`,
@@ -490,7 +491,7 @@ export async function generateTableReceiptPdf(
       doc.fillColor("#1a1a1a").fontSize(8.5).font("Helvetica")
         .text(paymentMethodLabel(p.method), colPayMethod + 4, y + 4, { width: 210 });
       const paidDate = p.paidAt
-        ? new Date(p.paidAt).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+        ? formatArgentinaDate(p.paidAt)
         : "—";
       doc.text(paidDate, colPayDate, y + 4, { width: 136 });
       doc.fillColor(p.isAdvance === "true" ? "#92400e" : "#555555").fontSize(8).font("Helvetica")
@@ -589,7 +590,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
     doc.fillColor("#333333").fontSize(11).font("Helvetica-Bold")
       .text(event.eventCode, codeBoxX, titleY + 17, { width: codeBoxW, align: "center" });
     doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
-      .text(`Generado: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
+      .text(`Generado: ${formatArgentinaDate(new Date())}`, codeBoxX, titleY + 30, { width: codeBoxW, align: "center" });
 
     let y = titleY + 48;
     doc.moveTo(margin, y).lineTo(margin + contentW, y).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
@@ -754,7 +755,7 @@ export async function generateConfirmacionEventoPdf(event: EventWithDetails): Pr
     doc.fillColor("#333333").fontSize(12).font("Helvetica-Bold")
       .text(event.eventCode, codeBoxX, y + 15, { width: codeBoxW, align: "center" });
     doc.fillColor("#aaaaaa").fontSize(6.5).font("Helvetica")
-      .text(new Date().toLocaleDateString("es-AR"), codeBoxX, y + 30, { width: codeBoxW, align: "center" });
+      .text(formatArgentinaDate(new Date()), codeBoxX, y + 30, { width: codeBoxW, align: "center" });
 
     y += Math.max(nameH + 4, 44);
 

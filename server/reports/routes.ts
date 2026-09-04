@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireRole } from "../auth";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
+import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 const FINANCE_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 const SPA_REPORT_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion", "spa"] as [string, ...string[]];
@@ -1335,7 +1336,7 @@ export function registerReportsRoutes(app: Express) {
         render(data);
         y += 16;
         if (y > 760) { doc.addPage(); y = 40; }
-        const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+        const ts = formatArgentinaDateTime(new Date());
         doc.font("Helvetica").fontSize(7).fillColor("#aaaaaa")
           .text(`Generado el ${ts} | Hotel Maran Suites & Towers`, x0, y, { align: "center", width: 515 });
         doc.end();

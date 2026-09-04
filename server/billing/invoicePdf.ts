@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import type { GroupInvoiceComposition } from "@shared/groupInvoiceComposition";
+import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 const $n = (v: any) => parseFloat(String(v ?? 0)) || 0;
 
@@ -9,10 +10,7 @@ function fPeso(n: number | string) {
 
 function fDate(d: string | Date | null | undefined) {
   if (!d) return "";
-  const dt = typeof d === "string"
-    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d)
-    : d;
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
+  return formatArgentinaDate(d);
 }
 
 function padNum(n: number, len: number) {
@@ -635,7 +633,7 @@ export async function generarFacturaPDF(
     y += 22;
 
     // Footer timestamp
-    const _ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const _ts = formatArgentinaDateTime(new Date());
     doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
        .text(`Generado el ${_ts} | ${cfgRazonSocial}`, x0, y + 4, { align: "center", width: W })
        .fillColor("#000");
@@ -939,7 +937,7 @@ export async function generarVoucherHabitacionPDF(
     y += 28;
 
     // ── Footer ─────────────────────────────────────────────────────────────
-    const _ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const _ts = formatArgentinaDateTime(new Date());
     doc.font("Helvetica").fontSize(6).fillColor("#aaaaaa")
        .text(`Generado el ${_ts} | ${config?.razonSocial ?? "Maran Suites & Towers"}`, x0, y + 8, { align: "center", width: W });
 

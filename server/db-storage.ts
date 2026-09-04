@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { getArgentinaOperationalParts } from "./utils/argentinaDateTime";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -6685,9 +6686,7 @@ export class DatabaseStorage implements IStorage {
     // Enviar efectivo a Caja de Administración si corresponde
     if (enviarAAdministracion && efectivoContado > 0) {
       try {
-        const now = new Date();
-        const fecha = now.toISOString().split("T")[0];
-        const hora = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+        const { date: fecha, time: hora } = getArgentinaOperationalParts();
         await db.execute(sql`
           INSERT INTO admin_cash_movements (fecha, hora, tipo, concepto, importe, signo, area_origen, operador, anulado)
           VALUES (${fecha}, ${hora},

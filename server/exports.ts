@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { requireAuth } from "./auth";
 import { calcNeto, calcIva21 } from "./lib/pricing";
+import { formatArgentinaDate, formatArgentinaDateTime, formatArgentinaFilenameTimestamp } from "./utils/argentinaDateTime";
 
 // ─── Hotel Constants ──────────────────────────────────────────────────────────
 const H = {
@@ -22,8 +23,7 @@ const $n = (v: any) => parseFloat(v ?? 0) || 0;
 
 function fDate(d: string | Date | null | undefined): string {
   if (!d) return "";
-  const dt = typeof d === "string" ? new Date(d + "T12:00:00") : d;
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
+  return formatArgentinaDate(d);
 }
 
 function fPeso(n: number): string {
@@ -31,8 +31,7 @@ function fPeso(n: number): string {
 }
 
 function nowStr(): string {
-  const n = new Date();
-  return `${String(n.getDate()).padStart(2,"0")}_${String(n.getMonth()+1).padStart(2,"0")}_${n.getFullYear()}_${String(n.getHours()).padStart(2,"0")}_${String(n.getMinutes()).padStart(2,"0")}`;
+  return formatArgentinaFilenameTimestamp();
 }
 
 function pad(v: any, len: number, char = " ", right = false): string {
@@ -48,7 +47,7 @@ async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Prom
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
     fn(doc);
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fontSize(6.5).font("Helvetica").fillColor("#aaaaaa")
       .text(`Generado el ${ts} | Hotel Maran Suites & Towers`, 40, doc.page.height - 22, { align: "center", width: 515 });
     doc.end();

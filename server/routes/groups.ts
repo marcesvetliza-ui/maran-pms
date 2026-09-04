@@ -15,6 +15,7 @@ import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition }
 import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
 import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
+import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -2936,7 +2937,7 @@ export function registerGroupsRoutes(app: Express) {
       y += 20;
       doc.moveTo(40, y).lineTo(555, y).lineWidth(0.5).stroke("#cccccc");
       doc.fontSize(8).font("Helvetica").fillColor("#888888")
-        .text(`Generado el ${new Date().toLocaleString("es-AR")} | ${HOTEL}`, 40, y + 8, { align: "center", width: pageW });
+        .text(`Generado el ${formatArgentinaDateTime(new Date())} | ${HOTEL}`, 40, y + 8, { align: "center", width: pageW });
 
       doc.end();
     } catch (error: any) {

@@ -23,6 +23,7 @@ import {
 } from "@shared/reservationFolio";
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
 import PDFDocument from "pdfkit";
+import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -997,7 +998,7 @@ export function registerReservationsRoutes(app: Express) {
       const netInvoiced = getNetReservationInvoicedTotal(emittedInvoices);
       const availableAdvance = getAvailableReservationAdvanceTotal(activePayments, emittedInvoices);
 
-      const printedAt = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      const printedAt = formatArgentinaDateTime(new Date());
 
       const pdfBuf = await generarResumenCuentaPDF({
         reservationCode: reservation.reservationCode,
@@ -3044,7 +3045,7 @@ async function handleConfirmationPdf(req: any, res: any) {
     doc.fillColor("#2e7d32").fontSize(6.5).font("Helvetica-Bold")
       .text("CONFIRMADA", badgeX, codeBoxY + 36, { width: badgeW, align: "center", characterSpacing: 0.5 });
     doc.fillColor("#aaaaaa").fontSize(7).font("Helvetica")
-      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, codeBoxX, codeBoxY + 49, { width: codeBoxW, align: "center" });
+      .text(`Emitida: ${formatArgentinaDate(new Date())}`, codeBoxX, codeBoxY + 49, { width: codeBoxW, align: "center" });
 
     y += 20;
 
@@ -3249,7 +3250,7 @@ async function handleConfirmationPdf(req: any, res: any) {
           margin, y, { width: contentW, align: "center" }
         );
     }
-    const _confTs = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const _confTs = formatArgentinaDate(new Date());
     doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
       .text(`Generado el ${_confTs} | Maran Suites & Towers`, margin, pageH - 20, { align: "center", width: contentW });
 

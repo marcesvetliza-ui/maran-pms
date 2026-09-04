@@ -6,6 +6,7 @@ import PDFDocument from "pdfkit";
 import { requireAuth } from "./auth";
 import { getArgentinaToday } from "./db-storage";
 import { isValidCentroCosto } from "./routes/cost-centers";
+import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -17,8 +18,7 @@ function fPeso(n: number): string {
 
 function fDate(d: string | Date | null | undefined): string {
   if (!d) return "";
-  const dt = typeof d === "string" ? new Date(d + "T12:00:00") : d;
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
+  return formatArgentinaDate(d);
 }
 
 async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Promise<Buffer> {
@@ -29,7 +29,7 @@ async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Prom
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
     fn(doc);
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fontSize(6.5).font("Helvetica").fillColor("#aaaaaa")
       .text(`Generado el ${ts} | Hotel Maran Suites & Towers`, 40, doc.page.height - 22, { align: "center", width: 515 });
     doc.end();

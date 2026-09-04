@@ -7,6 +7,7 @@ import { requireAuth } from "../auth";
 import { eq, desc, like, and, asc } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 import { assetPath } from "../utils/assetPath";
+import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 const HOTEL_NAME = "Maran Suites & Towers";
 const HOTEL_TAGLINE = "Hotel & Spa · Paraná, Entre Ríos";
@@ -1256,7 +1257,7 @@ export function registerPresupuestosRoutes(app: Express) {
         generateGeneralPdf(doc, pres, items, conditions);
       }
 
-      const _presTs = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+      const _presTs = formatArgentinaDateTime(new Date());
       doc.fontSize(6).font("Helvetica").fillColor("#aaaaaa")
         .text(`Generado el ${_presTs} | Maran Suites & Towers`, 0, doc.page.height - 10, { align: "center", width: doc.page.width });
       doc.end();

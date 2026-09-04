@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
 import type { SpaAppointmentWithDetails, SpaAccountWithItems, SpaProfessional } from "@shared/schema";
+import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
 
 export interface SpaReceiptData {
   accountId: string;
@@ -78,8 +79,8 @@ export async function generateSpaAccountReceiptPdf(data: SpaReceiptData): Promis
       .text("Recibo de SPA", margin, y, { width: contentW * 0.62 });
     y += 26;
     const closedStr = data.closedAt
-      ? new Date(data.closedAt).toLocaleDateString("es-AR")
-      : new Date().toLocaleDateString("es-AR");
+      ? formatArgentinaDate(data.closedAt)
+      : formatArgentinaDate(new Date());
     doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
       .text(`Emitido: ${closedStr}`, margin, y);
     y += 20;
@@ -174,7 +175,7 @@ export async function generateSpaAccountReceiptPdf(data: SpaReceiptData): Promis
       .text(HOTEL_ADDRESS, margin, footerY + 23, { width: pageW * 0.55 });
     doc.fillColor("#aacccc").fontSize(6.8).font("Helvetica")
       .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, margin, footerY + 33, { width: pageW * 0.55 });
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
       .text(`Generado el ${ts}`, pageW * 0.62 + margin, footerY + 20, { width: pageW * 0.35 - margin, align: "center" });
 
@@ -269,7 +270,7 @@ export async function generateConfirmacionTurnoSpaPdf(
       .text("Confirmación de Turno", margin, y, { width: contentW });
     y += 28;
     doc.fillColor("#666666").fontSize(8.5).font("Helvetica")
-      .text(`Emitida: ${new Date().toLocaleDateString("es-AR")}`, margin, y);
+      .text(`Emitida: ${formatArgentinaDate(new Date())}`, margin, y);
     y += 20;
 
     // ── STATUS BADGE ──────────────────────────────────────────────────────────
@@ -385,7 +386,7 @@ export async function generateConfirmacionTurnoSpaPdf(
       .text(HOTEL_ADDRESS, margin, footerY + 23, { width: pageW * 0.55 });
     doc.fillColor("#aacccc").fontSize(6.8).font("Helvetica")
       .text(`${HOTEL_EMAIL}  ·  ${HOTEL_PHONE}`, margin, footerY + 33, { width: pageW * 0.55 });
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
       .text(`Generado el ${ts}`, pageW * 0.62 + margin, footerY + 20, { width: pageW * 0.35 - margin, align: "center" });
 

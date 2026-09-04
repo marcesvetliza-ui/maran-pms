@@ -7,6 +7,7 @@ import { assetPath } from "../utils/assetPath";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import type { FolioEntityType, FolioStatus, FolioWithMovements } from "@shared/schema";
+import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -66,8 +67,7 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
       `$ ${Number(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const fmtDate = (iso: string | Date) => {
       try {
-        const d = new Date(iso);
-        return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        return formatArgentinaDateTime(iso);
       } catch { return String(iso); }
     };
 
@@ -314,7 +314,7 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
        .text("CUIT 33-68110008-9 · Responsable Inscripto", cx, footerY + 40, { width: cw, align: "center" });
     doc.fillColor("#ffffff").fontSize(10).font("Helvetica-Bold")
        .text("MARAN.COM.AR", pageW - margin - 100, footerY + 26, { width: 100, align: "right" });
-    const ts = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+    const ts = formatArgentinaDateTime(new Date());
     doc.fillColor("#aaaaaa").fontSize(6).font("Helvetica")
        .text(`Generado el ${ts}`, margin, footerY + 57, { width: cW, align: "center" });
 

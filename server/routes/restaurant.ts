@@ -8,6 +8,7 @@ import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
 import { assertFinancialSchemaReady } from "../migrate";
+import { getArgentinaOperationalParts } from "../utils/argentinaDateTime";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -1605,7 +1606,7 @@ export function registerRestaurantRoutes(app: Express) {
 
         // hour
         if (o.closedAt) {
-          const hr = o.closedAt.getHours();
+          const hr = getArgentinaOperationalParts(o.closedAt).hour;
           hrAgg.set(hr, (hrAgg.get(hr) ?? 0) + 1);
         }
 
