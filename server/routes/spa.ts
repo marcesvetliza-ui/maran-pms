@@ -26,6 +26,7 @@ import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
+import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -810,7 +811,7 @@ export function registerSpaRoutes(app: Express) {
               category: "spa",
               description: `SPA - ${treatment.name}`,
               amount: treatmentPrice,
-              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+              date: getArgentinaOperationalDate(),
               createdBy: (req as any).user?.id || null,
             } as any);
           } else if (settlement.type === "voucher" && voucherCashShift) {
@@ -1527,7 +1528,7 @@ export function registerSpaRoutes(app: Express) {
           category: "spa" as const,
           description: `SPA - Pago ${isAdvance ? "(Seña)" : ""}`,
           amount: amount,
-          date: new Date().toISOString().split("T")[0],
+          date: getArgentinaOperationalDate(),
           createdBy: null,
         });
       }
@@ -1821,7 +1822,7 @@ export function registerSpaRoutes(app: Express) {
       const pdfBuffer = await generateSpaAccountReceiptPdf({
         accountId: account.id,
         guestName: account.guestName,
-        appointmentDate: appointment?.appointmentDate ?? new Date().toISOString().split("T")[0],
+        appointmentDate: appointment?.appointmentDate ?? getArgentinaOperationalDate(),
         startTime: appointment?.startTime ?? "",
         treatmentName: treatment?.name ?? "Servicio SPA",
         receiptType: account.receiptType,
@@ -1863,7 +1864,7 @@ export function registerSpaRoutes(app: Express) {
       const pdfBuffer = await generateSpaAccountReceiptPdf({
         accountId: account.id,
         guestName: account.guestName,
-        appointmentDate: appointment?.appointmentDate ?? new Date().toISOString().split("T")[0],
+        appointmentDate: appointment?.appointmentDate ?? getArgentinaOperationalDate(),
         startTime: appointment?.startTime ?? "",
         treatmentName: treatment?.name ?? "Servicio SPA",
         receiptType: account.receiptType,

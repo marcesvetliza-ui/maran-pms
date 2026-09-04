@@ -8,7 +8,7 @@ import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
 import { assertFinancialSchemaReady } from "../migrate";
-import { getArgentinaOperationalParts } from "../utils/argentinaDateTime";
+import { getArgentinaOperationalDate, getArgentinaOperationalParts } from "../utils/argentinaDateTime";
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -363,7 +363,7 @@ export function registerRestaurantRoutes(app: Express) {
       });
 
       // Room charges — support multiple cuenta_habitacion splits
-      const today = new Date().toISOString().split("T")[0];
+      const today = getArgentinaOperationalDate();
       const orderLabel = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
       if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
         // Multi-split: handle room charges per split
@@ -467,7 +467,7 @@ export function registerRestaurantRoutes(app: Express) {
 
       // Si es cuenta corriente y hay entidad especificada, crear movimiento CC
       if (effectivePrimaryMethod === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        const today = new Date().toISOString().split("T")[0];
+        const today = getArgentinaOperationalDate();
         const label = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
         await storage.createAccountMovement({
           entityType: ccEntityType as "company" | "agency",
@@ -484,8 +484,8 @@ export function registerRestaurantRoutes(app: Express) {
       if (advanceCredit > 0 && order.tableId) {
         try {
           const orderDate = order.openedAt
-            ? new Date(order.openedAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-            : new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+            ? getArgentinaOperationalDate(order.openedAt)
+            : getArgentinaOperationalDate();
           const tableAdvances = await storage.getReservationAdvancesByTable(order.tableId, orderDate);
           for (const adv of tableAdvances.filter(a => !a.appliedToOrderId)) {
             await (storage as any).applyReservationAdvancesToOrder(adv.reservationId, req.params.id);
@@ -928,7 +928,7 @@ export function registerRestaurantRoutes(app: Express) {
             description: `Restaurante - Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
             amount: split.amount,
             category: "restaurant",
-            date: new Date().toISOString().split("T")[0],
+            date: getArgentinaOperationalDate(),
           });
         } catch (e) {
           console.error("Error creando cargo a habitación en split:", e);
@@ -1084,7 +1084,7 @@ export function registerRestaurantRoutes(app: Express) {
         await storage.createAccountMovement({
           entityType: ccEntityType,
           entityId: ccEntityId,
-          date: new Date().toISOString().split("T")[0],
+          date: getArgentinaOperationalDate(),
           type: "cargo",
           description: `Restaurante — Pedido ${order.orderNumber} (pago parcial)`,
           amount,
@@ -1101,7 +1101,7 @@ export function registerRestaurantRoutes(app: Express) {
             description: `Restaurante — Pedido ${order.orderNumber} (${selectedItems.length} ítem${selectedItems.length !== 1 ? "s" : ""})`,
             amount,
             category: "restaurant",
-            date: new Date().toISOString().split("T")[0],
+            date: getArgentinaOperationalDate(),
           });
         } catch (e) {
           console.error("[pay-items] room charge:", e);

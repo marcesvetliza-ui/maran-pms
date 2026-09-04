@@ -3,6 +3,7 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { addArgentinaOperationalDays, getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
 export function registerMaintenanceRoutes(app: Express) {
   // Maintenance Staff
@@ -225,8 +226,8 @@ export function registerMaintenanceRoutes(app: Express) {
       const inProgress = orders.filter(o => o.status === "in_progress" || o.status === "assigned").length;
       const completedToday = orders.filter(o => {
         if (o.status !== "completed" || !o.completedAt) return false;
-        const today = new Date().toISOString().split("T")[0];
-        return o.completedAt.toString().startsWith(today);
+        const today = getArgentinaOperationalDate();
+        return getArgentinaOperationalDate(o.completedAt) === today;
       }).length;
       const urgent = orders.filter(o => o.priority === "urgent" && o.status !== "completed" && o.status !== "cancelled").length;
 
@@ -315,10 +316,9 @@ export function registerMaintenanceRoutes(app: Express) {
       const existing = await db.execute(sql`SELECT * FROM preventive_tasks WHERE id = ${req.params.id}`);
       if (!existing.rows.length) return res.status(404).json({ error: "Tarea no encontrada" });
       const task = existing.rows[0] as any;
-      const today = new Date().toISOString().split("T")[0];
+      const today = getArgentinaOperationalDate();
       const freqDays = parseInt(String(task.frequency_days || 30));
-      const nextMs = Date.now() + freqDays * 86400000;
-      const nextDate = new Date(nextMs).toISOString().split("T")[0];
+      const nextDate = addArgentinaOperationalDays(new Date(), freqDays);
 
       // Calcular días de demora (positivo = llegó tarde, 0 = a tiempo o adelantado)
       const dueDate = new Date(String(task.next_due_at) + "T00:00:00");

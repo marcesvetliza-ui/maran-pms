@@ -8,6 +8,7 @@ import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesRe
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { assertFinancialSchemaReady } from "../migrate";
+import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
 export function registerEventsRoutes(app: Express) {
   // Event Rooms
@@ -250,7 +251,7 @@ export function registerEventsRoutes(app: Express) {
         quantity: qty,
         unitPrice,
         totalAmount: total,
-        date: new Date().toISOString().split("T")[0],
+        date: getArgentinaOperationalDate(),
         notes: notes || null,
         createdAt: new Date(),
       });
@@ -391,7 +392,7 @@ export function registerEventsRoutes(app: Express) {
         const entityType = ccEntityType || (evt?.companyId ? "company" : null);
         const entityId = ccEntityId || evt?.companyId || null;
         if (entityType && entityId) {
-          const today = new Date().toISOString().split("T")[0];
+          const today = getArgentinaOperationalDate();
           await storage.createAccountMovement({
             entityType: entityType as "company" | "agency",
             entityId,
@@ -513,7 +514,7 @@ export function registerEventsRoutes(app: Express) {
             reservationId: payment.reservationId,
             description: `Eventos - ${event.name}`,
             amount: payment.amount,
-            date: new Date().toISOString().split("T")[0],
+            date: getArgentinaOperationalDate(),
             category: "events",
             createdBy: null,
           });
@@ -772,7 +773,7 @@ export function registerEventsRoutes(app: Express) {
             reservationId: payment.reservationId,
             description: `Eventos Mesa ${table.tableNumber} - ${event?.name || ""}`,
             amount: payment.amount,
-            date: new Date().toISOString().split("T")[0],
+            date: getArgentinaOperationalDate(),
             category: "events",
             createdBy: null,
           });

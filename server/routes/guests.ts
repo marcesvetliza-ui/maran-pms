@@ -5,6 +5,7 @@ import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
+import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
 const PAYMENT_TOLERANCE = 0.01;
 
@@ -404,7 +405,7 @@ export function registerGuestsRoutes(app: Express) {
         "guest",
         req.params.id,
         {
-          date: date || new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+          date: date || getArgentinaOperationalDate(),
           description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
           amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
@@ -502,7 +503,7 @@ export function registerGuestsRoutes(app: Express) {
           const roomNum = row.room_number || "N/A";
           const checkInDate = row.check_in_date
             ? new Date(row.check_in_date).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" })
-            : new Date().toISOString().split("T")[0];
+            : getArgentinaOperationalDate();
           await storage.createAccountMovement({
             entityType: "company",
             entityId: companyId,
@@ -548,7 +549,7 @@ export function registerGuestsRoutes(app: Express) {
         "company",
         req.params.id,
         {
-          date: date || new Date().toISOString().split("T")[0],
+          date: date || getArgentinaOperationalDate(),
           description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
           amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
@@ -583,7 +584,7 @@ export function registerGuestsRoutes(app: Express) {
         "agency",
         req.params.id,
         {
-          date: date || new Date().toISOString().split("T")[0],
+          date: date || getArgentinaOperationalDate(),
           description: `${description || "Pago recibido"}${describePaymentMethods(payment.paymentDetails)}`,
           amount: (-payment.accountingAmount).toFixed(2),
           reference: reference || null,
@@ -818,7 +819,7 @@ export function registerGuestsRoutes(app: Express) {
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
 
       // Block if there's an active reservation (checked_in or confirmed with future dates)
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const today = getArgentinaOperationalDate();
       const activeRes = await db
         .select({ id: reservations.id })
         .from(reservations)

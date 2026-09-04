@@ -64,3 +64,17 @@ export function getArgentinaOperationalParts(value: DateInput = new Date()): {
     hour: Number(hour),
   };
 }
+
+export function getArgentinaOperationalDate(value: DateInput = new Date()): string {
+  return getArgentinaOperationalParts(value).date;
+}
+
+export function addArgentinaOperationalDays(value: DateInput, days: number): string {
+  if (!Number.isInteger(days)) {
+    throw new RangeError(`Days must be an integer: ${String(days)}`);
+  }
+
+  const [year, month, day] = getArgentinaOperationalDate(value).split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}

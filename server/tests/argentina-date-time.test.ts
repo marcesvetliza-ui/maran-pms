@@ -3,6 +3,8 @@ import {
   formatArgentinaDate,
   formatArgentinaDateTime,
   formatArgentinaFilenameTimestamp,
+  addArgentinaOperationalDays,
+  getArgentinaOperationalDate,
   getArgentinaOperationalParts,
 } from "../utils/argentinaDateTime";
 
@@ -31,6 +33,15 @@ describe("Argentina server date/time formatting", () => {
       time: "22:30",
       hour: 22,
     });
+    expect(getArgentinaOperationalDate(instant)).toBe("2026-09-04");
+    expect(addArgentinaOperationalDays(instant, 30)).toBe("2026-10-04");
+  });
+
+  it("keeps the Argentine operational day around midnight in a different process timezone", () => {
+    process.env.TZ = "Pacific/Kiritimati";
+
+    expect(getArgentinaOperationalDate("2026-09-05T02:59:59.999Z")).toBe("2026-09-04");
+    expect(getArgentinaOperationalDate("2026-09-05T03:00:00.000Z")).toBe("2026-09-05");
   });
 
   it("preserves calendar-only dates without timezone conversion", () => {
