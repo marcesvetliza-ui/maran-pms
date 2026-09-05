@@ -539,6 +539,67 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     }
   }, 15_000);
 
+  it("bloquea todos los borradores sin consultar ARCA cuando un folio SPA heredado tiene varios pendientes", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const accountId = `recovery-duplicate-spa-${suffix}`;
+    const itemId = `recovery-duplicate-spa-item-${suffix}`;
+    const puntoVenta = 9900 + (parseInt(suffix.slice(0, 4), 16) % 30);
+    const invoiceIds: number[] = [];
+    let spaAccountUniqueIndexDropped = false;
+    try {
+      // Simulate a database from before the SPA ownership index existed. The
+      // production index prevents new duplicates; recovery still has to make
+      // pre-existing inconsistent rows safe before any ARCA consultation.
+      await pool.query("DROP INDEX sales_invoices_spa_account_id_unique");
+      spaAccountUniqueIndexDropped = true;
+      await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
+        VALUES ($1, $2, 'SPA borradores duplicados', 'open', NOW())`, [accountId, `appointment-${suffix}`]);
+      await pool.query(`INSERT INTO spa_account_items (id, account_id, description, quantity, unit_price, subtotal, item_type, created_at)
+        VALUES ($1, $2, 'Tratamiento recovery', 1, '100.00', '100.00', 'treatment', NOW())`, [itemId, accountId]);
+      invoiceIds.push(await insertDraft({ puntoVenta, spaAccountId: accountId, cashFormaPago: "efectivo" }));
+      await pool.query("SELECT pg_sleep(0.01)");
+      invoiceIds.push(await insertDraft({ puntoVenta: puntoVenta + 1, spaAccountId: accountId, cashFormaPago: "efectivo" }));
+
+      const response = await request("POST", `/api/spa/accounts/${accountId}/resume-invoice`);
+      expect(response.status).toBe(409);
+      expect(response.body.error).toContain("múltiples autorizaciones ARCA pendientes");
+      expect(mocks.getTokenAuth).not.toHaveBeenCalled();
+      expect(mocks.feCompConsultar).not.toHaveBeenCalled();
+      expect(mocks.feCAESolicitar).not.toHaveBeenCalled();
+
+      const drafts = await pool.query<{
+        id: number;
+        estado: string;
+        reconciliation_status: string;
+        reconciliation_error: string | null;
+      }>(`SELECT id, estado, reconciliation_status, reconciliation_error
+          FROM sales_invoices WHERE id = ANY($1::int[]) ORDER BY id`, [invoiceIds]);
+      expect(drafts.rows).toEqual([
+        expect.objectContaining({
+          id: invoiceIds[0],
+          estado: "autorizacion_pendiente",
+          reconciliation_status: "requiere_revision",
+          reconciliation_error: expect.stringContaining("todos fueron bloqueados"),
+        }),
+        expect.objectContaining({
+          id: invoiceIds[1],
+          estado: "autorizacion_pendiente",
+          reconciliation_status: "requiere_revision",
+          reconciliation_error: expect.stringContaining("todos fueron bloqueados"),
+        }),
+      ]);
+    } finally {
+      await pool.query("DELETE FROM sales_invoices WHERE id = ANY($1::int[])", [invoiceIds]);
+      await pool.query("DELETE FROM spa_account_items WHERE account_id = $1", [accountId]);
+      await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);
+      if (spaAccountUniqueIndexDropped) {
+        await pool.query(`CREATE UNIQUE INDEX sales_invoices_spa_account_id_unique
+          ON sales_invoices (spa_account_id) WHERE spa_account_id IS NOT NULL`);
+      }
+    }
+  }, 15_000);
+
   it("no vincula comprobantes no emitidos aunque los reintentos sean concurrentes", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();

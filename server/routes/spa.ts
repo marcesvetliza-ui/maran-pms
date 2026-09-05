@@ -1083,6 +1083,7 @@ export function registerSpaRoutes(app: Express) {
             .where(and(
               eq(salesInvoices.spaAccountId, account.id),
               eq(salesInvoices.estado, "autorizacion_pendiente"),
+              eq(salesInvoices.reconciliationStatus, "pendiente"),
             ))
             .orderBy(desc(salesInvoices.createdAt))
             .limit(1)
@@ -1132,6 +1133,7 @@ export function registerSpaRoutes(app: Express) {
             .where(and(
               eq(salesInvoices.spaAccountId, account.id),
               eq(salesInvoices.estado, "autorizacion_pendiente"),
+              eq(salesInvoices.reconciliationStatus, "pendiente"),
             ))
             .orderBy(desc(salesInvoices.createdAt))
             .limit(1)
@@ -1451,10 +1453,26 @@ export function registerSpaRoutes(app: Express) {
           throw Object.assign(new Error("El folio SPA ya está cerrado o facturado"), { statusCode: 409 });
         }
 
-        const [pending] = await db.select().from(salesInvoices).where(and(
-          eq(salesInvoices.spaAccountId, account.id),
-          eq(salesInvoices.estado, "autorizacion_pendiente"),
-        )).orderBy(desc(salesInvoices.createdAt)).limit(1);
+        const pendingSelection = await db.transaction(async (tx) => {
+          const candidates = await tx.select().from(salesInvoices).where(and(
+            eq(salesInvoices.spaAccountId, account.id),
+            eq(salesInvoices.estado, "autorizacion_pendiente"),
+            eq(salesInvoices.reconciliationStatus, "pendiente"),
+          )).orderBy(desc(salesInvoices.createdAt), desc(salesInvoices.id));
+          if (candidates.length > 1) {
+            await tx.update(salesInvoices).set({
+              reconciliationStatus: "requiere_revision",
+              reconciliationError: "Múltiples borradores SPA pendientes; todos fueron bloqueados para revisión fiscal antes de autorizar",
+              reconciliationUpdatedAt: new Date(),
+            }).where(inArray(salesInvoices.id, candidates.map((draft) => draft.id)));
+            return { pending: undefined, duplicatesBlocked: true };
+          }
+          return { pending: candidates[0], duplicatesBlocked: false };
+        });
+        if (pendingSelection.duplicatesBlocked) {
+          throw Object.assign(new Error("Hay múltiples autorizaciones ARCA pendientes para este folio; fueron bloqueadas para revisión fiscal"), { statusCode: 409 });
+        }
+        const pending = pendingSelection.pending;
         if (!pending) {
           // A concurrent waiter acquired the same advisory lock after the
           // winner finalized ARCA. The SPA account is deliberately still open
