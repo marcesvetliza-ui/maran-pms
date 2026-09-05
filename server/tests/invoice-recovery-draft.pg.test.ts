@@ -29,15 +29,6 @@ vi.mock("../billing/wsfevClient", () => ({
   feCAESolicitar: mocks.feCAESolicitar,
   feCompConsultar: mocks.feCompConsultar,
 }));
-vi.mock("../auth", () => ({
-  requireAuth: (req: any, _res: any, next: () => void) => {
-    req.user = { username: "invoice-recovery-pg", fullName: "Invoice Recovery PG", role: "management" };
-    next();
-  },
-  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
-}));
-vi.mock("../audit", () => ({ audit: vi.fn() }));
-
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL
   ? new pg.Pool({
@@ -52,6 +43,7 @@ const { emitirFactura } = await import("../billing/invoiceService");
 
 let baseUrl = "";
 let httpServer: http.Server | null = null;
+let currentTestRole = "admin";
 
 async function startRecoveryRoutes() {
   const [{ registerReservationsRoutes }, { registerGroupsRoutes }, { registerSpaRoutes }] = await Promise.all([
@@ -61,6 +53,16 @@ async function startRecoveryRoutes() {
   ]);
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = {
+      id: "invoice-recovery-pg",
+      username: "invoice-recovery-pg",
+      fullName: "Invoice Recovery PG",
+      role: currentTestRole,
+    } as any;
+    req.isAuthenticated = () => true;
+    next();
+  });
   registerReservationsRoutes(app);
   registerGroupsRoutes(app);
   registerSpaRoutes(app);
@@ -79,7 +81,7 @@ async function stopRecoveryRoutes() {
   httpServer = null;
 }
 
-async function request(method: "POST" | "PATCH", path: string, body?: unknown) {
+async function request(method: "GET" | "POST" | "PATCH", path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -163,6 +165,7 @@ function expectRecoveredInvoice(body: any, invoiceId: number) {
 
 runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito ARCA", () => {
   beforeEach(() => {
+    currentTestRole = "admin";
     mocks.getTokenAuth.mockReset();
     mocks.feCAESolicitar.mockReset();
     mocks.feCompConsultar.mockReset();
@@ -492,9 +495,9 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
         VALUES ($1, $2, 'Tratamiento recovery', 1, '100.00', '100.00', 'treatment', NOW())`, [itemId, accountId]);
       invoiceId = await insertDraft({ puntoVenta, spaAccountId: accountId, cashFormaPago: "efectivo" });
       const gate = holdFirstArcaConsultation();
-      const first = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`);
+      const first = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`, { confirmation: `AUTORIZAR ${invoiceId}` });
       await gate.waitUntilHeld();
-      const second = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`);
+      const second = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`, { confirmation: `AUTORIZAR ${invoiceId}` });
       gate.release();
       const resumed = await Promise.all([first, second]);
       expect(resumed.map((result) => result.status)).toEqual([200, 200]);
@@ -589,7 +592,73 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
           reconciliation_error: expect.stringContaining("todos fueron bloqueados"),
         }),
       ]);
+
+      const reviewQueue = await request("GET", "/api/admin/spa/fiscal-drafts");
+      expect(reviewQueue.status).toBe(200);
+      expect(reviewQueue.body).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: invoiceIds[0],
+          spa_account_id: accountId,
+          reconciliation_error: expect.stringContaining("todos fueron bloqueados"),
+        }),
+        expect.objectContaining({
+          id: invoiceIds[1],
+          spa_account_id: accountId,
+          spa_account_total: "100.00",
+        }),
+      ]));
+
+      currentTestRole = "spa";
+      const forbidden = await request("POST", `/api/admin/spa/fiscal-drafts/${invoiceIds[0]}/resolve`, {
+        action: "discard",
+        reason: "Intento desde un rol operativo sin autorización",
+        confirmation: `DESCARTAR ${invoiceIds[0]}`,
+      });
+      expect(forbidden.status).toBe(403);
+      currentTestRole = "admin";
+
+      const keptId = invoiceIds[1];
+      const resolution = await request("POST", `/api/admin/spa/fiscal-drafts/${keptId}/resolve`, {
+        action: "keep",
+        reason: "Se verificó el número fiscal reservado correcto",
+        confirmation: `CONSERVAR ${keptId}`,
+      });
+      expect(resolution.status).toBe(200);
+      expect(resolution.body).toMatchObject({ action: "keep", invoiceId: keptId, arcaContacted: false });
+      expect(mocks.getTokenAuth).not.toHaveBeenCalled();
+      expect(mocks.feCompConsultar).not.toHaveBeenCalled();
+      expect(mocks.feCAESolicitar).not.toHaveBeenCalled();
+      const auditResult = await pool.query<{ action: string; module: string; details: string }>(
+        `SELECT action, module, details FROM audit_logs
+         WHERE entity_type = 'sales_invoice' AND entity_id = $1
+         ORDER BY timestamp DESC LIMIT 1`,
+        [String(keptId)],
+      );
+      expect(auditResult.rows[0]).toMatchObject({ action: "update", module: "spa-fiscal-review" });
+      expect(JSON.parse(auditResult.rows[0].details)).toMatchObject({ arcaContacted: false, action: "keep" });
+
+      const resolvedDrafts = await pool.query<{
+        id: number;
+        estado: string;
+        reconciliation_status: string;
+      }>(`SELECT id, estado, reconciliation_status
+          FROM sales_invoices WHERE id = ANY($1::int[]) ORDER BY id`, [invoiceIds]);
+      expect(resolvedDrafts.rows).toEqual([
+        { id: invoiceIds[0], estado: "descartada", reconciliation_status: "descartada" },
+        { id: invoiceIds[1], estado: "autorizacion_pendiente", reconciliation_status: "pendiente" },
+      ]);
+
+      const unconfirmedResume = await request("POST", `/api/spa/accounts/${accountId}/resume-invoice`, {});
+      expect(unconfirmedResume.status).toBe(400);
+      expect(unconfirmedResume.body.error).toContain(`AUTORIZAR ${keptId}`);
+      expect(mocks.getTokenAuth).not.toHaveBeenCalled();
+      expect(mocks.feCompConsultar).not.toHaveBeenCalled();
+      expect(mocks.feCAESolicitar).not.toHaveBeenCalled();
     } finally {
+      await pool.query(
+        "DELETE FROM audit_logs WHERE entity_type = 'sales_invoice' AND entity_id = ANY($1::text[])",
+        [invoiceIds.map(String)],
+      );
       await pool.query("DELETE FROM sales_invoices WHERE id = ANY($1::int[])", [invoiceIds]);
       await pool.query("DELETE FROM spa_account_items WHERE account_id = $1", [accountId]);
       await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);

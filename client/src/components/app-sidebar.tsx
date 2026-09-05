@@ -52,6 +52,7 @@ import {
   Store,
   Gift,
   CreditCard,
+  FileWarning,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -189,6 +190,7 @@ const menuSections = [
       { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
       { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
       { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
+      { label: "Revisión fiscal SPA", icon: FileWarning, href: "/admin/spa-fiscal-review", roles: ["admin","manager","resp_administracion"] },
     ],
   },
 

@@ -10,7 +10,7 @@ import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator, SelectLabel, SelectGroup } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -1108,10 +1108,12 @@ export default function SpaPage() {
     },
   });
 
+  const [resumeConfirmationOpen, setResumeConfirmationOpen] = useState(false);
+  const [resumeConfirmation, setResumeConfirmation] = useState("");
   const resumeSpaInvoiceMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (confirmation: string) => {
       if (!selectedAccount) throw new Error("Folio SPA no disponible");
-      const resumeRes = await apiRequest("POST", `/api/spa/accounts/${selectedAccount.id}/resume-invoice`, {});
+      const resumeRes = await apiRequest("POST", `/api/spa/accounts/${selectedAccount.id}/resume-invoice`, { confirmation });
       if (!resumeRes.ok) {
         const body = await resumeRes.json().catch(() => ({}));
         throw new Error(body.error || "No se pudo reanudar la autorización");
@@ -1127,6 +1129,8 @@ export default function SpaPage() {
       return linkRes.json();
     },
     onSuccess: () => {
+      setResumeConfirmationOpen(false);
+      setResumeConfirmation("");
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       refetchAccount();
@@ -3418,13 +3422,61 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           type="button"
                           size="sm"
                           className="mt-2"
-                          onClick={() => resumeSpaInvoiceMutation.mutate()}
+                           onClick={() => {
+                             setResumeConfirmation("");
+                             setResumeConfirmationOpen(true);
+                           }}
                           disabled={resumeSpaInvoiceMutation.isPending}
                           data-testid="button-resume-spa-invoice"
                         >
                           {resumeSpaInvoiceMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                           Reanudar autorización y cerrar
                         </Button>
+                         <Dialog open={resumeConfirmationOpen} onOpenChange={setResumeConfirmationOpen}>
+                           <DialogContent>
+                             <DialogHeader>
+                               <DialogTitle>Confirmar contacto fiscal con ARCA</DialogTitle>
+                               <DialogDescription>
+                                 Esta acción consultará ARCA y, si el número reservado aún no fue autorizado, solicitará el CAE
+                                 para este mismo borrador. No se creará un número nuevo.
+                               </DialogDescription>
+                             </DialogHeader>
+                             <div className="space-y-4">
+                               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200">
+                                 {selectedAccount.pendingAuthorization.tipoComprobante}{" "}
+                                 {String(selectedAccount.pendingAuthorization.puntoVenta).padStart(4, "0")}-
+                                 {String(selectedAccount.pendingAuthorization.numero).padStart(8, "0")}
+                                 {" · "}${fmtMoney(selectedAccount.pendingAuthorization.montoTotal)}
+                               </div>
+                               <div>
+                                 <Label htmlFor="spa-arca-confirmation">
+                                   Escribí <strong>AUTORIZAR {selectedAccount.pendingAuthorization.id}</strong> para continuar
+                                 </Label>
+                                 <Input
+                                   id="spa-arca-confirmation"
+                                   value={resumeConfirmation}
+                                   onChange={(event) => setResumeConfirmation(event.target.value)}
+                                   autoComplete="off"
+                                 />
+                               </div>
+                               <DialogFooter>
+                                 <Button type="button" variant="outline" onClick={() => setResumeConfirmationOpen(false)}>Cancelar</Button>
+                                 <Button
+                                   type="button"
+                                   variant="destructive"
+                                   disabled={
+                                     resumeSpaInvoiceMutation.isPending
+                                     || resumeConfirmation !== `AUTORIZAR ${selectedAccount.pendingAuthorization.id}`
+                                   }
+                                   onClick={() => resumeSpaInvoiceMutation.mutate(resumeConfirmation)}
+                                 >
+                                   {resumeSpaInvoiceMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                   Contactar ARCA y continuar
+                                 </Button>
+                               </DialogFooter>
+                             </div>
+                           </DialogContent>
+                         </Dialog>
                       </div>
                     )}
                     {selectedAccount.pendingInvoice && (

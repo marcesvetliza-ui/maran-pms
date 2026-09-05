@@ -19,6 +19,7 @@ import {
   charges,
   cashMovements,
   folios,
+  auditLogs,
 } from "@shared/schema";
 import { requireAuth, requireRole } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
@@ -57,6 +58,7 @@ const ALL_SPA_STATUSES = ["pending", "confirmed", "in_progress", "completed", "c
 const SPA_OPEN_MINUTES = 8 * 60;
 const SPA_CLOSE_MINUTES = 22 * 60;
 const SPA_ACCESS_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"] as [string, ...string[]];
+const SPA_FISCAL_REVIEW_ROLES = ["admin", "manager", "resp_administracion"] as [string, ...string[]];
 const SPA_DIRECT_PAYMENT_METHODS = ["cash", "debit_card", "credit_card", "transfer", "mercadopago"] as const;
 const INVOICE_TO_SPA_PAYMENT_METHOD: Record<string, string> = {
   efectivo: "cash",
@@ -239,6 +241,155 @@ async function lockAndAssertSpaAvailability(
 }
 
 export function registerSpaRoutes(app: Express) {
+  app.get("/api/admin/spa/fiscal-drafts", requireAuth, requireRole(SPA_FISCAL_REVIEW_ROLES), async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          si.id,
+          si.spa_account_id,
+          si.tipo_comprobante,
+          si.punto_venta,
+          si.numero,
+          si.fecha_emision,
+          si.monto_total,
+          si.cliente_razon_social,
+          si.cash_forma_pago,
+          si.items,
+          si.observaciones,
+          si.reconciliation_error,
+          si.reconciliation_updated_at,
+          si.created_at,
+          sa.guest_name,
+          sa.status AS spa_account_status,
+          sa.invoice_id AS linked_invoice_id,
+          COALESCE((
+            SELECT SUM(sai.subtotal)
+            FROM spa_account_items sai
+            WHERE sai.account_id = si.spa_account_id
+          ), 0) AS spa_account_total
+        FROM sales_invoices si
+        LEFT JOIN spa_accounts sa ON sa.id = si.spa_account_id
+        WHERE si.estado = 'autorizacion_pendiente'
+          AND si.reconciliation_status = 'requiere_revision'
+          AND si.spa_account_id IS NOT NULL
+        ORDER BY si.spa_account_id, si.created_at DESC, si.id DESC
+      `);
+      res.json(result.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "No se pudieron cargar los borradores fiscales SPA" });
+    }
+  });
+
+  app.post("/api/admin/spa/fiscal-drafts/:invoiceId/resolve", requireAuth, requireRole(SPA_FISCAL_REVIEW_ROLES), async (req, res) => {
+    const invoiceId = Number(req.params.invoiceId);
+    const action = String(req.body?.action || "");
+    const reason = String(req.body?.reason || "").trim();
+    const confirmation = String(req.body?.confirmation || "").trim();
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ error: "El borrador fiscal no es válido" });
+    }
+    if (action !== "discard" && action !== "keep") {
+      return res.status(400).json({ error: "La acción solicitada no es válida" });
+    }
+    if (reason.length < 10) {
+      return res.status(400).json({ error: "Indicá un motivo de al menos 10 caracteres para la auditoría" });
+    }
+    const expectedConfirmation = action === "keep" ? `CONSERVAR ${invoiceId}` : `DESCARTAR ${invoiceId}`;
+    if (confirmation !== expectedConfirmation) {
+      return res.status(400).json({ error: `Escribí exactamente "${expectedConfirmation}" para confirmar` });
+    }
+
+    try {
+      const [candidate] = await db.select({ spaAccountId: salesInvoices.spaAccountId })
+        .from(salesInvoices)
+        .where(eq(salesInvoices.id, invoiceId))
+        .limit(1);
+      if (!candidate?.spaAccountId) {
+        return res.status(404).json({ error: "El borrador fiscal SPA no existe" });
+      }
+
+      const result = await withSpaInvoiceAuthorizationLock(candidate.spaAccountId, () => db.transaction(async (tx) => {
+        const locked = await tx.execute(sql`
+          SELECT id, spa_account_id, tipo_comprobante, punto_venta, numero, monto_total,
+                 estado, reconciliation_status
+          FROM sales_invoices
+          WHERE id = ${invoiceId}
+          FOR UPDATE
+        `);
+        const draft = locked.rows[0] as any;
+        if (!draft || !draft.spa_account_id) {
+          throw Object.assign(new Error("El borrador fiscal SPA no existe"), { statusCode: 404 });
+        }
+        if (draft.estado !== "autorizacion_pendiente" || draft.reconciliation_status !== "requiere_revision") {
+          throw Object.assign(new Error("El borrador ya fue resuelto por otro operador"), { statusCode: 409 });
+        }
+
+        const siblings = await tx.execute(sql`
+          SELECT id
+          FROM sales_invoices
+          WHERE spa_account_id = ${draft.spa_account_id}
+            AND estado = 'autorizacion_pendiente'
+            AND reconciliation_status = 'requiere_revision'
+          FOR UPDATE
+        `);
+        const siblingIds = siblings.rows.map((row: any) => Number(row.id));
+        const now = new Date();
+
+        if (action === "keep") {
+          await tx.update(salesInvoices).set({
+            estado: "descartada",
+            reconciliationStatus: "descartada",
+            reconciliationError: `Descartado al conservar el borrador #${invoiceId}. Motivo: ${reason}`,
+            reconciliationUpdatedAt: now,
+          }).where(inArray(salesInvoices.id, siblingIds.filter((id) => id !== invoiceId)));
+          await tx.update(salesInvoices).set({
+            reconciliationStatus: "pendiente",
+            reconciliationError: `Habilitado manualmente para reanudación fiscal. Motivo: ${reason}`,
+            reconciliationUpdatedAt: now,
+          }).where(eq(salesInvoices.id, invoiceId));
+        } else {
+          await tx.update(salesInvoices).set({
+            estado: "descartada",
+            reconciliationStatus: "descartada",
+            reconciliationError: `Descartado manualmente. Motivo: ${reason}`,
+            reconciliationUpdatedAt: now,
+          }).where(eq(salesInvoices.id, invoiceId));
+        }
+        await tx.insert(auditLogs).values({
+          userId: (req as any).user?.id || null,
+          userName: (req as any).user?.fullName || (req as any).user?.username || "Sistema",
+          action: action === "keep" ? "update" : "delete",
+          module: "spa-fiscal-review",
+          entityType: "sales_invoice",
+          entityId: String(invoiceId),
+          description: action === "keep"
+            ? `Borrador fiscal SPA #${invoiceId} conservado; los duplicados quedaron descartados`
+            : `Borrador fiscal SPA #${invoiceId} descartado`,
+          details: JSON.stringify({
+            action,
+            reason,
+            spaAccountId: draft.spa_account_id,
+            affectedDraftIds: action === "keep" ? siblingIds : [invoiceId],
+            fiscalNumber: `${draft.tipo_comprobante} ${String(draft.punto_venta).padStart(4, "0")}-${String(draft.numero).padStart(8, "0")}`,
+            arcaContacted: false,
+          }),
+          ipAddress: req.ip || req.connection?.remoteAddress || null,
+          timestamp: now,
+        });
+        return { draft, siblingIds, action };
+      }));
+      res.json({
+        ok: true,
+        action: result.action,
+        invoiceId,
+        spaAccountId: result.draft.spa_account_id,
+        arcaContacted: false,
+      });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "No se pudo resolver el borrador fiscal SPA" });
+    }
+  });
+
   // SPA Cabins
   app.get("/api/spa/cabins", requireAuth, async (req, res) => {
     try {
@@ -1485,6 +1636,10 @@ export function registerSpaRoutes(app: Express) {
           )).orderBy(desc(salesInvoices.createdAt)).limit(1);
           if (alreadyResumed) return alreadyResumed;
           throw Object.assign(new Error("No hay una autorización ARCA pendiente para este folio"), { statusCode: 404 });
+        }
+        const expectedConfirmation = `AUTORIZAR ${pending.id}`;
+        if (String(req.body?.confirmation || "").trim() !== expectedConfirmation) {
+          throw Object.assign(new Error(`Escribí exactamente "${expectedConfirmation}" para autorizar el contacto con ARCA`), { statusCode: 400 });
         }
         if (!pending.cashFormaPago || !INVOICE_TO_SPA_PAYMENT_METHOD[pending.cashFormaPago]) {
           throw Object.assign(new Error("La factura pendiente no tiene una forma de pago válida"), { statusCode: 409 });

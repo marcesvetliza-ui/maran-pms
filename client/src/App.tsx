@@ -79,6 +79,7 @@ const HelpChat = lazy(() => import("@/components/help-chat"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
 const RecetasCostosPage = lazy(() => import("@/pages/recetas-costos"));
 const AdminIndecPage = lazy(() => import("@/pages/admin-indec"));
+const SpaFiscalReviewPage = lazy(() => import("@/pages/spa-fiscal-review"));
 
 interface AuthUser {
   id: string;
@@ -188,6 +189,17 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   return <Component />;
 }
 
+function RoleRoute({ component: Component, roles }: { component: React.ComponentType; roles: string[] }) {
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
+  const allowed = !!user && roles.includes(user.role);
+  useEffect(() => {
+    if (user && !allowed) navigate(getRoleHomePage(user.role));
+  }, [user, allowed, navigate]);
+  if (!allowed) return null;
+  return <Component />;
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -248,6 +260,9 @@ function Router() {
         <Route path="/admin/accounting-accounts" component={AccountingAccountsAbmPage} />
         <Route path="/admin/cost-centers" component={CostCentersAbmPage} />
         <Route path="/admin/indec" component={AdminIndecPage} />
+        <Route path="/admin/spa-fiscal-review">
+          {() => <RoleRoute component={SpaFiscalReviewPage} roles={["admin", "manager", "resp_administracion"]} />}
+        </Route>
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
         <Route path="/mozo" component={MozoPage} />
