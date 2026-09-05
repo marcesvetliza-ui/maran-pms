@@ -779,6 +779,81 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     }
   }, 15_000);
 
+  it("rechaza el descarte si la autorización fiscal del folio SPA ya está en curso", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const accountId = `recovery-authorization-race-${suffix}`;
+    const itemId = `recovery-authorization-race-item-${suffix}`;
+    const puntoVenta = 9930 + (parseInt(suffix.slice(0, 4), 16) % 20);
+    let invoiceId: number | null = null;
+    try {
+      await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
+        VALUES ($1, $2, 'SPA autorización fiscal en curso', 'open', NOW())`, [accountId, `appointment-${suffix}`]);
+      await pool.query(`INSERT INTO spa_account_items (id, account_id, description, quantity, unit_price, subtotal, item_type, created_at)
+        VALUES ($1, $2, 'Tratamiento recovery', 1, '100.00', '100.00', 'treatment', NOW())`, [itemId, accountId]);
+      invoiceId = await insertDraft({ puntoVenta, spaAccountId: accountId, cashFormaPago: "efectivo" });
+
+      const gate = holdFirstArcaConsultation();
+      const resume = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`, {
+        confirmation: `AUTORIZAR ${invoiceId}`,
+      });
+      await gate.waitUntilHeld();
+
+      const discard = request("POST", `/api/admin/spa/fiscal-drafts/${invoiceId}/resolve`, {
+        action: "discard",
+        reason: "Se intentó descartar durante la autorización fiscal",
+        confirmation: `DESCARTAR ${invoiceId}`,
+      });
+      await waitForAdvisoryLockWaiters(1);
+
+      gate.release();
+      const [resumeResult, discardResult] = await Promise.all([resume, discard]);
+
+      expect(resumeResult.status).toBe(200);
+      expectRecoveredInvoice(resumeResult.body, invoiceId);
+      expect(discardResult.status).toBe(409);
+      expect(discardResult.body.error).toContain("ya fue resuelto por otro operador");
+      expect(mocks.feCompConsultar).toHaveBeenCalledTimes(1);
+      expect(mocks.feCAESolicitar).not.toHaveBeenCalled();
+
+      const finalDraft = await pool.query<{
+        estado: string;
+        reconciliation_status: string;
+        reconciliation_error: string | null;
+        cae: string | null;
+      }>(
+        `SELECT estado, reconciliation_status, reconciliation_error, cae
+         FROM sales_invoices WHERE id = $1`,
+        [invoiceId],
+      );
+      expect(finalDraft.rows).toEqual([{
+        estado: "emitida",
+        reconciliation_status: "pendiente",
+        reconciliation_error: null,
+        cae: "71234567890123",
+      }]);
+
+      const auditResult = await pool.query(
+        `SELECT id FROM audit_logs
+         WHERE entity_type = 'sales_invoice'
+           AND entity_id = $1
+           AND module = 'spa-fiscal-review'`,
+        [String(invoiceId)],
+      );
+      expect(auditResult.rows).toEqual([]);
+    } finally {
+      if (invoiceId) {
+        await pool.query(
+          "DELETE FROM audit_logs WHERE entity_type = 'sales_invoice' AND entity_id = $1",
+          [String(invoiceId)],
+        );
+        await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      }
+      await pool.query("DELETE FROM spa_account_items WHERE account_id = $1", [accountId]);
+      await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);
+    }
+  }, 15_000);
+
   it("no vincula comprobantes no emitidos aunque los reintentos sean concurrentes", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
