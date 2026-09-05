@@ -1675,6 +1675,15 @@ export function registerGroupsRoutes(app: Express) {
       const { invoiceData } = req.body;
       if (!invoiceData?.id) return res.status(400).json({ error: "invoiceData es requerido" });
       const { payment, updated } = await db.transaction(async (tx) => {
+        // Serialize competing links before inspecting invoiceId. Without this
+        // row lock, two requests can both observe NULL; the loser then sees a
+        // conditional UPDATE affect zero rows and incorrectly receives 409
+        // instead of the idempotent already-linked result.
+        await tx.execute(sql`
+          SELECT id FROM group_payments
+          WHERE id = ${req.params.paymentId} AND group_id = ${req.params.groupId}
+          FOR UPDATE
+        `);
         const [payment] = await tx.select()
           .from(groupPaymentsTable)
           .where(and(

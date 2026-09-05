@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import express from "express";
+import * as http from "node:http";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalFetch = global.fetch;
 
@@ -27,6 +29,14 @@ vi.mock("../billing/wsfevClient", () => ({
   feCAESolicitar: mocks.feCAESolicitar,
   feCompConsultar: mocks.feCompConsultar,
 }));
+vi.mock("../auth", () => ({
+  requireAuth: (req: any, _res: any, next: () => void) => {
+    req.user = { username: "invoice-recovery-pg", fullName: "Invoice Recovery PG", role: "management" };
+    next();
+  },
+  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
+}));
+vi.mock("../audit", () => ({ audit: vi.fn() }));
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL
@@ -39,6 +49,117 @@ const pool = process.env.DATABASE_URL
   : null;
 
 const { emitirFactura } = await import("../billing/invoiceService");
+
+let baseUrl = "";
+let httpServer: http.Server | null = null;
+
+async function startRecoveryRoutes() {
+  const [{ registerReservationsRoutes }, { registerGroupsRoutes }, { registerSpaRoutes }] = await Promise.all([
+    import("../routes/reservations"),
+    import("../routes/groups"),
+    import("../routes/spa"),
+  ]);
+  const app = express();
+  app.use(express.json());
+  registerReservationsRoutes(app);
+  registerGroupsRoutes(app);
+  registerSpaRoutes(app);
+  httpServer = await new Promise<http.Server>((resolve) => {
+    const server = http.createServer(app);
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") throw new Error("No se pudo iniciar el servidor de prueba");
+  baseUrl = `http://127.0.0.1:${address.port}`;
+}
+
+async function stopRecoveryRoutes() {
+  if (!httpServer) return;
+  await new Promise<void>((resolve, reject) => httpServer!.close((error) => error ? reject(error) : resolve()));
+  httpServer = null;
+}
+
+async function request(method: "POST" | "PATCH", path: string, body?: unknown) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() as any };
+}
+
+const item = [{ descripcion: "Servicio de prueba", cantidad: 1, precioUnitario: 100, alicuotaIva: "no_gravado", subtotalNeto: 0, subtotal: 100 }];
+
+async function insertDraft(data: {
+  puntoVenta: number;
+  estado?: string;
+  reservationId?: string;
+  paymentId?: string;
+  groupId?: string;
+  groupPaymentId?: string;
+  groupPaymentIntent?: unknown;
+  spaAccountId?: string;
+  cashFormaPago?: string;
+  sourceChargeAmounts?: unknown;
+}) {
+  if (!pool) throw new Error("DATABASE_URL no está configurado");
+  const result = await pool.query<{ id: number }>(
+    `INSERT INTO sales_invoices
+       (tipo_comprobante, punto_venta, numero, fecha_emision, cliente_razon_social,
+        cliente_condicion_iva, monto_neto, monto_total, estado, reconciliation_status,
+        reserva_id, payment_id, group_id, group_payment_id, group_payment_intent,
+        spa_account_id, cash_forma_pago, source_charge_amounts, items, created_at)
+     VALUES
+       ('FB', $1, $2, CURRENT_DATE, 'Consumidor Final', 'Consumidor Final',
+        '0.00', '100.00', $3, 'pendiente', $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW())
+     RETURNING id`,
+    [
+      data.puntoVenta, 100000 + (data.puntoVenta % 100000), data.estado || "autorizacion_pendiente",
+      data.reservationId || null, data.paymentId || null, data.groupId || null, data.groupPaymentId || null,
+      data.groupPaymentIntent ? JSON.stringify(data.groupPaymentIntent) : null, data.spaAccountId || null,
+      data.cashFormaPago || null, data.sourceChargeAmounts ? JSON.stringify(data.sourceChargeAmounts) : null,
+      JSON.stringify(item),
+    ],
+  );
+  return result.rows[0].id;
+}
+
+function configureRecoveredArca() {
+  mocks.getTokenAuth.mockReset();
+  mocks.feCAESolicitar.mockReset();
+  mocks.feCompConsultar.mockReset();
+  mocks.getTokenAuth.mockResolvedValue({ token: "test-token", sign: "test-sign" });
+  mocks.feCompConsultar.mockResolvedValue({ cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") });
+}
+
+function holdFirstArcaConsultation() {
+  let reachedResolve!: () => void;
+  let releaseResolve!: () => void;
+  const reached = new Promise<void>((resolve) => { reachedResolve = resolve; });
+  const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+  mocks.feCompConsultar.mockImplementationOnce(async () => {
+    reachedResolve();
+    await release;
+    return { cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") };
+  });
+  return {
+    waitUntilHeld: () => new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        releaseResolve();
+        reject(new Error("La primera consulta ARCA no alcanzó la barrera"));
+      }, 5_000);
+      reached.then(() => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    }),
+    release: () => releaseResolve(),
+  };
+}
+
+function expectRecoveredInvoice(body: any, invoiceId: number) {
+  expect(body.invoice).toMatchObject({ id: invoiceId, estado: "emitida", cae: "71234567890123" });
+}
 
 runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito ARCA", () => {
   beforeEach(() => {
@@ -184,6 +305,283 @@ runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito A
       );
       global.fetch = originalFetch;
     }
+  });
+});
+
+runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas concurrentes", () => {
+  beforeAll(async () => {
+    if (pool) await startRecoveryRoutes();
+  });
+
+  beforeEach(() => configureRecoveredArca());
+
+  it("serializa dos reanudaciones individuales y vincula una sola vez", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const reservationId = `recovery-reservation-${suffix}`;
+    const paymentId = `recovery-payment-${suffix}`;
+    const puntoVenta = 8100 + (parseInt(suffix.slice(0, 4), 16) % 800);
+    let invoiceId: number | null = null;
+    try {
+      await pool.query(`INSERT INTO reservations
+        (id, reservation_code, guest_id, room_type_id, room_id, check_in_date, check_out_date, total_room_amount, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, CURRENT_DATE + 1, '100.00', 'confirmed', NOW())`,
+      [reservationId, `REC-${suffix}`, `guest-${suffix}`, `type-${suffix}`, `room-${suffix}`]);
+      await pool.query(`INSERT INTO payments (id, reservation_id, amount, method, date, status)
+        VALUES ($1, $2, '100.00', 'efectivo', CURRENT_DATE, 'active')`, [paymentId, reservationId]);
+      invoiceId = await insertDraft({ puntoVenta, reservationId, paymentId, cashFormaPago: "efectivo" });
+      const gate = holdFirstArcaConsultation();
+      const first = request("POST", `/api/payments/${paymentId}/resume-invoice`);
+      await gate.waitUntilHeld();
+      const second = request("POST", `/api/payments/${paymentId}/resume-invoice`);
+      gate.release();
+      const results = await Promise.all([first, second]);
+      expect(results.map((result) => result.status)).toEqual([200, 200]);
+      expect(mocks.feCompConsultar).toHaveBeenCalledTimes(1);
+      results.forEach((result) => expectRecoveredInvoice(result.body, invoiceId!));
+      const state = await pool.query(`SELECT si.estado, p.invoice_ref
+        FROM sales_invoices si JOIN payments p ON p.id = si.payment_id WHERE si.id = $1`, [invoiceId]);
+      expect(state.rows).toHaveLength(1);
+      expect(state.rows[0]).toMatchObject({ estado: "emitida" });
+      expect(state.rows[0].invoice_ref).toContain("71234567890123");
+      expect((await pool.query("SELECT id FROM sales_invoices WHERE payment_id = $1", [paymentId])).rows).toHaveLength(1);
+    } finally {
+      if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      await pool.query("DELETE FROM payments WHERE id = $1", [paymentId]);
+      await pool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
+    }
+  }, 15_000);
+
+  it("recupera una factura directa grupal y hace idempotente su vínculo concurrente", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const groupId = `recovery-direct-group-${suffix}`;
+    const puntoVenta = 8900 + (parseInt(suffix.slice(0, 4), 16) % 500);
+    let invoiceId: number | null = null;
+    try {
+      await pool.query(`INSERT INTO groups (id, group_code, name, check_in_date, check_out_date, status, created_at)
+        VALUES ($1, $2, 'Grupo recovery directo', CURRENT_DATE, CURRENT_DATE + 1, 'confirmed', NOW())`,
+      [groupId, `RD-${suffix}`]);
+      invoiceId = await insertDraft({ puntoVenta, groupId, sourceChargeAmounts: { [`charge-${suffix}`]: 100 } });
+      const gate = holdFirstArcaConsultation();
+      const first = request("POST", `/api/groups/${groupId}/invoices/${invoiceId}/resume-authorization`);
+      await gate.waitUntilHeld();
+      const second = request("POST", `/api/groups/${groupId}/invoices/${invoiceId}/resume-authorization`);
+      gate.release();
+      const resumed = await Promise.all([first, second]);
+      expect(resumed.map((result) => result.status)).toEqual([200, 200]);
+      expect(mocks.feCompConsultar).toHaveBeenCalledTimes(1);
+      resumed.forEach((result) => expectRecoveredInvoice(result.body, invoiceId!));
+      expect((await pool.query("SELECT id FROM sales_invoices WHERE group_id = $1", [groupId])).rows).toHaveLength(1);
+      const invoiceData = { id: invoiceId, tipoComprobante: "FB", puntoVenta, numero: 100000 + (puntoVenta % 100000) };
+      const linked = await Promise.all([
+        request("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData }),
+        request("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData }),
+      ]);
+      expect(linked.map((result) => result.status)).toEqual([200, 200]);
+      expect((await pool.query("SELECT id FROM group_invoices WHERE sales_invoice_id = $1", [invoiceId])).rows).toHaveLength(1);
+    } finally {
+      if (invoiceId) {
+        await pool.query("DELETE FROM group_invoices WHERE sales_invoice_id = $1", [invoiceId]);
+        await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      }
+      await pool.query("DELETE FROM groups WHERE id = $1", [groupId]);
+    }
+  }, 15_000);
+
+  it("recupera y vincula un cobro grupal sin duplicar sus efectos financieros", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const groupId = `recovery-payment-group-${suffix}`;
+    const reservationId = `recovery-payment-reservation-${suffix}`;
+    const groupPaymentId = `recovery-group-payment-${suffix}`;
+    const allocationId = `recovery-allocation-${suffix}`;
+    const cashId = `recovery-cash-${suffix}`;
+    const puntoVenta = 9400 + (parseInt(suffix.slice(0, 4), 16) % 400);
+    let invoiceId: number | null = null;
+    try {
+      await pool.query(`INSERT INTO groups (id, group_code, name, check_in_date, check_out_date, status, created_at)
+        VALUES ($1, $2, 'Grupo recovery pago', CURRENT_DATE, CURRENT_DATE + 1, 'confirmed', NOW())`, [groupId, `RP-${suffix}`]);
+      await pool.query(`INSERT INTO reservations (id, reservation_code, guest_id, room_type_id, room_id, check_in_date, check_out_date, total_room_amount, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, CURRENT_DATE + 1, '100.00', 'confirmed', NOW())`,
+      [reservationId, `RPR-${suffix}`, `guest-${suffix}`, `type-${suffix}`, `room-${suffix}`]);
+      await pool.query("INSERT INTO group_reservation_links (id, group_id, reservation_id) VALUES ($1, $2, $3)", [`link-${suffix}`, groupId, reservationId]);
+      await pool.query(`INSERT INTO group_payments (id, group_id, amount, method, date, receiver_details, destination)
+        VALUES ($1, $2, '100.00', 'efectivo', CURRENT_DATE, $3::jsonb, 'group_distribution')`,
+      [groupPaymentId, groupId, JSON.stringify({ razonSocial: "Consumidor Final" })]);
+      await pool.query(`INSERT INTO payments (id, reservation_id, amount, method, date, status, group_payment_id)
+        VALUES ($1, $2, '100.00', 'efectivo', CURRENT_DATE, 'active', $3)`, [allocationId, reservationId, groupPaymentId]);
+      await pool.query(`INSERT INTO cash_movements (id, area, source_type, source_id, payment_method, amount, movement_type, payment_id)
+        VALUES ($1, 'reception', 'group_payment', $2, 'efectivo', '100.00', 'income', $3)`, [cashId, groupId, groupPaymentId]);
+      invoiceId = await insertDraft({ puntoVenta, groupId, groupPaymentId, groupPaymentIntent: { amount: 100 }, cashFormaPago: "efectivo" });
+      const gate = holdFirstArcaConsultation();
+      const first = request("POST", `/api/groups/${groupId}/invoices/${invoiceId}/resume-authorization`);
+      await gate.waitUntilHeld();
+      const second = request("POST", `/api/groups/${groupId}/invoices/${invoiceId}/resume-authorization`);
+      gate.release();
+      const resumed = await Promise.all([first, second]);
+      expect(resumed.map((result) => result.status)).toEqual([200, 200]);
+      expect(mocks.feCompConsultar).toHaveBeenCalledTimes(1);
+      resumed.forEach((result) => expectRecoveredInvoice(result.body, invoiceId!));
+      expect((await pool.query("SELECT id FROM sales_invoices WHERE group_payment_id = $1", [groupPaymentId])).rows).toHaveLength(1);
+      const linked = await Promise.all([
+        request("PATCH", `/api/groups/${groupId}/payments/${groupPaymentId}/invoice`, { invoiceData: { id: invoiceId } }),
+        request("PATCH", `/api/groups/${groupId}/payments/${groupPaymentId}/invoice`, { invoiceData: { id: invoiceId } }),
+      ]);
+      expect(linked.map((result) => result.status)).toEqual([200, 200]);
+      const groupPayment = await pool.query(`SELECT id, invoice_id, invoice_ref FROM group_payments WHERE id = $1`, [groupPaymentId]);
+      expect(groupPayment.rows).toHaveLength(1);
+      expect(groupPayment.rows[0]).toMatchObject({ id: groupPaymentId, invoice_id: invoiceId });
+      expect(JSON.parse(groupPayment.rows[0].invoice_ref)).toEqual({
+        id: invoiceId,
+        tipoComprobante: "FB",
+        puntoVenta,
+        numero: 100000 + (puntoVenta % 100000),
+        cae: "71234567890123",
+        caeFechaVto: "2026-09-10",
+        montoTotal: "100.00",
+        estado: "emitida",
+      });
+      expect((await pool.query(`SELECT reconciliation_status, reconciliation_error FROM sales_invoices WHERE id = $1`, [invoiceId])).rows)
+        .toEqual([{ reconciliation_status: "conciliada", reconciliation_error: null }]);
+      expect((await pool.query("SELECT id FROM payments WHERE group_payment_id = $1", [groupPaymentId])).rows).toHaveLength(1);
+      expect((await pool.query("SELECT id FROM cash_movements WHERE payment_id = $1", [groupPaymentId])).rows).toHaveLength(1);
+    } finally {
+      if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      await pool.query("DELETE FROM cash_movements WHERE id = $1", [cashId]);
+      await pool.query("DELETE FROM payments WHERE id = $1", [allocationId]);
+      await pool.query("DELETE FROM group_reservation_links WHERE group_id = $1", [groupId]);
+      await pool.query("DELETE FROM group_payments WHERE id = $1", [groupPaymentId]);
+      await pool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
+      await pool.query("DELETE FROM groups WHERE id = $1", [groupId]);
+    }
+  }, 15_000);
+
+  it("recupera y vincula SPA una sola vez, incluidos Caja y movimientos de folio", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const accountId = `recovery-spa-account-${suffix}`;
+    const itemId = `recovery-spa-item-${suffix}`;
+    const puntoVenta = 9800 + (parseInt(suffix.slice(0, 4), 16) % 150);
+    let invoiceId: number | null = null;
+    let createdShiftId: string | null = null;
+    const suspendedSpaShifts: Array<{
+      id: string;
+      status: string;
+      closed_at: Date | null;
+      closed_by: string | null;
+    }> = [];
+    try {
+      // This case specifically proves the no-turno path. Development DBs can
+      // legitimately have an open SPA shift, so suspend those rows only for
+      // this fixture and restore their complete operational state in finally.
+      const activeShifts = await pool.query<{
+        id: string;
+        status: string;
+        closed_at: Date | null;
+        closed_by: string | null;
+      }>("SELECT id, status, closed_at, closed_by FROM cash_shifts WHERE area = 'spa' AND status = 'open'");
+      suspendedSpaShifts.push(...activeShifts.rows);
+      for (const shift of suspendedSpaShifts) {
+        await pool.query("UPDATE cash_shifts SET status = 'closed' WHERE id = $1", [shift.id]);
+      }
+      expect((await pool.query("SELECT id FROM cash_shifts WHERE area = 'spa' AND status = 'open'")).rows).toEqual([]);
+      await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
+        VALUES ($1, $2, 'Huésped recovery SPA', 'open', NOW())`, [accountId, `appointment-${suffix}`]);
+      await pool.query(`INSERT INTO spa_account_items (id, account_id, description, quantity, unit_price, subtotal, item_type, created_at)
+        VALUES ($1, $2, 'Tratamiento recovery', 1, '100.00', '100.00', 'treatment', NOW())`, [itemId, accountId]);
+      invoiceId = await insertDraft({ puntoVenta, spaAccountId: accountId, cashFormaPago: "efectivo" });
+      const gate = holdFirstArcaConsultation();
+      const first = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`);
+      await gate.waitUntilHeld();
+      const second = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`);
+      gate.release();
+      const resumed = await Promise.all([first, second]);
+      expect(resumed.map((result) => result.status)).toEqual([200, 200]);
+      expect(mocks.feCompConsultar).toHaveBeenCalledTimes(1);
+      resumed.forEach((result) => expectRecoveredInvoice(result.body, invoiceId!));
+      expect((await pool.query("SELECT id FROM sales_invoices WHERE spa_account_id = $1", [accountId])).rows).toHaveLength(1);
+      const linked = await Promise.all([
+        request("POST", `/api/spa/accounts/${accountId}/link-invoice`, { invoiceId }),
+        request("POST", `/api/spa/accounts/${accountId}/link-invoice`, { invoiceId }),
+      ]);
+      expect(linked.map((result) => result.status)).toEqual([200, 200]);
+      expect((await pool.query("SELECT id FROM spa_payments WHERE account_id = $1 AND status = 'active'", [accountId])).rows).toHaveLength(1);
+      const movements = await pool.query<{ id: string; shift_id: string }>("SELECT id, shift_id FROM cash_movements WHERE area = 'spa' AND source_type = 'comprobante' AND source_id = $1", [String(invoiceId)]);
+      expect(movements.rows).toHaveLength(1);
+      createdShiftId = movements.rows[0].shift_id;
+      expect((await pool.query("SELECT id FROM cash_shifts WHERE id = $1 AND area = 'spa' AND status = 'open'", [createdShiftId])).rows).toHaveLength(1);
+      expect((await pool.query(`SELECT fm.id FROM folio_movements fm JOIN folios f ON f.id = fm.folio_id
+        WHERE f.entity_type = 'spa_account' AND f.entity_id = $1 AND fm.type = 'payment'`, [accountId])).rows).toHaveLength(1);
+      expect((await pool.query("SELECT status, invoice_id FROM spa_accounts WHERE id = $1", [accountId])).rows)
+        .toEqual([{ status: "closed", invoice_id: invoiceId }]);
+    } finally {
+      try {
+        await pool.query(`DELETE FROM folio_movements WHERE folio_id IN
+          (SELECT id FROM folios WHERE entity_type = 'spa_account' AND entity_id = $1)`, [accountId]);
+        await pool.query("DELETE FROM folios WHERE entity_type = 'spa_account' AND entity_id = $1", [accountId]);
+        if (invoiceId) {
+          await pool.query("DELETE FROM cash_movements WHERE source_type = 'comprobante' AND source_id = $1", [String(invoiceId)]);
+          await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+        }
+        await pool.query("DELETE FROM spa_payments WHERE account_id = $1", [accountId]);
+        await pool.query("DELETE FROM spa_account_items WHERE account_id = $1", [accountId]);
+        await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);
+        if (createdShiftId) await pool.query("DELETE FROM cash_shifts WHERE id = $1", [createdShiftId]);
+      } finally {
+        for (const shift of suspendedSpaShifts) {
+          await pool.query(
+            "UPDATE cash_shifts SET status = $2, closed_at = $3, closed_by = $4 WHERE id = $1",
+            [shift.id, shift.status, shift.closed_at, shift.closed_by],
+          );
+        }
+      }
+    }
+  }, 15_000);
+
+  it("no vincula comprobantes no emitidos aunque los reintentos sean concurrentes", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const groupId = `recovery-unemitted-group-${suffix}`;
+    const groupPaymentId = `recovery-unemitted-payment-${suffix}`;
+    const accountId = `recovery-unemitted-spa-${suffix}`;
+    const puntoVenta = 9950 + (parseInt(suffix.slice(0, 4), 16) % 40);
+    let groupInvoiceId: number | null = null;
+    let paymentInvoiceId: number | null = null;
+    let spaInvoiceId: number | null = null;
+    try {
+      await pool.query(`INSERT INTO groups (id, group_code, name, check_in_date, check_out_date, status, created_at)
+        VALUES ($1, $2, 'Grupo no emitida', CURRENT_DATE, CURRENT_DATE + 1, 'confirmed', NOW())`, [groupId, `RU-${suffix}`]);
+      await pool.query(`INSERT INTO group_payments (id, group_id, amount, method, date, destination)
+        VALUES ($1, $2, '100.00', 'efectivo', CURRENT_DATE, 'group_distribution')`, [groupPaymentId, groupId]);
+      await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
+        VALUES ($1, $2, 'SPA no emitida', 'open', NOW())`, [accountId, `appointment-${suffix}`]);
+      groupInvoiceId = await insertDraft({ puntoVenta, estado: "rechazada", groupId, sourceChargeAmounts: { [`charge-${suffix}`]: 100 } });
+      paymentInvoiceId = await insertDraft({ puntoVenta: puntoVenta + 1, estado: "autorizacion_pendiente", groupId, groupPaymentId });
+      spaInvoiceId = await insertDraft({ puntoVenta: puntoVenta + 2, estado: "autorizacion_pendiente", spaAccountId: accountId, cashFormaPago: "efectivo" });
+      const responses = await Promise.all([
+        request("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData: { id: groupInvoiceId, tipoComprobante: "FB", puntoVenta, numero: 1 } }),
+        request("POST", `/api/groups/${groupId}/direct-invoice`, { invoiceData: { id: groupInvoiceId, tipoComprobante: "FB", puntoVenta, numero: 1 } }),
+        request("PATCH", `/api/groups/${groupId}/payments/${groupPaymentId}/invoice`, { invoiceData: { id: paymentInvoiceId } }),
+        request("PATCH", `/api/groups/${groupId}/payments/${groupPaymentId}/invoice`, { invoiceData: { id: paymentInvoiceId } }),
+        request("POST", `/api/spa/accounts/${accountId}/link-invoice`, { invoiceId: spaInvoiceId }),
+        request("POST", `/api/spa/accounts/${accountId}/link-invoice`, { invoiceId: spaInvoiceId }),
+      ]);
+      expect(responses.every((response) => response.status === 409)).toBe(true);
+      expect((await pool.query("SELECT id FROM group_invoices WHERE sales_invoice_id = $1", [groupInvoiceId])).rows).toEqual([]);
+      expect((await pool.query("SELECT invoice_id FROM group_payments WHERE id = $1", [groupPaymentId])).rows[0].invoice_id).toBeNull();
+      expect((await pool.query("SELECT id FROM spa_payments WHERE account_id = $1", [accountId])).rows).toEqual([]);
+      expect((await pool.query("SELECT id FROM cash_movements WHERE source_id = $1", [String(spaInvoiceId)])).rows).toEqual([]);
+    } finally {
+      await pool.query("DELETE FROM sales_invoices WHERE id = ANY($1::int[])", [[groupInvoiceId, paymentInvoiceId, spaInvoiceId].filter(Boolean)]);
+      await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);
+      await pool.query("DELETE FROM group_payments WHERE id = $1", [groupPaymentId]);
+      await pool.query("DELETE FROM groups WHERE id = $1", [groupId]);
+    }
+  }, 15_000);
+
+  afterAll(async () => {
+    await stopRecoveryRoutes();
   });
 });
 

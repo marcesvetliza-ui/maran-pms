@@ -1245,10 +1245,6 @@ export function registerSpaRoutes(app: Express) {
       if (!spaPaymentMethod) {
         return res.status(409).json({ error: "La factura no tiene una forma de pago SPA válida" });
       }
-      const invoiceCashShift = spaPaymentMethod === "cuenta_corriente"
-        ? null
-        : await storage.getOrCreateActiveTurno("spa");
-
       const linked = await db.transaction(async (tx) => {
         await tx.execute(sql`SELECT id FROM sales_invoices WHERE id = ${invoiceId} FOR UPDATE`);
         await tx.execute(sql`SELECT id FROM spa_accounts WHERE id = ${req.params.id} FOR UPDATE`);
@@ -1317,6 +1313,13 @@ export function registerSpaRoutes(app: Express) {
           throw Object.assign(new Error("El folio SPA ya tiene pagos registrados"), { statusCode: 409 });
         }
 
+        // Do this only after the account/invoice row locks have serialized the
+        // link. Previously two concurrent callers could both observe no SPA
+        // shift before either transaction closed the account and race creating
+        // a turno; the second caller then only discovered the completed link.
+        const invoiceCashShift = spaPaymentMethod === "cuenta_corriente"
+          ? null
+          : await storage.getOrCreateActiveTurno("spa");
         const [payment] = await tx.insert(spaPayments).values({
           accountId: account.id,
           amount: total.toFixed(2),
@@ -1453,6 +1456,16 @@ export function registerSpaRoutes(app: Express) {
           eq(salesInvoices.estado, "autorizacion_pendiente"),
         )).orderBy(desc(salesInvoices.createdAt)).limit(1);
         if (!pending) {
+          // A concurrent waiter acquired the same advisory lock after the
+          // winner finalized ARCA. The SPA account is deliberately still open
+          // until link-invoice runs, so return that finalized invoice rather
+          // than reporting a spurious missing-pending error.
+          const [alreadyResumed] = await db.select().from(salesInvoices).where(and(
+            eq(salesInvoices.spaAccountId, account.id),
+            eq(salesInvoices.estado, "emitida"),
+            eq(salesInvoices.reconciliationStatus, "pendiente"),
+          )).orderBy(desc(salesInvoices.createdAt)).limit(1);
+          if (alreadyResumed) return alreadyResumed;
           throw Object.assign(new Error("No hay una autorización ARCA pendiente para este folio"), { statusCode: 404 });
         }
         if (!pending.cashFormaPago || !INVOICE_TO_SPA_PAYMENT_METHOD[pending.cashFormaPago]) {
