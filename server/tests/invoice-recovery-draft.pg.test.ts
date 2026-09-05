@@ -159,6 +159,19 @@ function holdFirstArcaConsultation() {
   };
 }
 
+async function waitForAdvisoryLockWaiters(expected: number) {
+  if (!pool) throw new Error("DATABASE_URL no está configurado");
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+    );
+    if (Number(result.rows[0]?.count || 0) >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`No se observaron ${expected} solicitudes esperando el bloqueo fiscal SPA`);
+}
+
 function expectRecoveredInvoice(body: any, invoiceId: number) {
   expect(body.invoice).toMatchObject({ id: invoiceId, estado: "emitida", cae: "71234567890123" });
 }
@@ -666,6 +679,103 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
         await pool.query(`CREATE UNIQUE INDEX sales_invoices_spa_account_id_unique
           ON sales_invoices (spa_account_id) WHERE spa_account_id IS NOT NULL`);
       }
+    }
+  }, 15_000);
+
+  it("serializa el descarte administrativo contra la reanudación fiscal del mismo folio SPA", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const accountId = `recovery-review-race-${suffix}`;
+    const itemId = `recovery-review-race-item-${suffix}`;
+    const puntoVenta = 9930 + (parseInt(suffix.slice(0, 4), 16) % 20);
+    let invoiceId: number | null = null;
+    const lockClient = await pool.connect();
+    try {
+      await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
+        VALUES ($1, $2, 'SPA carrera revisión fiscal', 'open', NOW())`, [accountId, `appointment-${suffix}`]);
+      await pool.query(`INSERT INTO spa_account_items (id, account_id, description, quantity, unit_price, subtotal, item_type, created_at)
+        VALUES ($1, $2, 'Tratamiento recovery', 1, '100.00', '100.00', 'treatment', NOW())`, [itemId, accountId]);
+      invoiceId = await insertDraft({ puntoVenta, spaAccountId: accountId, cashFormaPago: "efectivo" });
+
+      await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [`spa-invoice:${accountId}`]);
+      const resume = request("POST", `/api/spa/accounts/${accountId}/resume-invoice`, {
+        confirmation: `AUTORIZAR ${invoiceId}`,
+      });
+      await waitForAdvisoryLockWaiters(1);
+
+      await pool.query(
+        `UPDATE sales_invoices
+         SET reconciliation_status = 'requiere_revision',
+             reconciliation_error = 'Borrador derivado a revisión administrativa',
+             reconciliation_updated_at = NOW()
+         WHERE id = $1`,
+        [invoiceId],
+      );
+      const discard = request("POST", `/api/admin/spa/fiscal-drafts/${invoiceId}/resolve`, {
+        action: "discard",
+        reason: "Se confirmó que el borrador debe descartarse",
+        confirmation: `DESCARTAR ${invoiceId}`,
+      });
+      await waitForAdvisoryLockWaiters(2);
+
+      await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [`spa-invoice:${accountId}`]);
+      const [resumeResult, discardResult] = await Promise.all([resume, discard]);
+
+      expect(resumeResult.status).toBe(404);
+      expect(resumeResult.body.error).toContain("No hay una autorización ARCA pendiente");
+      expect(discardResult.status).toBe(200);
+      expect(discardResult.body).toMatchObject({
+        action: "discard",
+        invoiceId,
+        spaAccountId: accountId,
+        arcaContacted: false,
+      });
+      expect(mocks.getTokenAuth).not.toHaveBeenCalled();
+      expect(mocks.feCompConsultar).not.toHaveBeenCalled();
+      expect(mocks.feCAESolicitar).not.toHaveBeenCalled();
+
+      const finalDraft = await pool.query<{
+        estado: string;
+        reconciliation_status: string;
+        reconciliation_error: string;
+      }>(
+        `SELECT estado, reconciliation_status, reconciliation_error
+         FROM sales_invoices WHERE id = $1`,
+        [invoiceId],
+      );
+      expect(finalDraft.rows).toEqual([{
+        estado: "descartada",
+        reconciliation_status: "descartada",
+        reconciliation_error: expect.stringContaining("Se confirmó que el borrador debe descartarse"),
+      }]);
+
+      const auditResult = await pool.query<{ action: string; module: string; details: string }>(
+        `SELECT action, module, details FROM audit_logs
+         WHERE entity_type = 'sales_invoice' AND entity_id = $1
+         ORDER BY timestamp DESC`,
+        [String(invoiceId)],
+      );
+      expect(auditResult.rows).toHaveLength(1);
+      expect(auditResult.rows[0]).toMatchObject({ action: "delete", module: "spa-fiscal-review" });
+      expect(JSON.parse(auditResult.rows[0].details)).toMatchObject({
+        action: "discard",
+        reason: "Se confirmó que el borrador debe descartarse",
+        spaAccountId: accountId,
+        affectedDraftIds: [invoiceId],
+        arcaContacted: false,
+      });
+    } finally {
+      await lockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [`spa-invoice:${accountId}`]).catch(() => undefined);
+      lockClient.release();
+      if (invoiceId) {
+        await pool.query(
+          "DELETE FROM audit_logs WHERE entity_type = 'sales_invoice' AND entity_id = $1",
+          [String(invoiceId)],
+        );
+        await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      }
+      await pool.query("DELETE FROM spa_account_items WHERE account_id = $1", [accountId]);
+      await pool.query("DELETE FROM spa_accounts WHERE id = $1", [accountId]);
     }
   }, 15_000);
 
