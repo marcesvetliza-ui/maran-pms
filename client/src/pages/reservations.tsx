@@ -320,9 +320,20 @@ export function ReservationFormDialog({
         ? new Date(reservation.createdAt)
         : new Date(),
   });
+  const initializedFormSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (open) {
+    if (!open) {
+      initializedFormSessionRef.current = null;
+      return;
+    }
+
+    const formSessionKey = reservation?.id ? `edit:${reservation.id}` : "create";
+    if (initializedFormSessionRef.current === formSessionKey) {
+      return;
+    }
+    initializedFormSessionRef.current = formSessionKey;
+
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
       setSelectedAgency(reservation?.agency || null);
@@ -393,7 +404,6 @@ export function ReservationFormDialog({
       setPendingCompanions([]);
       setShowCompanionForm(false);
       setNewCompForm(emptyCompanion);
-    }
   }, [
     open,
     reservation?.id,

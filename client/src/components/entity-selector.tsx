@@ -250,9 +250,15 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
             {searchResults.length > 0 && (
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {searchResults.map((guest) => (
-                  <div
+                  <button
+                    type="button"
                     key={guest.id}
-                    className="p-3 rounded-md border hover-elevate active-elevate-2 cursor-pointer"
+                    className="w-full p-3 rounded-md border hover-elevate active-elevate-2 cursor-pointer text-left"
+                    onPointerDown={(event) => {
+                      if (event.pointerType !== "mouse") return;
+                      event.preventDefault();
+                      onSelect(guest);
+                    }}
                     onClick={() => onSelect(guest)}
                     data-testid={`guest-result-${guest.id}`}
                   >
@@ -270,7 +276,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
                       </div>
                       <Check className="h-4 w-4 text-muted-foreground invisible group-hover:visible" />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
