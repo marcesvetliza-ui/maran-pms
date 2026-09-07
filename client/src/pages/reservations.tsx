@@ -2412,27 +2412,44 @@ function ReservationDetailDialog({
     enabled: transferringChargeId !== null || showBulkTransfer,
   });
 
-  const { data: charges, refetch: refetchCharges } = useQuery<Charge[]>({
+  const { data: charges, refetch: refetchCharges, isError: isChargesError } = useQuery<Charge[]>({
     queryKey: ["/api/reservations", reservation.id, "charges", "all"],
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservation.id}/charges?includeAnulados=true`);
-      return res.json();
+      if (!res.ok) {
+        throw new Error(`No se pudieron cargar los cargos (${res.status})`);
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("La respuesta de cargos no tiene el formato esperado");
+      }
+      return data;
     },
   });
 
-  const { data: payments, refetch: refetchPayments } = useQuery<Payment[]>({
+  const { data: payments, refetch: refetchPayments, isError: isPaymentsError } = useQuery<Payment[]>({
     queryKey: ["/api/reservations", reservation.id, "payments", "all"],
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`);
-      return res.json();
+      if (!res.ok) {
+        throw new Error(`No se pudieron cargar los pagos (${res.status})`);
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("La respuesta de pagos no tiene el formato esperado");
+      }
+      return data;
     },
   });
+
+  const safeCharges = Array.isArray(charges) ? charges : [];
+  const safePayments = Array.isArray(payments) ? payments : [];
 
   // Derive the invoice ID linked to the payment currently being voided.
   // Used to check whether an active NC already exists before showing the checkbox.
   const anularLinkedInvoiceId: number | null = (() => {
     if (!anularTarget || anularTarget.type !== "pago") return null;
-    const p = payments?.find((pm: any) => pm.id === anularTarget.id);
+    const p = safePayments.find((pm: any) => pm.id === anularTarget.id);
     try {
       const ref = (p as any)?.invoiceRef ? JSON.parse((p as any).invoiceRef) : null;
       return ref?.id ?? null;
@@ -2816,12 +2833,12 @@ function ReservationDetailDialog({
     adjustment: "Ajuste",
   };
 
-  const consumptionCharges = charges?.filter((c) =>
+  const consumptionCharges = safeCharges.filter((c) =>
     c.category !== "payment" && !isReservationCreditNoteAdjustment(c)
-  ) || [];
+  );
   const activeConsumptionCharges = consumptionCharges.filter((c) => (c as any).status !== "anulado");
   const totalConsumptions = activeConsumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-  const totalPayments = payments?.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0) || 0;
+  const totalPayments = safePayments.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0);
   const earlyCharge = parseFloat(reservation.earlyCheckInCharge || "0");
   const lateCharge = parseFloat(reservation.lateCheckOutCharge || "0");
   const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyCharge + lateCharge;
@@ -2829,8 +2846,8 @@ function ReservationDetailDialog({
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
   const totalInvoiced = getNetReservationInvoicedTotal(folioInvoices || []);
-  const availableAdvancePayments = getAvailableReservationAdvancePayments(payments || [], folioInvoices || []);
-  const paidPendingInvoice = getAvailableReservationAdvanceTotal(payments || [], folioInvoices || []);
+  const availableAdvancePayments = getAvailableReservationAdvancePayments(safePayments, folioInvoices || []);
+  const paidPendingInvoice = getAvailableReservationAdvanceTotal(safePayments, folioInvoices || []);
   const pendingCollection = Math.max(0, totalToPay - totalPayments);
   const pendingBilling = Math.max(0, totalToPay - totalInvoiced);
   const grossFolioBalance = Math.max(0, totalToPay);
@@ -2855,6 +2872,27 @@ function ReservationDetailDialog({
             Detalle de la reservación
           </DialogDescription>
         </DialogHeader>
+
+        {(isChargesError || isPaymentsError) && (
+          <div className="mx-6 mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" data-testid="banner-folio-load-error">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">No se pudo cargar todo el folio</p>
+              <p className="text-xs opacity-90">Reintentá antes de registrar pagos, facturar o cerrar la reserva.</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (isChargesError) void refetchCharges();
+                if (isPaymentsError) void refetchPayments();
+              }}
+            >
+              Reintentar
+            </Button>
+          </div>
+        )}
 
 
         {(reservation as any).groupId && (
@@ -4792,7 +4830,7 @@ function ReservationDetailDialog({
 
             {/* ── Anticipos / Pagos section ── */}
             {(() => {
-              const activePaymentsForBulk = payments?.filter((p: any) => p.status !== "anulado") || [];
+              const activePaymentsForBulk = safePayments.filter((p: any) => p.status !== "anulado");
               if (activePaymentsForBulk.length === 0) return null;
               return (
                 <div className="space-y-1.5">
@@ -4854,7 +4892,7 @@ function ReservationDetailDialog({
 
             {/* ── Balance preview ── */}
             {(bulkIncludeAccommodation || bulkSelectedChargeIds.size > 0 || bulkSelectedPaymentIds.size > 0) && (() => {
-              const activePaymentsForBulk = payments?.filter((p: any) => p.status !== "anulado") || [];
+              const activePaymentsForBulk = safePayments.filter((p: any) => p.status !== "anulado");
               const accommodationAmt = Number(reservation.totalRoomAmount || 0);
               const selectedChargesAmt = activeConsumptionCharges
                 .filter(c => bulkSelectedChargeIds.has(c.id))
