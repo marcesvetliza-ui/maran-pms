@@ -26,6 +26,7 @@ const reservation = {
   checkOutDate: "2026-08-24",
   companyId: "company-recipient-test",
   guest: {
+    id: "guest-recipient-test",
     firstName: "Lucía",
     lastName: "Huésped",
     documentNumber: "12345678",
@@ -162,6 +163,87 @@ describe("PrefacturaDialog recipient selection", () => {
     await user.click(screen.getByRole("button", { name: /Agregar forma de pago/ }));
     expect(screen.getByTestId("select-payment-method-0")).toHaveTextContent("Efectivo");
     expect(screen.getByTestId("select-payment-method-1")).toHaveTextContent("Tarjeta Débito");
+  });
+
+  it("allows charging the selected guest account without creating a cash payment", async () => {
+    const fetchMock = buildFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <PrefacturaDialog
+          open
+          onClose={vi.fn()}
+          reservationId={reservation.id}
+          reservation={reservation}
+          mode="billing"
+        />
+      </Wrapper>,
+    );
+
+    await screen.findByText(/Alojamiento Hab\. 101/);
+    await user.click(screen.getByTestId("select-sale-condition"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(screen.getByTestId("button-registrar-emitir"));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, options]) =>
+        String(url).includes("/api/billing/invoices") &&
+        String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+      )).toBe(true);
+    });
+
+    const invoiceCall = fetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/billing/invoices") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    const invoiceBody = JSON.parse(String((invoiceCall![1] as RequestInit).body));
+    expect(invoiceBody.cashFormaPago).toBe("cuenta_corriente");
+    expect(invoiceBody.ccEntityType).toBe("guest");
+    expect(invoiceBody.ccEntityId).toBe("guest-recipient-test");
+    expect(fetchMock.mock.calls.some(([url, options]) =>
+      String(url).includes("/api/payments") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    )).toBe(false);
+  });
+
+  it("allows Cuenta Corriente as a payment method for the reservation guest", async () => {
+    const fetchMock = buildFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <PrefacturaDialog
+          open
+          onClose={vi.fn()}
+          reservationId={reservation.id}
+          reservation={reservation}
+          mode="billing"
+        />
+      </Wrapper>,
+    );
+
+    await screen.findByText(/Alojamiento Hab\. 101/);
+    await user.click(screen.getByTestId("select-payment-method-0"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(screen.getByTestId("button-registrar-emitir"));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, options]) =>
+        String(url).includes("/api/payments") &&
+        String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+      )).toBe(true);
+    });
+
+    const paymentCall = fetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/payments") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    const paymentBody = JSON.parse(String((paymentCall![1] as RequestInit).body));
+    expect(paymentBody.method).toBe("cuenta_corriente");
+    expect(paymentBody.billingTarget).toBe("guest");
+    expect(paymentBody.companyId).toBeNull();
+    expect(paymentBody.agencyId).toBeNull();
   });
 
   it("emits only the covered accommodation amount and links one payment to it", async () => {

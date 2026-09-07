@@ -713,7 +713,7 @@ export function PrefacturaDialog({
       const dniVal = !rawCuit ? cleanIdentifier(g.documentNumber) : "";
       const condVal = normalizeVatCondition(g.vatCondition);
       setBillingTarget("guest");
-      setBillingEntityId("");
+      setBillingEntityId(String(g.id || res.guestId || ""));
       setRazonSocial(name);
       setCuit(cuitVal);
       setDni(dniVal);
@@ -734,7 +734,7 @@ export function PrefacturaDialog({
       applyEntity(ag, "agency");
     } else if (g) {
       setBillingTarget("guest");
-      setBillingEntityId("");
+      setBillingEntityId(String(g.id || res.guestId || ""));
       const isJuridica = g.tipoPersona === "juridica";
       const name = isJuridica ? (g.firstName || "") : [g.lastName, g.firstName].filter(Boolean).join(" ");
       const rawCuit = cleanIdentifier(g.cuilCuit).replace(/\D/g, "").slice(0, 11);
@@ -777,6 +777,7 @@ export function PrefacturaDialog({
   }
 
   function handleBillingTargetChange(target: "guest" | "company" | "agency") {
+    setSubmitError(null);
     setBillingTarget(target);
     setBillingEntityId("");
     if (target === "guest" && reservation) {
@@ -789,6 +790,7 @@ export function PrefacturaDialog({
   }
 
   function handleEntitySelect(id: string, entityType: "company" | "agency") {
+    setSubmitError(null);
     setBillingEntityId(id);
     const list = entityType === "company" ? companies : agencies;
     const entity = list.find((e: any) => String(e.id) === id);
@@ -803,6 +805,7 @@ export function PrefacturaDialog({
 
   // Payment row helpers
   function updateRow(id: string, field: keyof PaymentRow, value: any) {
+    setSubmitError(null);
     setPaymentRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
     // Any edit to an amount row dismisses the split-balance-changed notice
     if (field === "amount") setSplitBalanceChanged(false);
@@ -1009,8 +1012,8 @@ export function PrefacturaDialog({
       return;
     }
     if (!alreadyPaidAndInvoiced && saleCondition === "cuenta_corriente" &&
-      ((billingTarget !== "company" && billingTarget !== "agency") || !billingEntityId)) {
-      setSubmitError("Cuenta Corriente requiere una empresa o agencia. Seleccioná una entidad receptora antes de emitir el comprobante.");
+      (!["guest", "company", "agency"].includes(billingTarget) || !billingEntityId)) {
+      setSubmitError("Cuenta Corriente requiere un huésped, empresa o agencia seleccionada antes de emitir el comprobante.");
       return;
     }
     // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
@@ -1074,10 +1077,10 @@ export function PrefacturaDialog({
         ? buildInvoiceItems(invoiceItemsToEmit, tipo)
         : [];
       if (invoiceItems.length > 0) {
-        // Si algún row de cobro es "cuenta_corriente" y hay una empresa/agencia seleccionada,
+        // Si la condición es "cuenta_corriente" y hay una entidad seleccionada,
         // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
         const isCcPayment = saleCondition === "cuenta_corriente" &&
-          (billingTarget === "company" || billingTarget === "agency") && !!billingEntityId;
+          ["guest", "company", "agency"].includes(billingTarget) && !!billingEntityId;
 
         const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
           tipoComprobante: tipo,
@@ -1698,11 +1701,14 @@ export function PrefacturaDialog({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">Condición de venta</Label>
-                <Select value={saleCondition} onValueChange={(value) => setSaleCondition(value as SaleCondition)}>
+                <Select value={saleCondition} onValueChange={(value) => {
+                  setSubmitError(null);
+                  setSaleCondition(value as SaleCondition);
+                }}>
                   <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem>
-                    <SelectItem value="cuenta_corriente" disabled={billingTarget === "guest" || !billingEntityId}>
+                    <SelectItem value="cuenta_corriente" disabled={!billingEntityId}>
                       {SALE_CONDITION_LABELS.cuenta_corriente}
                     </SelectItem>
                   </SelectContent>

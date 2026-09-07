@@ -818,8 +818,9 @@ export function registerBillingRoutes(app: Express) {
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
-      if (cashFormaPago === "cuenta_corriente" && (!ccEntityType || !ccEntityId)) {
-        return res.status(400).json({ error: "Seleccione una empresa o agencia para cargar a Cuenta Corriente" });
+      if (cashFormaPago === "cuenta_corriente" &&
+        (!["guest", "company", "agency"].includes(String(ccEntityType)) || !ccEntityId)) {
+        return res.status(400).json({ error: "Seleccione un huésped, empresa o agencia para cargar a Cuenta Corriente" });
       }
       if (cashFormaPago === "cuenta_corriente") assertFinancialSchemaReady();
       const reservationId = reservaId === undefined || reservaId === null
@@ -1222,7 +1223,7 @@ export function registerBillingRoutes(app: Express) {
             : await emitInvoice();
       const user = (req as any).user;
 
-      // Cuenta Corriente: cargar el total a la cuenta corriente de la empresa/agencia (no es un movimiento de caja)
+      // Cuenta Corriente: cargar el total a la cuenta de la entidad seleccionada (no es un movimiento de caja)
       // A group invoice documents sources only. Its collection was (or will
       // be) recorded through the group payment endpoints, so it must never
       // create a second Caja/CC movement.
