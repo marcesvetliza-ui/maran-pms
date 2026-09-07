@@ -2399,39 +2399,54 @@ export function registerReservationsRoutes(app: Express) {
       // never reached us.
       const paymentIds = result.map((payment: any) => String(payment.id)).filter(Boolean);
       if (paymentIds.length) {
-        const pending = await db.execute(sql`
-          SELECT DISTINCT ON (payment_id)
-            payment_id, id, tipo_comprobante, punto_venta, numero, cae, monto_total, estado
-          FROM sales_invoices
-          WHERE payment_id = ANY(${paymentIds}::varchar[])
-            AND estado IN ('emitida', 'autorizacion_pendiente')
-          ORDER BY payment_id, created_at DESC, id DESC
-        `);
-        const byPayment = new Map((pending.rows as any[]).map((invoice) => [
-          String(invoice.payment_id),
-          {
-            id: Number(invoice.id),
-            tipoComprobante: invoice.tipo_comprobante,
-            puntoVenta: Number(invoice.punto_venta),
-            numero: Number(invoice.numero),
-            cae: invoice.cae,
-            montoTotal: invoice.monto_total,
-            authorizationPending: invoice.estado === "autorizacion_pendiente",
-          },
-        ]));
-        result = result.map((payment: any) => {
-          const invoice = byPayment.get(String(payment.id));
-          if (!invoice || payment.invoiceRef || payment.invoice_ref) return payment;
-          return {
-            ...payment,
-            ...(invoice.authorizationPending
-              ? { pendingAuthorization: invoice }
-              : { pendingInvoiceLink: invoice, invoiceLinkFailed: true }),
-          };
-        });
+        try {
+          const pending = await db.execute(sql`
+            SELECT DISTINCT ON (payment_id)
+              payment_id, id, tipo_comprobante, punto_venta, numero, cae, monto_total, estado
+            FROM sales_invoices
+            WHERE payment_id = ANY(${paymentIds}::varchar[])
+              AND estado IN ('emitida', 'autorizacion_pendiente')
+            ORDER BY payment_id, created_at DESC, id DESC
+          `);
+          const byPayment = new Map((pending.rows as any[]).map((invoice) => [
+            String(invoice.payment_id),
+            {
+              id: Number(invoice.id),
+              tipoComprobante: invoice.tipo_comprobante,
+              puntoVenta: Number(invoice.punto_venta),
+              numero: Number(invoice.numero),
+              cae: invoice.cae,
+              montoTotal: invoice.monto_total,
+              authorizationPending: invoice.estado === "autorizacion_pendiente",
+            },
+          ]));
+          result = result.map((payment: any) => {
+            const invoice = byPayment.get(String(payment.id));
+            if (!invoice || payment.invoiceRef || payment.invoice_ref) return payment;
+            return {
+              ...payment,
+              ...(invoice.authorizationPending
+                ? { pendingAuthorization: invoice }
+                : { pendingInvoiceLink: invoice, invoiceLinkFailed: true }),
+            };
+          });
+        } catch (enrichmentError: any) {
+          // Recovery metadata is supplementary. A missing production migration
+          // must never hide real payments or block the reservation folio.
+          console.error("[reservation-payments] Invoice recovery enrichment failed", {
+            reservationId: req.params.reservationId,
+            code: enrichmentError?.code,
+            message: enrichmentError?.message,
+          });
+        }
       }
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("[reservation-payments] Failed to load payments", {
+        reservationId: req.params.reservationId,
+        code: error?.code,
+        message: error?.message,
+      });
       res.status(500).json({ error: "Error fetching payments" });
     }
   });

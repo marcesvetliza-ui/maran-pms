@@ -73,6 +73,7 @@ const storage = {
   getReservation: vi.fn(async () => reservation),
   getCharges: vi.fn(async () => charges),
   getPayments: vi.fn(async () => payments),
+  getAllPaymentsIncludingAnulados: vi.fn(async () => payments),
 };
 
 vi.mock("../db-storage", () => ({
@@ -191,6 +192,30 @@ afterEach(() => {
 });
 
 describe("reservation folio after a total credit note", () => {
+  it("keeps payments available when invoice recovery enrichment fails", async () => {
+    state.dbError = Object.assign(new Error("column sales_invoices.payment_id does not exist"), {
+      code: "42703",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/reservations/reservation-1/payments?includeAnulados=true`,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(payments);
+    });
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[reservation-payments] Invoice recovery enrichment failed",
+      expect.objectContaining({
+        reservationId: "reservation-1",
+        code: "42703",
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
   it("rejects an unauthenticated folio request", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/reservations/reservation-1/folio`);
