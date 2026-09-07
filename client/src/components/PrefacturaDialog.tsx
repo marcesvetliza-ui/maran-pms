@@ -553,10 +553,12 @@ export function PrefacturaDialog({
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservationId}/invoices`);
       if (!res.ok) return [];
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     },
     enabled: open && !!reservationId,
   });
+  const safeEmittedInvoices = Array.isArray(emittedInvoices) ? emittedInvoices : [];
   const { data: emittedCreditNotes = [], refetch: refetchEmittedCreditNotes } = useQuery<any[]>({
     queryKey: ["/api/reservations", String(reservationId), "credit-notes"],
     queryFn: async () => {
@@ -636,7 +638,7 @@ export function PrefacturaDialog({
       const initialBalance = getSelectedFolioBalance(
         initialItems,
         initialItems,
-        getAvailableReservationAdvancePayments(folio.payments || [], emittedInvoices),
+        getAvailableReservationAdvancePayments(folio.payments || [], safeEmittedInvoices),
       );
       if (initialBalance > 0.01) {
         setPaymentRows([{
@@ -668,7 +670,7 @@ export function PrefacturaDialog({
   // A refetch must never reselect an already invoiced item or overwrite the
   // selection-specific payment allocation shown to the user.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folio?.balance, open, invoicesLoading, emittedInvoices]);
+  }, [folio?.balance, open, invoicesLoading, safeEmittedInvoices]);
 
   // When reservation loads: auto-fill client data
   useEffect(() => {
@@ -833,7 +835,7 @@ export function PrefacturaDialog({
   const originalBillableItems = folio
     ? getAllBillableFolioItems(folio, itemDescriptions)
     : [];
-  const invoicedAmountsByCharge = getInvoicedAmountsByCharge(emittedInvoices);
+  const invoicedAmountsByCharge = getInvoicedAmountsByCharge(safeEmittedInvoices);
   const remainingAmountsByCharge = getRemainingChargeAmounts(
     originalBillableItems,
     invoicedAmountsByCharge,
@@ -846,7 +848,7 @@ export function PrefacturaDialog({
     : [];
   const availableAdvancePayments = getAvailableReservationAdvancePayments(
     folio?.payments || [],
-    emittedInvoices,
+    safeEmittedInvoices,
   );
   const totalSelected = getSelectedFolioTotal(selectedItems);
   const selectedBalance = getSelectedFolioBalance(
@@ -922,7 +924,7 @@ export function PrefacturaDialog({
   // emittedInvoices is the stable query result; fullyInvoicedChargeIds is rebuilt
   // on each render and must not itself be used as an effect dependency.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, emittedInvoices]);
+  }, [open, safeEmittedInvoices]);
 
   // A linked company/agency is a billing option, never a forced recipient:
   // reception must still be able to issue the stay to the guest.
@@ -1319,7 +1321,7 @@ export function PrefacturaDialog({
   // ── Render ──────────────────────────────────────────────────────────────────
 
   // Invoices eligible for a Nota de Crédito (only FA / FB / FC / FT / FM)
-  const ncEligibleInvoices = emittedInvoices.filter((inv: any) =>
+  const ncEligibleInvoices = safeEmittedInvoices.filter((inv: any) =>
     ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante) &&
     (parseFloat(inv.monto_total || "0") - parseFloat(inv.monto_acreditado || "0")) > 0.01
   );
@@ -1728,7 +1730,7 @@ export function PrefacturaDialog({
 
             <DialogFooter className="gap-2 flex-wrap">
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-              {emittedInvoices.length > 0 && (
+              {safeEmittedInvoices.length > 0 && (
                 <>
                   <TooltipProvider>
                     <Tooltip>

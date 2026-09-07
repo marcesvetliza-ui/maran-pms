@@ -5428,7 +5428,11 @@ export default function ReservationsPage() {
       }
       const res = await fetch(`/api/reservations?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch reservations");
-      return res.json();
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        throw new Error("La respuesta de reservas no tiene el formato esperado");
+      }
+      return data;
     },
   });
 
@@ -5560,8 +5564,9 @@ export default function ReservationsPage() {
     },
   });
 
-  const filteredReservations = reservations
-    ?.filter((res) => {
+  const safeReservations = Array.isArray(reservations) ? reservations : [];
+  const filteredReservations = safeReservations
+    .filter((res) => {
       const guestName = `${res.guest?.lastName} ${res.guest?.firstName}`.toLowerCase();
       const sq = searchQuery.toLowerCase();
       const matchesSearch =

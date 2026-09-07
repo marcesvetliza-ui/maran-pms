@@ -340,6 +340,29 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     vi.stubGlobal("open", vi.fn());
   });
 
+  it("does not crash when the reservation invoices response is not an array", async () => {
+    const baseFetch = buildFetchMock();
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      const strUrl = url.toString();
+      const method = options?.method?.toUpperCase() ?? "GET";
+      if (
+        strUrl.includes(`/api/reservations/${RESERVATION_ID}/invoices`) &&
+        method === "GET"
+      ) {
+        return new Response(JSON.stringify({ error: "Error fetching invoices" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return baseFetch(url, options);
+    }));
+
+    renderDialog();
+
+    expect(await screen.findByTestId("button-registrar-emitir")).toBeInTheDocument();
+    expect(screen.queryByText("Algo salió mal")).not.toBeInTheDocument();
+  });
+
   it("reaches step 3 even when the checkout API returns 500", async () => {
     const user = userEvent.setup();
     renderDialog();
