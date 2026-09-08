@@ -103,6 +103,34 @@ runIfDatabaseIsConfigured("PostgreSQL real: historical reservation cash recovery
     }
   });
 
+  it("rejects paymentId on the generic cash movement endpoint", async () => {
+    const fixture = await createPayment();
+    const shiftId = await createShift(randomUUID(), 951006);
+    try {
+      const attempted = await request("/api/cash/movements", {
+        method: "POST",
+        body: JSON.stringify({
+          shiftId,
+          area: "reception",
+          sourceType: "manual",
+          receiptType: "ingreso_efectivo",
+          description: "Ingreso manual",
+          amount: "125.00",
+          paymentId: fixture.paymentId,
+        }),
+      });
+      expect(attempted.response.status).toBe(400);
+      expect(attempted.body.error).toContain("paymentId no está permitido");
+      const movements = await testPool!.query(
+        "SELECT count(*) FROM cash_movements WHERE payment_id = $1",
+        [fixture.paymentId],
+      );
+      expect(movements.rows[0].count).toBe("0");
+    } finally {
+      await cleanup(fixture.paymentId, fixture.reservationId, [shiftId]);
+    }
+  });
+
   it("requires a valid explicit candidate for ambiguous shifts", async () => {
     const fixture = await createPayment();
     const suffix = randomUUID();

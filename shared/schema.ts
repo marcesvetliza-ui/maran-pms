@@ -2161,8 +2161,14 @@ export const cashMovements = pgTable("cash_movements", {
   anuladoAt: timestamp("anulado_at"),
 });
 
-// Receipt numbers are an auditable server/database sequence, never client input.
-export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({ id: true, receiptNumber: true, createdAt: true });
+// Receipt numbers and payment links are server-controlled. Public/generic cash
+// movement creation must never be able to attach itself to a reservation payment.
+export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
+  id: true,
+  receiptNumber: true,
+  paymentId: true,
+  createdAt: true,
+});
 export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
 export type CashMovement = typeof cashMovements.$inferSelect;
 

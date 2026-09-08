@@ -6948,9 +6948,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
+    // Generic/manual creation is deliberately unable to link a cash movement
+    // to a payment. Only registerCashMovement and transactional internal flows
+    // may set paymentId.
+    const { paymentId: _untrustedPaymentId, ...safeData } = data as InsertCashMovement & {
+      paymentId?: unknown;
+    };
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
-      ...data,
+      ...safeData,
       receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
     }).returning();
     return movement;

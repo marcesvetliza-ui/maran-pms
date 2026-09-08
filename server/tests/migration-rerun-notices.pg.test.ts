@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL,
+  CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL,
   INCREMENTAL_NON_INDEX_DDL,
   INCREMENTAL_INDEX_DEFINITIONS,
   RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL,
@@ -191,6 +192,35 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     `);
     await expectSilentSecondRun(client, SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL);
     await expectSilentSecondRun(client, RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL);
+  });
+
+  it("only creates the cash payment unique index after legacy duplicates are clean", async () => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, "cash_payment_link", async () => {
+      await client.query("CREATE TABLE cash_movements (id varchar PRIMARY KEY, source_type text NOT NULL, payment_id varchar)");
+      await client.query(`
+        INSERT INTO cash_movements VALUES
+          ('r1', 'reservation', 'reservation-payment'),
+          ('r2', 'reservation', 'reservation-payment'),
+          ('g1', 'group_payment', 'group-payment'),
+          ('g2', 'group_payment', 'group-payment')
+      `);
+
+      await client.query(CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL);
+      expect((await client.query("SELECT to_regclass('cash_movements_reservation_payment_id_unique') AS name")).rows[0].name).toBeNull();
+
+      await client.query("DELETE FROM cash_movements WHERE id = 'r2'");
+      await expectSilentSecondRun(client, CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL);
+      expect((await client.query("SELECT to_regclass('cash_movements_reservation_payment_id_unique') AS name")).rows[0].name)
+        .toBe("cash_movements_reservation_payment_id_unique");
+
+      await expect(client.query(
+        "INSERT INTO cash_movements VALUES ('g3', 'group_payment', 'group-payment')",
+      )).resolves.toBeDefined();
+      await expect(client.query(
+        "INSERT INTO cash_movements VALUES ('r3', 'reservation', 'reservation-payment')",
+      )).rejects.toMatchObject({ code: "23505" });
+    });
   });
 
   it("silences existing-table notices in an isolated schema", async () => {

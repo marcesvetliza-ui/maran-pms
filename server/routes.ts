@@ -2411,6 +2411,11 @@ export async function registerRoutes(
   app.post("/api/cash/movements", requireAuth, async (req, res) => {
     try {
       const body = req.body as any;
+      if (Object.prototype.hasOwnProperty.call(body, "paymentId")) {
+        return res.status(400).json({
+          error: "paymentId no está permitido en el alta manual de movimientos de Caja",
+        });
+      }
       const movementData = body.sourceType === "manual"
         ? buildManualCashMovement(body)
         : body;

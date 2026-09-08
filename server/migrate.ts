@@ -258,6 +258,37 @@ export const CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL = serializeIncremen
   END $$
 `);
 
+/**
+ * Legacy cash data may already contain more than one row for a payment. Audit
+ * first and only add the uniqueness guard when the existing data is clean.
+ * A dirty legacy database remains available for an explicit repair instead of
+ * failing startup halfway through the migration.
+ */
+export const CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    -- Remove the briefly introduced database-wide variant: group split tenders
+    -- intentionally share one group payment id across multiple Caja rows.
+    IF to_regclass('cash_movements_payment_id_unique') IS NOT NULL THEN
+      DROP INDEX cash_movements_payment_id_unique;
+    END IF;
+
+    IF to_regclass('cash_movements_reservation_payment_id_unique') IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM cash_movements
+         WHERE payment_id IS NOT NULL
+           AND source_type = 'reservation'
+         GROUP BY payment_id
+         HAVING COUNT(*) > 1
+       ) THEN
+      CREATE UNIQUE INDEX cash_movements_reservation_payment_id_unique
+        ON cash_movements (payment_id)
+        WHERE payment_id IS NOT NULL AND source_type = 'reservation';
+    END IF;
+  END $$
+`);
+
 export const SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL = serializeIncrementalDdl(`
   DO $$
   BEGIN
@@ -865,6 +896,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN payment_id varchar
     `)))
   );
+  await withTimeout("cash_movements_payment_id_unique", T, async () => {
+    const duplicateResult = await db.execute(sql`
+      SELECT payment_id, COUNT(*)::integer AS movement_count
+      FROM cash_movements
+      WHERE payment_id IS NOT NULL
+        AND source_type = 'reservation'
+      GROUP BY payment_id
+      HAVING COUNT(*) > 1
+      ORDER BY payment_id
+      LIMIT 20
+    `);
+    if (duplicateResult.rows.length > 0) {
+      logger.warn(
+        "Legacy reservation cash movements contain duplicate payment links; unique index was not created.",
+        { duplicates: duplicateResult.rows },
+      );
+    }
+    await db.execute(sql.raw(CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL));
+  });
 
   // Security: brute-force columns on system_users + failed_login_attempts table
   await withTimeout("system_users_security_cols", T, () =>

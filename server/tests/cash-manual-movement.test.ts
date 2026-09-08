@@ -6,6 +6,7 @@ describe("manual cash movement receipts", () => {
     const movement = buildManualCashMovement({
       shiftId: "shift-1", area: "reception", amount: "1500", description: "Fondo de apertura",
       receiptType: "inicio_caja", movementType: "expense", paymentMethod: "transfer", receiptNumber: "999",
+      paymentId: "payment-that-must-not-be-linked",
     });
 
     expect(movement).toMatchObject({
@@ -13,6 +14,7 @@ describe("manual cash movement receipts", () => {
       receiptType: "inicio_caja", amount: "1500",
     });
     expect(movement).not.toHaveProperty("receiptNumber");
+    expect(movement).not.toHaveProperty("paymentId");
   });
 
   it("requires provider and category only for a Retiro de Efectivo", () => {
