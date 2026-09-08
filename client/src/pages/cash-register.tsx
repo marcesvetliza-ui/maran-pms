@@ -2462,6 +2462,143 @@ function NightAuditTab() {
   );
 }
 
+type MissingReservationPayment = {
+  paymentId: string;
+  paymentDate: string;
+  paymentTimestamp: string;
+  operator?: string | null;
+  method: string;
+  amount: string | number;
+  reservationId: string;
+  reservationCode: string;
+  roomNumber?: string | null;
+  candidateShifts: CashShift[];
+  automaticShiftId?: string | null;
+};
+
+function MissingReservationPaymentsTab() {
+  const { toast } = useToast();
+  const [selectedShifts, setSelectedShifts] = useState<Record<string, string>>({});
+  const { data: payments = [], isLoading } = useQuery<MissingReservationPayment[]>({
+    queryKey: ["/api/cash/reservation-payments/missing-movements"],
+    queryFn: async () => {
+      const res = await fetch("/api/cash/reservation-payments/missing-movements", { credentials: "include" });
+      if (!res.ok) throw new Error("Error al cargar cobros pendientes de recuperación");
+      return res.json();
+    },
+  });
+  const repairMutation = useMutation({
+    mutationFn: async ({ paymentId, shiftId }: { paymentId: string; shiftId?: string }) => {
+      const response = await apiRequest("POST", `/api/cash/reservation-payments/${paymentId}/repair-movement`, shiftId ? { shiftId } : {});
+      return response.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/reservation-payments/missing-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+      toast({
+        title: result.alreadyRepaired ? "Cobro ya recuperado" : "Cobro recuperado",
+        description: result.alreadyRepaired ? "Otro proceso ya había creado el movimiento." : "Se generó el movimiento y su recibo de Caja.",
+      });
+    },
+    onError: (error: any) => toast({ title: "No se pudo recuperar", description: error.message, variant: "destructive" }),
+  });
+  const formatPaymentDate = (value: string) => {
+    const [year, month, day] = value.slice(0, 10).split("-");
+    return year && month && day ? `${day}/${month}/${year}` : value;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-amber-500" />
+          Cobros de reservas sin movimiento de Caja
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Pagos activos excluyendo cuenta corriente y cargo a habitación. La recuperación conserva el turno histórico y emite un recibo auditable.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? <Skeleton className="h-32 w-full" /> : payments.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">No hay cobros pendientes de recuperación.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Operador</TableHead>
+                  <TableHead>Reserva</TableHead>
+                  <TableHead>Hab.</TableHead>
+                  <TableHead>Método</TableHead>
+                  <TableHead className="text-right">Importe</TableHead>
+                  <TableHead>Turno histórico</TableHead>
+                  <TableHead className="text-right">Acción</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {payments.map((payment) => {
+                  const candidates = Array.isArray(payment.candidateShifts) ? payment.candidateShifts : [];
+                  const requiresSelection = !payment.automaticShiftId;
+                  const selectedShift = selectedShifts[payment.paymentId];
+                  return (
+                    <TableRow key={payment.paymentId}>
+                      <TableCell className="whitespace-nowrap">{formatPaymentDate(payment.paymentDate)}</TableCell>
+                      <TableCell>{payment.operator || "—"}</TableCell>
+                      <TableCell className="font-medium">{payment.reservationCode}</TableCell>
+                      <TableCell>{payment.roomNumber || "—"}</TableCell>
+                      <TableCell>{PAYMENT_METHOD_MAP[payment.method] || payment.method}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(Number(payment.amount))}</TableCell>
+                      <TableCell className="min-w-[230px]">
+                        {payment.automaticShiftId ? (
+                          (() => {
+                            const automaticShift = candidates.find((shift) => shift.id === payment.automaticShiftId);
+                            return automaticShift ? (
+                              <span className="text-sm">
+                                {formatShiftLabel(automaticShift)} · {formatDateTime(automaticShift.openedAt)}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-destructive">Turno automático no disponible; recargá el informe</span>
+                            );
+                          })()
+                        ) : candidates.length > 0 ? (
+                          <Select value={selectedShift} onValueChange={(shiftId) => setSelectedShifts((old) => ({ ...old, [payment.paymentId]: shiftId }))}>
+                            <SelectTrigger><SelectValue placeholder="Confirmar turno histórico" /></SelectTrigger>
+                            <SelectContent>
+                              {candidates.map((shift) => (
+                                <SelectItem key={shift.id} value={shift.id}>
+                                  {formatShiftLabel(shift)} · {formatDateTime(shift.openedAt)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="text-sm text-destructive">Sin turno histórico candidato</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          disabled={repairMutation.isPending || (requiresSelection && !selectedShift)}
+                          onClick={() => repairMutation.mutate({ paymentId: payment.paymentId, shiftId: requiresSelection ? selectedShift : undefined })}
+                          data-testid={`button-repair-payment-${payment.paymentId}`}
+                        >
+                          <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                          Recuperar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function CashRegister() {
   const { user } = useAuth();
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
@@ -2478,6 +2615,7 @@ export default function CashRegister() {
   // Roles with full global visibility (all areas + historial + resumen)
   const GLOBAL_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
   const isAdminOrManager = GLOBAL_ROLES.includes(user?.role ?? "");
+  const canRepairReservationPayments = ["admin", "manager"].includes(user?.role ?? "");
   // Any authenticated user who reaches this page can at least see global tabs (historial/resumen/night-audit)
   const canSeeGlobalTabs = true;
 
@@ -2625,6 +2763,12 @@ export default function CashRegister() {
                 Night Audit
               </TabsTrigger>
             )}
+            {canRepairReservationPayments && (
+              <TabsTrigger value="payment-recovery" data-testid="tab-payment-recovery">
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Recuperar cobros
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {visibleConfigs.length === 0 && !isAdminOrManager && (
@@ -2653,6 +2797,11 @@ export default function CashRegister() {
           {isAdminOrManager && (
             <TabsContent value="night-audit">
               <NightAuditTab />
+            </TabsContent>
+          )}
+          {canRepairReservationPayments && (
+            <TabsContent value="payment-recovery">
+              <MissingReservationPaymentsTab />
             </TabsContent>
           )}
         </Tabs>

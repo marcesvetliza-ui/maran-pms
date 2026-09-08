@@ -2209,6 +2209,205 @@ export async function registerRoutes(
     }
   });
 
+  // Historical reservation payments that were committed before their cash
+  // movement. This is deliberately restricted to a financial supervisor:
+  // repairing a closed shift changes its historical report.
+  app.get("/api/cash/reservation-payments/missing-movements", requireRole(["admin", "manager"]), async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT
+          p.id AS "paymentId",
+          p.date AS "paymentDate",
+          (p.date::timestamp) AS "paymentTimestamp",
+          p.received_by AS operator,
+          p.method,
+          p.amount,
+          r.id AS "reservationId",
+          r.reservation_code AS "reservationCode",
+          rm.room_number AS "roomNumber",
+          COALESCE(candidates.shifts, '[]'::json) AS "candidateShifts",
+          automatic_match.id AS "automaticShiftId"
+        FROM payments p
+        JOIN reservations r ON r.id = p.reservation_id
+        LEFT JOIN rooms rm ON rm.id = r.room_id
+        LEFT JOIN LATERAL (
+          SELECT json_agg(json_build_object(
+            'id', cs.id, 'openedAt', cs.opened_at, 'closedAt', cs.closed_at,
+             'shiftNumber', cs.shift_number, 'status', cs.status, 'openedBy', cs.opened_by,
+             'area', cs.area
+          ) ORDER BY cs.opened_at) AS shifts
+          FROM cash_shifts cs
+          WHERE cs.area IN ('reception', 'recepcion')
+            AND (cs.opened_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= p.date
+            AND (
+              cs.closed_at IS NULL
+              OR (cs.closed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= p.date
+            )
+        ) candidates ON true
+        LEFT JOIN LATERAL (
+          SELECT cs.id
+          FROM cash_shifts cs
+          WHERE cs.area IN ('reception', 'recepcion')
+            AND (cs.opened_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= p.date
+            AND (
+              cs.closed_at IS NULL
+              OR (cs.closed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= p.date
+            )
+            AND 1 = (
+              SELECT COUNT(*)
+              FROM cash_shifts unique_cs
+              WHERE unique_cs.area IN ('reception', 'recepcion')
+                AND (unique_cs.opened_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= p.date
+                AND (
+                  unique_cs.closed_at IS NULL
+                  OR (unique_cs.closed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= p.date
+                )
+            )
+        ) automatic_match ON true
+        WHERE (p.status IS NULL OR p.status = 'active')
+          AND p.group_payment_id IS NULL
+          AND p.method IN (
+            'efectivo', 'cash',
+            'tarjeta_debito', 'debit_card',
+            'tarjeta_credito', 'credit_card',
+            'transferencia', 'transfer',
+            'mercadopago'
+          )
+          AND NOT EXISTS (SELECT 1 FROM cash_movements cm WHERE cm.payment_id = p.id)
+        ORDER BY p.date ASC, p.id ASC
+      `);
+      res.json(result.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error al buscar cobros sin movimiento de caja" });
+    }
+  });
+
+  app.post("/api/cash/reservation-payments/:paymentId/repair-movement", requireRole(["admin", "manager"]), async (req, res) => {
+    const paymentId = req.params.paymentId;
+    const requestedShiftId = typeof req.body?.shiftId === "string" ? req.body.shiftId : undefined;
+    try {
+      const outcome = await db.transaction(async (tx) => {
+        // The payment row serializes two repair attempts for the same payment.
+        const paymentResult = await tx.execute(sql`
+          SELECT p.*, r.reservation_code, rm.room_number
+          FROM payments p
+          JOIN reservations r ON r.id = p.reservation_id
+          LEFT JOIN rooms rm ON rm.id = r.room_id
+          WHERE p.id = ${paymentId}
+          FOR UPDATE OF p
+        `);
+        const payment = paymentResult.rows[0] as any;
+        if (!payment) throw Object.assign(new Error("Pago no encontrado."), { statusCode: 404 });
+        if (payment.status && payment.status !== "active") {
+          throw Object.assign(new Error("El pago no está activo y no puede recuperarse."), { statusCode: 409 });
+        }
+        if (payment.group_payment_id) {
+          throw Object.assign(new Error("El pago pertenece a una liquidación grupal y no puede recuperarse como cobro individual."), { statusCode: 409 });
+        }
+        const methodMap: Record<string, string> = {
+          efectivo: "cash", cash: "cash",
+          tarjeta_debito: "debit_card", debit_card: "debit_card",
+          tarjeta_credito: "credit_card", credit_card: "credit_card",
+          transferencia: "transfer", transfer: "transfer",
+          mercadopago: "mercadopago",
+        };
+        const paymentMethod = methodMap[payment.method];
+        if (!paymentMethod) {
+          throw Object.assign(new Error("Este método no representa un ingreso de Caja."), { statusCode: 409 });
+        }
+
+        // Recheck after locking. A unique index is not assumed on legacy data,
+        // so the locked payment row is the idempotency gate.
+        const duplicate = await tx.execute(sql`
+          SELECT id FROM cash_movements WHERE payment_id = ${paymentId} LIMIT 1 FOR UPDATE
+        `);
+        if (duplicate.rows[0]) return { repaired: false, alreadyRepaired: true, movementId: duplicate.rows[0].id };
+
+        // payments stores a calendar date without a reliable time. A shift can
+        // only be inferred when exactly one reception shift overlaps that date;
+        // ambiguous dates require an explicit supervisor confirmation.
+        const candidateResult = await tx.execute(sql`
+          SELECT id, area, opened_at, closed_at, shift_number, status, opened_by
+          FROM cash_shifts
+          WHERE area IN ('reception', 'recepcion')
+            AND (opened_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <= ${payment.date}::date
+            AND (
+              closed_at IS NULL
+              OR (closed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date >= ${payment.date}::date
+            )
+          ORDER BY opened_at
+          FOR UPDATE
+        `);
+        const candidates = candidateResult.rows as any[];
+        const automaticMatches = candidates.length === 1 ? candidates : [];
+        let shift: any;
+        if (automaticMatches.length === 1) {
+          shift = automaticMatches[0];
+        } else {
+          if (!requestedShiftId) {
+            throw Object.assign(new Error("No se pudo determinar un único turno histórico. Seleccioná uno de los turnos candidatos."), {
+              statusCode: 409, candidates,
+            });
+          }
+          shift = candidates.find((candidate) => candidate.id === requestedShiftId);
+          if (!shift) {
+            throw Object.assign(new Error("El turno seleccionado no corresponde a los candidatos históricos del pago."), {
+              statusCode: 400, candidates,
+            });
+          }
+        }
+
+        const movementId = randomUUID();
+        await tx.insert(cashMovements).values({
+          id: movementId,
+          shiftId: shift.id,
+          area: shift.area === "recepcion" ? "recepcion" : "reception",
+          sourceType: "reservation",
+          sourceId: payment.reservation_id,
+          sourceLabel: `Reserva ${payment.reservation_code}${payment.room_number ? ` — Hab. ${payment.room_number}` : ""}`,
+          paymentMethod,
+          amount: payment.amount,
+          movementType: "income",
+          registeredBy: (req.user as any)?.fullName || (req.user as any)?.username || "Sistema",
+          receiptType: "recuperacion_historica",
+          paymentId,
+          receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
+        } as any);
+        // Closed shifts have a materialized summary. Keep its expected income
+        // and non-cash method totals aligned with the recovered movement. Cash
+        // itself remains the amount physically counted at closing.
+        await tx.execute(sql`
+          UPDATE cash_closing_summaries
+          SET
+            total_debit_card = COALESCE(total_debit_card, 0) + CASE WHEN ${paymentMethod} = 'debit_card' THEN ${payment.amount}::numeric ELSE 0 END,
+            total_credit_card = COALESCE(total_credit_card, 0) + CASE WHEN ${paymentMethod} = 'credit_card' THEN ${payment.amount}::numeric ELSE 0 END,
+            total_transfer = COALESCE(total_transfer, 0) + CASE WHEN ${paymentMethod} = 'transfer' THEN ${payment.amount}::numeric ELSE 0 END,
+            total_mercadopago = COALESCE(total_mercadopago, 0) + CASE WHEN ${paymentMethod} = 'mercadopago' THEN ${payment.amount}::numeric ELSE 0 END,
+            total_general = COALESCE(total_general, 0) + ${payment.amount}::numeric,
+            transaction_count = COALESCE(transaction_count, 0) + 1
+          WHERE shift_id = ${shift.id}
+        `);
+        await tx.execute(sql`
+          INSERT INTO audit_logs (id, user_id, user_name, action, module, entity_type, entity_id, description, details, ip_address, timestamp)
+          VALUES (
+            ${randomUUID()}, ${(req.user as any)?.id || null}, ${(req.user as any)?.fullName || (req.user as any)?.username || "Sistema"},
+            'create', 'cash', 'cash_movement', ${movementId},
+            ${`Recuperación histórica de cobro de reserva ${payment.reservation_code}`},
+            ${JSON.stringify({ paymentId, shiftId: shift.id, automaticShiftMatch: automaticMatches.length === 1 })},
+            ${req.ip || null}, now()
+          )
+        `);
+        return { repaired: true, alreadyRepaired: false, movementId, shiftId: shift.id };
+      });
+      res.status(outcome.repaired ? 201 : 200).json(outcome);
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({
+        error: error.message || "Error al recuperar el cobro",
+        candidates: error.candidates,
+      });
+    }
+  });
+
   app.post("/api/cash/movements", requireAuth, async (req, res) => {
     try {
       const body = req.body as any;
