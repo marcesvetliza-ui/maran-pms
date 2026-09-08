@@ -922,7 +922,7 @@ export default function PlanningPage() {
               <div className={`overflow-auto ${isFullscreen ? "max-h-[calc(100vh-80px)]" : "flex-1 min-h-0"}`}>
               <div className="min-w-max">
                 <table className="w-full border-collapse">
-                  <thead>
+                  <thead className="relative z-30">
                     <tr ref={dateHeaderRowRef}>
                       <th className="sticky left-0 top-0 z-30 bg-muted px-3 py-2 text-left text-sm font-medium w-24 border-b border-r">
                         Hab.
@@ -933,7 +933,7 @@ export default function PlanningPage() {
                           <th
                             key={day}
                             className={`sticky top-0 z-20 px-1 py-2 text-center text-xs font-medium border-b min-w-[60px] align-top ${
-                              info.isToday ? "bg-primary/10" : info.isWeekend ? "bg-muted/50" : "bg-background"
+                              info.isToday ? "bg-blue-50 dark:bg-blue-950" : info.isWeekend ? "bg-muted" : "bg-background"
                             }`}
                           >
                             <div className="flex flex-col items-center gap-0.5">
@@ -950,7 +950,7 @@ export default function PlanningPage() {
                     {/* ── FILA DE NOTAS DEL DÍA ─────────────────────── */}
                     <tr ref={notesHeaderRowRef} className="border-b">
                       <td
-                        className="sticky left-0 z-30 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border-r whitespace-nowrap w-24"
+                        className="sticky left-0 z-30 bg-amber-50 dark:bg-amber-950 px-3 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 border-r whitespace-nowrap w-24"
                         style={{ top: dateRowHeight }}
                       >
                         Notas
@@ -963,7 +963,7 @@ export default function PlanningPage() {
                           <td
                             key={day}
                             className={`sticky z-20 px-0.5 py-0.5 min-w-[60px] align-middle ${
-                              info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : "bg-amber-50/60 dark:bg-amber-950/20"
+                              info.isToday ? "bg-blue-50 dark:bg-blue-950" : info.isWeekend ? "bg-muted" : "bg-amber-50 dark:bg-amber-950"
                             }`}
                             style={{ top: dateRowHeight }}
                           >
@@ -998,7 +998,7 @@ export default function PlanningPage() {
                     {showRevenue && (
                       <tr className="border-b">
                         <td
-                          className="sticky left-0 z-30 bg-emerald-50/90 dark:bg-emerald-950/40 px-3 py-1.5 border-r w-24"
+                          className="sticky left-0 z-30 bg-emerald-50 dark:bg-emerald-950 px-3 py-1.5 border-r w-24"
                           style={{ top: dateRowHeight + notesRowHeight }}
                         >
                           <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
@@ -1041,7 +1041,7 @@ export default function PlanningPage() {
                             <td
                               key={day}
                               className={`sticky z-20 px-1 py-1 min-w-[60px] align-middle ${
-                                info.isToday ? "bg-primary/5" : info.isWeekend ? "bg-muted/20" : "bg-emerald-50/50 dark:bg-emerald-950/20"
+                                info.isToday ? "bg-blue-50 dark:bg-blue-950" : info.isWeekend ? "bg-muted" : "bg-emerald-50 dark:bg-emerald-950"
                               }`}
                               style={{ top: dateRowHeight + notesRowHeight }}
                             >
@@ -1164,7 +1164,7 @@ export default function PlanningPage() {
                                   day={day}
                                   className={`p-0.5 border-b ${info.isToday ? "bg-primary/5" : ""}`}
                                 >
-                                  <Tooltip>
+                                  <Tooltip disableHoverableContent>
                                     <TooltipTrigger asChild>
                                       {reservation && status === "checked_out" ? (
                                         <div

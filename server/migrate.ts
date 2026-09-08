@@ -1235,6 +1235,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("presupuesto_items.cantidad_habitaciones", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuesto_items ADD COLUMN cantidad_habitaciones NUMERIC(8,2) NOT NULL DEFAULT '1'`)))
   );
+  await withTimeout("presupuesto_items.category", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuesto_items ADD COLUMN category varchar`)))
+  );
   await withTimeout("quote_catalog_items (create)", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       CREATE TABLE quote_catalog_items (

@@ -47,6 +47,61 @@ const CATEGORY_LABELS: Record<string, string> = {
   otro: "Otros Servicios",
 };
 
+const EVENTOS_CATEGORY_ORDER = ["salon", "coffee_break", "coctel", "equipamiento", "menu", "otro"] as const;
+const EVENTOS_CATEGORY_LABELS: Record<string, string> = {
+  salon: "Salones",
+  coffee_break: "Coffee Breaks",
+  coctel: "Cócteles",
+  equipamiento: "Equipamiento Técnico",
+  menu: "Menú",
+  otro: "Otros",
+};
+
+function normalizeCatalogName(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase("es");
+}
+
+export function groupEventosItems(items: any[], catalogItems: any[] = []) {
+  const catalogCategoryByName = new Map(
+    catalogItems.map(item => [normalizeCatalogName(item.name), item.category]),
+  );
+  const grouped = new Map<string, any[]>();
+  for (const item of items) {
+    const category = item.category
+      || catalogCategoryByName.get(normalizeCatalogName(item.descripcion))
+      || "otro";
+    if (!grouped.has(category)) grouped.set(category, []);
+    grouped.get(category)!.push(item);
+  }
+  return [...grouped.entries()]
+    .sort(([a], [b]) => {
+      const ai = EVENTOS_CATEGORY_ORDER.indexOf(a as typeof EVENTOS_CATEGORY_ORDER[number]);
+      const bi = EVENTOS_CATEGORY_ORDER.indexOf(b as typeof EVENTOS_CATEGORY_ORDER[number]);
+      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+    })
+    .map(([category, categoryItems]) => ({
+      category,
+      label: EVENTOS_CATEGORY_LABELS[category] || CATEGORY_LABELS[category] || category,
+      items: categoryItems,
+    }));
+}
+
+export function shouldMoveEventosGroupToFreshPage(
+  currentY: number,
+  groupHeight: number,
+  contentTop: number,
+  usableBottom: number,
+): boolean {
+  const freshPageCapacity = usableBottom - contentTop;
+  return currentY > contentTop
+    && currentY + groupHeight > usableBottom
+    && groupHeight <= freshPageCapacity;
+}
+
 async function generateNumero(): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `PRES-${year}-`;
@@ -482,7 +537,7 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
 
 // ── Catalog PDF (eventos) ─────────────────────────────────────────────────────
 
-function generateEventosPdf(doc: any, pres: any, items: any[], conditions: string | null) {
+export function generateEventosPdf(doc: any, pres: any, items: any[], conditions: string | null, catalogItems: any[] = []) {
   const W = 595, H = 842, M = 40;
   const imgPath = assetPath("confirmacion-header.jpg");
   const headerH = 148;
@@ -579,94 +634,121 @@ function generateEventosPdf(doc: any, pres: any, items: any[], conditions: strin
   }
   y += infoH2 + 14;
 
-  // Items table
+  // Items grouped by the configured Eventos catalog categories.
   if (items.length > 0) {
     const hasDiscount = items.some((i: any) => parseFloat(i.descuento ?? "0") > 0);
-    // Footer safety margin: footer image starts ~120px from bottom
     const FOOT = 125;
-    if (hasDiscount) {
-      // 5-col layout: desc | precio unit | dto | precio esp | subtotal
-      const cols = { tipo: M, tarifa: M + 195, dto: M + 305, tarifa_dto: M + 370, sub: M + 440 };
-      const Ws  = { tipo: 190, tarifa: 105,    dto: 60,      tarifa_dto: 65,       sub: 70 };
-      doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
-      const th = y + 6;
-      doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
-      doc.text("PRECIO UNITARIO", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
-      doc.text("DESC.", cols.dto, th, { width: Ws.dto, align: "right" });
-      doc.text("P. ESPECIAL", cols.tarifa_dto, th, { width: Ws.tarifa_dto, align: "right" });
-      doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
-      y += 22;
-      items.forEach((it: any, idx: number) => {
-        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
-        doc.fontSize(8).font("Helvetica-Bold");
-        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
-        doc.fontSize(7).font("Helvetica");
-        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
-        const rowH = Math.max(24, descH + detH + 14);
-        if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        const rowY = y;
-        doc.rect(M, rowY, contentW, rowH).fill(rowBg).stroke(BORDER);
-        const cy = rowY + 6;
-        const dto = parseFloat(it.descuento ?? "0");
-        const tarifaConDto = parseFloat(it.precioUnitario) * (1 - dto / 100);
-        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
-        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
-        doc.fillColor(DARK).fontSize(8).font("Helvetica").text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
-        doc.text(dto > 0 ? `${dto}%` : "—", cols.dto, cy, { width: Ws.dto, align: "right" });
-        if (dto > 0) doc.fillColor("#1a6c3a").font("Helvetica-Bold");
-        doc.text(`$ ${formatMoney(tarifaConDto.toFixed(2))}`, cols.tarifa_dto, cy, { width: Ws.tarifa_dto, align: "right" });
-        doc.fillColor(DARK).font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        // Correct row height using actual doc.y position (same-page overestimate fix)
-        if (doc.y > rowY && doc.y < rowY + rowH - 8) {
-          const actualEnd = doc.y + 8;
-          doc.rect(M - 1, actualEnd, contentW + 2, rowY + rowH - actualEnd + 2).fill(rowBg);
-          doc.rect(M, rowY, contentW, actualEnd - rowY).stroke(BORDER);
-          y = actualEnd;
-        } else {
-          y = rowY + rowH;
+    const usableBottom = H - FOOT;
+    const contentTop = headerH + 10;
+    const categoryTitleH = 18;
+    const tableHeaderH = 22;
+    const groupGap = 8;
+    const groups = groupEventosItems(items, catalogItems);
+    const cols = hasDiscount
+      ? { tipo: M, tarifa: M + 195, dto: M + 305, tarifa_dto: M + 370, sub: M + 440 }
+      : { tipo: M, noches: M + 215, tarifa: M + 280, sub: M + 405 };
+    const widths = hasDiscount
+      ? { tipo: 190, tarifa: 105, dto: 60, tarifa_dto: 65, sub: 70 }
+      : { tipo: 210, noches: 60, tarifa: 120, sub: 105 };
+
+    const addItemsPage = () => {
+      doc.addPage();
+      drawPageBg(doc, imgPath, W, H);
+      y = contentTop;
+    };
+
+    const measureRow = (item: any) => {
+      doc.font("Helvetica-Bold").fontSize(8);
+      const descH = doc.heightOfString(item.descripcion, { width: widths.tipo, lineGap: 0 });
+      doc.font("Helvetica").fontSize(7);
+      const detailH = item.detalle
+        ? doc.heightOfString(item.detalle, { width: widths.tipo, lineGap: 0 }) + 3
+        : 0;
+      return Math.max(25, descH + detailH + 12);
+    };
+
+    const drawGroupHeaders = (label: string, continued = false) => {
+      doc.roundedRect(M, y, contentW, categoryTitleH, 4)
+        .fillAndStroke("#e9eef6", BORDER);
+      doc.fillColor(NAVY).fontSize(8.5).font("Helvetica-Bold")
+        .text(
+          `${label.toLocaleUpperCase("es")}${continued ? " · CONTINUACIÓN" : ""}`,
+          M + 8,
+          y + 5,
+          { width: contentW - 16, characterSpacing: 0.4, lineBreak: false },
+        );
+      y += categoryTitleH;
+
+      doc.rect(M, y, contentW, 20).fill(NAVY);
+      doc.fillColor("white").fontSize(7.2).font("Helvetica-Bold");
+      const headerY = y + 6;
+      doc.text("DESCRIPCIÓN", cols.tipo + 6, headerY, { width: widths.tipo, lineBreak: false });
+      if (hasDiscount) {
+        doc.text("PRECIO UNITARIO", (cols as any).tarifa, headerY, { width: (widths as any).tarifa, align: "right", lineBreak: false });
+        doc.text("DESC.", (cols as any).dto, headerY, { width: (widths as any).dto, align: "right", lineBreak: false });
+        doc.text("P. ESPECIAL", (cols as any).tarifa_dto, headerY, { width: (widths as any).tarifa_dto, align: "right", lineBreak: false });
+      } else {
+        doc.text("CANT.", (cols as any).noches, headerY, { width: (widths as any).noches, align: "right", lineBreak: false });
+        doc.text("PRECIO UNITARIO — IVA incl.", (cols as any).tarifa, headerY, { width: (widths as any).tarifa, align: "right", lineBreak: false });
+      }
+      doc.text("SUBTOTAL", (cols as any).sub, headerY, { width: (widths as any).sub, align: "right", lineBreak: false });
+      y += tableHeaderH;
+    };
+
+    const drawItemRow = (item: any, rowIndex: number, rowH: number) => {
+      const rowY = y;
+      const rowBg = rowIndex % 2 === 0 ? "#ffffff" : "#fafafa";
+      doc.rect(M, rowY, contentW, rowH).fillAndStroke(rowBg, BORDER);
+      const textY = rowY + 5;
+      doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold")
+        .text(item.descripcion, cols.tipo + 6, textY, { width: widths.tipo, lineGap: 0 });
+      doc.font("Helvetica-Bold").fontSize(8);
+      const descH = doc.heightOfString(item.descripcion, { width: widths.tipo, lineGap: 0 });
+      if (item.detalle) {
+        doc.font("Helvetica").fillColor(MUTED).fontSize(7)
+          .text(item.detalle, cols.tipo + 6, textY + descH + 2, { width: widths.tipo, lineGap: 0 });
+      }
+
+      doc.fillColor(DARK).fontSize(8).font("Helvetica");
+      if (hasDiscount) {
+        const discount = parseFloat(item.descuento ?? "0");
+        const discountedPrice = parseFloat(item.precioUnitario) * (1 - discount / 100);
+        doc.text(`$ ${formatMoney(item.precioUnitario)}`, (cols as any).tarifa, textY, { width: (widths as any).tarifa, align: "right", lineBreak: false });
+        doc.text(discount > 0 ? `${discount}%` : "—", (cols as any).dto, textY, { width: (widths as any).dto, align: "right", lineBreak: false });
+        doc.fillColor(discount > 0 ? "#1a6c3a" : DARK).font(discount > 0 ? "Helvetica-Bold" : "Helvetica")
+          .text(`$ ${formatMoney(discountedPrice.toFixed(2))}`, (cols as any).tarifa_dto, textY, { width: (widths as any).tarifa_dto, align: "right", lineBreak: false });
+      } else {
+        doc.text(formatNum(item.cantidad), (cols as any).noches, textY, { width: (widths as any).noches, align: "right", lineBreak: false });
+        doc.text(`$ ${formatMoney(item.precioUnitario)}`, (cols as any).tarifa, textY, { width: (widths as any).tarifa, align: "right", lineBreak: false });
+      }
+      doc.fillColor(DARK).font("Helvetica-Bold")
+        .text(`$ ${formatMoney(item.subtotal)}`, (cols as any).sub, textY, { width: (widths as any).sub, align: "right", lineBreak: false });
+      y = rowY + rowH;
+    };
+
+    for (const group of groups) {
+      const rowHeights = group.items.map(measureRow);
+      const groupHeight = categoryTitleH + tableHeaderH
+        + rowHeights.reduce((sum, height) => sum + height, 0)
+        + groupGap;
+
+      if (shouldMoveEventosGroupToFreshPage(y, groupHeight, contentTop, usableBottom)) {
+        addItemsPage();
+      } else if (y + categoryTitleH + tableHeaderH + rowHeights[0] > usableBottom) {
+        addItemsPage();
+      }
+
+      drawGroupHeaders(group.label);
+      for (let index = 0; index < group.items.length; index++) {
+        const rowH = rowHeights[index];
+        if (y + rowH > usableBottom) {
+          addItemsPage();
+          drawGroupHeaders(group.label, true);
         }
-      });
-    } else {
-      // 4-col layout: desc | cantidad | precio unit | subtotal
-      const cols = { tipo: M, noches: M + 215, tarifa: M + 280, sub: M + 405 };
-      const Ws  = { tipo: 210, noches: 60,      tarifa: 120,     sub: 105 };
-      doc.roundedRect(M, y, contentW, 20, 4).fill(NAVY);
-      doc.fillColor("white").fontSize(7.5).font("Helvetica-Bold");
-      const th = y + 6;
-      doc.text("DESCRIPCIÓN", cols.tipo + 6, th, { width: Ws.tipo });
-       doc.text("CANT.", cols.noches, th, { width: Ws.noches, align: "right" });
-      doc.text("PRECIO POR NOCHE — IVA incl.", cols.tarifa, th, { width: Ws.tarifa, align: "right" });
-      doc.text("SUBTOTAL", cols.sub, th, { width: Ws.sub, align: "right" });
-      y += 22;
-      items.forEach((it: any, idx: number) => {
-        const rowBg = idx % 2 === 0 ? "#fff" : "#fafafa";
-        doc.fontSize(8).font("Helvetica-Bold");
-        const descH = doc.heightOfString(it.descripcion, { width: Ws.tipo });
-        doc.fontSize(7).font("Helvetica");
-        const detH = it.detalle ? doc.heightOfString(it.detalle, { width: Ws.tipo }) + 4 : 0;
-        const rowH = Math.max(24, descH + detH + 14);
-        if (y + rowH > H - FOOT) { doc.addPage(); drawPageBg(doc, imgPath, W, H); y = headerH + 10; }
-        const rowY = y;
-        doc.rect(M, rowY, contentW, rowH).fill(rowBg).stroke(BORDER);
-        const cy = rowY + 6;
-        doc.fillColor(DARK).fontSize(8).font("Helvetica-Bold").text(it.descripcion, cols.tipo + 6, cy, { width: Ws.tipo });
-        if (it.detalle) doc.font("Helvetica").fillColor(MUTED).fontSize(7).text(it.detalle, cols.tipo + 6, cy + descH + 3, { width: Ws.tipo });
-        doc.fillColor(DARK).fontSize(8).font("Helvetica").text(formatNum(it.cantidad), cols.noches, cy, { width: Ws.noches, align: "right" });
-        doc.text(`$ ${formatMoney(it.precioUnitario)}`, cols.tarifa, cy, { width: Ws.tarifa, align: "right" });
-        doc.font("Helvetica-Bold").text(`$ ${formatMoney(it.subtotal)}`, cols.sub, cy, { width: Ws.sub, align: "right" });
-        // Correct row height using actual doc.y position (same-page overestimate fix)
-        if (doc.y > rowY && doc.y < rowY + rowH - 8) {
-          const actualEnd = doc.y + 8;
-          doc.rect(M - 1, actualEnd, contentW + 2, rowY + rowH - actualEnd + 2).fill(rowBg);
-          doc.rect(M, rowY, contentW, actualEnd - rowY).stroke(BORDER);
-          y = actualEnd;
-        } else {
-          y = rowY + rowH;
-        }
-      });
+        drawItemRow(group.items[index], index, rowH);
+      }
+      y += groupGap;
     }
-    y += 8;
 
     // Totals — check page break before drawing
     const subtotalSum = items.reduce((sum: number, it: any) => sum + parseFloat(it.subtotal || "0"), 0);
@@ -1233,7 +1315,7 @@ export function registerPresupuestosRoutes(app: Express) {
           drawFallbackPortada(doc, area);
         }
         doc.addPage();
-        generateEventosPdf(doc, pres, items, conditions);
+        generateEventosPdf(doc, pres, items, conditions, catalogItems);
       } else if (area === "spa") {
         // Portada full-bleed para spa — NO addPage() aquí, generateSpaPdf lo hace internamente
         const spaCover = assetPath("spa-cover.jpg");

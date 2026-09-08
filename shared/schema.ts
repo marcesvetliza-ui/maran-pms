@@ -2899,6 +2899,7 @@ export const presupuestoItems = pgTable("presupuesto_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   presupuestoId: varchar("presupuesto_id").notNull().references(() => presupuestos.id, { onDelete: "cascade" }),
   sector: varchar("sector").$type<PresupuestoSector>().notNull().default("otro"),
+  category: varchar("category"),
   descripcion: text("descripcion").notNull(),
   detalle: text("detalle"),
   cantidad: numeric("cantidad", { precision: 8, scale: 2 }).notNull().default("1"),

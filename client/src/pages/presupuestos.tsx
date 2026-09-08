@@ -37,6 +37,7 @@ type AreaOrigen = "grupos" | "recepcion" | "eventos" | "spa" | "restaurant";
 
 interface ItemRow {
   id?: string;
+  category?: string;
   sector: Sector;
   descripcion: string;
   detalle: string;
@@ -214,7 +215,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
   const [condLoaded, setCondLoaded] = useState(false);
   const [items, setItems] = useState<ItemRow[]>(
     presupuesto?.items?.length
-      ? presupuesto.items.map(it => ({ id: it.id, sector: it.sector as Sector, descripcion: it.descripcion, detalle: it.detalle || "", cantidad: String(it.cantidad), cantidadHabitaciones: String((it as any).cantidadHabitaciones ?? "1"), precioUnitario: String(it.precioUnitario), descuento: String(it.descuento), subtotal: String(it.subtotal) }))
+      ? presupuesto.items.map(it => ({ id: it.id, category: (it as any).category || undefined, sector: it.sector as Sector, descripcion: it.descripcion, detalle: it.detalle || "", cantidad: String(it.cantidad), cantidadHabitaciones: String((it as any).cantidadHabitaciones ?? "1"), precioUnitario: String(it.precioUnitario), descuento: String(it.descuento), subtotal: String(it.subtotal) }))
       : [emptyItem()]
   );
   useEffect(() => {
@@ -236,6 +237,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
       setItems(presupuesto.items?.length
         ? presupuesto.items.map(it => ({
             id: it.id,
+            category: (it as any).category || undefined,
             sector: it.sector as Sector,
             descripcion: it.descripcion,
             detalle: it.detalle || "",
@@ -281,6 +283,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
     });
     setItems(sorted.map((item: any) => ({
       sector: "evento" as Sector,
+      category: item.category,
       descripcion: item.name,
       detalle: item.description || "",
       cantidad: "1",
@@ -356,6 +359,7 @@ function PresupuestoDialog({ open, onOpenChange, presupuesto, onSaved }: {
     areaOrigen: area,
     items: useItems ? items.map((it, ord) => ({
       ...(it.id ? { id: it.id } : {}),
+      ...(it.category ? { category: it.category } : {}),
       sector: it.sector,
       descripcion: it.descripcion.trim(),
       detalle: it.detalle.trim() || null,

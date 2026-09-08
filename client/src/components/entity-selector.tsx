@@ -238,6 +238,13 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
                 placeholder="Buscar por nombre, email o documento..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const firstGuest = searchResults[0];
+                  if (firstGuest) onSelect(firstGuest);
+                }}
                 className="pl-10"
                 data-testid="input-search-guest"
               />
