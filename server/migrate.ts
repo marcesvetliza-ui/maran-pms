@@ -3,6 +3,319 @@ import { db } from "./db";
 import { logger } from "./logger";
 import { sql } from "drizzle-orm";
 
+/**
+ * Serializes catalog-check + DDL batches across concurrently starting app
+ * instances. The transaction-scoped lock is released with the implicit
+ * transaction containing this multi-statement query, so it is pooler-safe.
+ */
+export function serializeIncrementalDdl(ddl: string): string {
+  return `
+    SELECT pg_advisory_xact_lock(1296126535, 1);
+    ${ddl}
+  `;
+}
+
+export function createIndexWithoutRerunNotice(indexName: string, createIndexSql: string): string {
+  const escapedIndexName = indexName.replaceAll("'", "''");
+  const escapedCreateSql = createIndexSql.replaceAll("'", "''");
+
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF to_regclass('${escapedIndexName}') IS NULL THEN
+        EXECUTE '${escapedCreateSql}';
+      END IF;
+    END $$
+  `);
+}
+
+function escapeSqlLiteral(value: string): string {
+  return value.replaceAll("'", "''");
+}
+
+export function createTableWithoutRerunNotice(tableName: string, createTableSql: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF to_regclass('${escapeSqlLiteral(tableName)}') IS NULL THEN
+        EXECUTE '${escapeSqlLiteral(createTableSql)}';
+      END IF;
+    END $$
+  `);
+}
+
+export function addColumnWithoutRerunNotice(
+  tableName: string,
+  columnName: string,
+  columnDefinition: string,
+): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_attribute
+        WHERE attrelid = '${escapeSqlLiteral(tableName)}'::regclass
+          AND attname = '${escapeSqlLiteral(columnName)}'
+          AND NOT attisdropped
+      ) THEN
+        EXECUTE 'ALTER TABLE ${escapeSqlLiteral(tableName)} ADD COLUMN ${escapeSqlLiteral(columnName)} ${escapeSqlLiteral(columnDefinition)}';
+      END IF;
+    END $$
+  `);
+}
+
+export function createSequenceWithoutRerunNotice(sequenceName: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF to_regclass('${escapeSqlLiteral(sequenceName)}') IS NULL THEN
+        EXECUTE 'CREATE SEQUENCE ${escapeSqlLiteral(sequenceName)}';
+      END IF;
+    END $$
+  `);
+}
+
+/**
+ * Converts an incremental CREATE TABLE / CREATE SEQUENCE / ADD COLUMN
+ * statement to catalog-guarded DDL. PostgreSQL's native IF NOT EXISTS form
+ * emits a NOTICE on a rerun, which makes a healthy startup look like a failed
+ * migration.
+ *
+ * This deliberately creates one guarded ALTER statement per column. Besides
+ * avoiding notices, that means an existing column cannot prevent later
+ * columns in the same historical multi-column migration from being added.
+ */
+export function incrementalDdlWithoutRerunNotice(ddl: string): string {
+  const tableMatch = ddl.match(/^\s*CREATE\s+TABLE\s+([^\s(]+)/i);
+  if (tableMatch) {
+    return createTableWithoutRerunNotice(
+      tableMatch[1],
+      ddl,
+    );
+  }
+
+  const sequenceMatch = ddl.match(/^\s*CREATE\s+SEQUENCE\s+([^\s;]+)/i);
+  if (sequenceMatch) {
+    return createSequenceWithoutRerunNotice(sequenceMatch[1]);
+  }
+
+  const alterMatch = ddl.match(/^\s*ALTER\s+TABLE\s+([^\s]+)/i);
+  const columnMatches = [...ddl.matchAll(
+    /ADD\s+COLUMN\s+((?:"[^"]+")|(?:[A-Za-z_][A-Za-z0-9_$]*))/gi,
+  )];
+  if (alterMatch && columnMatches.length > 0) {
+    return columnMatches.map((columnMatch, index) => {
+      const definitionStart = columnMatch.index! + columnMatch[0].length;
+      const definitionEnd = index + 1 < columnMatches.length
+        ? columnMatches[index + 1].index! - 1
+        : ddl.length;
+      const definition = ddl
+        .slice(definitionStart, definitionEnd)
+        .replace(/[,;\s]+$/, "")
+        .trim();
+      return addColumnWithoutRerunNotice(alterMatch[1], columnMatch[1], definition);
+    }).join("\n;\n");
+  }
+
+  throw new Error("Unsupported incremental DDL; add an explicit catalog guard.");
+}
+
+export const INCREMENTAL_NON_INDEX_DDL = {
+  chargeTypesTable: createTableWithoutRerunNotice("charge_types", `
+    CREATE TABLE charge_types (
+      id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+      label text NOT NULL,
+      description text NOT NULL,
+      default_amount decimal(10,2) NOT NULL,
+      category text NOT NULL DEFAULT 'otros',
+      active boolean NOT NULL DEFAULT true,
+      sort_order integer NOT NULL DEFAULT 0
+    )
+  `),
+  cashShiftsTurnoTipoColumn: addColumnWithoutRerunNotice("cash_shifts", "turno_tipo", "text"),
+  groupPaymentsReceiptNumberSequence: createSequenceWithoutRerunNotice("group_payments_receipt_number_seq"),
+} as const;
+
+export type IncrementalIndexDefinition = Readonly<{
+  indexName: string;
+  createSql: string;
+  fixtureSql: string;
+}>;
+
+export const INCREMENTAL_INDEX_DEFINITIONS = {
+  invoiceCountersUniquePair: {
+    indexName: "invoice_counters_tipo_comprobante_punto_venta_unique",
+    createSql: "CREATE UNIQUE INDEX invoice_counters_tipo_comprobante_punto_venta_unique ON invoice_counters (tipo_comprobante, punto_venta)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS invoice_counters (tipo_comprobante text, punto_venta integer)",
+  },
+  reservationWaitlistCheckIn: {
+    indexName: "reservation_waitlist_check_in_idx",
+    createSql: "CREATE INDEX reservation_waitlist_check_in_idx ON reservation_waitlist (check_in_date, created_at)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS reservation_waitlist (check_in_date date, created_at timestamp)",
+  },
+  spaTreatmentResourcesTreatment: {
+    indexName: "idx_spa_treatment_resources_treatment",
+    createSql: "CREATE INDEX idx_spa_treatment_resources_treatment ON spa_treatment_resources (treatment_id, sort_order)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS spa_treatment_resources (treatment_id varchar, sort_order integer)",
+  },
+  spaAppointmentResourcesAppointment: {
+    indexName: "idx_spa_appointment_resources_appointment",
+    createSql: "CREATE INDEX idx_spa_appointment_resources_appointment ON spa_appointment_resources (appointment_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS spa_appointment_resources (appointment_id varchar, cabin_id varchar, start_time text, end_time text)",
+  },
+  spaAppointmentResourcesCabin: {
+    indexName: "idx_spa_appointment_resources_cabin",
+    createSql: "CREATE INDEX idx_spa_appointment_resources_cabin ON spa_appointment_resources (cabin_id, start_time, end_time)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS spa_appointment_resources (appointment_id varchar, cabin_id varchar, start_time text, end_time text)",
+  },
+  accountMovementsEntity: {
+    indexName: "idx_account_movements_entity",
+    createSql: "CREATE INDEX idx_account_movements_entity ON account_movements(entity_type, entity_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS account_movements (entity_type text, entity_id varchar, group_payment_id varchar)",
+  },
+  accountMovementAllocationsCargo: {
+    indexName: "idx_account_movement_allocations_cargo",
+    createSql: "CREATE INDEX idx_account_movement_allocations_cargo ON account_movement_allocations(cargo_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS account_movement_allocations (cargo_id varchar, pago_id varchar)",
+  },
+  accountMovementAllocationsPago: {
+    indexName: "idx_account_movement_allocations_pago",
+    createSql: "CREATE INDEX idx_account_movement_allocations_pago ON account_movement_allocations(pago_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS account_movement_allocations (cargo_id varchar, pago_id varchar)",
+  },
+  salesInvoicesNcReconciliationPending: {
+    indexName: "idx_sales_invoices_nc_reconciliation_pending",
+    createSql: "CREATE INDEX idx_sales_invoices_nc_reconciliation_pending ON sales_invoices (nota_credito_id, reconciliation_status) WHERE reconciliation_status = 'pendiente'",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
+  },
+  groupPaymentsInvoiceIdUnique: {
+    indexName: "group_payments_invoice_id_unique",
+    createSql: "CREATE UNIQUE INDEX group_payments_invoice_id_unique ON group_payments (invoice_id) WHERE invoice_id IS NOT NULL",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS group_payments (invoice_id integer, group_id varchar, receipt_number integer)",
+  },
+  accountMovementsGroupPaymentId: {
+    indexName: "account_movements_group_payment_id_idx",
+    createSql: "CREATE INDEX account_movements_group_payment_id_idx ON account_movements (group_payment_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS account_movements (entity_type text, entity_id varchar, group_payment_id varchar)",
+  },
+  groupPaymentsGroupId: {
+    indexName: "group_payments_group_id_idx",
+    createSql: "CREATE INDEX group_payments_group_id_idx ON group_payments(group_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS group_payments (invoice_id integer, group_id varchar, receipt_number integer)",
+  },
+  paymentsGroupPaymentId: {
+    indexName: "payments_group_payment_id_idx",
+    createSql: "CREATE INDEX payments_group_payment_id_idx ON payments(group_payment_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS payments (group_payment_id varchar)",
+  },
+  groupPaymentsReceiptNumberUnique: {
+    indexName: "group_payments_receipt_number_unique",
+    createSql: "CREATE UNIQUE INDEX group_payments_receipt_number_unique ON group_payments (receipt_number) WHERE receipt_number IS NOT NULL",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS group_payments (invoice_id integer, group_id varchar, receipt_number integer)",
+  },
+  salesInvoicesGroupId: {
+    indexName: "sales_invoices_group_id_idx",
+    createSql: "CREATE INDEX sales_invoices_group_id_idx ON sales_invoices (group_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
+  },
+  salesInvoicesGroupPaymentId: {
+    indexName: "sales_invoices_group_payment_id_idx",
+    createSql: "CREATE INDEX sales_invoices_group_payment_id_idx ON sales_invoices (group_payment_id) WHERE group_payment_id IS NOT NULL",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
+  },
+  salesInvoicesPaymentId: {
+    indexName: "sales_invoices_payment_id_idx",
+    createSql: "CREATE UNIQUE INDEX sales_invoices_payment_id_idx ON sales_invoices (payment_id) WHERE payment_id IS NOT NULL",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
+  },
+  salesInvoicesSpaAccountIdUnique: {
+    indexName: "sales_invoices_spa_account_id_unique",
+    createSql: "CREATE UNIQUE INDEX sales_invoices_spa_account_id_unique ON sales_invoices (spa_account_id) WHERE spa_account_id IS NOT NULL",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
+  },
+} as const satisfies Record<string, IncrementalIndexDefinition>;
+
+type IncrementalIndexKey = keyof typeof INCREMENTAL_INDEX_DEFINITIONS;
+
+function incrementalIndexSql(key: IncrementalIndexKey): string {
+  const definition = INCREMENTAL_INDEX_DEFINITIONS[key];
+  return createIndexWithoutRerunNotice(definition.indexName, definition.createSql);
+}
+
+export const CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conname = 'cash_register_configs_area_unique'
+        AND conrelid = 'cash_register_configs'::regclass
+    ) AND to_regclass('cash_register_configs_area_unique') IS NULL THEN
+      ALTER TABLE cash_register_configs
+        ADD CONSTRAINT cash_register_configs_area_unique UNIQUE (area);
+    END IF;
+  END $$
+`);
+
+export const SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_treatment_resources_treatment_fk'
+        AND conrelid = 'spa_treatment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_treatment_resources
+      ADD CONSTRAINT spa_treatment_resources_treatment_fk
+      FOREIGN KEY (treatment_id) REFERENCES spa_treatments(id) ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_treatment_resources_cabin_fk'
+        AND conrelid = 'spa_treatment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_treatment_resources
+      ADD CONSTRAINT spa_treatment_resources_cabin_fk
+      FOREIGN KEY (default_cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_appointment_resources_appointment_fk'
+        AND conrelid = 'spa_appointment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_appointment_resources
+      ADD CONSTRAINT spa_appointment_resources_appointment_fk
+      FOREIGN KEY (appointment_id) REFERENCES spa_appointments(id) ON DELETE CASCADE;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_appointment_resources_cabin_fk'
+        AND conrelid = 'spa_appointment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_appointment_resources
+      ADD CONSTRAINT spa_appointment_resources_cabin_fk
+      FOREIGN KEY (cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
+    END IF;
+  END
+  $$
+`);
+
+export const RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$ BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_name = 'reservation_companions_guest_id_guests_id_fk'
+        AND table_schema = current_schema()
+        AND table_name = 'reservation_companions'
+    ) THEN
+      ALTER TABLE reservation_companions
+        ADD CONSTRAINT reservation_companions_guest_id_guests_id_fk
+        FOREIGN KEY (guest_id) REFERENCES guests(id) ON DELETE SET NULL;
+    END IF;
+  END $$;
+`);
+
 // Wraps a migration in a timeout so a hung DDL lock never kills the startup
 async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -150,12 +463,12 @@ export function assertFinancialSchemaReady() {
  * replaying every startup migration.
  */
 export async function backfillGroupPaymentSettlementBreakdowns() {
-  await db.execute(sql`
+  await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
     ALTER TABLE group_payments
-      ADD COLUMN IF NOT EXISTS settlement_breakdown jsonb,
-      ADD COLUMN IF NOT EXISTS settlement_breakdown_status text,
-      ADD COLUMN IF NOT EXISTS settlement_breakdown_note text
-  `);
+      ADD COLUMN settlement_breakdown jsonb,
+      ADD COLUMN settlement_breakdown_status text,
+      ADD COLUMN settlement_breakdown_note text
+  `)));
 
   return db.execute(sql`
     WITH fiscal_receipts AS (
@@ -330,7 +643,7 @@ export async function runMigrations() {
   // In production Railway uses PgBouncer (connection pooling). Drizzle's migrate()
   // issues DDL commands (CREATE SCHEMA, advisory locks) that are incompatible with
   // pooled connections and fail with "Control plane request failed".
-  // All schema changes below use idempotent ALTER TABLE / CREATE TABLE IF NOT EXISTS,
+  // All schema changes below are idempotent.
   // so migrate() is only needed for a brand-new database setup (which is done in dev).
   if (process.env.NODE_ENV !== "production") {
     try {
@@ -358,11 +671,11 @@ export async function runMigrations() {
   const T = 8_000;
 
   await withTimeout("cash_shifts.turno_tipo", T, () =>
-    db.execute(sql`ALTER TABLE cash_shifts ADD COLUMN IF NOT EXISTS turno_tipo text`)
+    db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn))
   );
 
   await withTimeout("purchase_invoices.subtipo_retencion", T, () =>
-    db.execute(sql`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS subtipo_retencion text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN subtipo_retencion text`)))
   );
 
   // Older databases allowed more than one counter for the same fiscal
@@ -386,24 +699,11 @@ export async function runMigrations() {
     `)
   );
   await withTimeout("invoice_counters.unique_pair", T, () =>
-    db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS invoice_counters_tipo_comprobante_punto_venta_unique
-      ON invoice_counters (tipo_comprobante, punto_venta)
-    `)
+    db.execute(sql.raw(incrementalIndexSql("invoiceCountersUniquePair")))
   );
 
   await withTimeout("charge_types (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS charge_types (
-        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-        label text NOT NULL,
-        description text NOT NULL,
-        default_amount decimal(10,2) NOT NULL,
-        category text NOT NULL DEFAULT 'otros',
-        active boolean NOT NULL DEFAULT true,
-        sort_order integer NOT NULL DEFAULT 0
-      )
-    `)
+    db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.chargeTypesTable))
   );
   await withTimeout("charge_types (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM charge_types`);
@@ -451,15 +751,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   });
 
   await withTimeout("reservations.late_checkout", T, () =>
-    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout boolean DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN late_checkout boolean DEFAULT false`)))
   );
   await withTimeout("reservations.late_checkout_time", T, () =>
-    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS late_checkout_time varchar(10)`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN late_checkout_time varchar(10)`)))
   );
 
   await withTimeout("loan_items (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS loan_items (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE loan_items (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         name text NOT NULL,
         description text,
@@ -467,11 +767,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         active boolean NOT NULL DEFAULT true,
         sort_order integer NOT NULL DEFAULT 0
       )
-    `)
+    `)))
   );
   await withTimeout("item_loans (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS item_loans (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE item_loans (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         loan_item_id varchar NOT NULL REFERENCES loan_items(id),
         room_number text NOT NULL,
@@ -481,7 +781,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         notes text,
         registered_by text
       )
-    `)
+    `)))
   );
   await withTimeout("loan_items (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM loan_items`);
@@ -503,11 +803,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   });
 
   await withTimeout("billing_config.arca_ambiente", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE billing_config
-        ADD COLUMN IF NOT EXISTS arca_ambiente text DEFAULT 'ficticio',
-        ADD COLUMN IF NOT EXISTS punto_venta_homolog integer DEFAULT 99
-    `)
+        ADD COLUMN arca_ambiente text DEFAULT 'ficticio',
+        ADD COLUMN punto_venta_homolog integer DEFAULT 99
+    `)))
   );
   await withTimeout("billing_config.arca_ambiente (update)", T, () =>
     db.execute(sql`
@@ -517,8 +817,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
   await withTimeout("reservation_changelog", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS reservation_changelog (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE reservation_changelog (
         id serial PRIMARY KEY,
         reservation_id varchar NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
         fecha timestamp NOT NULL DEFAULT now(),
@@ -526,12 +826,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         tipo text NOT NULL,
         descripcion text NOT NULL
       )
-    `)
+    `)))
   );
 
   await withTimeout("housekeeping_tasks", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS housekeeping_tasks (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE housekeeping_tasks (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
         task_type text NOT NULL DEFAULT 'checkout_clean',
@@ -546,40 +846,40 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         inspected_at timestamp,
         created_at timestamp NOT NULL
       )
-    `)
+    `)))
   );
 
   // Cash movements: columnas receiptNumber, proveedor, expenseCategory
   await withTimeout("cash_movements_receipt_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE cash_movements
-        ADD COLUMN IF NOT EXISTS receipt_number text,
-        ADD COLUMN IF NOT EXISTS proveedor text,
-        ADD COLUMN IF NOT EXISTS expense_category text
-    `)
+        ADD COLUMN receipt_number text,
+        ADD COLUMN proveedor text,
+        ADD COLUMN expense_category text
+    `)))
   );
   // Cash movements: payment_id para vincular movimiento de caja con pago de reserva
   await withTimeout("cash_movements_payment_id_col", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE cash_movements
-        ADD COLUMN IF NOT EXISTS payment_id varchar
-    `)
+        ADD COLUMN payment_id varchar
+    `)))
   );
 
   // Security: brute-force columns on system_users + failed_login_attempts table
   await withTimeout("system_users_security_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE system_users
-        ADD COLUMN IF NOT EXISTS locked_at timestamp,
-        ADD COLUMN IF NOT EXISTS lock_reason text,
-        ADD COLUMN IF NOT EXISTS lock_permanent text DEFAULT 'false',
-        ADD COLUMN IF NOT EXISTS failed_login_count integer DEFAULT 0
-    `)
+        ADD COLUMN locked_at timestamp,
+        ADD COLUMN lock_reason text,
+        ADD COLUMN lock_permanent text DEFAULT 'false',
+        ADD COLUMN failed_login_count integer DEFAULT 0
+    `)))
   );
 
   await withTimeout("failed_login_attempts", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS failed_login_attempts (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE failed_login_attempts (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         username text NOT NULL,
         ip_address text NOT NULL,
@@ -589,23 +889,23 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         user_agent text,
         session_id text
       )
-    `)
+    `)))
   );
 
   // cuentaPedida flag on restaurant_orders (mozo solicitó la cuenta)
   await withTimeout("restaurant_orders_cuenta_pedida", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE restaurant_orders
-        ADD COLUMN IF NOT EXISTS cuenta_pedida boolean NOT NULL DEFAULT false
-    `)
+        ADD COLUMN cuenta_pedida boolean NOT NULL DEFAULT false
+    `)))
   );
 
   // allow_price_edit flag on charge_types (precio variable)
   await withTimeout("charge_types_allow_price_edit", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE charge_types
-        ADD COLUMN IF NOT EXISTS allow_price_edit boolean NOT NULL DEFAULT false
-    `)
+        ADD COLUMN allow_price_edit boolean NOT NULL DEFAULT false
+    `)))
   );
 
   // Activate allow_price_edit for Lavandería by default
@@ -619,28 +919,28 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // monto_acreditado en sales_invoices (para NC parciales múltiples y estado "parcial")
   await withTimeout("sales_invoices.monto_acreditado", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS monto_acreditado numeric(14,2) DEFAULT 0`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN monto_acreditado numeric(14,2) DEFAULT 0`)))
   );
 
   // default_course en menu_items (agregado al schema pero faltaba la migración)
   await withTimeout("menu_items.default_course", T, () =>
-    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS default_course integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE menu_items ADD COLUMN default_course integer`)))
   );
 
   // is_editable en menu_items (puede no existir en producción)
   await withTimeout("menu_items.is_editable", T, () =>
-    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS is_editable text DEFAULT 'false'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE menu_items ADD COLUMN is_editable text DEFAULT 'false'`)))
   );
 
   // billing_config: columnas de token WSAA persistente
   await withTimeout("billing_config.arca_ta_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE billing_config
-        ADD COLUMN IF NOT EXISTS arca_ta_token text,
-        ADD COLUMN IF NOT EXISTS arca_ta_sign text,
-        ADD COLUMN IF NOT EXISTS arca_ta_expiry timestamp,
-        ADD COLUMN IF NOT EXISTS arca_ta_ambiente text
-    `)
+        ADD COLUMN arca_ta_token text,
+        ADD COLUMN arca_ta_sign text,
+        ADD COLUMN arca_ta_expiry timestamp,
+        ADD COLUMN arca_ta_ambiente text
+    `)))
   );
 
   // table_reservations: make table_id nullable, add new columns
@@ -648,23 +948,23 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`ALTER TABLE table_reservations ALTER COLUMN table_id DROP NOT NULL`)
   );
   await withTimeout("table_reservations.new_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE table_reservations
-        ADD COLUMN IF NOT EXISTS client_id varchar,
-        ADD COLUMN IF NOT EXISTS card_last4 text,
-        ADD COLUMN IF NOT EXISTS card_holder text
-    `)
+        ADD COLUMN client_id varchar,
+        ADD COLUMN card_last4 text,
+        ADD COLUMN card_holder text
+    `)))
   );
 
   // restaurant_time_slots: add area_id for per-salon turn configuration
   await withTimeout("restaurant_time_slots.area_id", T, () =>
-    db.execute(sql`ALTER TABLE restaurant_time_slots ADD COLUMN IF NOT EXISTS area_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE restaurant_time_slots ADD COLUMN area_id varchar`)))
   );
 
   // restaurant_reservation_advances: advances/deposits on reservations
   await withTimeout("restaurant_reservation_advances (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS restaurant_reservation_advances (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE restaurant_reservation_advances (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         reservation_id varchar NOT NULL,
         amount decimal(10,2) NOT NULL,
@@ -674,33 +974,33 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         created_at timestamp NOT NULL DEFAULT now(),
         applied_to_order_id varchar
       )
-    `)
+    `)))
   );
 
   await withTimeout("restaurant_reservation_advances.invoice_id", T, () =>
-    db.execute(sql`ALTER TABLE restaurant_reservation_advances ADD COLUMN IF NOT EXISTS invoice_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE restaurant_reservation_advances ADD COLUMN invoice_id integer`)))
   );
 
   await withTimeout("order_items.paid", T, () =>
-    db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS paid boolean NOT NULL DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE order_items ADD COLUMN paid boolean NOT NULL DEFAULT false`)))
   );
 
   // order_items: course y sent_at — en el schema desde el inicio pero por las dudas los aseguramos
   await withTimeout("order_items.course_sent_at", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE order_items
-        ADD COLUMN IF NOT EXISTS course integer DEFAULT 1,
-        ADD COLUMN IF NOT EXISTS sent_at timestamptz
-    `)
+        ADD COLUMN course integer DEFAULT 1,
+        ADD COLUMN sent_at timestamptz
+    `)))
   );
 
   await withTimeout("guests.active", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN active boolean NOT NULL DEFAULT true`)))
   );
 
   await withTimeout("reservation_waitlist.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS reservation_waitlist (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE reservation_waitlist (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         first_name text NOT NULL,
         last_name text NOT NULL,
@@ -713,17 +1013,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         CONSTRAINT reservation_waitlist_dates_valid CHECK (check_out_date > check_in_date),
         CONSTRAINT reservation_waitlist_guests_valid CHECK (number_of_guests > 0)
       )
-    `)
+    `)))
   );
   await withTimeout("reservation_waitlist.check_in_idx", T, () =>
-    db.execute(sql`
-      CREATE INDEX IF NOT EXISTS reservation_waitlist_check_in_idx
-      ON reservation_waitlist (check_in_date, created_at)
-    `)
+    db.execute(sql.raw(incrementalIndexSql("reservationWaitlistCheckIn")))
   );
 
   await withTimeout("rooms.is_virtual", T, () =>
-    db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_virtual boolean DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE rooms ADD COLUMN is_virtual boolean DEFAULT false`)))
   );
 
   await withTimeout("rooms.reub_delete", T, () =>
@@ -732,68 +1029,68 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // table_reservations: add area_id for per-salon filtering
   await withTimeout("table_reservations.area_id", T, () =>
-    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS area_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE table_reservations ADD COLUMN area_id varchar`)))
   );
 
   // guests: vat_condition and provincia
   await withTimeout("guests.vat_condition", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS vat_condition text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN vat_condition text`)))
   );
   await withTimeout("guests.provincia", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS provincia text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN provincia text`)))
   );
 
   // guests: libro de registro + fiscal + migratorio + FCE
   await withTimeout("guests.estado_civil", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS estado_civil text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN estado_civil text`)))
   );
   await withTimeout("guests.procedencia", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS procedencia text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN procedencia text`)))
   );
   await withTimeout("guests.nationality_code", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS nationality_code text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN nationality_code text`)))
   );
   await withTimeout("guests.fecha_ingreso_argentina", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS fecha_ingreso_argentina date`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN fecha_ingreso_argentina date`)))
   );
   await withTimeout("guests.fecha_salida_argentina", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS fecha_salida_argentina date`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN fecha_salida_argentina date`)))
   );
   await withTimeout("guests.es_empresa_grande", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS es_empresa_grande boolean DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN es_empresa_grande boolean DEFAULT false`)))
   );
   await withTimeout("guests.monto_base_fce", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS monto_base_fce text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN monto_base_fce text`)))
   );
   await withTimeout("guests.codigo_postal", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS codigo_postal text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN codigo_postal text`)))
   );
 
   // table_reservations: advance fields (legacy single-advance snapshot)
   await withTimeout("table_reservations.advance_amount", T, () =>
-    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_amount numeric(10,2) DEFAULT 0`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE table_reservations ADD COLUMN advance_amount numeric(10,2) DEFAULT 0`)))
   );
   await withTimeout("table_reservations.advance_method", T, () =>
-    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_method text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE table_reservations ADD COLUMN advance_method text`)))
   );
   await withTimeout("table_reservations.advance_date", T, () =>
-    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_date date`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE table_reservations ADD COLUMN advance_date date`)))
   );
   await withTimeout("table_reservations.advance_notes", T, () =>
-    db.execute(sql`ALTER TABLE table_reservations ADD COLUMN IF NOT EXISTS advance_notes text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE table_reservations ADD COLUMN advance_notes text`)))
   );
 
   // Tabla countries (nomenclador AFIP)
   await withTimeout("countries.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS countries (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE countries (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         afip_code integer NOT NULL UNIQUE,
         name text NOT NULL,
         is_active boolean NOT NULL DEFAULT true,
         display_order integer DEFAULT 0
       )
-    `)
+    `)))
   );
 
   // Seed países AFIP si la tabla está vacía
@@ -872,32 +1169,32 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   });
 
   await withTimeout("web_checkins.signature_image", T, () =>
-    db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS signature_image text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE web_checkins ADD COLUMN signature_image text`)))
   );
 
   await withTimeout("guests.tipo_persona", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS tipo_persona text DEFAULT 'fisica'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN tipo_persona text DEFAULT 'fisica'`)))
   );
 
   await withTimeout("companies.es_empresa_grande", T, () =>
-    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS es_empresa_grande boolean DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN es_empresa_grande boolean DEFAULT false`)))
   );
   await withTimeout("companies.monto_base_fce", T, () =>
-    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS monto_base_fce text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN monto_base_fce text`)))
   );
   await withTimeout("companies.condicion_venta", T, () =>
-    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN condicion_venta_predeterminada text DEFAULT 'contado'`)))
   );
   await withTimeout("agencies.condicion_venta", T, () =>
-    db.execute(sql`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE agencies ADD COLUMN condicion_venta_predeterminada text DEFAULT 'contado'`)))
   );
   await withTimeout("guests.condicion_venta", T, () =>
-    db.execute(sql`ALTER TABLE guests ADD COLUMN IF NOT EXISTS condicion_venta_predeterminada text DEFAULT 'contado'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE guests ADD COLUMN condicion_venta_predeterminada text DEFAULT 'contado'`)))
   );
 
   await withTimeout("pos_configs table", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS pos_configs (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE pos_configs (
         id SERIAL PRIMARY KEY,
         nombre TEXT NOT NULL,
         numero INTEGER NOT NULL,
@@ -906,7 +1203,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         descripcion TEXT,
         activo BOOLEAN DEFAULT true
       )
-    `)
+    `)))
   );
 
   await withTimeout("pos_configs seed", T, async () => {
@@ -925,22 +1222,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // ── Presupuestos multi-área ───────────────────────────────────────────────
   await withTimeout("presupuestos.area_origen", T, () =>
-    db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS area_origen VARCHAR DEFAULT 'grupos'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN area_origen VARCHAR DEFAULT 'grupos'`)))
   );
   await withTimeout("presupuestos.participantes", T, () =>
-    db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS participantes INTEGER`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN participantes INTEGER`)))
   );
   await withTimeout("presupuestos.datos_destinatario", T, async () => {
-    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS cuit TEXT`);
-    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS direccion TEXT`);
-    await db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS contacto TEXT`);
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN cuit TEXT`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN direccion TEXT`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN contacto TEXT`)));
   });
   await withTimeout("presupuesto_items.cantidad_habitaciones", T, () =>
-    db.execute(sql`ALTER TABLE presupuesto_items ADD COLUMN IF NOT EXISTS cantidad_habitaciones NUMERIC(8,2) NOT NULL DEFAULT '1'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuesto_items ADD COLUMN cantidad_habitaciones NUMERIC(8,2) NOT NULL DEFAULT '1'`)))
   );
   await withTimeout("quote_catalog_items (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS quote_catalog_items (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE quote_catalog_items (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
         area VARCHAR NOT NULL,
         category VARCHAR NOT NULL,
@@ -952,17 +1249,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         is_active BOOLEAN NOT NULL DEFAULT true,
         sort_order INTEGER NOT NULL DEFAULT 0
       )
-    `)
+    `)))
   );
   await withTimeout("quote_conditions (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS quote_conditions (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE quote_conditions (
         id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
         area VARCHAR NOT NULL UNIQUE,
         content TEXT NOT NULL DEFAULT '',
         updated_at TIMESTAMP DEFAULT NOW()
       )
-    `)
+    `)))
   );
   await withTimeout("quote_conditions (seed defaults)", T, async () => {
     const res = await db.execute(sql`SELECT COUNT(*) as cnt FROM quote_conditions`);
@@ -1013,7 +1310,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // ── SPA appointments — guest_id column (added after initial migration) ───
   await withTimeout("spa_appointments.guest_id", T, () =>
-    db.execute(sql`ALTER TABLE spa_appointments ADD COLUMN IF NOT EXISTS guest_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_appointments ADD COLUMN guest_id varchar`)))
   );
 
   // ── Unificación clientes SPA → guests ────────────────────────────────────
@@ -1028,25 +1325,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // ── SPA clients — nuevos campos demograficos ──────────────────────────────
   await withTimeout("spa_clients new columns", T, async () => {
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS tipo_persona text DEFAULT 'fisica'`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS document_type text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS document_number text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS cuil_cuit text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS vat_condition text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS direccion text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS provincia text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS localidad text`);
-    await db.execute(sql`ALTER TABLE spa_clients ADD COLUMN IF NOT EXISTS codigo_postal text`);
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN tipo_persona text DEFAULT 'fisica'`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN document_type text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN document_number text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN cuil_cuit text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN vat_condition text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN direccion text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN provincia text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN localidad text`)));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_clients ADD COLUMN codigo_postal text`)));
   });
 
   // ── SPA circuit resources ─────────────────────────────────────────────────
   // Additive model: existing appointments keep their single cabin, while
   // circuits may reserve extra cabins through linked resource rows.
   await withTimeout("spa_treatments.is_circuit", T, async () => {
-    await db.execute(sql`
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE spa_cabins
-      ADD COLUMN IF NOT EXISTS resource_type text
-    `);
+      ADD COLUMN resource_type text
+    `)));
     await db.execute(sql`
       UPDATE spa_cabins
       SET resource_type = CASE
@@ -1057,10 +1354,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       WHERE resource_type IS NULL
         AND (LOWER(name) LIKE '%sauna%' OR LOWER(name) LIKE '%hidro%')
     `);
-    await db.execute(sql`
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE spa_treatments
-      ADD COLUMN IF NOT EXISTS is_circuit boolean NOT NULL DEFAULT false
-    `);
+      ADD COLUMN is_circuit boolean NOT NULL DEFAULT false
+    `)));
     await db.execute(sql`
       UPDATE spa_treatments t
       SET is_circuit = true
@@ -1074,19 +1371,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `);
   });
   await withTimeout("spa_treatment_resources", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS spa_treatment_resources (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE spa_treatment_resources (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         treatment_id varchar NOT NULL,
         default_cabin_id varchar NOT NULL,
         duration_minutes integer NOT NULL DEFAULT 30,
         sort_order integer NOT NULL DEFAULT 0
       )
-    `)
+    `)))
   );
   await withTimeout("spa_appointment_resources", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS spa_appointment_resources (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE spa_appointment_resources (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         appointment_id varchar NOT NULL,
         cabin_id varchar NOT NULL,
@@ -1096,60 +1393,26 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         sort_order integer NOT NULL DEFAULT 0,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
   await withTimeout("spa circuit resource foreign keys", T, async () => {
-    await db.execute(sql`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_treatment_resources_treatment_fk') THEN
-          ALTER TABLE spa_treatment_resources
-          ADD CONSTRAINT spa_treatment_resources_treatment_fk
-          FOREIGN KEY (treatment_id) REFERENCES spa_treatments(id) ON DELETE CASCADE;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_treatment_resources_cabin_fk') THEN
-          ALTER TABLE spa_treatment_resources
-          ADD CONSTRAINT spa_treatment_resources_cabin_fk
-          FOREIGN KEY (default_cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_appointment_resources_appointment_fk') THEN
-          ALTER TABLE spa_appointment_resources
-          ADD CONSTRAINT spa_appointment_resources_appointment_fk
-          FOREIGN KEY (appointment_id) REFERENCES spa_appointments(id) ON DELETE CASCADE;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'spa_appointment_resources_cabin_fk') THEN
-          ALTER TABLE spa_appointment_resources
-          ADD CONSTRAINT spa_appointment_resources_cabin_fk
-          FOREIGN KEY (cabin_id) REFERENCES spa_cabins(id) ON DELETE RESTRICT;
-        END IF;
-      END
-      $$
-    `);
+    await db.execute(sql.raw(SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL));
   });
   await withTimeout("spa circuit resource indexes", T, async () => {
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_spa_treatment_resources_treatment
-      ON spa_treatment_resources (treatment_id, sort_order)
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_spa_appointment_resources_appointment
-      ON spa_appointment_resources (appointment_id)
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_spa_appointment_resources_cabin
-      ON spa_appointment_resources (cabin_id, start_time, end_time)
-    `);
+    await db.execute(sql.raw(incrementalIndexSql("spaTreatmentResourcesTreatment")));
+    await db.execute(sql.raw(incrementalIndexSql("spaAppointmentResourcesAppointment")));
+    await db.execute(sql.raw(incrementalIndexSql("spaAppointmentResourcesCabin")));
   });
 
   // ── Web check-in — solicitud Factura A ────────────────────────────────────
   await withTimeout("web_checkins request_factura_a column", T, async () => {
-    await db.execute(sql`ALTER TABLE web_checkins ADD COLUMN IF NOT EXISTS request_factura_a boolean DEFAULT false`);
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE web_checkins ADD COLUMN request_factura_a boolean DEFAULT false`)));
   });
 
   // ── Paquetes Turísticos ───────────────────────────────────────────────────
   await withTimeout("packages (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS packages (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE packages (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         code text NOT NULL UNIQUE,
         name text NOT NULL,
@@ -1165,12 +1428,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         terms text,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
 
   await withTimeout("package_items (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS package_items (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE package_items (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         package_id varchar NOT NULL,
         item_type text NOT NULL,
@@ -1178,24 +1441,24 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         quantity integer NOT NULL DEFAULT 1,
         unit_value decimal(10,2)
       )
-    `)
+    `)))
   );
 
   await withTimeout("package_room_prices (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS package_room_prices (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE package_room_prices (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         package_id varchar NOT NULL,
         room_type_id varchar NOT NULL,
         price decimal(12,2) NOT NULL DEFAULT 0,
         extra_amount decimal(12,2) DEFAULT 0
       )
-    `)
+    `)))
   );
 
   await withTimeout("preventive_tasks (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS preventive_tasks (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE preventive_tasks (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         name varchar(255) NOT NULL,
         description text,
@@ -1209,20 +1472,20 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         created_at timestamp DEFAULT now(),
         updated_at timestamp DEFAULT now()
       )
-    `)
+    `)))
   );
 
   // ── preventive_tasks: registro de demora ─────────────────────────────────
   await withTimeout("preventive_tasks.last_overdue_days", T, () =>
-    db.execute(sql`ALTER TABLE preventive_tasks ADD COLUMN IF NOT EXISTS last_overdue_days integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE preventive_tasks ADD COLUMN last_overdue_days integer`)))
   );
 
   // ── Unificación platos/inventario ────────────────────────────────────────
   await withTimeout("inventory_items.item_kind", T, () =>
-    db.execute(sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS item_kind text NOT NULL DEFAULT 'venta_directa'`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN item_kind text NOT NULL DEFAULT 'venta_directa'`)))
   );
   await withTimeout("menu_items.inventory_item_id", T, () =>
-    db.execute(sql`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS inventory_item_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE menu_items ADD COLUMN inventory_item_id varchar`)))
   );
   await withTimeout("item_categories.platos (ensure)", T, async () => {
     const res = await db.execute(sql`
@@ -1259,8 +1522,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // Esto provocaba "relation does not exist" en Railway -> endpoints de saldo
   // devolvían 500 -> frontend mostraba $0.00.
   await withTimeout("account_movements (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS account_movements (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE account_movements (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         entity_type text NOT NULL,
         entity_id varchar NOT NULL,
@@ -1276,66 +1539,62 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         created_by varchar,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
   await withTimeout("account_movements.retentions", T, () =>
-    db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS retentions jsonb`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE account_movements ADD COLUMN retentions jsonb`)))
   );
   await withTimeout("account_movement_allocations (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS account_movement_allocations (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE account_movement_allocations (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         pago_id varchar NOT NULL REFERENCES account_movements(id),
         cargo_id varchar NOT NULL REFERENCES account_movements(id),
         amount numeric(12, 2) NOT NULL,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
   await withTimeout("account_movements.idx_entity", T, () =>
-    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movements_entity ON account_movements(entity_type, entity_id)`)
+    db.execute(sql.raw(incrementalIndexSql("accountMovementsEntity")))
   );
   await withTimeout("account_movement_allocations.idx_cargo", T, () =>
-    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movement_allocations_cargo ON account_movement_allocations(cargo_id)`)
+    db.execute(sql.raw(incrementalIndexSql("accountMovementAllocationsCargo")))
   );
   await withTimeout("account_movements.payment_method", T, () =>
-    db.execute(sql`ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS payment_method text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE account_movements ADD COLUMN payment_method text`)))
   );
   await withTimeout("account_movement_allocations.idx_pago", T, () =>
-    db.execute(sql`CREATE INDEX IF NOT EXISTS idx_account_movement_allocations_pago ON account_movement_allocations(pago_id)`)
+    db.execute(sql.raw(incrementalIndexSql("accountMovementAllocationsPago")))
   );
 
   // Credit notes for reservation folios are persisted before ARCA authorization.
   // The reconciliation fields make a post-authorization Folio correction
   // recoverable instead of allowing a second fiscal NC on retry.
   await withTimeout("sales_invoices.nc_reconciliation_status", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_status text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN reconciliation_status text`)))
   );
   await withTimeout("sales_invoices.nc_reconciliation_error", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_error text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN reconciliation_error text`)))
   );
   await withTimeout("sales_invoices.nc_reconciliation_updated_at", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reconciliation_updated_at timestamp`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN reconciliation_updated_at timestamp`)))
   );
   await withTimeout("sales_invoices.nc_reconciliation_pending_idx", T, () =>
-    db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_sales_invoices_nc_reconciliation_pending
-      ON sales_invoices (nota_credito_id, reconciliation_status)
-      WHERE reconciliation_status = 'pendiente'
-    `)
+    db.execute(sql.raw(incrementalIndexSql("salesInvoicesNcReconciliationPending")))
   );
 
   await withTimeout("reservations.checked_out_at", T, () =>
-    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS checked_out_at timestamp`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN checked_out_at timestamp`)))
   );
 
   await withTimeout("presupuestos.fecha_fin", T, () =>
-    db.execute(sql`ALTER TABLE presupuestos ADD COLUMN IF NOT EXISTS fecha_fin varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE presupuestos ADD COLUMN fecha_fin varchar`)))
   );
 
   await withTimeout("gift_vouchers (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS gift_vouchers (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE gift_vouchers (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         voucher_code text NOT NULL UNIQUE,
         area text NOT NULL,
@@ -1357,7 +1616,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         notes text,
         created_by text
       )
-    `)
+    `)))
   );
 
   // Restore deleted charge types (cochera, pensión completa) if missing
@@ -1374,40 +1633,40 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("rooms.is_active", T, () =>
-    db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE rooms ADD COLUMN is_active boolean NOT NULL DEFAULT true`)))
   );
 
   // restaurant_tables: event-specific columns for "Evento por Mesa" salon
   await withTimeout("restaurant_tables.event_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE restaurant_tables
-        ADD COLUMN IF NOT EXISTS event_client_name text,
-        ADD COLUMN IF NOT EXISTS event_client_phone text,
-        ADD COLUMN IF NOT EXISTS event_seats integer,
-        ADD COLUMN IF NOT EXISTS event_notes text
-    `)
+        ADD COLUMN event_client_name text,
+        ADD COLUMN event_client_phone text,
+        ADD COLUMN event_seats integer,
+        ADD COLUMN event_notes text
+    `)))
   );
 
   // restaurant_tables: email + advance fields for event pre-load
   await withTimeout("restaurant_tables.event_advance_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE restaurant_tables
-        ADD COLUMN IF NOT EXISTS event_client_email text,
-        ADD COLUMN IF NOT EXISTS event_advance_amount decimal(10,2),
-        ADD COLUMN IF NOT EXISTS event_advance_method text,
-        ADD COLUMN IF NOT EXISTS event_advance_date text
-    `)
+        ADD COLUMN event_client_email text,
+        ADD COLUMN event_advance_amount decimal(10,2),
+        ADD COLUMN event_advance_method text,
+        ADD COLUMN event_advance_date text
+    `)))
   );
 
   // restaurant_tables: layout columns (shape, position, window) — en el schema pero faltaban en la migración
   await withTimeout("restaurant_tables.layout_cols", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE restaurant_tables
-        ADD COLUMN IF NOT EXISTS shape text DEFAULT 'square',
-        ADD COLUMN IF NOT EXISTS position_x integer DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS position_y integer DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS has_window text DEFAULT 'false'
-    `)
+        ADD COLUMN shape text DEFAULT 'square',
+        ADD COLUMN position_x integer DEFAULT 0,
+        ADD COLUMN position_y integer DEFAULT 0,
+        ADD COLUMN has_window text DEFAULT 'false'
+    `)))
   );
 
   // Seed "Evento por Mesa" restaurant area if not present
@@ -1421,15 +1680,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("charge_types.allow_recurring", T, () =>
-    db.execute(sql`ALTER TABLE charge_types ADD COLUMN IF NOT EXISTS allow_recurring boolean NOT NULL DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE charge_types ADD COLUMN allow_recurring boolean NOT NULL DEFAULT false`)))
   );
 
   await withTimeout("charges.is_recurring", T, () =>
-    db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS is_recurring boolean NOT NULL DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE charges ADD COLUMN is_recurring boolean NOT NULL DEFAULT false`)))
   );
 
   await withTimeout("charges.unit_amount", T, () =>
-    db.execute(sql`ALTER TABLE charges ADD COLUMN IF NOT EXISTS unit_amount decimal(10,2)`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE charges ADD COLUMN unit_amount decimal(10,2)`)))
   );
 
   // Fix: clear valid_to on rate plans that expired in the past but still have current pricing.
@@ -1439,7 +1698,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("reservations.special_rate_reason", T, () =>
-    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS special_rate_reason text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN special_rate_reason text`)))
   );
 
   await withTimeout("rate_plans.fix_currency_ars", T, () =>
@@ -1448,63 +1707,55 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // invoice_ref en payments (anticipo con factura electrónica vinculada)
   await withTimeout("payments.invoice_ref", T, () =>
-    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE payments ADD COLUMN invoice_ref text`)))
   );
 
   // invoice_ref en group_payments y event_payments (misma funcionalidad para grupos y eventos)
   await withTimeout("group_payments.invoice_ref", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN invoice_ref text`)))
   );
   await withTimeout("event_payments.invoice_ref", T, () =>
-    db.execute(sql`ALTER TABLE event_payments ADD COLUMN IF NOT EXISTS invoice_ref text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE event_payments ADD COLUMN invoice_ref text`)))
   );
 
   // invoice_link_failed: persistent flag so unlinked invoices can be found after toast disappears
   await withTimeout("payments.invoice_link_failed", T, () =>
-    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_link_failed boolean NOT NULL DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE payments ADD COLUMN invoice_link_failed boolean NOT NULL DEFAULT false`)))
   );
 
   // guest_id FK on reservation_companions — link companions to CRM guest profiles
-  await withTimeout("reservation_companions.guest_id", T, () =>
-    db.execute(sql`
-      ALTER TABLE reservation_companions ADD COLUMN IF NOT EXISTS guest_id varchar;
-      DO $$ BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.table_constraints
-          WHERE constraint_name = 'reservation_companions_guest_id_guests_id_fk'
-        ) THEN
-          ALTER TABLE reservation_companions
-            ADD CONSTRAINT reservation_companions_guest_id_guests_id_fk
-            FOREIGN KEY (guest_id) REFERENCES guests(id) ON DELETE SET NULL;
-        END IF;
-      END $$;
-    `)
-  );
+  await withTimeout("reservation_companions.guest_id", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE reservation_companions ADD COLUMN guest_id varchar",
+    )));
+    return db.execute(sql.raw(RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL));
+  });
 
   // merma: % de desperdicio por ingrediente en recetas
   await withTimeout("recipe_ingredients.merma", T, () =>
-    db.execute(sql`ALTER TABLE recipe_ingredients ADD COLUMN IF NOT EXISTS merma numeric(5,2)`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipe_ingredients ADD COLUMN merma numeric(5,2)`)))
   );
 
   // Elaboraciones base (sub-recipes / intermediate productions)
-  await withTimeout("recipes.elaboraciones_fields", T, () =>
-    db.execute(sql`
-      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS is_base boolean DEFAULT false;
-      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS name text;
-      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS production_unit text;
-      ALTER TABLE recipes ADD COLUMN IF NOT EXISTS production_yield numeric(10,3);
-      ALTER TABLE recipes ALTER COLUMN menu_item_id DROP NOT NULL;
-    `)
-  );
+  await withTimeout("recipes.elaboraciones_fields", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE recipes
+        ADD COLUMN is_base boolean DEFAULT false,
+        ADD COLUMN name text,
+        ADD COLUMN production_unit text,
+        ADD COLUMN production_yield numeric(10,3);
+    `)));
+    return db.execute(sql`ALTER TABLE recipes ALTER COLUMN menu_item_id DROP NOT NULL`);
+  });
 
   await withTimeout("recipe_ingredients.sub_recipe_id", T, () =>
-    db.execute(sql`ALTER TABLE recipe_ingredients ADD COLUMN IF NOT EXISTS sub_recipe_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipe_ingredients ADD COLUMN sub_recipe_id varchar`)))
   );
 
   // Toma de Inventario
   await withTimeout("inventory_counts.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS inventory_counts (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE inventory_counts (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         date date NOT NULL,
         area text,
@@ -1515,12 +1766,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         closed_by text,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
 
   await withTimeout("inventory_count_items.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS inventory_count_items (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE inventory_count_items (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         count_id varchar NOT NULL REFERENCES inventory_counts(id) ON DELETE CASCADE,
         item_id varchar NOT NULL,
@@ -1530,16 +1781,16 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         actual_stock numeric(10,3),
         notes text
       )
-    `)
+    `)))
   );
 
   await withTimeout("menu_categories.is_beverage", T, () =>
-    db.execute(sql`ALTER TABLE menu_categories ADD COLUMN IF NOT EXISTS is_beverage BOOLEAN DEFAULT FALSE`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE menu_categories ADD COLUMN is_beverage BOOLEAN DEFAULT FALSE`)))
   );
 
   await withTimeout("internal_movements.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS internal_movements (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE internal_movements (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         date date NOT NULL,
         motivo text NOT NULL,
@@ -1548,12 +1799,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         created_by text,
         created_at timestamp NOT NULL DEFAULT now()
       )
-    `)
+    `)))
   );
 
   await withTimeout("internal_movement_items.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS internal_movement_items (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE internal_movement_items (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         movement_id varchar NOT NULL REFERENCES internal_movements(id) ON DELETE CASCADE,
         item_id varchar NOT NULL,
@@ -1563,24 +1814,24 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         cost_price numeric(10,2) NOT NULL DEFAULT 0,
         notes text
       )
-    `)
+    `)))
   );
 
   await withTimeout("item_categories.is_group", T, () =>
-    db.execute(sql`ALTER TABLE item_categories ADD COLUMN IF NOT EXISTS is_group boolean NOT NULL DEFAULT false`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE item_categories ADD COLUMN is_group boolean NOT NULL DEFAULT false`)))
   );
 
   await withTimeout("email_config.banner_footer", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE email_config
-        ADD COLUMN IF NOT EXISTS email_banner_base64 text,
-        ADD COLUMN IF NOT EXISTS email_footer_base64 text
-    `)
+        ADD COLUMN email_banner_base64 text,
+        ADD COLUMN email_footer_base64 text
+    `)))
   );
 
   // group_payment_id on payments: deterministic FK so invoice_ref can be propagated to the exact group_payments row
   await withTimeout("payments.group_payment_id", T, () =>
-    db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS group_payment_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE payments ADD COLUMN group_payment_id varchar`)))
   );
 
   // Backfill [res:ID] tag on transfer charges that predate the room-link feature.
@@ -1745,110 +1996,110 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("sales_invoices.restaurant_order_id", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS restaurant_order_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN restaurant_order_id varchar`)))
   );
 
   await withTimeout("spa_accounts.invoice_id", T, () =>
-    db.execute(sql`ALTER TABLE spa_accounts ADD COLUMN IF NOT EXISTS invoice_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_accounts ADD COLUMN invoice_id integer`)))
   );
 
   await withTimeout("events.invoice_id", T, () =>
-    db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS invoice_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE events ADD COLUMN invoice_id integer`)))
   );
 
   await withTimeout("event_tables.invoice_id", T, () =>
-    db.execute(sql`ALTER TABLE event_tables ADD COLUMN IF NOT EXISTS invoice_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE event_tables ADD COLUMN invoice_id integer`)))
   );
 
   await withTimeout("event_tables.nc_id", T, () =>
-    db.execute(sql`ALTER TABLE event_tables ADD COLUMN IF NOT EXISTS nc_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE event_tables ADD COLUMN nc_id integer`)))
   );
 
   await withTimeout("events.nc_id", T, () =>
-    db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS nc_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE events ADD COLUMN nc_id integer`)))
   );
 
   await withTimeout("groups.billing_entity_type", T, () =>
-    db.execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS billing_entity_type text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE groups ADD COLUMN billing_entity_type text`)))
   );
 
   await withTimeout("spa_accounts.nc_id", T, () =>
-    db.execute(sql`ALTER TABLE spa_accounts ADD COLUMN IF NOT EXISTS nc_id integer`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_accounts ADD COLUMN nc_id integer`)))
   );
 
   await withTimeout("groups.billing_entity_id", T, () =>
-    db.execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS billing_entity_id varchar`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE groups ADD COLUMN billing_entity_id varchar`)))
   );
 
   await withTimeout("sales_invoices.cash_forma_pago", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS cash_forma_pago text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cash_forma_pago text`)))
   );
 
   await withTimeout("sales_invoices.source_charge_ids", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS source_charge_ids jsonb`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN source_charge_ids jsonb`)))
   );
 
   await withTimeout("sales_invoices.source_charge_amounts", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS source_charge_amounts jsonb`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN source_charge_amounts jsonb`)))
   );
 
   await withTimeout("sales_invoices.observaciones", T, () =>
-    db.execute(sql`ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS observaciones text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN observaciones text`)))
   );
 
   await withTimeout("group_payments.receipt_type", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS receipt_type text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN receipt_type text`)))
   );
 
   await withTimeout("group_payments.billing_entity_type", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS billing_entity_type text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN billing_entity_type text`)))
   );
 
   await withTimeout("group_payments.billing_entity_id", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS billing_entity_id varchar(255)`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN billing_entity_id varchar(255)`)))
   );
 
   await withTimeout("group_payments.payment_method_detail", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS payment_method_detail jsonb`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN payment_method_detail jsonb`)))
   );
 
-  await withTimeout("group_payments.destination_and_receiver", T, () =>
-    db.execute(sql`
+  await withTimeout("group_payments.destination_and_receiver", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE group_payments
-        ADD COLUMN IF NOT EXISTS destination text NOT NULL DEFAULT 'group_distribution',
-        ADD COLUMN IF NOT EXISTS receiver_details jsonb;
+        ADD COLUMN destination text NOT NULL DEFAULT 'group_distribution',
+        ADD COLUMN receiver_details jsonb;
+    `)));
+    return db.execute(sql`
       UPDATE group_payments
       SET destination = 'master_folio'
       WHERE destination = 'group_distribution'
         AND distribution = 'master_folio';
-    `)
-  );
+    `);
+  });
 
-  await withTimeout("group_payments.invoice_id", T, () =>
-    db.execute(sql`
-      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_id integer;
-      CREATE UNIQUE INDEX IF NOT EXISTS group_payments_invoice_id_unique
-        ON group_payments (invoice_id) WHERE invoice_id IS NOT NULL;
-    `)
-  );
+  await withTimeout("group_payments.invoice_id", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE group_payments ADD COLUMN invoice_id integer",
+    )));
+    return db.execute(sql.raw(incrementalIndexSql("groupPaymentsInvoiceIdUnique")));
+  });
 
-  await withTimeout("account_movements.group_payment_id", T, () =>
-    db.execute(sql`
-      ALTER TABLE account_movements ADD COLUMN IF NOT EXISTS group_payment_id varchar;
-      CREATE INDEX IF NOT EXISTS account_movements_group_payment_id_idx
-        ON account_movements (group_payment_id);
-    `)
-  );
+  await withTimeout("account_movements.group_payment_id", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE account_movements ADD COLUMN group_payment_id varchar",
+    )));
+    return db.execute(sql.raw(incrementalIndexSql("accountMovementsGroupPaymentId")));
+  });
   await withTimeout("group_payments.group_id_idx", T, () =>
-    db.execute(sql`CREATE INDEX IF NOT EXISTS group_payments_group_id_idx ON group_payments(group_id)`)
+    db.execute(sql.raw(incrementalIndexSql("groupPaymentsGroupId")))
   );
   await withTimeout("payments.group_payment_id_idx", T, () =>
-    db.execute(sql`CREATE INDEX IF NOT EXISTS payments_group_payment_id_idx ON payments(group_payment_id)`)
+    db.execute(sql.raw(incrementalIndexSql("paymentsGroupPaymentId")))
   );
 
   // invoice_nc_ref on group_payments: JSON-encoded ARCA NC result when a nota de crédito has been emitted for this payment
   await withTimeout("group_payments.invoice_nc_ref", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS invoice_nc_ref text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN invoice_nc_ref text`)))
   );
 
   // retention_detail on group_payments: [{tipo, monto}] retención withheld on
@@ -1856,7 +2107,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // room to attach payments.notes to — without this column that retención
   // was silently dropped instead of just recorded elsewhere.
   await withTimeout("group_payments.retention_detail", T, () =>
-    db.execute(sql`ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS retention_detail jsonb`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_payments ADD COLUMN retention_detail jsonb`)))
   );
 
   // Recover only immutable splits explicitly persisted before fiscal
@@ -1869,15 +2120,20 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // Receipt numbers are generated only for newly issued parent receipts.
   // Do not backfill historic UUID receipts: their immutable display fallback
   // is intentionally handled by the receipt renderer.
-  await withTimeout("group_payments.receipt_number_and_concepts", T, () =>
-    db.execute(sql`
-      CREATE SEQUENCE IF NOT EXISTS group_payments_receipt_number_seq;
-      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS receipt_number integer;
+  await withTimeout("group_payments.receipt_number_and_concepts", T, async () => {
+    await db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.groupPaymentsReceiptNumberSequence));
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE group_payments ADD COLUMN receipt_number integer",
+    )));
+    await db.execute(sql`
       ALTER TABLE group_payments
         ALTER COLUMN receipt_number SET DEFAULT nextval('group_payments_receipt_number_seq'::regclass);
-      CREATE UNIQUE INDEX IF NOT EXISTS group_payments_receipt_number_unique
-        ON group_payments (receipt_number) WHERE receipt_number IS NOT NULL;
-      ALTER TABLE group_payments ADD COLUMN IF NOT EXISTS concepts jsonb;
+      ${sql.raw(incrementalIndexSql("groupPaymentsReceiptNumberUnique"))}
+    `);
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE group_payments ADD COLUMN concepts jsonb",
+    )));
+    return db.execute(sql`
       CREATE OR REPLACE FUNCTION prevent_group_payment_receipt_number_change()
       RETURNS trigger AS $$
       BEGIN
@@ -1891,13 +2147,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       CREATE TRIGGER group_payments_receipt_number_immutable
         BEFORE UPDATE ON group_payments
         FOR EACH ROW EXECUTE FUNCTION prevent_group_payment_receipt_number_change();
-    `)
-  );
+    `);
+  });
 
   // group_invoices: facturas emitidas directamente desde el Resumen del Grupo (sin pago asociado)
   await withTimeout("group_invoices (create)", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS group_invoices (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE group_invoices (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         group_id varchar NOT NULL,
         sales_invoice_id integer UNIQUE,
@@ -1905,59 +2161,52 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         notes text,
         created_at timestamp DEFAULT now()
       )
-    `)
+    `)))
   );
 
   // Add sales_invoice_id column if table was created without it (incremental add)
   await withTimeout("group_invoices.sales_invoice_id", T, () =>
-    db.execute(sql`ALTER TABLE group_invoices ADD COLUMN IF NOT EXISTS sales_invoice_id integer UNIQUE`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE group_invoices ADD COLUMN sales_invoice_id integer UNIQUE`)))
   );
 
   // The fiscal source claim must be written with sales_invoices, before the
   // client performs its follow-up link request. This makes the group residual
   // guard safe across simultaneous browser actions and application instances.
-  await withTimeout("sales_invoices.group_invoice_scope", T, () =>
-    db.execute(sql`
+  await withTimeout("sales_invoices.group_invoice_scope", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE sales_invoices
-        ADD COLUMN IF NOT EXISTS group_id varchar,
-        ADD COLUMN IF NOT EXISTS group_payment_id varchar,
-        ADD COLUMN IF NOT EXISTS group_payment_intent jsonb;
-      CREATE INDEX IF NOT EXISTS sales_invoices_group_id_idx
-        ON sales_invoices (group_id);
+        ADD COLUMN group_id varchar,
+        ADD COLUMN group_payment_id varchar,
+        ADD COLUMN group_payment_intent jsonb;
+    `)));
+    return db.execute(sql`
+      ${sql.raw(incrementalIndexSql("salesInvoicesGroupId"))}
       ALTER TABLE sales_invoices
         DROP CONSTRAINT IF EXISTS sales_invoices_group_payment_id_unique;
       DROP INDEX IF EXISTS sales_invoices_group_payment_id_unique;
-      CREATE INDEX IF NOT EXISTS sales_invoices_group_payment_id_idx
-        ON sales_invoices (group_payment_id)
-        WHERE group_payment_id IS NOT NULL;
-    `)
-  );
+      ${sql.raw(incrementalIndexSql("salesInvoicesGroupPaymentId"))}
+    `);
+  });
 
   // Reservation-payment ownership is captured before ARCA just like group and
   // SPA ownership.  A payment has one fiscal document: the unique claim closes
   // the concurrent-tab window before an outbound ARCA request is made.
-  await withTimeout("sales_invoices.payment_invoice_scope", T, () =>
-    db.execute(sql`
-      ALTER TABLE sales_invoices
-        ADD COLUMN IF NOT EXISTS payment_id varchar;
-      CREATE UNIQUE INDEX IF NOT EXISTS sales_invoices_payment_id_idx
-        ON sales_invoices (payment_id)
-        WHERE payment_id IS NOT NULL;
-    `)
-  );
+  await withTimeout("sales_invoices.payment_invoice_scope", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE sales_invoices ADD COLUMN payment_id varchar",
+    )));
+    return db.execute(sql.raw(incrementalIndexSql("salesInvoicesPaymentId")));
+  });
 
   // A fiscal invoice emitted from SPA claims its account before ARCA issuance.
   // The unique partial index prevents two browser tabs from invoicing the same
   // SPA account independently.
-  await withTimeout("sales_invoices.spa_account_scope", T, () =>
-    db.execute(sql`
-      ALTER TABLE sales_invoices
-        ADD COLUMN IF NOT EXISTS spa_account_id varchar;
-      CREATE UNIQUE INDEX IF NOT EXISTS sales_invoices_spa_account_id_unique
-        ON sales_invoices (spa_account_id)
-        WHERE spa_account_id IS NOT NULL;
-    `)
-  );
+  await withTimeout("sales_invoices.spa_account_scope", T, async () => {
+    await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      "ALTER TABLE sales_invoices ADD COLUMN spa_account_id varchar",
+    )));
+    return db.execute(sql.raw(incrementalIndexSql("salesInvoicesSpaAccountIdUnique")));
+  });
 
   // Clean up 9 orphaned spa_accounts from March 2026 whose parent appointments
   // were deleted. Mark as 'cancelled' (not DELETE) to preserve payment history.
@@ -1983,31 +2232,28 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // moved_from_room_number on reservations: stores original room number when a checked-in reservation is moved in-house
   await withTimeout("reservations.moved_from_room_number", T, () =>
-    db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS moved_from_room_number text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN moved_from_room_number text`)))
   );
 
   // billing_config: iibb e telefono para comprobantes fiscales
   await withTimeout("billing_config.iibb_telefono", T, () =>
-    db.execute(sql`
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE billing_config
-        ADD COLUMN IF NOT EXISTS iibb text,
-        ADD COLUMN IF NOT EXISTS telefono text
-    `)
+        ADD COLUMN iibb text,
+        ADD COLUMN telefono text
+    `)))
   );
 
   // Add regimen_hospedaje to companies
   await withTimeout("companies.regimen_hospedaje", T, () =>
-    db.execute(sql`ALTER TABLE companies ADD COLUMN IF NOT EXISTS regimen_hospedaje text`)
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN regimen_hospedaje text`)))
   );
 
-  // cash_register_configs: unique constraint on area column (idempotent via DO block)
+  // cash_register_configs: unique constraint on area column.
+  // Check both the constraint and its backing relation so reruns do not emit
+  // duplicate-relation warnings when the index already exists.
   await withTimeout("cash_register_configs.area_unique", T, () =>
-    db.execute(sql`
-      DO $$ BEGIN
-        ALTER TABLE cash_register_configs ADD CONSTRAINT cash_register_configs_area_unique UNIQUE (area);
-      EXCEPTION WHEN duplicate_object THEN NULL;
-      END $$
-    `)
+    db.execute(sql.raw(CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL))
   );
 
   // ── Seed inicial de empresas y agencias ──────────────────────────────────
@@ -2148,8 +2394,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // group_invoices: vincular facturas emitidas desde el Resumen del Grupo al folio
   await withTimeout("group_invoices.create", T, () =>
-    db.execute(sql`
-      CREATE TABLE IF NOT EXISTS group_invoices (
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE group_invoices (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         group_id varchar NOT NULL,
         sales_invoice_id integer UNIQUE,
@@ -2157,7 +2403,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         notes text,
         created_at timestamp DEFAULT now()
       )
-    `)
+    `)))
   );
 
   // Bug fix: deleteEventCharge never removed the matching folio_movements row,
