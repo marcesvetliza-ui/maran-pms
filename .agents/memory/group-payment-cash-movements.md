@@ -16,3 +16,9 @@ Group-payment persistence is atomic: the parent receipt, child room allocations,
 **Why:** a best-effort Caja write after the payment commit can reduce operational debt while silently omitting the money from Caja. Also, PostgreSQL leaves a transaction aborted after any failed statement even if application code catches the exception; later statements then fail and can hide the original cause.
 
 **How to apply:** keep every representation of one group collection in the same database transaction and lock scope. Do not catch a SQL error inside that transaction and continue unless using a savepoint; validate optional writes up front or let the whole operation roll back.
+
+Reservation collections follow the same rule: a cash-bearing payment, its Caja row, its folio movement, and the folio aggregate update are one transaction. Cuenta Corriente and room charges are non-cash and must not create Caja income.
+
+**Why:** the former best-effort Caja write could fail after the payment was accepted, leaving checked-out rooms visible in folios but absent from reception cash reconciliation.
+
+**How to apply:** normalize and validate the amount once, lock the folio while recalculating, and never swallow a Caja failure after accepting a reservation payment.

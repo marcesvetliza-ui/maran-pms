@@ -1230,6 +1230,156 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async createReservationPaymentWithLedger(input: {
+    payment: Omit<InsertPayment, "method"> & { method: string };
+    sourceLabel: string;
+    registeredBy?: string;
+    receiptType?: string;
+  }): Promise<Payment> {
+    const methodMap: Record<string, string> = {
+      efectivo: "cash",
+      cash: "cash",
+      tarjeta_debito: "debit_card",
+      debit_card: "debit_card",
+      tarjeta_credito: "credit_card",
+      credit_card: "credit_card",
+      transferencia: "transfer",
+      transfer: "transfer",
+      mercadopago: "mercadopago",
+      cuenta_corriente: "current_account",
+      current_account: "current_account",
+      cargo_habitacion: "room_charge",
+      room_charge: "room_charge",
+    };
+    const paymentMethod = methodMap[input.payment.method];
+    if (!paymentMethod) {
+      throw Object.assign(new Error("Método de pago no admitido."), { statusCode: 400 });
+    }
+    const rawAmount = typeof input.payment.amount === "string"
+      ? input.payment.amount.trim()
+      : typeof input.payment.amount === "number" && Number.isFinite(input.payment.amount)
+        ? String(input.payment.amount)
+        : "";
+    const amountMatch = /^(\d+)(?:\.(\d{1,2}))?$/.exec(rawAmount);
+    if (!amountMatch) {
+      throw Object.assign(
+        new Error("El importe del pago debe ser un número positivo con hasta dos decimales."),
+        { statusCode: 400 },
+      );
+    }
+    const integerPart = amountMatch[1].replace(/^0+(?=\d)/, "");
+    const decimalPart = (amountMatch[2] || "").padEnd(2, "0");
+    // payments.amount is numeric(10,2), leaving eight digits to the left of
+    // the decimal point. Work from strings so large values cannot lose cents.
+    if (integerPart.length > 8 || (integerPart === "0" && decimalPart === "00")) {
+      throw Object.assign(
+        new Error("El importe del pago debe ser mayor a cero y no exceder 99999999.99."),
+        { statusCode: 400 },
+      );
+    }
+    const canonicalAmount = `${integerPart}.${decimalPart}`;
+    if (!input.payment.reservationId) {
+      throw Object.assign(new Error("El pago debe estar asociado a una reserva."), { statusCode: 400 });
+    }
+
+    const cashBearingMethods = new Set(["cash", "debit_card", "credit_card", "transfer", "mercadopago"]);
+    return db.transaction(async (tx) => {
+      const [payment] = await tx.insert(payments).values({
+        ...input.payment,
+        amount: canonicalAmount,
+      } as any).returning();
+      let cashMovementId: string | undefined;
+
+      if (cashBearingMethods.has(paymentMethod)) {
+        // Payments recorded at reception must use the canonical area. Historic
+        // rows using another spelling remain untouched.
+        const openShift = await tx.execute(sql`
+          SELECT id FROM cash_shifts
+          WHERE area = 'reception' AND status = 'open'
+          ORDER BY opened_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `);
+        const shiftId = (openShift.rows[0] as any)?.id;
+        if (!shiftId) {
+          throw Object.assign(
+            new Error("No hay un turno de recepción abierto para registrar el cobro."),
+            { statusCode: 409 },
+          );
+        }
+        cashMovementId = randomUUID();
+        await tx.insert(cashMovements).values({
+          id: cashMovementId,
+          shiftId,
+          area: "reception",
+          sourceType: "reservation",
+          sourceId: payment.reservationId,
+          sourceLabel: input.sourceLabel,
+          paymentMethod,
+          amount: canonicalAmount,
+          movementType: "income",
+          registeredBy: input.registeredBy || null,
+          receiptType: input.receiptType || null,
+          paymentId: payment.id,
+          receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
+        } as any);
+      }
+
+      let [folio] = await tx.select().from(folios).where(and(
+        eq(folios.entityType, "reservation"),
+        eq(folios.entityId, payment.reservationId),
+      )).limit(1);
+      if (!folio) {
+        // Keep the existing sequential display code while serializing its
+        // generation inside this transaction.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('folio_codigo_reservation'))`);
+        [folio] = await tx.select().from(folios).where(and(
+          eq(folios.entityType, "reservation"),
+          eq(folios.entityId, payment.reservationId),
+        )).limit(1);
+        if (!folio) {
+          const [countRow] = await tx.select({ cnt: sql<number>`count(*)` }).from(folios)
+            .where(eq(folios.entityType, "reservation"));
+          const codigo = `RS-${(Number(countRow?.cnt ?? 0) + 1).toString().padStart(6, "0")}`;
+          [folio] = await tx.insert(folios).values({
+            codigo, entityType: "reservation", entityId: payment.reservationId,
+            status: "open", totalCharges: "0", totalPayments: "0", balance: "0",
+          }).returning();
+        }
+      }
+      // A payment movement and its aggregate update must serialize with every
+      // other writer for this folio; otherwise two concurrent recalculations
+      // can both overwrite totals based on an incomplete movement set.
+      await tx.execute(sql`SELECT id FROM folios WHERE id = ${folio.id} FOR UPDATE`);
+
+      await tx.insert(folioMovements).values({
+        folioId: folio.id,
+        type: "payment",
+        amount: canonicalAmount,
+        description: payment.notes || `Pago — ${input.payment.method}`,
+        paymentMethod: input.payment.method,
+        sourceType: "payment",
+        sourceId: payment.id,
+        cashMovementId: cashMovementId ?? null,
+        registeredBy: input.registeredBy ?? null,
+        receiptType: input.receiptType ?? null,
+      });
+      const [totals] = await tx.select({
+        charges: sql<string>`COALESCE(SUM(CASE WHEN ${folioMovements.type} IN ('charge', 'transfer_in') THEN ${folioMovements.amount}::numeric ELSE 0 END), 0)`,
+        payments: sql<string>`COALESCE(SUM(CASE WHEN ${folioMovements.type} IN ('payment', 'advance', 'discount', 'transfer_out', 'void') THEN ${folioMovements.amount}::numeric ELSE 0 END), 0)`,
+      }).from(folioMovements).where(eq(folioMovements.folioId, folio.id));
+      const charges = Number(totals?.charges ?? 0);
+      const totalPayments = Number(totals?.payments ?? 0);
+      await tx.update(folios).set({
+        totalCharges: charges.toFixed(2),
+        totalPayments: totalPayments.toFixed(2),
+        balance: (charges - totalPayments).toFixed(2),
+      }).where(eq(folios.id, folio.id));
+
+      return payment;
+    });
+  }
+
   async updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined> {
     const [updated] = await db.update(payments).set(payment as any).where(eq(payments.id, id)).returning();
     return updated;

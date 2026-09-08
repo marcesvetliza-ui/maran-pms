@@ -2460,7 +2460,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/payments", async (req, res) => {
+  app.post("/api/payments", requireAuth, async (req, res) => {
     try {
       if (req.body.method === "cuenta_corriente") assertFinancialSchemaReady();
       // Prefactura emits the invoice before recording its payment. Persist the
@@ -2484,7 +2484,24 @@ export function registerReservationsRoutes(app: Express) {
         const now = new Date();
         req.body.date = now.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       }
-      const payment = await storage.createPayment(req.body);
+      const rawMethod = req.body.method;
+      const reservationForPayment = req.body.reservationId
+        ? await storage.getReservation(req.body.reservationId)
+        : null;
+      const cashLabel = reservationForPayment
+        ? [
+            `Reserva ${reservationForPayment.reservationCode}`,
+            reservationForPayment.room?.roomNumber ? `Hab. ${reservationForPayment.room.roomNumber}` : null,
+            reservationForPayment.guest ? `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}` : null,
+            `Pago ${rawMethod}`,
+          ].filter(Boolean).join(" — ")
+        : `Pago manual - ${req.body.description || "Sin descripción"}`;
+      const payment = await storage.createReservationPaymentWithLedger({
+        payment: req.body,
+        sourceLabel: cashLabel,
+        registeredBy: (req as any).user?.username,
+        receiptType: req.body.receiptType,
+      });
 
       // Registrar movimiento en Cuenta Corriente al momento del pago (no esperar al checkout)
       if (req.body.method === "cuenta_corriente" && req.body.reservationId) {
@@ -2547,50 +2564,6 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
-      try {
-        const methodMap: Record<string, string> = {
-          efectivo: "cash", tarjeta_debito: "debit_card", tarjeta_credito: "credit_card",
-          transferencia: "transfer", mercadopago: "mercadopago", cuenta_corriente: "current_account",
-          cargo_habitacion: "room_charge", room_charge: "room_charge",
-          cash: "cash", debit_card: "debit_card", credit_card: "credit_card", transfer: "transfer",
-          current_account: "current_account",
-        };
-        const rawMethod = req.body.method || "cash";
-        const cashMethod = methodMap[rawMethod] || rawMethod;
-        const reservation = req.body.reservationId ? await storage.getReservation(req.body.reservationId) : null;
-        const label = reservation
-          ? [
-              `Reserva ${reservation.reservationCode}`,
-              reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
-              reservation.guest ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}` : null,
-              `Pago ${rawMethod}`,
-            ].filter(Boolean).join(" — ")
-          : `Pago manual - ${req.body.description || "Sin descripción"}`;
-        await storage.registerCashMovement(
-          "reception", "reservation", req.body.reservationId || null, label,
-          cashMethod, String(req.body.amount), "income",
-          undefined, req.body.receiptType, payment.id
-        );
-      } catch (e) {
-        console.error("Error registrando movimiento de caja:", e);
-      }
-
-      // Motor financiero: escribir al folio de la reserva
-      if (payment.reservationId) {
-        const rawMethod = req.body.method || "cash";
-        storage.addFolioPayment(
-          "reservation",
-          payment.reservationId,
-          parseFloat(payment.amount),
-          payment.notes || `Pago — ${rawMethod}`,
-          rawMethod,
-          "payment",
-          payment.id,
-          undefined,
-          (req as any).user?.username,
-          req.body.receiptType,
-        ).catch(e => console.error("[Folio] Error escribiendo pago:", e));
-      }
       await audit(req, "create", "payments",
         `Pago registrado: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
         { entityType: "payment", entityId: payment.id }

@@ -333,6 +333,12 @@ export interface IStorage {
   getPayments(reservationId: string): Promise<Payment[]>;
   getAllPaymentsIncludingAnulados(reservationId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
+  createReservationPaymentWithLedger(input: {
+    payment: Omit<InsertPayment, "method"> & { method: string };
+    sourceLabel: string;
+    registeredBy?: string;
+    receiptType?: string;
+  }): Promise<Payment>;
   updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined>;
   deletePayment(id: string): Promise<boolean>;
   getPaymentsTotal(reservationId: string): Promise<number>;
