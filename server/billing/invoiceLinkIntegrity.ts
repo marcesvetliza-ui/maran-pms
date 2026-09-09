@@ -41,3 +41,38 @@ export function canonicalPaymentLinkState(invoice: LinkableInvoice) {
     reconciliationError: null,
   };
 }
+
+function invoiceIdentity(value: LinkableInvoice) {
+  return {
+    id: Number(value?.id),
+    type: String(value?.tipoComprobante ?? value?.tipo_comprobante ?? ""),
+    point: Number(value?.puntoVenta ?? value?.punto_venta),
+    number: Number(value?.numero),
+  };
+}
+
+function hasInvoiceIdentity(value: LinkableInvoice): boolean {
+  const identity = invoiceIdentity(value);
+  return Number.isInteger(identity.id) && identity.id > 0 &&
+    Boolean(identity.type) && Number.isFinite(identity.point) && Number.isFinite(identity.number);
+}
+
+/** Established fiscal provenance is immutable; retries may only enrich metadata. */
+export function assertSameOriginalInvoice(existing: LinkableInvoice, candidate: LinkableInvoice): void {
+  if (!hasInvoiceIdentity(existing)) return;
+  const left = invoiceIdentity(existing);
+  const right = invoiceIdentity(candidate);
+  const candidateHasId = candidate?.id !== undefined && candidate?.id !== null;
+  const candidateHasType = candidate?.tipoComprobante !== undefined || candidate?.tipo_comprobante !== undefined;
+  const candidateHasPoint = candidate?.puntoVenta !== undefined || candidate?.punto_venta !== undefined;
+  const candidateHasNumber = candidate?.numero !== undefined && candidate?.numero !== null;
+  if ((candidateHasId && left.id !== right.id) ||
+      (candidateHasType && left.type !== right.type) ||
+      (candidateHasPoint && left.point !== right.point) ||
+      (candidateHasNumber && left.number !== right.number)) {
+    throw Object.assign(
+      new Error("El pago ya conserva otro comprobante fiscal original y no puede reemplazarse"),
+      { statusCode: 409 },
+    );
+  }
+}

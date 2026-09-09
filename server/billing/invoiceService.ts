@@ -59,6 +59,12 @@ export interface NewInvoiceData {
   /** Reservation debit notes use the same durable pre-authorization draft flow. */
   recoverableDebitNote?: boolean;
   recoveryInvoiceId?: number;
+  creditReapplicationIntent?: Record<string, unknown>;
+  /**
+   * Internal durable-draft hook. It runs in the same transaction as the draft
+   * insert and may validate locked state and complete immutable intent fields.
+   */
+  beforeDraftInsert?: (tx: any, draft: typeof salesInvoices.$inferInsert) => Promise<void>;
 }
 
 export const TIPOS_CBT_WSFE: Record<string, number> = {
@@ -209,7 +215,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     || Boolean(data.groupId)
     || Boolean(data.groupPaymentId)
     || Boolean(data.spaAccountId)
-    || Boolean(data.groupPaymentIntent);
+    || Boolean(data.groupPaymentIntent)
+    || Boolean(data.creditReapplicationIntent);
   if (recoverableBeforeAuthorization) {
     // A recoverable fiscal draft depends on the live sales_invoices recovery
     // columns. Fail before numbering or contacting ARCA when a timed-out
@@ -232,7 +239,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   let pendingInvoice: typeof salesInvoices.$inferSelect | undefined;
 
   const insertPendingInvoice = async () => {
-    const [draft] = await db.insert(salesInvoices).values({
+    const values: typeof salesInvoices.$inferInsert = {
       tipoComprobante: data.tipoComprobante,
       puntoVenta,
       numero,
@@ -257,6 +264,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       groupId: data.groupId || null,
       groupPaymentId: data.groupPaymentId || null,
       groupPaymentIntent: data.groupPaymentIntent || null,
+      creditReapplicationIntent: data.creditReapplicationIntent || null,
       spaAccountId: data.spaAccountId || null,
       restaurantOrderId: data.restaurantOrderId || null,
       folioId: data.folioId || null,
@@ -274,7 +282,12 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       observaciones: data.observaciones || null,
       reconciliationStatus: "pendiente",
       reconciliationUpdatedAt: new Date(),
-    }).returning();
+    };
+    const draft = await db.transaction(async (tx) => {
+      await data.beforeDraftInsert?.(tx, values);
+      const [inserted] = await tx.insert(salesInvoices).values(values).returning();
+      return inserted;
+    });
     pendingInvoice = draft;
     return draft;
   };

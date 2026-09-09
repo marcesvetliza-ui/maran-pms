@@ -2550,6 +2550,10 @@ export const salesInvoices = pgTable("sales_invoices", {
   // Durable collection intent captured before ARCA. It allows a confirmed
   // group invoice to finish linking even if the browser reloads after CAE.
   groupPaymentIntent: jsonb("group_payment_intent"),
+  // Reservation credit consumption intent captured before ARCA. This is
+  // deliberately separate from group semantics and remains immutable across
+  // recovery retries.
+  creditReapplicationIntent: jsonb("credit_reapplication_intent"),
   // SPA account that owns this invoice. Persisted at issuance so the later
   // account link cannot attach an unrelated same-value invoice.
   spaAccountId: varchar("spa_account_id"),

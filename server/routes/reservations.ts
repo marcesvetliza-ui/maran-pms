@@ -6,6 +6,7 @@ import { assetPath } from "../utils/assetPath";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
+import type { PoolClient } from "pg";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { emitirFactura } from "../billing/invoiceService";
@@ -21,16 +22,20 @@ import {
   getReservationFinancialSummary,
   getOperationalReservationCharges,
   isReservationCreditNoteAdjustment,
+  getReservationRateAuditEvent,
 } from "@shared/reservationFolio";
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
+import { assertPaymentHasNoUnresolvedCreditHold } from "../billing/reservationCreditReconciliation";
 import PDFDocument from "pdfkit";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
-import { canonicalInvoiceReference, canonicalPaymentLinkState } from "../billing/invoiceLinkIntegrity";
+import { assertSameOriginalInvoice, canonicalInvoiceReference, canonicalPaymentLinkState } from "../billing/invoiceLinkIntegrity";
+import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
 const HOTEL_PHONE   = "+54 (0343) 503-8070";
+
 const HOTEL_EMAIL   = "recepcion@maran.com.ar";
 const HOTEL_CUIT    = "33-68110008-9";
 const HOTEL_WEB     = "www.maran.com.ar";
@@ -280,6 +285,26 @@ export function registerReservationsRoutes(app: Express) {
 
       const reservation = await storage.createReservation(data);
 
+      // Keep the durable reservation history as the source for rate chronology.
+      // Only record an initial assignment when the create request supplied a
+      // real rate; imports with no rate do not get a misleading event.
+      const initialRateEvent = getReservationRateAuditEvent(
+        null, data.finalRatePerNight, true,
+      );
+      if (initialRateEvent) {
+        const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
+        try {
+          await db.insert(reservationChangelog).values({
+            reservationId: reservation.id,
+            operador,
+            tipo: initialRateEvent.tipo,
+            descripcion: initialRateEvent.descripcion,
+          });
+        } catch (clErr: any) {
+          console.warn("[changelog] initial rate insert failed (non-fatal):", clErr?.message);
+        }
+      }
+
       // Fire confirmation email if created as "confirmed"
       if (data.status === "confirmed") {
         sendConfirmationEmail(reservation.id).catch(e => console.error("[email] create confirmation trigger:", e));
@@ -349,6 +374,10 @@ export function registerReservationsRoutes(app: Express) {
       if (req.body.status !== undefined && !VALID_STATUSES.includes(req.body.status)) delete req.body.status;
 
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
+      if (Object.prototype.hasOwnProperty.call(req.body, "finalRatePerNight") &&
+        (req.body.finalRatePerNight === "" || req.body.finalRatePerNight === null)) {
+        return res.status(400).json({ error: "La tarifa asignada por noche no puede quedar vacía." });
+      }
       for (const field of numericFields) {
         if (req.body[field] === "") {
           req.body[field] = null;
@@ -441,8 +470,16 @@ export function registerReservationsRoutes(app: Express) {
       if (req.body.status && req.body.status !== existing.status) {
         cambios.push({ tipo: "estado", descripcion: `Estado: ${statusLabels[existing.status] || existing.status} → ${statusLabels[req.body.status] || req.body.status}` });
       }
-      if (req.body.baseRatePerNight && String(req.body.baseRatePerNight) !== String(existing.baseRatePerNight)) {
-        cambios.push({ tipo: "tarifa", descripcion: `Tarifa modificada: $${existing.baseRatePerNight} → $${req.body.baseRatePerNight}` });
+      // finalRatePerNight is the assigned room rate used by the folio. A
+      // base-rate-only import/update is not enough evidence of a guest rate
+      // change and must not create a misleading chronology entry.
+      const rateWasExplicitlyChanged = req.body.finalRatePerNight !== undefined;
+      if (rateWasExplicitlyChanged) {
+        const rateEvent = getReservationRateAuditEvent(
+          existing.finalRatePerNight,
+          req.body.finalRatePerNight,
+        );
+        if (rateEvent) cambios.push(rateEvent);
       }
       if (req.body.guestId && req.body.guestId !== existing.guestId) {
         cambios.push({ tipo: "huesped", descripcion: `Huésped titular cambiado` });
@@ -899,7 +936,7 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(404).json({ error: "Reservation not found" });
       }
 
-      const [chargesList, paymentsList, invoicesResult] = await Promise.all([
+      const [chargesList, paymentsList, invoicesResult, reservedResult] = await Promise.all([
         storage.getCharges(req.params.id),
         storage.getPayments(req.params.id),
         db.execute(sql`
@@ -908,6 +945,14 @@ export function registerReservationsRoutes(app: Express) {
           WHERE reserva_id = ${req.params.id}
             AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
             AND estado IN ('emitida','parcial','anulada')
+        `),
+        db.execute(sql`
+          SELECT credit_reapplication_intent
+          FROM sales_invoices
+          WHERE reserva_id = ${req.params.id}
+            AND estado IN ('autorizacion_pendiente','emitida')
+            AND reconciliation_status IN ('pendiente','error','requiere_revision')
+            AND credit_reapplication_intent IS NOT NULL
         `),
       ]);
       const operationalCharges = getOperationalReservationCharges(chargesList);
@@ -927,6 +972,17 @@ export function registerReservationsRoutes(app: Express) {
         paymentsList,
         invoicesResult.rows as any[],
       );
+      const reservedReleasedCredit = (reservedResult.rows as any[]).reduce((sum, row) =>
+        sum + (Array.isArray(row.credit_reapplication_intent?.payments)
+          ? row.credit_reapplication_intent.payments.reduce((s: number, p: any) => s + (Number(p?.amount) || 0), 0)
+          : 0), 0);
+      financialSummary.availableReleasedCredit = Number(Math.max(
+        0, financialSummary.availableReleasedCredit - reservedReleasedCredit,
+      ).toFixed(2));
+      financialSummary.releasedAvailableAdvance = financialSummary.availableReleasedCredit;
+      financialSummary.newCollectionNeeded = Number(Math.max(
+        0, financialSummary.pendingInvoicing - financialSummary.availableReleasedCredit,
+      ).toFixed(2));
 
       res.json({
         reservationCode: reservation.reservationCode,
@@ -2578,17 +2634,28 @@ export function registerReservationsRoutes(app: Express) {
 
   app.patch("/api/payments/:id", async (req, res) => {
     try {
-      const payment = await storage.updatePayment(req.params.id, req.body);
+      const current = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
+      const reservationId = String((current.rows[0] as any)?.reservation_id || "");
+      const payment = await withInvoiceAdvisoryLock(
+        pool,
+        `folio-invoice:${reservationId}`,
+        async () => {
+          await assertPaymentHasNoUnresolvedCreditHold(req.params.id);
+          return storage.updatePayment(req.params.id, req.body);
+        },
+      );
       if (!payment) {
         return res.status(404).json({ error: "Payment not found" });
       }
       res.json(payment);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating payment" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "Error updating payment" });
     }
   });
 
   app.patch("/api/payments/:id/anular", requireAuth, async (req, res) => {
+    let creditLockClient: PoolClient | undefined;
+    let creditLockKey = "";
     try {
       const { motivoAnulacion, anuladoPor } = req.body;
       if (!motivoAnulacion?.trim()) {
@@ -2598,6 +2665,10 @@ export function registerReservationsRoutes(app: Express) {
       const pay = payResult.rows?.[0] as any;
       if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
       if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
+      creditLockClient = await pool.connect();
+      creditLockKey = `folio-invoice:${pay.reservation_id}`;
+      await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
+      await assertPaymentHasNoUnresolvedCreditHold(req.params.id);
 
       // Solo permite anular pagos del día de hoy
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -2711,17 +2782,34 @@ export function registerReservationsRoutes(app: Express) {
 
       res.json(updated.rows[0]);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
+    } finally {
+      if (creditLockClient) {
+        await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
+        creditLockClient.release();
+      }
     }
   });
 
   // Vincular resultado de factura electrónica a un pago/anticipo
   app.patch("/api/payments/:id/invoice", requireAuth, async (req, res) => {
+    let creditLockClient: PoolClient | undefined;
+    let creditLockKey = "";
     try {
       const { invoiceData } = req.body;
       if (!invoiceData) return res.status(400).json({ error: "invoiceData requerido" });
-      const payResult = await db.execute(sql`SELECT id, reservation_id FROM payments WHERE id = ${req.params.id}`);
+      const payResult = await db.execute(sql`SELECT id, reservation_id, invoice_ref FROM payments WHERE id = ${req.params.id}`);
       if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
+      const paymentBeforeLink = payResult.rows[0] as any;
+      creditLockKey = `folio-invoice:${paymentBeforeLink.reservation_id}`;
+      creditLockClient = await pool.connect();
+      await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
+      await assertPaymentHasNoUnresolvedCreditHold(req.params.id);
+      const lockedPaymentResult = await db.execute(sql`
+        SELECT id, reservation_id, invoice_ref FROM payments WHERE id = ${req.params.id}
+      `);
+      const lockedPayment = lockedPaymentResult.rows[0] as any;
+      if (!lockedPayment) return res.status(404).json({ error: "Pago no encontrado" });
       if (!Number.isInteger(Number(invoiceData.id)) || Number(invoiceData.id) <= 0) {
         return res.status(400).json({ error: "invoiceData.id requerido" });
       }
@@ -2741,7 +2829,7 @@ export function registerReservationsRoutes(app: Express) {
       // only when it belongs to the same reservation and is not already named
       // by another payment's persisted reference.
       if (!invoice.payment_id) {
-        if (String(invoice.reserva_id || "") !== String((payResult.rows[0] as any).reservation_id || "")) {
+        if (String(invoice.reserva_id || "") !== String(lockedPayment.reservation_id || "")) {
           return res.status(409).json({ error: "La factura no pertenece a la reserva de este pago" });
         }
         const claimedElsewhere = await db.execute(sql`
@@ -2754,9 +2842,24 @@ export function registerReservationsRoutes(app: Express) {
         if (claimedElsewhere.rows.length) return res.status(409).json({ error: "La factura ya está vinculada a otro pago" });
       }
       const canonicalRef = canonicalInvoiceReference(invoice);
+      let priorReapplications: any[] = [];
+      try {
+        const previousRef = typeof lockedPayment.invoice_ref === "string"
+          ? JSON.parse(lockedPayment.invoice_ref)
+          : lockedPayment.invoice_ref;
+        if (previousRef) assertSameOriginalInvoice(previousRef, canonicalRef);
+        priorReapplications = Array.isArray(previousRef?.reapplications)
+          ? previousRef.reapplications
+          : [];
+      } catch {
+        throw Object.assign(new Error("El vínculo fiscal existente del pago no es válido"), { statusCode: 409 });
+      }
+      const preservedRef = priorReapplications.length
+        ? { ...canonicalRef, reapplications: priorReapplications }
+        : canonicalRef;
       const updated = await db.execute(sql`
         UPDATE payments
-        SET invoice_ref = ${JSON.stringify(canonicalRef)},
+        SET invoice_ref = ${JSON.stringify(preservedRef)},
             invoice_link_failed = false
         WHERE id = ${req.params.id} RETURNING *
       `);
@@ -2784,7 +2887,12 @@ export function registerReservationsRoutes(app: Express) {
       }
       res.json(updatedPay);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
+    } finally {
+      if (creditLockClient) {
+        await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
+        creditLockClient.release();
+      }
     }
   });
 
@@ -2874,23 +2982,45 @@ export function registerReservationsRoutes(app: Express) {
   // original del pago. The nested allocation is idempotent by invoice id.
   app.patch("/api/payments/:id/invoice-reapplication", requireAuth, async (req, res) => {
     try {
+      return res.status(410).json({
+        error: "Endpoint obsoleto. Reaplicá el crédito mediante la confirmación de la factura.",
+      });
+      /*
       const { invoiceData } = req.body;
       const amount = Number(req.body.amount);
       if (!invoiceData?.id || !Number.isFinite(amount) || amount <= 0) {
         return res.status(400).json({ error: "invoiceData y amount positivo requeridos" });
       }
-      const entry = {
-        invoiceId: invoiceData.id,
-        tipoComprobante: invoiceData.tipoComprobante ?? invoiceData.tipo_comprobante,
-        puntoVenta: invoiceData.puntoVenta ?? invoiceData.punto_venta,
-        numero: invoiceData.numero,
-        amount: Number(amount.toFixed(2)),
-      };
       const paymentResult = await db.execute(sql`
-        SELECT * FROM payments WHERE id = ${req.params.id}
+        SELECT * FROM payments
+        WHERE id = ${req.params.id}
+        FOR UPDATE
       `);
       const payment = paymentResult.rows?.[0] as any;
       if (!payment) return res.status(404).json({ error: "Pago no encontrado" });
+      if (payment.status === "anulado") return res.status(409).json({ error: "El pago está anulado" });
+      if (["cuenta_corriente", "current_account"].includes(String(payment.method))) {
+        return res.status(409).json({ error: "Cuenta Corriente no puede reaplicarse como crédito" });
+      }
+      const targetResult = await db.execute(sql`
+        SELECT id, reserva_id, tipo_comprobante, monto_total, monto_acreditado, estado
+        FROM sales_invoices WHERE id = ${Number(invoiceData.id)}
+        FOR UPDATE
+      `);
+      const target = targetResult.rows?.[0] as any;
+      if (!target) return res.status(404).json({ error: "Factura destino no encontrada" });
+      if (String(target.reserva_id) !== String(payment.reservation_id)) {
+        return res.status(403).json({ error: "La factura destino no pertenece a la reserva del pago" });
+      }
+      if (!["FA", "FB", "FC", "FT", "FM"].includes(String(target.tipo_comprobante)) ||
+        !["emitida", "parcial"].includes(String(target.estado))) {
+        return res.status(409).json({ error: "La factura destino no está activa para reaplicación" });
+      }
+      const entry = {
+        invoiceId: target.id,
+        tipoComprobante: target.tipo_comprobante,
+        amount: Number(amount.toFixed(2)),
+      };
       if (!payment.invoice_ref) {
         return res.status(409).json({ error: "El pago no tiene un comprobante original para conservar" });
       }
@@ -2937,7 +3067,16 @@ export function registerReservationsRoutes(app: Express) {
         RETURNING *
       `);
       if (updated.rows?.[0]) return res.json(updated.rows[0]);
+      // A concurrent retry may have committed the same target between the
+      // idempotency check and UPDATE. It is already the desired state.
+      const retry = await db.execute(sql`SELECT * FROM payments WHERE id = ${req.params.id}`);
+      const retryRef = retry.rows?.[0] as any;
+      const retryApps = retryRef?.invoice_ref ? JSON.parse(retryRef.invoice_ref).reapplications : [];
+      if (retryApps.some((item: any) => Number(item?.invoiceId) === Number(target.id))) {
+        return res.json(retryRef);
+      }
       return res.status(409).json({ error: "No se pudo registrar la reaplicación del pago" });
+      */
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2945,29 +3084,72 @@ export function registerReservationsRoutes(app: Express) {
 
   // Marcar vínculo de factura como fallido (y guardar datos de la factura para reintento posterior)
   app.patch("/api/payments/:id/invoice-link-failed", requireAuth, async (req, res) => {
+    let creditLockClient: PoolClient | undefined;
+    let creditLockKey = "";
     try {
       const { invoiceData } = req.body;
-      const payResult = await db.execute(sql`SELECT id FROM payments WHERE id = ${req.params.id}`);
+      const payResult = await db.execute(sql`SELECT id, reservation_id FROM payments WHERE id = ${req.params.id}`);
       if (!payResult.rows?.[0]) return res.status(404).json({ error: "Pago no encontrado" });
+      creditLockKey = `folio-invoice:${String((payResult.rows[0] as any).reservation_id)}`;
+      creditLockClient = await pool.connect();
+      await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
+      await assertPaymentHasNoUnresolvedCreditHold(req.params.id);
+      const lockedPaymentResult = await db.execute(sql`
+        SELECT invoice_ref FROM payments WHERE id = ${req.params.id}
+      `);
+      const lockedInvoiceRef = (lockedPaymentResult.rows[0] as any)?.invoice_ref;
+      let preservedInvoiceData = invoiceData;
+      if (invoiceData && lockedInvoiceRef) {
+        try {
+          const previousRef = typeof lockedInvoiceRef === "string"
+            ? JSON.parse(lockedInvoiceRef)
+            : lockedInvoiceRef;
+          assertSameOriginalInvoice(previousRef, invoiceData);
+          preservedInvoiceData = {
+            ...previousRef,
+            ...invoiceData,
+            id: previousRef.id,
+            tipoComprobante: previousRef.tipoComprobante ?? previousRef.tipo_comprobante,
+            puntoVenta: previousRef.puntoVenta ?? previousRef.punto_venta,
+            numero: previousRef.numero,
+            ...(Array.isArray(previousRef?.reapplications)
+              ? { reapplications: previousRef.reapplications }
+              : {}),
+          };
+        } catch {
+          throw Object.assign(new Error("El vínculo fiscal existente del pago no es válido"), { statusCode: 409 });
+        }
+      }
       // Store invoice data (so the re-link action can use it later) and mark as failed
       const updated = await db.execute(sql`
         UPDATE payments
         SET invoice_link_failed = true
-            ${invoiceData ? sql`, invoice_ref = ${JSON.stringify(invoiceData)}` : sql``}
+            ${preservedInvoiceData ? sql`, invoice_ref = ${JSON.stringify(preservedInvoiceData)}` : sql``}
         WHERE id = ${req.params.id} RETURNING *
       `);
       res.json(updated.rows[0]);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
+    } finally {
+      if (creditLockClient) {
+        await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
+        creditLockClient.release();
+      }
     }
   });
 
   app.delete("/api/payments/:id", async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/payments/${req.params.id} — usar PATCH /anular`);
+    let creditLockClient: PoolClient | undefined;
+    let creditLockKey = "";
     try {
       const payResult = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
       const payRow = payResult.rows?.[0] as any;
       if (payRow?.reservation_id) {
+        creditLockKey = `folio-invoice:${payRow.reservation_id}`;
+        creditLockClient = await pool.connect();
+        await creditLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [creditLockKey]);
+        await assertPaymentHasNoUnresolvedCreditHold(req.params.id);
         const reservation = await storage.getReservation(payRow.reservation_id);
         if (reservation && isReservationLocked(reservation)) {
           return res.status(403).json({ error: "No se puede eliminar pagos de una reserva cerrada de días anteriores" });
@@ -2979,7 +3161,13 @@ export function registerReservationsRoutes(app: Express) {
       }
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: "Error deleting payment" });
+      const statusCode = (error as any)?.statusCode || 500;
+      res.status(statusCode).json({ error: (error as Error)?.message || "Error deleting payment" });
+    } finally {
+      if (creditLockClient) {
+        await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
+        creditLockClient.release();
+      }
     }
   });
 

@@ -56,7 +56,7 @@
 - [GitHub Actions npm install failures](github-actions-npm-exit-handler-bug.md) — root cause was package-lock.json resolved URLs pointing at Replit's internal package-firewall host, unreachable from GitHub runners; fixed by rewriting to registry.npmjs.org.
 - [SPA circuit resources](spa-circuit-resources.md) — circuits reserve linked Sauna/Hidromasaje slots under one parent turn/folio; availability changes must lock every occupied cabin.
 - [SPA settlement safety](spa-settlement-safety.md) — room charges never hit Caja; SPA invoices claim their folio before ARCA and only the final link writes Caja/payment.
-- [Fiscal group collection intents](fiscal-group-collection-intents.md) — persist intent before ARCA; only an emitted, atomically claimed invoice may create the group payment and Caja movement.
+- [Fiscal collection intents](fiscal-group-collection-intents.md) — persist settlement intent before ARCA; emitted invoices reconcile idempotently without duplicating Caja, CC, or credits.
 - [Authorized repair test layering](authorized-repair-test-layering.md) — repair tests must cross real role middleware and endpoint; mocked UI alone cannot prove authorization or atomicity.
 - [Group receipt settlement snapshots](group-receipt-settlement-snapshots.md) — persist invoice total, applied advances, and new collection at confirmation; later balances cannot reconstruct the split.
 - [Publish sequence defaults](publish-sequence-defaults.md) — avoid sequence-backed text column defaults with PostgreSQL casts; Publish can truncate the introspected expression.

@@ -8,6 +8,7 @@ import {
   getAvailableReservationAdvancePayments,
   isReservationCreditNoteAdjustment,
   parseReservationInvoiceRef,
+  getReservationSelectionFinancialSummary,
 } from "@shared/reservationFolio";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
@@ -52,8 +53,13 @@ interface PrefacturaFolioData {
     operationalServices: number;
     netInvoiced: number;
     historicalPayments: number;
+    activeHistoricalSettlements?: number;
     releasedAvailableAdvance: number;
+    availableReleasedCredit?: number;
     pendingGrossInvoice: number;
+    pendingInvoicing?: number;
+    operationalFolioBalance?: number;
+    appliedCreditForSelection?: number;
     newCollectionNeeded: number;
   };
 }
@@ -495,6 +501,12 @@ export function PrefacturaDialog({
     { id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" },
   ]);
   const [invoiceObservations, setInvoiceObservations] = useState("");
+  // Safe default is to apply released credit. Staff can explicitly opt out
+  // before submitting, in which case the advance remains available.
+  const [applyReleasedCredit, setApplyReleasedCredit] = useState(true);
+  const [creditOperationId, setCreditOperationId] = useState(() =>
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `credit-${Date.now()}`,
+  );
 
   // Step 3: result
   const [emittedInvoice, setEmittedInvoice] = useState<any>(null);
@@ -601,6 +613,8 @@ export function PrefacturaDialog({
       setPaymentRows([{ id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" }]);
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
+      setApplyReleasedCredit(true);
+      setCreditOperationId(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `credit-${Date.now()}`);
       setSaleCondition("contado");
       setTransferDialogOpen(false);
       setTransferCharge(null);
@@ -854,12 +868,23 @@ export function PrefacturaDialog({
     safeEmittedInvoices,
   );
   const totalSelected = getSelectedFolioTotal(selectedItems);
-  const selectedBalance = getSelectedFolioBalance(
+  const selectedBalanceWithCredit = getSelectedFolioBalance(
     selectedItems,
     allBillableItems,
-    availableAdvancePayments,
+    applyReleasedCredit ? availableAdvancePayments : [],
   );
-  const selectedAlreadyPaid = totalSelected - selectedBalance;
+  const selectedFinancialSummary = folio?.financialSummary
+    ? getReservationSelectionFinancialSummary(
+      folio.financialSummary as any,
+      totalSelected,
+      applyReleasedCredit,
+    )
+    : null;
+  const appliedCreditForSelection = selectedFinancialSummary?.appliedCreditForSelection
+    ?? (totalSelected - selectedBalanceWithCredit);
+  const selectedBalance = selectedFinancialSummary?.newCollectionRequired
+    ?? selectedBalanceWithCredit;
+  const selectedAlreadyPaid = appliedCreditForSelection;
   const selectedSourceIds = selectedItems.map(item => item.id);
   // Uninvoiced advances are linked after emission. Advances released by an NC
   // keep the original invoice reference as immutable fiscal history.
@@ -869,7 +894,7 @@ export function PrefacturaDialog({
   );
   const creditedAdvanceReapplications = getCreditedAdvanceReapplications(
     availableAdvancePayments,
-    selectedAlreadyPaid,
+    applyReleasedCredit ? selectedAlreadyPaid : 0,
   );
 
   const totalPayments = paymentRows.reduce((acc, r) => {
@@ -1107,7 +1132,10 @@ export function PrefacturaDialog({
             ccEntityType: billingTarget,
             ccEntityId: billingEntityId,
           } : {}),
-          observaciones: invoiceObservations.trim() || undefined,
+           observaciones: invoiceObservations.trim() || undefined,
+           creditReapplications: applyReleasedCredit ? creditedAdvanceReapplications : [],
+           creditOperationId: applyReleasedCredit && creditedAdvanceReapplications.length > 0
+             ? creditOperationId : undefined,
         });
         const invoiceBody = await invoiceRes.json();
         if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
@@ -1127,20 +1155,6 @@ export function PrefacturaDialog({
             toast({
               title: "Factura emitida con vínculo pendiente",
               description: "Un anticipo previo no pudo vincularse automáticamente. Quedó marcado para reintento.",
-              variant: "destructive",
-            });
-          }
-        }
-        for (const reapplication of creditedAdvanceReapplications) {
-          const reapplyRes = await apiRequest(
-            "PATCH",
-            `/api/payments/${reapplication.paymentId}/invoice-reapplication`,
-            { invoiceData, amount: reapplication.amount },
-          );
-          if (!reapplyRes.ok) {
-            toast({
-              title: "Factura emitida con reaplicación pendiente",
-              description: "El comprobante original del pago se conservó, pero su reaplicación requiere revisión manual.",
               variant: "destructive",
             });
           }
@@ -1397,7 +1411,7 @@ export function PrefacturaDialog({
             {folioLoading ? (
               <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
             ) : folio ? (
-              <div className="rounded-md border overflow-hidden">
+               <div className="rounded-md border overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50">
@@ -1513,12 +1527,16 @@ export function PrefacturaDialog({
                 {/* Totals row */}
                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">A facturar (bruto)</div>
+                     <div className="text-muted-foreground text-xs">Pendiente de facturar ahora</div>
                     <div className="font-bold">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Anticipos aplicados al cobro</div>
-                    <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(selectedAlreadyPaid)}</div>
+                     <div className="text-muted-foreground text-xs">Crédito liberado disponible en la reserva</div>
+                     <div className="font-medium text-amber-700 dark:text-amber-400">${fmtMoney(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0)}</div>
+                    </div>
+                    <div className="text-right">
+                     <div className="text-muted-foreground text-xs">Crédito aplicado</div>
+                     <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(appliedCreditForSelection)}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-muted-foreground text-xs">Nuevo cobro requerido</div>
@@ -1527,11 +1545,22 @@ export function PrefacturaDialog({
                     </div>
                   </div>
                 </div>
+                 <div className="border-t px-4 py-2 flex items-center justify-end gap-2 text-xs">
+                   <Checkbox
+                     id="apply-released-credit"
+                     checked={applyReleasedCredit}
+                     disabled={(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0) <= 0.01}
+                     onCheckedChange={(checked) => setApplyReleasedCredit(checked === true)}
+                   />
+                   <Label htmlFor="apply-released-credit" className="cursor-pointer">
+                     Aplicar crédito a esta selección (reduce el nuevo cobro, nunca el importe a facturar)
+                   </Label>
+                 </div>
                 {(folio.payments || []).length > 0 && (
                   <p className="px-4 pb-3 text-xs text-muted-foreground">
                     Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} ·
                     {" "}anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}.
-                    {" "}El anticipo reduce solamente el nuevo cobro; el importe a facturar conserva el servicio bruto.
+                     {" "}El pendiente de facturar cubierto por crédito no genera nuevo dinero; el importe a facturar conserva el servicio bruto.
                   </p>
                 )}
                 <div className="border-t px-4 py-2 flex justify-end">
@@ -1859,13 +1888,15 @@ export function PrefacturaDialog({
 
             {/* Payment rows — only shown when there is an outstanding balance */}
             {saleCondition === "contado" && selectedBalance > 0.01 && (
-            <div>
-              <Label className="text-sm font-medium mb-2 block">Formas de cobro</Label>
+             <div>
+               <h3 className="text-base font-semibold mb-1">Cobro / dinero nuevo</h3>
+               <p className="text-xs text-muted-foreground mb-2">El crédito aplicado reduce únicamente este cobro; no modifica el importe fiscal a facturar.</p>
+               <Label className="text-sm font-medium mb-2 block">Formas de cobro</Label>
               <div className="space-y-3">
                 {paymentRows.map((row, idx) => (
                   <div key={row.id} className="rounded-lg border p-3 space-y-2">
-                    <div className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-3">
+                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                       <div className="sm:col-span-3">
                         <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
                         <Input
                           type="number"
@@ -1878,7 +1909,7 @@ export function PrefacturaDialog({
                           data-testid={`input-payment-amount-${idx}`}
                         />
                       </div>
-                      <div className="col-span-4">
+                       <div className="sm:col-span-4">
                         <Label className="text-xs text-muted-foreground mb-1 block">Método</Label>
                         <Select value={row.method} onValueChange={v => updateRow(row.id, "method", v)}>
                           <SelectTrigger className="h-8 text-sm" data-testid={`select-payment-method-${idx}`}><SelectValue /></SelectTrigger>
@@ -1891,12 +1922,12 @@ export function PrefacturaDialog({
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="col-span-4">
+                       <div className="sm:col-span-4">
                         <p className="text-xs text-muted-foreground pb-2">
                           La referencia se registra una sola vez en el comprobante.
                         </p>
                       </div>
-                      <div className="col-span-1 flex justify-end">
+                       <div className="sm:col-span-1 flex justify-end">
                         {paymentRows.length > 1 && (
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => removeRow(row.id)}>
                             <Trash2 className="h-3.5 w-3.5" />
@@ -2986,7 +3017,7 @@ function ChargeRow({
     ? (isTransferOut
         ? "bg-orange-50/60 dark:bg-orange-950/20 opacity-80"
         : "bg-blue-50/60 dark:bg-blue-950/20 opacity-80")
-    : (!selected ? "opacity-40" : undefined);
+     : undefined;
 
   return (
     <TableRow className={`${rowCls ?? ""} ${alreadyReversed || alreadyInvoiced ? "opacity-40" : ""}`}>
@@ -3027,6 +3058,16 @@ function ChargeRow({
                 Ya facturado
               </Badge>
             )}
+             {!isTransfer && !alreadyInvoiced && pending > 0.01 && alreadyPaid > 0.01 && (
+               <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 border-amber-500 text-amber-700 dark:text-amber-400">
+                 Facturado parcialmente · quedan ${fmtMoney(pending)}
+               </Badge>
+             )}
+             {!isTransfer && !alreadyInvoiced && pending > 0.01 && alreadyPaid <= 0.01 && (
+               <Badge variant="outline" className="text-[10px] px-1 py-0 shrink-0 border-blue-400 text-blue-700 dark:text-blue-400">
+                 Seleccionable
+               </Badge>
+             )}
             {isTransfer ? renderTransferDescription() : <span className="text-sm">{cleanDescription}</span>}
             {date && <span className="text-xs text-muted-foreground">{formatDateAR(date)}</span>}
             {!isTransfer && (

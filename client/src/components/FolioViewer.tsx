@@ -35,6 +35,7 @@ import {
   Ban,
   FileCheck,
 } from "lucide-react";
+import { getReservationFinancialSummary } from "@shared/reservationFolio";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ interface FolioData {
   openedAt: string;
   closedAt?: string;
   movements: FolioMovement[];
+  financialSummary?: ReturnType<typeof getReservationFinancialSummary>;
 }
 
 // Restaurant order item
@@ -477,7 +479,11 @@ function MovementRow({
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-muted-foreground">
-              {isNotaDebito ? "Nota de Débito" : (MOVEMENT_LABELS[mov.type] ?? mov.type)}
+              {isNotaDebito
+                ? "Nota de Débito"
+                : mov.paymentMethod === "cuenta_corriente"
+                  ? "Trasladado a Cuenta Corriente"
+                  : (MOVEMENT_LABELS[mov.type] ?? mov.type)}
             </span>
             {isNotaDebito && (
               <Badge
@@ -598,6 +604,7 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
   const charges = Number(folio.totalCharges);
   const paymentsTotal = Number(folio.totalPayments);
   const EntityIcon = ENTITY_ICONS[entityType] ?? ReceiptText;
+  const reservationSummary = folio.financialSummary;
 
   return (
     <div className="space-y-4">
@@ -626,6 +633,28 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
           </Button>
         </div>
       </div>
+
+      {/* Reservation financial contract (operational and fiscal views stay separate) */}
+      {entityType === "reservation" && reservationSummary && (
+        <div className="rounded-lg border bg-muted/20 p-3 space-y-3 text-xs">
+          <div>
+            <p className="font-semibold text-foreground mb-2">Operativo</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div><span className="text-muted-foreground block">Servicios</span><strong>{formatCurrency(reservationSummary.operationalServices)}</strong></div>
+              <div><span className="text-muted-foreground block">Liquidaciones activas</span><strong>{formatCurrency(reservationSummary.activeHistoricalSettlements)}</strong></div>
+              <div><span className="text-muted-foreground block">Saldo operativo</span><strong>{formatCurrency(reservationSummary.operationalFolioBalance)}</strong></div>
+            </div>
+          </div>
+          <div className="border-t pt-2">
+            <p className="font-semibold text-foreground mb-2">Fiscal / crédito</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div><span className="text-muted-foreground block">Neto facturado</span><strong>{formatCurrency(reservationSummary.netInvoiced)}</strong></div>
+              <div><span className="text-muted-foreground block">Pendiente de facturar</span><strong>{formatCurrency(reservationSummary.pendingInvoicing)}</strong></div>
+              <div><span className="text-muted-foreground block">Crédito liberado disponible</span><strong>{formatCurrency(reservationSummary.availableReleasedCredit)}</strong></div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Totals */}
       <div className="grid grid-cols-3 gap-3">

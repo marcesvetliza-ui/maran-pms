@@ -372,6 +372,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "group_id",
       "group_payment_id",
       "group_payment_intent",
+      "credit_reapplication_intent",
       "spa_account_id",
       "reconciliation_status",
       "reconciliation_error",
@@ -1635,6 +1636,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
   await withTimeout("sales_invoices.nc_reconciliation_pending_idx", T, () =>
     db.execute(sql.raw(incrementalIndexSql("salesInvoicesNcReconciliationPending")))
+  );
+  await withTimeout("sales_invoices.credit_reapplication_intent", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
+      `ALTER TABLE sales_invoices ADD COLUMN credit_reapplication_intent jsonb`
+    )))
   );
 
   await withTimeout("reservations.checked_out_at", T, () =>

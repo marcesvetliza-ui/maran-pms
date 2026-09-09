@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getReservationFinancialSummary } from "./reservationFolio";
+import { getReservationFinancialSummary, getReservationRateAuditEvent } from "./reservationFolio";
 
 describe("reservation folio financial summary", () => {
   it("keeps services and historical cash intact after a full credit note", () => {
@@ -39,5 +39,73 @@ describe("reservation folio financial summary", () => {
       releasedAvailableAdvance: 43000,
       newCollectionNeeded: 102500,
     });
+  });
+
+  it("counts Cuenta Corriente as an active settlement, never as released cash credit", () => {
+    const summary = getReservationFinancialSummary(
+      139000,
+      [
+        { id: "parking", amount: "2500", category: "otros", status: "active" },
+        { id: "minibar", amount: "1200", category: "otros", status: "active" },
+      ],
+      [
+        {
+          id: "cc",
+          amount: "139000",
+          method: "cuenta_corriente",
+          invoiceRef: JSON.stringify({ id: 10, tipo_comprobante: "FB", punto_venta: 1, numero: 1 }),
+        },
+        {
+          id: "cash",
+          amount: "3700",
+          method: "efectivo",
+          invoiceRef: JSON.stringify({ id: 11, tipo_comprobante: "FB", punto_venta: 1, numero: 2 }),
+        },
+      ],
+      [
+        { id: 10, tipo_comprobante: "FB", monto_total: "139000", monto_acreditado: "0", estado: "emitida" },
+        { id: 11, tipo_comprobante: "FB", monto_total: "3700", monto_acreditado: "2500", estado: "parcial" },
+      ],
+    );
+
+    expect(summary).toMatchObject({
+      operationalServices: 142700,
+      activeHistoricalSettlements: 142700,
+      operationalFolioBalance: 0,
+      netInvoiced: 140200,
+      pendingInvoicing: 2500,
+      availableReleasedCredit: 2500,
+      newCollectionNeeded: 0,
+    });
+  });
+});
+
+describe("reservation rate chronology", () => {
+  it("records an explicit initial assignment and later previous/new rate", () => {
+    expect(getReservationRateAuditEvent(null, "139000", true)).toEqual({
+      tipo: "tarifa",
+      descripcion: "Tarifa inicial asignada: $139000.00 por noche",
+    });
+    expect(getReservationRateAuditEvent("139000", 145000)).toEqual({
+      tipo: "tarifa",
+      descripcion: "Tarifa modificada: $139000.00 → $145000.00 por noche",
+    });
+  });
+
+  it("does not fabricate events for omitted or unchanged rates", () => {
+    expect(getReservationRateAuditEvent(undefined, undefined, true)).toBeNull();
+    expect(getReservationRateAuditEvent("139000", "139000")).toBeNull();
+    expect(getReservationRateAuditEvent("139000", "")).toBeNull();
+  });
+
+  it("treats an annulled invoice as zero fiscal coverage even with stale credit data", () => {
+    const summary = getReservationFinancialSummary(1000, [], [], [{
+      tipo_comprobante: "FB",
+      monto_total: 1000,
+      monto_acreditado: 0,
+      estado: "anulada",
+    }]);
+    expect(summary.netInvoiced).toBe(0);
+    expect(summary.pendingInvoicing).toBe(1000);
   });
 });

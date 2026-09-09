@@ -16,6 +16,23 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../db", () => ({
   db: {
+    transaction: vi.fn(async (action: (tx: any) => Promise<any>) => action({
+      execute: vi.fn(async () => ({ rows: [] })),
+      insert: vi.fn(() => ({
+        values: (values: any) => {
+          state.events.push("insert-draft");
+          state.insertValues.push(values);
+          state.savedDraft = {
+            id: 44,
+            ...values,
+            estado: "autorizacion_pendiente",
+            reconciliationStatus: "pendiente",
+            reconciliationError: null,
+          };
+          return { returning: async () => [{ ...state.savedDraft }] };
+        },
+      })),
+    })),
     execute: vi.fn(async () => {
       state.events.push("execute");
       state.executeCount++;
@@ -136,6 +153,43 @@ describe("recoverable reservation credit-note emission", () => {
       sourceChargeAmounts: { "charge-1": 100 },
     });
     expect(invoice).toMatchObject({ id: 44, estado: "emitida" });
+  });
+
+  it("runs the draft hook in the insert transaction and aborts before authorization on failure", async () => {
+    const input = {
+      tipoComprobante: "FB" as const,
+      cliente: { razonSocial: "Consumidor Final", condicionIva: "Consumidor Final" },
+      items: [{
+        descripcion: "Alojamiento",
+        cantidad: 1,
+        precioUnitario: 100,
+        alicuotaIva: "no_gravado" as const,
+        subtotalNeto: 0,
+        subtotal: 100,
+      }],
+      reservaId: "reservation-1",
+      creditReapplicationIntent: { operationId: "operation-12345678901234567890" },
+    };
+    const hook = vi.fn(async (_tx: any, draft: any) => {
+      state.events.push("draft-hook");
+      draft.creditReapplicationIntent = { operationId: "durable" };
+    });
+    await emitirFactura({ ...input, beforeDraftInsert: hook });
+    expect(state.events).toEqual(["execute", "draft-hook", "insert-draft", "update"]);
+    expect(state.insertValues[0].creditReapplicationIntent).toEqual({ operationId: "durable" });
+
+    state.events = [];
+    state.insertValues = [];
+    state.savedDraft = null;
+    await expect(emitirFactura({
+      ...input,
+      beforeDraftInsert: async () => {
+        state.events.push("draft-hook-failed");
+        throw new Error("credit changed");
+      },
+    })).rejects.toThrow("credit changed");
+    expect(state.events).toEqual(["execute", "draft-hook-failed"]);
+    expect(state.insertValues).toHaveLength(0);
   });
 
   it("persists a group-payment recovery instruction before ARCA authorization", async () => {

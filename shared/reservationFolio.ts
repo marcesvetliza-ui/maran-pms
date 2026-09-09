@@ -29,7 +29,35 @@ export type ReservationPaymentLike = {
   invoice_ref?: unknown;
   invoiceLinkFailed?: boolean | null;
   invoice_link_failed?: boolean | null;
+  method?: string | null;
 };
+
+export type ReservationRateAuditEvent = {
+  tipo: "tarifa";
+  descripcion: string;
+};
+
+/** Build a rate-history event only from a rate explicitly present in the
+ * request. This prevents imports/partial updates from inventing a change. */
+export function getReservationRateAuditEvent(
+  previousRate: string | number | null | undefined,
+  nextRate: string | number | null | undefined,
+  initial = false,
+): ReservationRateAuditEvent | null {
+  if (nextRate === null || nextRate === undefined || String(nextRate).trim() === "") return null;
+  const next = Number(nextRate);
+  if (!Number.isFinite(next) || next < 0) return null;
+  const previous = previousRate === null || previousRate === undefined || String(previousRate).trim() === ""
+    ? null : Number(previousRate);
+  if (!initial && previous !== null && Math.abs(previous - next) < 0.005) return null;
+  const money = (value: number) => value.toFixed(2);
+  return {
+    tipo: "tarifa",
+    descripcion: initial
+      ? `Tarifa inicial asignada: $${money(next)} por noche`
+      : `Tarifa modificada: $${money(previous ?? 0)} → $${money(next)} por noche`,
+  };
+}
 
 export type AvailableReservationAdvancePayment<T extends ReservationPaymentLike = ReservationPaymentLike> = T & {
   availableAdvanceAmount: number;
@@ -88,6 +116,7 @@ export function getNetReservationInvoicedTotal(invoices: ReservationInvoiceLike[
   return invoices.reduce((sum, invoice) => {
     const type = String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante") || "");
     if (!SALE_INVOICE_TYPES.has(type)) return sum;
+    if (String(invoice.estado || "").toLowerCase() === "anulada") return sum;
     const total = Number(invoiceValue(invoice, "monto_total", "montoTotal") || 0);
     const credited = Number(invoiceValue(invoice, "monto_acreditado", "montoAcreditado") || 0);
     if (!Number.isFinite(total) || total <= 0) return sum;
@@ -128,7 +157,10 @@ export function getAvailableReservationAdvancePayments<T extends ReservationPaym
   }
 
   return payments.flatMap<AvailableReservationAdvancePayment<T>>(payment => {
-    if (payment.status === "anulado" || payment.invoiceLinkFailed || payment.invoice_link_failed) return [];
+    // Cuenta Corriente settles the folio by creating debt; it is never a
+    // cash/advance credit that can be applied to a later invoice.
+    if (payment.status === "anulado" || payment.method === "cuenta_corriente" ||
+      payment.method === "current_account" || payment.invoiceLinkFailed || payment.invoice_link_failed) return [];
     const paymentAmount = Number(payment.amount) || 0;
     if (paymentAmount <= 0) return [];
     const ref = parseReservationInvoiceRef(payment.invoiceRef ?? payment.invoice_ref);
@@ -200,10 +232,35 @@ export function getReservationFinancialSummary(
     operationalServices: Number(operationalServices.toFixed(2)),
     netInvoiced: Number(netInvoiced.toFixed(2)),
     historicalPayments: Number(historicalPayments.toFixed(2)),
+    // Stable names used by every financial view.  Keep the older names below
+    // for consumers which still render the reservation folio contract.
+    activeHistoricalSettlements: Number(historicalPayments.toFixed(2)),
     releasedAvailableAdvance: Number(releasedAvailableAdvance.toFixed(2)),
+    availableReleasedCredit: Number(releasedAvailableAdvance.toFixed(2)),
     pendingGrossInvoice: Number(pendingGrossInvoice.toFixed(2)),
+    pendingInvoicing: Number(pendingGrossInvoice.toFixed(2)),
+    operationalFolioBalance: Number(Math.max(0, operationalServices - historicalPayments).toFixed(2)),
+    appliedCreditForSelection: 0,
     // This is the operational balance before applying a released advance.
     pendingGrossCollection: Number(Math.max(0, operationalServices - historicalPayments).toFixed(2)),
     newCollectionNeeded: Number(Math.max(0, pendingGrossInvoice - releasedAvailableAdvance).toFixed(2)),
   };
+}
+
+/** Project the server contract onto a selected fiscal source without allowing
+ * component-specific formulas to drift from the folio calculation. */
+export function getReservationSelectionFinancialSummary(
+  summary: ReturnType<typeof getReservationFinancialSummary>,
+  selectedAmount: number,
+  applyReleasedCredit = true,
+) {
+  const appliedCreditForSelection = Number(Math.min(
+    Math.max(0, selectedAmount),
+    applyReleasedCredit ? summary.availableReleasedCredit : 0,
+  ).toFixed(2));
+  const newCollectionRequired = Number(Math.max(
+    0,
+    selectedAmount - appliedCreditForSelection,
+  ).toFixed(2));
+  return { ...summary, appliedCreditForSelection, newCollectionRequired };
 }

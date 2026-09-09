@@ -55,6 +55,9 @@ vi.mock("@shared/schema", () => ({
 }));
 
 vi.mock("../billing/invoiceService", () => ({
+  calcularMontos: vi.fn((items: any[]) => ({
+    montoTotal: items.reduce((sum, item) => sum + Number(item.subtotal ?? item.precioUnitario * item.cantidad), 0),
+  })),
   emitirFactura: vi.fn(async (data: any) => {
     // Keep the first request inside the reservation lock long enough for the
     // second request to reach and wait on the same lock.
@@ -209,6 +212,88 @@ describe("folio invoice source guard", () => {
       });
       expect(state.emitted).toHaveLength(0);
     });
+  });
+
+  it("reserves source capacity while an authorization-pending draft is recoverable", async () => {
+    state.invoices = [{
+      id: 77,
+      estado: "autorizacion_pendiente",
+      tipo_comprobante: "FB",
+      source_charge_ids: ["charge-1"],
+      source_charge_amounts: { "charge-1": 100 },
+      monto_total: "100.00",
+      monto_acreditado: "0.00",
+      credit_reapplication_intent: {
+        operationId: "pending-operation-1234567890",
+        status: "pending",
+      },
+    }];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoiceBody()),
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringMatching(/saldo suficiente/i),
+      });
+    });
+    expect(state.emitted).toHaveLength(0);
+  });
+
+  it("replays an operation whose invoice was fully credited without issuing again", async () => {
+    const operationId = "12345678-1234-1234-1234-123456789012";
+    state.invoices = [{
+      id: 88,
+      estado: "anulada",
+      tipo_comprobante: "FB",
+      punto_venta: 1,
+      numero: 8,
+      monto_total: "100.00",
+      credit_reapplication_intent: {
+        operationId,
+        tipoComprobante: "FB",
+        recipient: {
+          razonSocial: "Consumidor Final",
+          cuit: "",
+          dni: "",
+          condicionIva: "Consumidor Final",
+        },
+        items: invoiceBody().items,
+        sourceChargeIds: ["charge-1"],
+        sourceChargeAmounts: { "charge-1": 100 },
+        invoiceTotal: 100,
+        payments: [{ paymentId: "payment-credit", amount: 100 }],
+        settlement: {
+          destination: "none",
+          amount: 0,
+          method: null,
+          cashArea: null,
+          ccEntityType: null,
+          ccEntityId: null,
+          label: `FB reaplicación ${operationId}`,
+          status: "completed",
+        },
+        status: "completed",
+      },
+    }];
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoiceBody({
+          creditOperationId: operationId,
+          creditReapplications: [{ paymentId: "payment-credit", amount: 100 }],
+        })),
+      });
+      const body = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(201);
+      expect(body).toMatchObject({ id: 88, estado: "anulada" });
+    });
+    expect(state.emitted).toHaveLength(0);
   });
 
   it("allows the full charge to be invoiced again after its invoice was fully credited", async () => {

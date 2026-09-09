@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assertInvoiceEmittedForLink,
+  assertSameOriginalInvoice,
   canonicalInvoiceReference,
   canonicalPaymentLinkState,
 } from "../billing/invoiceLinkIntegrity";
@@ -70,5 +71,31 @@ describe("group invoice link integrity", () => {
       reconciliationError: null,
       invoice: { tipoComprobante: "FB", puntoVenta: 2, numero: 77, cae: "server-cae" },
     });
+  });
+
+  it("rejects replacement of established original invoice provenance", () => {
+    const original = { id: 8, tipoComprobante: "FB", puntoVenta: 2, numero: 77 };
+    expect(() => assertSameOriginalInvoice(original, {
+      id: 9,
+      tipoComprobante: "FB",
+      puntoVenta: 2,
+      numero: 77,
+    })).toThrow(/no puede reemplazarse/i);
+    try {
+      assertSameOriginalInvoice(original, { id: 9 });
+    } catch (error: any) {
+      expect(error.statusCode).toBe(409);
+    }
+  });
+
+  it("allows metadata enrichment for the same immutable invoice identity", () => {
+    expect(() => assertSameOriginalInvoice(
+      { id: 8, tipoComprobante: "FB", puntoVenta: 2, numero: 77 },
+      { id: 8, tipoComprobante: "FB", puntoVenta: 2, numero: 77, cae: "updated" },
+    )).not.toThrow();
+    expect(() => assertSameOriginalInvoice(
+      { id: 8, tipoComprobante: "FB", puntoVenta: 2, numero: 77 },
+      { reconciliationError: "network timeout" },
+    )).not.toThrow();
   });
 });

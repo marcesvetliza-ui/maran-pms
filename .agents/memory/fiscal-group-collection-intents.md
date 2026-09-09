@@ -1,6 +1,6 @@
 ---
-name: Fiscal group collection intents
-description: Safety rule for group invoices whose collection must not reach Caja before fiscal confirmation.
+name: Fiscal collection intents
+description: Safety rules for recoverable fiscal settlement across group collections and reservation credit reapplications.
 ---
 
 A fiscal group collection must persist a durable intent before contacting ARCA, but must not create its payment, allocations, account entries, or Caja movement until the invoice is emitted and atomically claimed.
@@ -20,3 +20,9 @@ Authorization recovery and operational linking are one state machine: recovery i
 **Why:** ARCA success alone does not restore the application relationship, and competing retries or client-provided fiscal data can create duplicate authorization attempts or false links.
 
 **How to apply:** Serialize issuance and recovery under the same owner scope, finish the owner link before reporting recovery success, trust only stored emitted invoices, and keep every replay idempotent.
+
+Reservation credit released by a partial/full NC uses the same saga: persist the exact credit allocations and uncovered settlement with the pre-authorization draft, reserve both payment credit and fiscal source capacity while unresolved, then reconcile from stored intent only.
+
+**Why:** ARCA cannot participate in the local database transaction. A failure after CAE must not free the same credit/source for another invoice, lose the uncovered Caja/CC amount, or contact ARCA again on retry.
+
+**How to apply:** Treat recipient, items, source mapping, amounts, and original invoice identity as immutable. Keep reconciliation status/error outside snapshot equality. Guard every payment mutation while an unresolved intent references it.

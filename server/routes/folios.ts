@@ -8,6 +8,9 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import type { FolioEntityType, FolioStatus, FolioWithMovements } from "@shared/schema";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import { getReservationFinancialSummary } from "@shared/reservationFolio";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -552,6 +555,44 @@ export function registerFolioRoutes(app: Express) {
       );
       if (!folio) {
         return res.json(null);
+      }
+      if (entityType === "reservation") {
+        const [charges, payments, invoiceRows] = await Promise.all([
+          storage.getCharges(entityId),
+          storage.getPayments(entityId),
+          db.execute(sql`
+            SELECT id, tipo_comprobante, punto_venta, numero, monto_total,
+                   monto_acreditado, estado
+            FROM sales_invoices
+            WHERE reserva_id = ${entityId}
+              AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
+              AND estado IN ('emitida','parcial','anulada')
+          `),
+        ]);
+        const reservation = await storage.getReservation(entityId);
+        const reservedRows = await db.execute(sql`
+          SELECT credit_reapplication_intent FROM sales_invoices
+          WHERE reserva_id = ${entityId}
+            AND estado IN ('autorizacion_pendiente','emitida')
+            AND reconciliation_status IN ('pendiente','error','requiere_revision')
+            AND credit_reapplication_intent IS NOT NULL
+        `);
+        const roomTotal = Number(reservation?.totalRoomAmount || 0) ||
+          Number(reservation?.finalRatePerNight || 0) * Number(reservation?.nights || 0);
+        const financialSummary = getReservationFinancialSummary(
+          roomTotal, charges, payments, invoiceRows.rows as any[],
+        );
+        const reserved = (reservedRows.rows as any[]).reduce((sum, row) =>
+          sum + (Array.isArray(row.credit_reapplication_intent?.payments)
+            ? row.credit_reapplication_intent.payments.reduce((s: number, p: any) => s + (Number(p?.amount) || 0), 0)
+            : 0), 0);
+        financialSummary.availableReleasedCredit = Math.max(0, financialSummary.availableReleasedCredit - reserved);
+        financialSummary.releasedAvailableAdvance = financialSummary.availableReleasedCredit;
+        res.json({
+          ...folio,
+          financialSummary,
+        });
+        return;
       }
       res.json(folio);
     } catch (error) {

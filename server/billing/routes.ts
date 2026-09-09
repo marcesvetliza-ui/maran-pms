@@ -25,6 +25,13 @@ import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
 import { assertFinancialSchemaReady } from "../migrate";
 import { withInvoiceAdvisoryLock } from "./invoiceAdvisoryLock";
 import { exposeInvoiceReconciliation } from "./reconciliationPresentation";
+import {
+  equalCreditSnapshots,
+  getUncoveredReservationSettlement,
+  prepareReservationCreditIntent,
+  reconcileReservationCreditInvoice,
+  type ReservationCreditIntent,
+} from "./reservationCreditReconciliation";
 
 const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
 const SPA_INVOICE_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"];
@@ -320,6 +327,102 @@ class FolioInvoiceValidationError extends Error {
  */
 async function withReservationInvoiceLock<T>(reservationId: string, action: () => Promise<T>): Promise<T> {
   return withInvoiceAdvisoryLock(pool, `folio-invoice:${reservationId}`, action);
+}
+
+async function reconcileReservationCreditSettlement(invoiceId: number): Promise<void> {
+  const invoiceRows = await db.execute(sql`
+    SELECT id, reserva_id, tipo_comprobante, numero, estado, operador, credit_reapplication_intent
+    FROM sales_invoices WHERE id = ${invoiceId}
+  `);
+  const invoice = invoiceRows.rows[0] as any;
+  const intent = invoice?.credit_reapplication_intent;
+  const settlement = intent?.settlement;
+  if (!invoice || !intent?.operationId || !settlement || settlement.status === "completed") return;
+  if (!["emitida", "parcial"].includes(String(invoice.estado))) return;
+
+  try {
+    await withReservationInvoiceLock(String(invoice.reserva_id), async () => {
+      const lockedRows = await db.execute(sql`
+        SELECT credit_reapplication_intent FROM sales_invoices WHERE id = ${invoiceId}
+      `);
+      const lockedIntent = (lockedRows.rows[0] as any)?.credit_reapplication_intent;
+      const lockedSettlement = lockedIntent?.settlement;
+      if (!lockedSettlement || lockedSettlement.status === "completed") return;
+      const amount = Number(lockedSettlement.amount) || 0;
+      const canonicalReference = `credit-operation:${String(lockedIntent.operationId)}`;
+
+      if (amount > 0 && lockedSettlement.destination === "cuenta_corriente") {
+        const existing = await db.execute(sql`
+          SELECT 1 FROM account_movements
+          WHERE reference = ${canonicalReference}
+            AND entity_type = ${String(lockedSettlement.ccEntityType)}
+            AND entity_id = ${String(lockedSettlement.ccEntityId)}
+            AND amount::numeric = ${amount}
+          LIMIT 1
+        `);
+        if (!existing.rows.length) {
+          await storage.createAccountMovement({
+            entityType: lockedSettlement.ccEntityType,
+            entityId: lockedSettlement.ccEntityId,
+            date: getArgentinaToday(),
+            type: "cargo",
+            description: lockedSettlement.label,
+            amount: amount.toFixed(2),
+            reservationId: String(invoice.reserva_id),
+            reference: canonicalReference,
+            createdBy: null,
+          } as any);
+        }
+      } else if (amount > 0 && lockedSettlement.destination === "cash") {
+        const existing = await db.execute(sql`
+          SELECT 1 FROM cash_movements
+          WHERE source_type = 'credit_invoice_settlement'
+            AND source_id = ${String(invoiceId)}
+            AND area = ${String(lockedSettlement.cashArea)}
+            AND payment_method = ${String(lockedSettlement.method)}
+            AND amount::numeric = ${amount}
+            AND movement_type = 'income'
+            AND anulado = false
+          LIMIT 1
+        `);
+        if (!existing.rows.length) {
+          await storage.registerCashMovement(
+            lockedSettlement.cashArea,
+            "credit_invoice_settlement",
+            String(invoiceId),
+            lockedSettlement.label,
+            lockedSettlement.method,
+            amount.toFixed(2),
+            "income",
+            invoice.operador || undefined,
+          );
+        }
+      }
+
+      await db.execute(sql`
+        UPDATE sales_invoices
+        SET credit_reapplication_intent = jsonb_set(
+              jsonb_set(credit_reapplication_intent, '{settlement,status}', '"completed"'::jsonb),
+              '{settlement,error}', 'null'::jsonb
+            ),
+            reconciliation_updated_at = now()
+        WHERE id = ${invoiceId}
+      `);
+    });
+  } catch (error: any) {
+    await db.execute(sql`
+      UPDATE sales_invoices
+      SET credit_reapplication_intent = jsonb_set(
+            credit_reapplication_intent,
+            '{settlement,error}',
+            to_jsonb(${String(error?.message || error)}::text)
+          ),
+          reconciliation_updated_at = now()
+      WHERE id = ${invoiceId}
+        AND credit_reapplication_intent->'settlement'->>'status' <> 'completed'
+    `).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Serializes group-source validation and invoice persistence across app instances. */
@@ -814,7 +917,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      const { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext } = req.body;
+      const { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, creditOperationId } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -951,7 +1054,142 @@ export function registerBillingRoutes(app: Express) {
       }
 
       let reusedExistingClaim = false;
+      let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        let creditIntent: Record<string, unknown> | undefined;
+        if (Array.isArray(creditReapplications) && creditReapplications.length > 0 && !creditOperationId) {
+          throw new FolioInvoiceValidationError("creditOperationId es requerido al aplicar crédito", 400);
+        }
+        if (reservationId && creditOperationId) {
+          if (typeof creditOperationId !== "string" || !/^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
+            throw new FolioInvoiceValidationError("Operación de crédito inválida", 400);
+          }
+          const requested = Array.isArray(creditReapplications) ? creditReapplications : [];
+          const normalized = requested.map((row: any) => ({
+            paymentId: String(row?.paymentId || ""),
+            amount: Number(Number(row?.amount).toFixed(2)),
+          }));
+          if (normalized.some((row) => !row.paymentId || !Number.isFinite(row.amount) || row.amount <= 0) ||
+            new Set(normalized.map((row) => row.paymentId)).size !== normalized.length) {
+            throw new FolioInvoiceValidationError("Selección de crédito inválida", 400);
+          }
+          const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
+          const appliedCredit = normalized.reduce((sum, row) => sum + row.amount, 0);
+          if (appliedCredit > invoiceTotal + 0.009) {
+            throw new FolioInvoiceValidationError("El crédito supera el total de la factura", 409);
+          }
+          const uncoveredAmount = getUncoveredReservationSettlement(invoiceTotal, normalized);
+          const settlement = {
+            destination: uncoveredAmount <= 0
+              ? "none"
+              : cashFormaPago === "cuenta_corriente"
+                ? "cuenta_corriente"
+                : cashArea && cashFormaPago
+                  ? "cash"
+                  : "none",
+            amount: uncoveredAmount,
+            method: cashFormaPago || null,
+            cashArea: cashArea || null,
+            ccEntityType: ccEntityType || null,
+            ccEntityId: ccEntityId || null,
+            label: String(cashLabelBody || `${tipoComprobante} reaplicación ${creditOperationId}`),
+            status: "pending",
+          };
+          const immutableSnapshot = {
+            tipoComprobante,
+            recipient: {
+              razonSocial: String(cliente?.razonSocial || ""),
+              cuit: String(cliente?.cuit || ""),
+              dni: String(cliente?.dni || ""),
+              condicionIva: String(cliente?.condicionIva || ""),
+            },
+            items,
+            sourceChargeIds: normalizedSourceChargeIds,
+            sourceChargeAmounts: sanitizedSourceChargeAmounts,
+            invoiceTotal: Number(invoiceTotal.toFixed(2)),
+            payments: normalized,
+            settlement,
+          };
+          const prior = await db.execute(sql`
+            SELECT *, credit_reapplication_intent
+            FROM sales_invoices
+            WHERE reserva_id = ${reservationId}
+              AND credit_reapplication_intent->>'operationId' = ${creditOperationId}
+            ORDER BY id DESC LIMIT 1
+          `);
+          const previous = prior.rows[0] as any;
+          if (previous) {
+            const snapshot = previous.credit_reapplication_intent;
+            const { status: _status, operationId: _operationId, ...storedSnapshot } = snapshot || {};
+            if (!equalCreditSnapshots(storedSnapshot, immutableSnapshot)) {
+              throw new FolioInvoiceValidationError("La operación de crédito no coincide con su intento original", 409);
+            }
+            if (previous.estado === "autorizacion_pendiente") {
+              const resumed = await emitirFactura({
+                tipoComprobante: previous.tipo_comprobante,
+                cliente: {
+                  razonSocial: previous.cliente_razon_social,
+                  cuit: previous.cliente_cuit || undefined,
+                  dni: previous.cliente_dni || undefined,
+                  condicionIva: previous.cliente_condicion_iva,
+                  domicilio: previous.cliente_domicilio || undefined,
+                },
+                items: previous.items,
+                reservaId: reservationId,
+                puntoVentaOverride: Number(previous.punto_venta),
+                sourceChargeIds: previous.source_charge_ids || undefined,
+                sourceChargeAmounts: previous.source_charge_amounts || undefined,
+                observaciones: previous.observaciones || undefined,
+                recoveryInvoiceId: Number(previous.id),
+                creditReapplicationIntent: snapshot,
+              } as NewInvoiceData);
+              const reconciled = await reconcileReservationCreditInvoice(Number(resumed.id));
+              reusedExistingClaim = true;
+              return {
+                ...reconciled,
+                tipoComprobante: reconciled.tipo_comprobante,
+                puntoVenta: reconciled.punto_venta,
+                montoTotal: reconciled.monto_total,
+              };
+            } else if (previous.estado === "emitida") {
+              const existing = {
+                ...previous,
+                tipoComprobante: previous.tipo_comprobante,
+                puntoVenta: previous.punto_venta,
+                montoTotal: previous.monto_total,
+              };
+              reusedExistingClaim = true;
+              if (previous.reconciliation_status === "conciliada" && snapshot?.status === "completed") {
+                return existing;
+              }
+              const reconciled = await reconcileReservationCreditInvoice(Number(previous.id));
+              return {
+                ...reconciled,
+                tipoComprobante: reconciled.tipo_comprobante,
+                puntoVenta: reconciled.punto_venta,
+                montoTotal: reconciled.monto_total,
+              };
+            } else if (["parcial", "anulada"].includes(String(previous.estado))) {
+              reusedExistingClaim = true;
+              return {
+                ...previous,
+                tipoComprobante: previous.tipo_comprobante,
+                puntoVenta: previous.punto_venta,
+                montoTotal: previous.monto_total,
+              };
+            } else {
+              throw new FolioInvoiceValidationError(
+                `La operación de crédito ya pertenece a una factura en estado ${String(previous.estado)}`,
+                409,
+              );
+            }
+          }
+          creditIntent = {
+            operationId: creditOperationId,
+            ...immutableSnapshot,
+            status: "pending",
+          };
+        }
         let persistedGroupPaymentIntent = sanitizedGroupPaymentIntent;
         // Every reservation invoice must declare the exact folio sources it
         // consumes. Without this, an older tab could bypass the residual guard.
@@ -1012,7 +1250,17 @@ export function registerBillingRoutes(app: Express) {
             FROM sales_invoices si
             WHERE si.reserva_id = ${reservationId}
             AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
-            AND si.estado IN ('emitida', 'parcial')
+            AND (
+              si.estado IN ('emitida', 'parcial')
+              OR (
+                si.estado = 'autorizacion_pendiente'
+                AND (
+                  ${creditOperationId ? String(creditOperationId) : null}::text IS NULL
+                  OR COALESCE(si.credit_reapplication_intent->>'operationId', '') <>
+                     ${creditOperationId ? String(creditOperationId) : null}::text
+                )
+              )
+            )
         `);
         const alreadyInvoiced: Record<string, number> = {};
         for (const invoice of priorInvoices.rows) {
@@ -1039,7 +1287,6 @@ export function registerBillingRoutes(app: Express) {
         let persistedItems = items;
         let persistedCliente = cliente;
         let spaRecoveryInvoiceId: number | undefined;
-        let paymentRecoveryInvoiceId: number | undefined;
         // A browser can disappear after ARCA responds.  The payment ownership
         // claim is already in sales_invoices, so return/retry that exact draft
         // instead of allocating a new number or authorizing a duplicate.
@@ -1193,7 +1440,7 @@ export function registerBillingRoutes(app: Express) {
         }
 
         const user = (req as any).user;
-        return emitirFactura({
+        const emitted = await emitirFactura({
           tipoComprobante,
           cliente: persistedCliente,
           items: persistedItems,
@@ -1211,7 +1458,31 @@ export function registerBillingRoutes(app: Express) {
           sourceChargeAmounts: Object.keys(sanitizedSourceChargeAmounts).length > 0 ? sanitizedSourceChargeAmounts : undefined,
           observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
           recoveryInvoiceId: spaRecoveryInvoiceId ?? paymentRecoveryInvoiceId,
+          creditReapplicationIntent: creditIntent,
+          beforeDraftInsert: reservationId && creditIntent
+            ? async (tx, draft) => {
+                try {
+                  await prepareReservationCreditIntent(
+                    reservationId,
+                    creditIntent as ReservationCreditIntent,
+                  )(tx, draft);
+                } catch (error: any) {
+                  throw new FolioInvoiceValidationError(error?.message || "No se pudo reservar el crédito", 409);
+                }
+              }
+            : undefined,
         } as NewInvoiceData);
+        if (reservationId && creditIntent) {
+          try {
+            await reconcileReservationCreditInvoice(Number(emitted.id));
+          } catch (completionError: any) {
+            throw new FolioInvoiceValidationError(
+              `Factura emitida; reaplicación pendiente de recuperación (invoice ${emitted.id})`,
+              409,
+            );
+          }
+        }
+        return emitted;
       };
 
       const factura = reservationId
@@ -1222,13 +1493,23 @@ export function registerBillingRoutes(app: Express) {
             ? await withSpaInvoiceLock(spaAccountId, emitInvoice)
             : await emitInvoice();
       const user = (req as any).user;
+      const invoiceTotalForSettlement = parseFloat(String(
+        (factura as any).montoTotal ?? (factura as any).monto_total ?? "0",
+      ));
+      const uncoveredSettlement = getUncoveredReservationSettlement(
+        invoiceTotalForSettlement,
+        reservationId && Array.isArray(creditReapplications) ? creditReapplications : [],
+      );
 
-      // Cuenta Corriente: cargar el total a la cuenta de la entidad seleccionada (no es un movimiento de caja)
+      // Applied reservation credit is itself a settlement. Only its uncovered
+      // remainder may create new debt or a Caja collection.
       // A group invoice documents sources only. Its collection was (or will
       // be) recorded through the group payment endpoints, so it must never
       // create a second Caja/CC movement.
-      if (!reusedExistingClaim && !groupId && cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
-        const total = parseFloat(String((factura as any).montoTotal || "0"));
+      if (reservationId && creditOperationId) {
+        await reconcileReservationCreditSettlement(Number(factura.id));
+      } else if (!reusedExistingClaim && !groupId && cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
+        const total = uncoveredSettlement;
         if (total > 0) {
           const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
           await storage.createAccountMovement({
@@ -1245,7 +1526,7 @@ export function registerBillingRoutes(app: Express) {
       } else if (!reusedExistingClaim && !groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área
         try {
-          const total = parseFloat(String((factura as any).montoTotal || "0"));
+          const total = uncoveredSettlement;
           if (total > 0) {
             const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
             await storage.registerCashMovement(
