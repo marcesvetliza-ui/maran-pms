@@ -51,6 +51,30 @@ describe("reservation credit settlement", () => {
     )).toBe(true);
   });
 
+  it("accepts a settlement-only CC intent when no advance exists", async () => {
+    const hook = prepareReservationCreditIntent("reservation-1", {
+      operationId: "settlement-only-1234567890",
+      invoiceTotal: 153000,
+      payments: [],
+      status: "pending",
+      settlement: {
+        destination: "cuenta_corriente",
+        amount: 153000,
+        status: "pending",
+      },
+    });
+    const draft: any = { montoTotal: "153000.00" };
+
+    await expect(hook({ execute: vi.fn() }, draft)).resolves.toBeUndefined();
+    expect(draft.creditReapplicationIntent).toMatchObject({
+      payments: [],
+      settlement: {
+        destination: "cuenta_corriente",
+        amount: 153000,
+      },
+    });
+  });
+
   it("rejects a generic uninvoiced advance as NC-released credit", async () => {
     const hook = prepareReservationCreditIntent("reservation-1", {
       operationId: "operation-12345678901234567890",

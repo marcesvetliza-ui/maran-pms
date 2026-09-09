@@ -1791,6 +1791,37 @@ export function registerBillingRoutes(app: Express) {
         if (repaired.rows.length > 1) {
           throw new FolioInvoiceValidationError("Hay más de una reparación CC histórica posible", 409);
         }
+        // A current settlement can outlive the browser session that created its
+        // operationId. Recover it by reservation when it is the only pending CC
+        // intent. This completes the missing folio payment/Caja informational
+        // movement without creating a second account-current cargo.
+        const pendingIntents = await db.execute(sql`
+          SELECT id
+          FROM sales_invoices
+          WHERE reserva_id = ${reservationId}
+            AND cash_forma_pago = 'cuenta_corriente'
+            AND estado IN ('emitida','parcial')
+            AND credit_reapplication_intent IS NOT NULL
+            AND COALESCE(credit_reapplication_intent->'settlement'->>'status', 'pending') <> 'completed'
+          ORDER BY id DESC
+          LIMIT 2
+        `);
+        if (pendingIntents.rows.length > 1) {
+          throw new FolioInvoiceValidationError("Hay más de una liquidación CC pendiente para esta reserva", 409);
+        }
+        if (pendingIntents.rows.length === 1) {
+          const invoiceId = Number((pendingIntents.rows[0] as any).id);
+          await reconcileReservationCreditInvoice(invoiceId);
+          await reconcileReservationCreditSettlement(invoiceId, true);
+          const completed = await db.execute(sql`
+            SELECT payment_id FROM sales_invoices WHERE id = ${invoiceId}
+          `);
+          const paymentId = String((completed.rows[0] as any)?.payment_id || "");
+          if (!paymentId) {
+            throw new FolioInvoiceValidationError("La liquidación CC se concilió sin vincular el pago del folio", 409);
+          }
+          return { payment: { id: paymentId }, invoiceId };
+        }
         const invoices = await db.execute(sql`
           SELECT * FROM sales_invoices
           WHERE reserva_id = ${reservationId}

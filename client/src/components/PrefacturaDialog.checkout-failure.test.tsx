@@ -523,20 +523,19 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     );
     const invoiceBody = JSON.parse(String((invoicePost?.[1] as RequestInit).body));
     expect(invoiceBody.sourceChargeAmounts).toEqual({ "charge-partial": 40 });
+    expect(invoiceBody.creditReapplications).toEqual([{
+      paymentId: "payment-original",
+      amount: 40,
+    }]);
     expect(partialFetchMock.mock.calls.some(([url, options]) =>
       String(url).includes("/api/payments/payment-original/invoice") &&
       !String(url).includes("/invoice-reapplication") &&
       String((options as RequestInit | undefined)?.method).toUpperCase() === "PATCH"
     )).toBe(false);
-    const reapplicationCall = partialFetchMock.mock.calls.find(([url, options]) =>
+    expect(partialFetchMock.mock.calls.some(([url, options]) =>
       String(url).includes("/api/payments/payment-original/invoice-reapplication") &&
       String((options as RequestInit | undefined)?.method).toUpperCase() === "PATCH"
-    );
-    expect(reapplicationCall).toBeDefined();
-    expect(JSON.parse(String((reapplicationCall?.[1] as RequestInit).body))).toMatchObject({
-      amount: 40,
-      invoiceData: { id: 800, tipoComprobante: "FB", numero: 87 },
-    });
+    )).toBe(false);
     expect(partialFetchMock.mock.calls.some(([url, options]) =>
       String(url).includes("/api/payments") &&
       String((options as RequestInit | undefined)?.method).toUpperCase() === "POST"

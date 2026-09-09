@@ -24,6 +24,12 @@ describe("horarios operativos del hotel", () => {
     expect(formatHotelTime(openedAt)).toBe("22:30");
   });
 
+  it("muestra en folios la hora argentina del instante reportado", () => {
+    expect(formatHotelTime("2026-09-09T23:00:00.000Z")).toBe("20:00");
+    expect(formatHotelDateTime("2026-09-09T19:21:04.345Z", { twoDigitYear: true }))
+      .toBe("09/09/26 16:21");
+  });
+
   it("usa el ciclo 00–23 durante la primera hora del día", () => {
     const midnight = "2026-09-04T03:00:00.000Z";
     const halfPastMidnight = "2026-09-04T03:30:00.000Z";

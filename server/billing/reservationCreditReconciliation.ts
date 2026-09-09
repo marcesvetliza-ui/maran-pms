@@ -113,7 +113,11 @@ export function prepareReservationCreditIntent(
         new Set(ordinaryAllocations.map(row => row.paymentId)).size !== ordinaryAllocations.length) {
       throw new Error("Selección de anticipos ordinarios inválida");
     }
-    if ((!allocations.length && !ordinaryAllocations.length) ||
+    const settlement = intent.settlement as { destination?: unknown; amount?: unknown } | undefined;
+    const hasSettlementWork = !!settlement &&
+      settlement.destination !== "none" &&
+      money(settlement.amount) > 0;
+    if ((!allocations.length && !ordinaryAllocations.length && !hasSettlementWork) ||
         allocations.some((row) => !row.paymentId || !Number.isFinite(row.amount) || row.amount <= 0) ||
         new Set(allocations.map((row) => row.paymentId)).size !== allocations.length) {
       throw new Error("Selección de crédito inválida");
