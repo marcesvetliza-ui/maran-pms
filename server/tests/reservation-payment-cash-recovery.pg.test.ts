@@ -159,18 +159,38 @@ runIfDatabaseIsConfigured("PostgreSQL real: historical reservation cash recovery
     }
   });
 
-  it("excludes and rejects non-cash methods and group payment allocations", async () => {
+  it("reports and repairs CC/voucher informational movements, without cash income or expense", async () => {
     const nonCash = await createPayment("cuenta_corriente");
+    const voucher = await createPayment("gift voucher");
+    const alreadyCash = await createPayment("cash");
     const groupAllocated = await createPayment("cash", `group-${randomUUID()}`);
     const shiftId = await createShift(randomUUID(), 951005);
+    await testPool!.query(
+      `INSERT INTO cash_movements
+        (id,shift_id,area,source_type,payment_method,amount,movement_type,payment_id)
+       VALUES ($1,$2,'reception','reservation','cash','125.00','income',$3)`,
+      [randomUUID(), shiftId, alreadyCash.paymentId],
+    );
     try {
       const report = await request("/api/cash/reservation-payments/missing-movements");
-      expect(report.body.map((row: any) => row.paymentId)).not.toContain(nonCash.paymentId);
+      expect(report.body.map((row: any) => row.paymentId)).toContain(nonCash.paymentId);
+      expect(report.body.map((row: any) => row.paymentId)).toContain(voucher.paymentId);
+      expect(report.body.map((row: any) => row.paymentId)).not.toContain(alreadyCash.paymentId);
       expect(report.body.map((row: any) => row.paymentId)).not.toContain(groupAllocated.paymentId);
-      expect((await request(`/api/cash/reservation-payments/${nonCash.paymentId}/repair-movement`, { method: "POST", body: "{}" })).response.status).toBe(409);
+      expect((await request(`/api/cash/reservation-payments/${nonCash.paymentId}/repair-movement`, { method: "POST", body: "{}" })).response.status).toBe(201);
+      expect((await request(`/api/cash/reservation-payments/${voucher.paymentId}/repair-movement`, { method: "POST", body: "{}" })).response.status).toBe(201);
+      const movements = await testPool!.query(
+        `SELECT movement_type, payment_method FROM cash_movements
+         WHERE payment_id = ANY($1::varchar[])`, [[nonCash.paymentId, voucher.paymentId]],
+      );
+      expect(movements.rows).toHaveLength(2);
+      expect(movements.rows.every((row: any) => row.movement_type === "informational")).toBe(true);
+      expect(movements.rows.map((row: any) => row.payment_method).sort()).toEqual(["current_account", "voucher"]);
       expect((await request(`/api/cash/reservation-payments/${groupAllocated.paymentId}/repair-movement`, { method: "POST", body: "{}" })).response.status).toBe(409);
     } finally {
       await cleanup(nonCash.paymentId, nonCash.reservationId, [shiftId]);
+      await cleanup(voucher.paymentId, voucher.reservationId, [shiftId]);
+      await cleanup(alreadyCash.paymentId, alreadyCash.reservationId, [shiftId]);
       await cleanup(groupAllocated.paymentId, groupAllocated.reservationId);
     }
   });

@@ -334,6 +334,7 @@ export interface IStorage {
   getPayments(reservationId: string): Promise<Payment[]>;
   getAllPaymentsIncludingAnulados(reservationId: string): Promise<Payment[]>;
   createPayment(payment: InsertPayment): Promise<Payment>;
+  voidReservationPaymentAtomic(paymentId: string, operator: string, reason: string): Promise<{ alreadyVoided: boolean; paymentId: string }>;
   createReservationPaymentWithLedger(input: {
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;

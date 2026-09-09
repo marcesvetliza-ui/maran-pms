@@ -29,6 +29,12 @@ suite("PostgreSQL: canonical reservation Cuenta Corriente settlement", () => {
        RETURNING id`,
       [id],
     );
+    const shiftId = `cc-shift-${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO cash_shifts (id, area, shift_number, opened_at, status)
+       VALUES ($1, 'reception', floor(random()*1000000)::int, NOW(), 'open')`,
+      [shiftId],
+    );
     const invoice = await pool.query("SELECT id FROM sales_invoices WHERE reserva_id=$1 ORDER BY id DESC LIMIT 1", [id]);
     const invoiceId = Number(invoice.rows[0].id);
     const input = {
@@ -60,12 +66,13 @@ suite("PostgreSQL: canonical reservation Cuenta Corriente settlement", () => {
       const cargos = await pool.query(
         "SELECT id FROM account_movements WHERE reservation_id=$1 AND reference=$2 AND type='cargo'", [id, reference],
       );
-      const cash = await pool.query("SELECT id FROM cash_movements WHERE payment_id=$1 OR source_id=$2", [first.id, id]);
+      const cash = await pool.query("SELECT id, movement_type, payment_method, amount FROM cash_movements WHERE payment_id=$1", [first.id]);
       const linked = await pool.query("SELECT payment_id FROM sales_invoices WHERE id=$1", [invoiceId]);
       expect(payments.rows).toHaveLength(1);
       expect(folio.rows).toHaveLength(1);
       expect(cargos.rows).toHaveLength(1);
-      expect(cash.rows).toHaveLength(0);
+      expect(cash.rows).toHaveLength(1);
+      expect(cash.rows[0]).toMatchObject({ movement_type: "informational", payment_method: "current_account", amount: "100000.00" });
       expect(linked.rows[0].payment_id).toBe(first.id);
     } finally {
       await pool.query("DELETE FROM account_movements WHERE reservation_id=$1", [id]);
@@ -74,6 +81,7 @@ suite("PostgreSQL: canonical reservation Cuenta Corriente settlement", () => {
       await pool.query("DELETE FROM payments WHERE reservation_id=$1", [id]);
       await pool.query("DELETE FROM sales_invoices WHERE id=$1", [invoiceId]);
       await pool.query("DELETE FROM reservations WHERE id=$1", [id]);
+      await pool.query("DELETE FROM cash_shifts WHERE id=$1", [shiftId]);
     }
   });
 });

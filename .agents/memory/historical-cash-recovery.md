@@ -14,3 +14,9 @@ When adding a recovered movement to a closed shift, update its expected income, 
 **Why:** The cash total captured at closing represents money physically counted. Adding the recovered ledger amount to it would double-count cash that may already have been present even though its movement was missing.
 
 **How to apply:** Preserve the closed summary's physical cash value while updating total expected income and non-cash method buckets in the same transaction as the movement and audit record.
+
+Cuenta Corriente and voucher settlements belong in the reception shift closure as informational, shift-bound events even though they are not physical cash.
+
+**Why:** Omitting them makes the shift report fail to reconcile closed rooms; treating them as income or expense corrupts expected cash and the counting difference.
+
+**How to apply:** Show and persist separate non-monetary totals and counts, exclude them from physical cash and `totalGeneral`, and link each event idempotently to its payment. Creation, close, repair, and void must lock and update the event, folio, account ledger, and any closed summary atomically.
