@@ -64,3 +64,4 @@
 - [Server timestamps in Argentina](server-argentina-timestamps.md) — visible server timestamps use one Buenos Aires formatter; plain YYYY-MM-DD values remain calendar dates.
 - [Read-only Caja E2E setup](read-only-cash-e2e.md) — bypass asynchronous POS/parte prompts deterministically so browser checks never open or close real shifts.
 - [Historical Caja recovery](historical-cash-recovery.md) — date-only payments auto-match only one Argentina-day shift; closed-shift repairs preserve physically counted cash.
+- [Existing CC advance invoicing](existing-cc-advance-invoicing.md) — invoice the locked payment itself; preserve exact CC ownership and never create a second settlement.

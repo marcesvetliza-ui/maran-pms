@@ -6,12 +6,14 @@ import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toA
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import {
   formatReservationInvoiceRef,
+  canInvoiceReservationPayment,
   getAvailableReservationAdvancePayments,
   getAvailableReservationAdvanceTotal,
   getNetReservationInvoicedTotal,
   isReservationCreditNoteAdjustment,
   parseReservationInvoiceRef,
 } from "@shared/reservationFolio";
+import { resolveReservationBillingTarget } from "@shared/reservationBillingTarget";
 import {
   CalendarCheck,
   CalendarRange,
@@ -2504,12 +2506,12 @@ function ReservationDetailDialog({
 
   const { data: companiesForCC = [] } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
-    enabled: paymentRows.some(r => r.method === "cuenta_corriente" && r.billingTarget === "company" && !reservation.companyId),
+    enabled: true,
   });
 
   const { data: agenciesForCC = [] } = useQuery<Agency[]>({
     queryKey: ["/api/agencies"],
-    enabled: paymentRows.some(r => r.method === "cuenta_corriente" && r.billingTarget === "agency" && !reservation.agencyId),
+    enabled: true,
   });
 
   // Always-loaded for billing fallback (guest's default company/agency)
@@ -4152,6 +4154,20 @@ function ReservationDetailDialog({
                           <Undo2 className="h-3 w-3 mr-1" />Re-vincular
                         </Button>
                       )}
+                      {canInvoiceReservationPayment(payment as any) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-xs px-2"
+                          onClick={() => {
+                            setInvoicingPaymentId(payment.id);
+                            setShowAdvanceFacturar(true);
+                          }}
+                          data-testid={`button-invoice-payment-${payment.id}`}
+                        >
+                          <FileText className="h-3 w-3 mr-1" />Emitir
+                        </Button>
+                      )}
                       {/* Bug J+T: payments with invoiceRef are locked (NC only), and voiding requires supervisor permission */}
                       {!isLocked && !isAnulado && !invoiceRef && canAnularPago && (
                       <Button 
@@ -4189,17 +4205,31 @@ function ReservationDetailDialog({
                 const guestFiscal: any = g;
                 const company = (reservation as any).company;
                 const agency = (reservation as any).agency;
-                const associatedRecipient = company
-                  ? { type: "company" as const, id: company.id, razonSocial: company.razonSocial || company.nombreFantasia || "", cuit: company.cuilCuit || "", condicionIva: company.condicionIva || "Consumidor Final", domicilio: company.domicilio || company.direccion || "" }
-                  : agency
-                    ? { type: "agency" as const, id: agency.id, razonSocial: agency.razonSocial || agency.nombreFantasia || "", cuit: agency.cuilCuit || "", condicionIva: agency.condicionIva || "Consumidor Final", domicilio: agency.domicilio || agency.direccion || "" }
-                    : null;
+                const target = resolveReservationBillingTarget(
+                  p,
+                  { companyId: reservation.companyId, agencyId: reservation.agencyId, guestId: reservation.guestId, guest: g },
+                );
+                const exactCompany: any = target?.type === "company"
+                  ? (target.id === company?.id ? company : companiesForCC.find((entry: any) => entry.id === target.id))
+                  : null;
+                const exactAgency: any = target?.type === "agency"
+                  ? (target.id === agency?.id ? agency : agenciesForCC.find((entry: any) => entry.id === target.id))
+                  : null;
+                const associatedRecipient = target?.type === "guest" && target.id === g?.id
+                    ? { type: "guest" as const, id: target.id, razonSocial: g ? `${g.lastName} ${g.firstName}` : "", cuit: guestFiscal?.cuit || guestFiscal?.cuilCuit || "", condicionIva: guestFiscal?.vatCondition || guestFiscal?.condicionIva || "Consumidor Final", domicilio: guestFiscal?.direccion || guestFiscal?.domicilio || "" }
+                    : target?.type === "agency" && exactAgency
+                      ? { type: "agency" as const, id: exactAgency.id, razonSocial: exactAgency.razonSocial || exactAgency.nombreFantasia || "", cuit: exactAgency.cuilCuit || "", condicionIva: exactAgency.condicionIva || "Consumidor Final", domicilio: exactAgency.domicilio || exactAgency.direccion || "" }
+                      : target?.type === "company" && exactCompany
+                        ? { type: "company" as const, id: exactCompany.id, razonSocial: exactCompany.razonSocial || exactCompany.nombreFantasia || "", cuit: exactCompany.cuilCuit || "", condicionIva: exactCompany.condicionIva || "Consumidor Final", domicilio: exactCompany.domicilio || exactCompany.direccion || "" }
+                        : null;
                 const advanceInitial: EmitirFacturaInitialValues = {
                   razonSocial: associatedRecipient?.razonSocial || (g ? `${g.lastName} ${g.firstName}` : ""),
                   cuit: associatedRecipient?.cuit || guestFiscal?.cuit || guestFiscal?.cuilCuit || undefined,
                   dni: g?.documentNumber || undefined,
                   documentType: g?.documentType || "DNI",
                   paymentMethod: p?.method || "efectivo",
+                  ccEntityType: target?.type,
+                  ccEntityId: target?.id,
                   condicionIva: associatedRecipient?.condicionIva || guestFiscal?.vatCondition || guestFiscal?.condicionIva || "Consumidor Final",
                   domicilio: associatedRecipient?.domicilio || guestFiscal?.direccion || guestFiscal?.domicilio || "",
                   items: p ? [{ descripcion: `Anticipo — Reserva ${reservation.reservationCode}`, precioUnitario: parseFloat(p.amount) }] : [],
@@ -4215,7 +4245,12 @@ function ReservationDetailDialog({
                       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setInvoicingPaymentId(null)}>Omitir</Button>
                       <Button size="sm" className="h-7 text-xs" onClick={() => setShowAdvanceFacturar(true)}>Emitir</Button>
                     </div>
-                    {showAdvanceFacturar && (
+                    {showAdvanceFacturar && (!target || !associatedRecipient) && (
+                      <p className="text-xs text-destructive" data-testid="advance-invoice-recipient-error">
+                        No se pudo cargar la ficha fiscal exacta del receptor. Verifique la entidad antes de facturar.
+                      </p>
+                    )}
+                    {showAdvanceFacturar && target && associatedRecipient && (
                       <EmitirFacturaDialog
                         open={showAdvanceFacturar}
                         onClose={() => setShowAdvanceFacturar(false)}
@@ -4227,8 +4262,8 @@ function ReservationDetailDialog({
                         hideAddItems
                         lockItems
                         skipReview
-                        billingEntityType={associatedRecipient?.type}
-                        billingEntityId={associatedRecipient?.id}
+                        billingEntityType={target?.type}
+                        billingEntityId={target?.id}
                         recipientProfile={associatedRecipient
                           ? { type: associatedRecipient.type, id: associatedRecipient.id }
                           : g?.id

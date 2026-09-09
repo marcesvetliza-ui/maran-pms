@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { getReservationFinancialSummary, getReservationRateAuditEvent } from "./reservationFolio";
+import { canInvoiceReservationPayment, getReservationFinancialSummary, getReservationRateAuditEvent } from "./reservationFolio";
+
+describe("reservation payment invoice eligibility", () => {
+  it("allows only active payments without fiscal recovery/link state", () => {
+    expect(canInvoiceReservationPayment({ status: "active" })).toBe(true);
+    expect(canInvoiceReservationPayment({ status: "anulado" })).toBe(false);
+    expect(canInvoiceReservationPayment({ status: "active", invoiceRef: { id: 1 } })).toBe(false);
+    expect(canInvoiceReservationPayment({ status: "active", invoiceLinkFailed: true })).toBe(false);
+    expect(canInvoiceReservationPayment({ status: "active", pendingAuthorization: { id: 2 } })).toBe(false);
+  });
+});
 
 describe("reservation folio financial summary", () => {
   it("keeps services and historical cash intact after a full credit note", () => {

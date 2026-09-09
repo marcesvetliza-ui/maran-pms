@@ -27,10 +27,20 @@ export type ReservationPaymentLike = {
   status?: string | null;
   invoiceRef?: unknown;
   invoice_ref?: unknown;
+  pendingInvoiceLink?: unknown;
   invoiceLinkFailed?: boolean | null;
+  pendingAuthorization?: unknown;
   invoice_link_failed?: boolean | null;
   method?: string | null;
 };
+
+export function canInvoiceReservationPayment(payment: ReservationPaymentLike): boolean {
+  const status = String(payment.status || "active");
+  return status === "active"
+    && !parseReservationInvoiceRef(payment.invoiceRef ?? payment.invoice_ref ?? payment.pendingInvoiceLink)
+    && !payment.invoiceLinkFailed
+    && !payment.pendingAuthorization;
+}
 
 export type ReservationRateAuditEvent = {
   tipo: "tarifa";

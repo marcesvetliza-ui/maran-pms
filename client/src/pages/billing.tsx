@@ -572,6 +572,8 @@ export type EmitirFacturaInitialValues = {
   condicionIva?: string;
   domicilio?: string;
   items?: Array<{ descripcion: string; precioUnitario: number }>;
+  ccEntityType?: "guest" | "company" | "agency";
+  ccEntityId?: string;
 };
 
 type RecipientProfile = {
@@ -646,7 +648,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   /** When true, the pre-filled item cannot be modified or removed. */
   lockItems?: boolean;
   /** Pre-set billing entity — its address will be updated if the user changes domicilio */
-  billingEntityType?: "company" | "agency";
+  billingEntityType?: "guest" | "company" | "agency";
   /** ID of the pre-set billing entity */
   billingEntityId?: string;
   /** Reservation profile whose fiscal data was pre-filled. */
@@ -666,7 +668,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
-  const [ccEntityType, setCcEntityType] = useState<"company" | "agency">("company");
+  const [ccEntityType, setCcEntityType] = useState<"guest" | "company" | "agency">("company");
   const [ccEntityId, setCcEntityId] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
@@ -677,7 +679,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
   // Track the billing entity so we can update its address if the user edits domicilio
-  const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "company" | "agency"; id: string } | null>(null);
+  const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
   const originalDomicilioRef = useRef<string>("");
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
   const [entitySearch, setEntitySearch] = useState("");
@@ -751,6 +753,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       if (initialValues.cuit !== undefined) setCuit(initialValues.cuit);
       if (initialValues.dni !== undefined) setDni(initialValues.dni);
       if (initialValues.paymentMethod) setCashFormaPago(initialValues.paymentMethod);
+      if (initialValues.ccEntityType) setCcEntityType(initialValues.ccEntityType);
+      if (initialValues.ccEntityId) setCcEntityId(initialValues.ccEntityId);
       setGuestFirstName(recipientProfile?.firstName || "");
       setGuestLastName(recipientProfile?.lastName || "");
       const initDom = initialValues.domicilio ?? "";
@@ -854,8 +858,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
     });
-    if (cashArea && cashFormaPago === "cuenta_corriente" && !ccEntityId) {
-      errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : "una agencia"}`;
+    if (cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
+      errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : ccEntityType === "agency" ? "una agencia" : "un huésped"}`;
     }
     return errs;
   }
@@ -1037,10 +1041,6 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         setEmittedInvoiceData(data);
         setLinkPending(true);
         try {
-          if (showPaymentMethod) {
-            const paymentUpdate = await apiRequest("PATCH", `/api/payments/${paymentId}`, { method: cashFormaPago });
-            if (!paymentUpdate.ok) throw new Error("No se pudo actualizar la forma de pago");
-          }
           const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData: data });
           setLinkPending(false);
           if (linkRes.ok) {
@@ -1383,14 +1383,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         ...(groupFolioContext ? { folioContext: groupFolioContext } : {}),
       } : {}),
       ...(spaAccountId ? { spaAccountId } : {}),
-      ...((cashArea || showPaymentMethod)
+      ...((cashArea || showPaymentMethod || cashFormaPago === "cuenta_corriente")
         ? {
             ...(cashArea ? { cashArea } : {}),
             cashFormaPago,
-            ...(cashArea ? {
+              ...(cashArea ? {
               cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
-              ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
             } : {}),
+              ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
           }
         : {}),
     });
@@ -1701,7 +1701,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         {(cashArea || showPaymentMethod) && (
           <div className="space-y-1">
             <Label>Forma de pago</Label>
-            <Select value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
+            <Select disabled={!!paymentId} value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
               <SelectTrigger data-testid="select-cash-forma-pago"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="efectivo">Efectivo</SelectItem>
@@ -1712,16 +1712,16 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                     {allowCuentaCorriente && <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>}
               </SelectContent>
             </Select>
-            {cashArea && cashFormaPago === "cuenta_corriente" && (
+            {cashFormaPago === "cuenta_corriente" && (
               <div className="grid grid-cols-2 gap-2 pt-1">
-                <Select value={ccEntityType} onValueChange={v => { setCcEntityType(v as "company" | "agency"); setCcEntityId(""); }}>
+                <Select disabled={!!paymentId} value={ccEntityType} onValueChange={v => { setCcEntityType(v as "guest" | "company" | "agency"); setCcEntityId(""); }}>
                   <SelectTrigger data-testid="select-cc-entity-type"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="company">Empresa</SelectItem>
                     <SelectItem value="agency">Agencia</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={ccEntityId} onValueChange={setCcEntityId}>
+                <Select disabled={!!paymentId} value={ccEntityId} onValueChange={setCcEntityId}>
                   <SelectTrigger data-testid="select-cc-entity-id"><SelectValue placeholder={ccEntityType === "company" ? "Seleccionar empresa..." : "Seleccionar agencia..."} /></SelectTrigger>
                   <SelectContent>
                     {(ccEntityType === "company" ? companies : agencies).map((e: any) => (
@@ -1870,13 +1870,13 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
-                     <Input disabled={lockItems} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
+                      <Input data-testid={`item-description-${idx}`} disabled={false} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
                   </div>
-                   <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input disabled={lockItems} type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
+                   <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input data-testid={`item-quantity-${idx}`} disabled={lockItems} type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
                   <div className="col-span-2 space-y-1">
                     <Label className="text-xs">P. Unit.</Label>
-                     <Input disabled={lockItems} type="number" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
+                     <Input data-testid={`item-price-${idx}`} disabled={lockItems} type="number" step="0.01" value={item.precioUnitario || ""} onChange={e => { updateItem(idx, "precioUnitario", parseFloat(e.target.value) || 0); if (fieldErrors[`precio_${idx}`]) setFieldErrors(p => ({ ...p, [`precio_${idx}`]: "" })); }} placeholder="0.00" className={fieldErrors[`precio_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`precio_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`precio_${idx}`]}</p>}
                   </div>
                   <div className="col-span-2 space-y-1">
@@ -1885,7 +1885,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                       <div className="h-9 flex items-center text-xs text-muted-foreground border rounded-md px-2 bg-muted/30">Sin IVA</div>
                     ) : (
                        <Select disabled={lockItems} value={item.alicuotaIva} onValueChange={v => updateItem(idx, "alicuotaIva", v)}>
-                        <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                         <SelectTrigger className="h-9" data-testid={`item-iva-${idx}`}><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="21">21%</SelectItem>
                           <SelectItem value="10.5">10.5%</SelectItem>
