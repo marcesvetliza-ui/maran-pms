@@ -2247,11 +2247,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN group_payment_intent jsonb;
     `)));
     return db.execute(sql`
-      ${sql.raw(incrementalIndexSql("salesInvoicesGroupId"))}
+      ${sql.raw(incrementalIndexSql("salesInvoicesGroupId"))};
       ALTER TABLE sales_invoices
         DROP CONSTRAINT IF EXISTS sales_invoices_group_payment_id_unique;
       DROP INDEX IF EXISTS sales_invoices_group_payment_id_unique;
-      ${sql.raw(incrementalIndexSql("salesInvoicesGroupPaymentId"))}
+      ${sql.raw(incrementalIndexSql("salesInvoicesGroupPaymentId"))};
     `);
   });
 
