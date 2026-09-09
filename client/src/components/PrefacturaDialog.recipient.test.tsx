@@ -82,6 +82,10 @@ function buildFetchMock() {
     if (target.includes("/api/payments") && method === "POST") {
       return Response.json({ id: "payment-partial-test" }, { status: 201 });
     }
+    if (target.includes(`/api/billing/reservations/${reservation.id}/operations/`) ||
+        target.includes(`/api/billing/reservations/${reservation.id}/legacy-cc/recover`)) {
+      return Response.json({ error: "No hay liquidación pendiente" }, { status: 404 });
+    }
     if (target.includes("/folio")) return Response.json(folio);
     if (target.includes("/api/billing/config")) return Response.json({ puntoVenta: 1, arcaAmbiente: "ficticio" });
     if (target.includes("/api/companies")) return Response.json([reservation.company]);
