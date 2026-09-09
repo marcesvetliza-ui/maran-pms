@@ -113,7 +113,7 @@ import {
   type HospitalityAlert, type InsertHospitalityAlert,
   type CashRegisterConfig, type InsertCashRegisterConfig,
   type CashShift, type InsertCashShift,
-  type CashMovement, type InsertCashMovement,
+  type CashMovement, type InsertCashMovement, type OrphanedCashPaymentLink,
   type CashClosingSummary, type InsertCashClosingSummary,
   type AccountMovement, type InsertAccountMovement, type AccountEntityType,
   type OrderStatus,
@@ -6945,6 +6945,50 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(cashMovements)
       .where(eq(cashMovements.shiftId, shiftId))
       .orderBy(desc(cashMovements.createdAt));
+  }
+
+  async getOrphanedCashPaymentLinks(): Promise<OrphanedCashPaymentLink[]> {
+    const result = await db.execute(sql`
+      SELECT
+        cm.id AS "movementId",
+        cm.payment_id AS "paymentId",
+        CASE
+          WHEN cm.source_type = 'reservation' THEN 'reservation'
+          WHEN cm.source_type = 'group_payment' THEN 'group'
+          WHEN cm.source_type IN ('spa_account', 'comprobante') AND cm.area = 'spa' THEN 'spa'
+        END AS "paymentType",
+        cm.source_type AS "sourceType",
+        cm.source_id AS "sourceId",
+        cm.source_label AS "sourceLabel",
+        cm.shift_id AS "shiftId",
+        cm.area,
+        cm.amount,
+        cm.payment_method AS "paymentMethod",
+        cm.movement_type AS "movementType",
+        cm.anulado,
+        cm.created_at AS "createdAt"
+      FROM cash_movements cm
+      WHERE cm.payment_id IS NOT NULL
+        AND (
+          (
+            cm.source_type = 'reservation'
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.id = cm.payment_id)
+          )
+          OR
+          (
+            cm.source_type = 'group_payment'
+            AND NOT EXISTS (SELECT 1 FROM group_payments gp WHERE gp.id = cm.payment_id)
+          )
+          OR
+          (
+            cm.area = 'spa'
+            AND cm.source_type IN ('spa_account', 'comprobante')
+            AND NOT EXISTS (SELECT 1 FROM spa_payments sp WHERE sp.id = cm.payment_id)
+          )
+        )
+      ORDER BY cm.created_at ASC NULLS FIRST, cm.id ASC
+    `);
+    return result.rows as OrphanedCashPaymentLink[];
   }
 
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {

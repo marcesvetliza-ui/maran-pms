@@ -2209,6 +2209,14 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/cash/orphaned-payment-links", requireRole(["admin", "manager"]), async (_req, res) => {
+    try {
+      res.json(await storage.getOrphanedCashPaymentLinks());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error al auditar vínculos de pagos en Caja" });
+    }
+  });
+
   // Historical reservation payments that were committed before their cash
   // movement. This is deliberately restricted to a financial supervisor:
   // repairing a closed shift changes its historical report.

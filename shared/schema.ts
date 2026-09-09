@@ -2172,6 +2172,22 @@ export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
 export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
 export type CashMovement = typeof cashMovements.$inferSelect;
 
+export type OrphanedCashPaymentLink = {
+  movementId: string;
+  paymentId: string;
+  paymentType: "reservation" | "group" | "spa";
+  sourceType: "reservation" | "group_payment" | "spa_account" | "comprobante";
+  sourceId: string | null;
+  sourceLabel: string | null;
+  shiftId: string | null;
+  area: string;
+  amount: string;
+  paymentMethod: string;
+  movementType: string;
+  anulado: boolean;
+  createdAt: Date | null;
+};
+
 export const cashClosingSummaries = pgTable("cash_closing_summaries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   shiftId: varchar("shift_id").notNull(),

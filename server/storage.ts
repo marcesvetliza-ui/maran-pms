@@ -211,6 +211,7 @@ import {
   type AccountEntityType,
   type AccountRetention,
   type AccountMovementAllocation,
+  type OrphanedCashPaymentLink,
   type GiftVoucher,
   type InsertGiftVoucher,
 } from "@shared/schema";
@@ -831,6 +832,7 @@ export interface IStorage {
   getAutocreadoShifts(): Promise<any[]>;
   getShiftDetail(shiftId: string): Promise<any>;
   getCashMovements(shiftId: string): Promise<any[]>;
+  getOrphanedCashPaymentLinks(): Promise<OrphanedCashPaymentLink[]>;
   createCashMovement(data: any): Promise<any>;
   registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<any>;
   getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;
