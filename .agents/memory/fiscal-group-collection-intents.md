@@ -26,3 +26,9 @@ Reservation credit released by a partial/full NC uses the same saga: persist the
 **Why:** ARCA cannot participate in the local database transaction. A failure after CAE must not free the same credit/source for another invoice, lose the uncovered Caja/CC amount, or contact ARCA again on retry.
 
 **How to apply:** Treat recipient, items, source mapping, amounts, and original invoice identity as immutable. Keep reconciliation status/error outside snapshot equality. Guard every payment mutation while an unresolved intent references it.
+
+For reservation Cuenta Corriente invoices, persist specific ordinary advance allocations before ARCA and reconcile those allocations server-side; never let the browser consume advances after issuance. Only the uncovered remainder becomes a Cuenta Corriente payment/cargo, and it never creates Caja.
+
+**Why:** Aggregate-only advance amounts or post-invoice browser linking allow response loss/concurrency to reuse an advance, overstate debt, or leave checkout blocked even though the account cargo exists.
+
+**How to apply:** Reserve payment IDs with the draft, reconcile advance links plus the uncovered settlement idempotently, and keep the operation recoverable until checkout succeeds. Historical cargo-only repairs must adopt one exact, unambiguous cargo and claim it atomically.

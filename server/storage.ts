@@ -339,6 +339,18 @@ export interface IStorage {
     sourceLabel: string;
     registeredBy?: string;
     receiptType?: string;
+    accountSettlement?: {
+      entityType: "company" | "agency" | "guest";
+      entityId: string;
+      description: string;
+      reference?: string;
+      createdBy?: string | null;
+      invoiceId?: number;
+      existingCargoId?: string;
+      advancePaymentIds?: string[];
+      adoptedCanonicalReference?: string;
+      advanceInvoiceRef?: string;
+    };
   }): Promise<Payment>;
   updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined>;
   deletePayment(id: string): Promise<boolean>;

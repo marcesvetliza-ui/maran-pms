@@ -11,6 +11,7 @@ export type ReservationCreditIntent = {
   operationId: string;
   invoiceTotal: number;
   payments: ReservationCreditAllocation[];
+  ordinaryAdvances?: ReservationCreditAllocation[];
   status: "pending" | "completed";
   [key: string]: unknown;
 };
@@ -19,6 +20,23 @@ type Transaction = any;
 
 function money(value: unknown): number {
   return Number(Number(value).toFixed(2));
+}
+
+export function findUniqueWholeAdvanceAllocation<T extends { amount?: unknown }>(
+  advances: T[],
+  requiredAmount: number,
+  maxCandidates = 20,
+): T[] | null {
+  if (advances.length > maxCandidates) throw new Error("Demasiados anticipos para una asignación automática segura");
+  const target = Math.round(requiredAmount * 100);
+  const matches: T[][] = [];
+  for (let mask = 0; mask < (1 << advances.length) && matches.length < 2; mask++) {
+    const selected = advances.filter((_row, index) => mask & (1 << index));
+    const cents = selected.reduce((sum, row) => sum + Math.round(Number(row.amount || 0) * 100), 0);
+    if (cents === target) matches.push(selected);
+  }
+  if (matches.length > 1) throw new Error("La asignación de anticipos es ambigua");
+  return matches.length === 1 ? matches[0] : null;
 }
 
 const NUMERIC_SNAPSHOT_FIELDS = new Set([
@@ -36,7 +54,10 @@ export function normalizeCreditSnapshot(value: any, field = ""): any {
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.keys(value).filter((key) => key !== "status" && key !== "operationId" && key !== "error").sort()
+      Object.keys(value).filter((key) =>
+        key !== "status" && key !== "operationId" && key !== "error" &&
+        !(key === "ordinaryAdvanceAmount" && money(value[key]) === 0)
+      ).sort()
         .map((key) => [key, normalizeCreditSnapshot(value[key], key)]),
     );
   }
@@ -85,13 +106,20 @@ export function prepareReservationCreditIntent(
     const allocations = intent.payments
       .map((row) => ({ paymentId: String(row.paymentId), amount: money(row.amount) }))
       .sort((a, b) => a.paymentId.localeCompare(b.paymentId));
-    if (!allocations.length ||
+    const ordinaryAllocations = (intent.ordinaryAdvances || [])
+      .map((row) => ({ paymentId: String(row.paymentId), amount: money(row.amount) }))
+      .sort((a, b) => a.paymentId.localeCompare(b.paymentId));
+    if (ordinaryAllocations.some(row => !row.paymentId || row.amount <= 0) ||
+        new Set(ordinaryAllocations.map(row => row.paymentId)).size !== ordinaryAllocations.length) {
+      throw new Error("Selección de anticipos ordinarios inválida");
+    }
+    if ((!allocations.length && !ordinaryAllocations.length) ||
         allocations.some((row) => !row.paymentId || !Number.isFinite(row.amount) || row.amount <= 0) ||
         new Set(allocations.map((row) => row.paymentId)).size !== allocations.length) {
       throw new Error("Selección de crédito inválida");
     }
     const draftTotal = money(draft.montoTotal);
-    const aggregate = money(allocations.reduce((sum, row) => sum + row.amount, 0));
+    const aggregate = money([...allocations, ...ordinaryAllocations].reduce((sum, row) => sum + row.amount, 0));
     if (!Number.isFinite(draftTotal) || aggregate > draftTotal) {
       throw new Error("El crédito supera el total persistido de la factura");
     }
@@ -112,6 +140,28 @@ export function prepareReservationCreditIntent(
         throw new Error("El pago no conserva una factura original válida con crédito liberado");
       }
       locked.push(payment);
+    }
+    for (const allocation of ordinaryAllocations) {
+      const result = await tx.execute(sql`SELECT * FROM payments WHERE id = ${allocation.paymentId} FOR UPDATE`);
+      const payment = result.rows[0] as any;
+      if (!payment || String(payment.reservation_id) !== reservationId ||
+          ![null, "active"].includes(payment.status) || payment.invoice_ref ||
+          money(payment.amount) !== allocation.amount) {
+        throw new Error("Un anticipo ordinario ya no está disponible");
+      }
+      const held = await tx.execute(sql`
+        SELECT 1 FROM sales_invoices
+        WHERE reserva_id = ${reservationId}
+          AND estado IN ('autorizacion_pendiente','emitida')
+          AND reconciliation_status IN ('pendiente','error','requiere_revision')
+          AND credit_reapplication_intent->>'operationId' <> ${intent.operationId}
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(COALESCE(credit_reapplication_intent->'ordinaryAdvances','[]'::jsonb)) a
+            WHERE a->>'paymentId' = ${allocation.paymentId}
+          )
+        LIMIT 1
+      `);
+      if (held.rows.length) throw new Error("Un anticipo ordinario ya está reservado por otra factura");
     }
 
     const unresolved = await tx.execute(sql`
@@ -178,9 +228,6 @@ export async function reconcileReservationCreditInvoice(invoiceId: number): Prom
       const allocations = intent.payments
         .map((row) => ({ paymentId: String(row.paymentId), amount: money(row.amount) }))
         .sort((a, b) => a.paymentId.localeCompare(b.paymentId));
-      if (money(allocations.reduce((sum, row) => sum + row.amount, 0)) > money(invoice.monto_total)) {
-        throw new Error("El crédito conciliado supera el total emitido");
-      }
       const lockedPayments: any[] = [];
       for (const allocation of allocations) {
         const result = await tx.execute(sql`SELECT * FROM payments WHERE id = ${allocation.paymentId} FOR UPDATE`);
@@ -191,6 +238,37 @@ export async function reconcileReservationCreditInvoice(invoiceId: number): Prom
           throw new Error("Un pago del intento ya no está disponible");
         }
         lockedPayments.push(payment);
+      }
+      const ordinaryAllocations = (intent.ordinaryAdvances || [])
+        .map(row => ({ paymentId: String(row.paymentId), amount: money(row.amount) }))
+        .sort((a, b) => a.paymentId.localeCompare(b.paymentId));
+      if (money([...allocations, ...ordinaryAllocations].reduce((sum, row) => sum + row.amount, 0)) >
+          money(invoice.monto_total)) {
+        throw new Error("Las aplicaciones conciliadas superan el total emitido");
+      }
+      for (const allocation of ordinaryAllocations) {
+        const result = await tx.execute(sql`SELECT * FROM payments WHERE id = ${allocation.paymentId} FOR UPDATE`);
+        const payment = result.rows[0] as any;
+        const existingRef = parseReservationInvoiceRef(payment?.invoice_ref);
+        if (!payment || String(payment.reservation_id) !== String(invoice.reserva_id) ||
+            ![null, "active"].includes(payment.status) ||
+            money(payment.amount) !== allocation.amount ||
+            (existingRef && Number(existingRef.id) !== invoiceId)) {
+          throw new Error("Un anticipo ordinario reservado ya no está disponible");
+        }
+        if (!existingRef) {
+          await tx.execute(sql`
+            UPDATE payments
+            SET invoice_ref = ${JSON.stringify({
+              id: invoiceId,
+              tipoComprobante: invoice.tipo_comprobante,
+              puntoVenta: invoice.punto_venta,
+              numero: invoice.numero,
+              total: invoice.monto_total,
+            })}, invoice_link_failed = false
+            WHERE id = ${allocation.paymentId}
+          `);
+        }
       }
       const sourceIds = [...new Set(lockedPayments.flatMap(invoiceIdsForPayment))];
       const sourceRows = sourceIds.length
@@ -260,7 +338,10 @@ export async function assertPaymentHasNoUnresolvedCreditHold(paymentId: string):
       AND reconciliation_status IN ('pendiente', 'error', 'requiere_revision')
       AND credit_reapplication_intent IS NOT NULL
       AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(credit_reapplication_intent->'payments') allocation
+        SELECT 1 FROM jsonb_array_elements(
+          COALESCE(credit_reapplication_intent->'payments','[]'::jsonb) ||
+          COALESCE(credit_reapplication_intent->'ordinaryAdvances','[]'::jsonb)
+        ) allocation
         WHERE allocation->>'paymentId' = ${paymentId}
       )
     LIMIT 1

@@ -319,6 +319,9 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     // solo llevan una numeración local propia por tipo + punto de venta.
     if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
     modoFicticio = false;
+    if (recoverableBeforeAuthorization && !pendingInvoice) {
+      await insertPendingInvoice();
+    }
   } else if (ambiente === "homologacion" || ambiente === "produccion") {
     // En producción/homologación: obtener token primero para poder
     // consultar el último número directamente de AFIP

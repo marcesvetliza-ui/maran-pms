@@ -89,6 +89,7 @@ vi.mock("../db-storage", () => ({
       nights: 1,
     })),
     getCharges: vi.fn(async () => state.charges),
+    getPayments: vi.fn(async () => []),
     createAccountMovement: vi.fn(),
     registerCashMovement: vi.fn(),
   },
@@ -177,6 +178,20 @@ afterEach(() => {
 });
 
 describe("folio invoice source guard", () => {
+  it("returns the recovery no-op contract for a brand-new operation under the reservation lock", async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/billing/reservations/reservation-1/operations/operation-12345678901234567890/recover`,
+        { method: "POST" },
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        error: "No existe una operación persistida para recuperar",
+      });
+      expect(state.releaseCalls).toBe(1);
+    });
+  });
+
   it("allows only one of two simultaneous invoices to consume the same charge", async () => {
     await withServer(async (baseUrl) => {
       const [first, second] = await Promise.all([

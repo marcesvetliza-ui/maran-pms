@@ -3,11 +3,24 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../db", () => ({ db: {} }));
 import {
   equalCreditSnapshots,
+  findUniqueWholeAdvanceAllocation,
   getUncoveredReservationSettlement,
   prepareReservationCreditIntent,
 } from "../billing/reservationCreditReconciliation";
 
 describe("reservation credit settlement", () => {
+  it("finds the single exact 44000 legacy advance allocation in cents", () => {
+    const fortyFour = { id: "44", amount: "44000.00" };
+    expect(findUniqueWholeAdvanceAllocation([
+      fortyFour, { id: "10", amount: "10000.00" },
+    ], 44000)).toEqual([fortyFour]);
+  });
+
+  it("refuses ambiguous whole-advance combinations", () => {
+    expect(() => findUniqueWholeAdvanceAllocation([
+      { amount: 44000 }, { amount: 44000 },
+    ], 44000)).toThrow(/ambigua/i);
+  });
   it("does not create a new settlement amount when credit fully covers the invoice", () => {
     expect(getUncoveredReservationSettlement(100, [{ amount: 60 }, { amount: 40 }])).toBe(0);
   });
@@ -28,6 +41,13 @@ describe("reservation credit settlement", () => {
         payments: [{ amount: "10.00", paymentId: "a" }, { amount: 20, paymentId: "b" }],
         settlement: { amount: "0.00", destination: "none" },
       },
+    )).toBe(true);
+  });
+
+  it("treats a missing ordinary-advance field as legacy zero", () => {
+    expect(equalCreditSnapshots(
+      { payments: [], settlement: { amount: 100 }, ordinaryAdvanceAmount: 0 },
+      { payments: [], settlement: { amount: 100 } },
     )).toBe(true);
   });
 
@@ -52,5 +72,51 @@ describe("reservation credit settlement", () => {
       }),
     };
     await expect(hook(tx, { montoTotal: "100.00" })).rejects.toThrow(/factura original válida/i);
+  });
+
+  it("persists a specific whole uninvoiced ordinary advance in the durable draft", async () => {
+    const hook = prepareReservationCreditIntent("reservation-1", {
+      operationId: "ordinary-12345678901234567890",
+      invoiceTotal: 144000,
+      payments: [],
+      ordinaryAdvances: [{ paymentId: "advance-44", amount: 44000 }],
+      status: "pending",
+    });
+    let call = 0;
+    const tx = {
+      execute: async () => {
+        call++;
+        if (call === 1) return { rows: [{
+          id: "advance-44", reservation_id: "reservation-1", method: "efectivo",
+          status: "active", amount: "44000.00", invoice_ref: null,
+        }] };
+        return { rows: [] };
+      },
+    };
+    const draft: any = { montoTotal: "144000.00" };
+    await hook(tx, draft);
+    expect(draft.creditReapplicationIntent.ordinaryAdvances).toEqual([
+      { paymentId: "advance-44", amount: 44000 },
+    ]);
+  });
+
+  it("rejects an ordinary advance reserved by another unresolved operation", async () => {
+    const hook = prepareReservationCreditIntent("reservation-1", {
+      operationId: "ordinary-22345678901234567890",
+      invoiceTotal: 44000,
+      payments: [],
+      ordinaryAdvances: [{ paymentId: "advance-44", amount: 44000 }],
+      status: "pending",
+    });
+    let call = 0;
+    const tx = {
+      execute: async () => {
+        call++;
+        return call === 1
+          ? { rows: [{ id: "advance-44", reservation_id: "reservation-1", method: "efectivo", status: "active", amount: "44000.00", invoice_ref: null }] }
+          : { rows: [{}] };
+      },
+    };
+    await expect(hook(tx, { montoTotal: "44000.00" })).rejects.toThrow(/reservado por otra factura/i);
   });
 });
