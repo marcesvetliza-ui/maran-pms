@@ -15,4 +15,16 @@ GitHub's own edge blocks any API request body (REST Git Data blobs/contents, and
 
 **How to apply:** When the local repo's history has diverged from `origin/main` (a previous squash-push landed as a single foreign commit with no shared ancestry) and a file to publish contains `<script`, do not use the OAuth connector's `proxyFetch`/Git Data API for that file — it will 403 regardless of chunking or escaping. Instead: `git fetch` the real remote head with a working token, `git worktree add` a temp dir at that commit, copy over only the intended changed/added source paths (never `git add -A` — see the workspace-uploads-git memory on excluding `attached_assets/` and built `dist/` churn), commit with that remote commit as the sole parent, then `git push <worktree-head>:main` with the working token. This is a real git-wire-protocol push (pack data, not JSON), so the content block does not apply, and it stays a clean fast-forward since the new commit's parent is the exact observed remote head.
 
+Do not build new API commits on a remote base until large-file blob sizes and prefixes have been audited against a known-good checkout.
+
+**Why:** A damaged remote base contained only suffixes of several large source files. Small API commits preserved those truncations, producing a sequence of unrelated-looking build errors.
+
+**How to apply:** Prefer the git wire protocol above. If the API is unavoidable, compare the complete recursive remote tree against real local blobs first; investigate large size drops before writing another commit.
+
 For large repository tree comparisons, do not parse a long `git ls-tree` result directly: pass `-c core.quotepath=false` or non-ASCII filenames come back octal-escaped and produce false added/removed diffs against the API tree (which returns literal UTF-8). Write both sides to `/tmp` and diff with a small script rather than trusting raw shell output for either side.
+
+Do not pass Git paths or blob payloads through the durable shell callback's text output when creating Git Data API commits.
+
+**Why:** Its line endings and encoded output corrupted remote path names and file contents while the API still accepted the commit, causing CI-only module and JSON parse failures.
+
+**How to apply:** Prefer git wire protocol. If the API is unavoidable, read workspace files as raw bytes inside one impure function, upload those bytes as Base64, then fetch and compare every remote blob SHA against local Git before declaring success.

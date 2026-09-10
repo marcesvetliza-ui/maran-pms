@@ -1,5 +1,5 @@
 import { Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets } from "lucide-react";
-import type { PlanningCellStatus, ReservationSource } from "@shared/schema";
+import type { BedConfig, PlanningCellStatus, ReservationSource } from "@shared/schema";
 import { getLocalToday } from "@/lib/utils";
 
 export function formatDate(dateStr: string) {
@@ -16,6 +16,19 @@ export function formatDate(dateStr: string) {
 export function formatDateReadable(dateStr: string) {
   const date = new Date(dateStr + "T12:00:00");
   return date.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+}
+
+export function getPlanningStatusForDate(
+  roomOccupancy: readonly PlanningCellStatus[],
+  dayIndexMap: Readonly<Record<string, number>>,
+  referenceDate: string,
+): PlanningCellStatus | undefined {
+  const dayIndex = dayIndexMap[referenceDate];
+  return dayIndex === undefined ? undefined : roomOccupancy[dayIndex];
+}
+
+export function isPlanningRoomOccupied(status: PlanningCellStatus | undefined): boolean {
+  return status !== undefined && !["available", "dirty", "cleaning", "inspected"].includes(status);
 }
 
 export const PLANNING_COLORS: Record<PlanningCellStatus, { bg: string; text: string; label: string; border: string }> = {
@@ -132,14 +145,22 @@ export const featureIconMap: Record<string, { icon: typeof Accessibility; label:
   shower_only: { icon: Droplets, label: "Solo ducha" },
 };
 
-export const bedConfigLabels: Record<string, string> = {
-  MAT: "Matrimonial",
-  TWIN: "Twin",
-  MAT_CC: "Matrimonial + Cama cucheta",
-  TWIN_CC: "Twin + Cama cucheta",
-  MAT_EXTRA: "Matrimonial + Extra",
-  MAT_CC_EXTRA: "Matrimonial + CC + Extra",
-};
+export const BED_CONFIG_OPTIONS: ReadonlyArray<{ value: BedConfig; label: string }> = [
+  { value: "MAT", label: "Matrimonial" },
+  { value: "TWIN", label: "Twin (2 camas)" },
+  { value: "MAT_CC", label: "Matrimonial + Cama cucheta" },
+  { value: "TWIN_CC", label: "Twin + Cama cucheta" },
+  { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
+  { value: "MAT_CC_EXTRA", label: "Matrimonial + Cama cucheta + Extra" },
+];
+
+export const bedConfigLabels: Record<BedConfig, string> = Object.fromEntries(
+  BED_CONFIG_OPTIONS.map(({ value, label }) => [value, label]),
+) as Record<BedConfig, string>;
+
+export function getBedConfigLabel(value: string): string {
+  return bedConfigLabels[value as BedConfig] || value;
+}
 
 export const ROOM_STATUS_OPTIONS: { value: string; label: string; dot: string }[] = [
   { value: "available",      label: "Libre limpia",    dot: "bg-green-500" },

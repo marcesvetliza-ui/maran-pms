@@ -2122,6 +2122,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cash_forma_pago text`)))
   );
 
+  await withTimeout("sales_invoices.cash_forma_pago_detalle", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cash_forma_pago_detalle jsonb`)))
+  );
+
   await withTimeout("sales_invoices.source_charge_ids", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN source_charge_ids jsonb`)))
   );

@@ -81,7 +81,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
-import type { RoomWithType, RoomType, InsertRoom, RoomStatus, ChargeType, SystemUserRole } from "@shared/schema";
+import type { RoomWithType, RoomType, InsertRoom, RoomStatus, BedConfig, ChargeType, SystemUserRole } from "@shared/schema";
+import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
 
 // Roles que pueden crear/editar habitaciones y gestionar cargos
 const ROOM_ADMIN_ROLES: SystemUserRole[] = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"];
@@ -259,6 +260,7 @@ function RoomFormDialog({
     roomTypeId: room?.roomTypeId || "",
     floor: room?.floor || 1,
     status: room?.status || "available",
+    bedConfig: room?.bedConfig || undefined,
     notes: room?.notes || "",
   });
 
@@ -269,6 +271,7 @@ function RoomFormDialog({
         roomTypeId: room?.roomTypeId || "",
         floor: room?.floor || 1,
         status: room?.status || "available",
+        bedConfig: room?.bedConfig || undefined,
         notes: room?.notes || "",
       });
     }
@@ -342,6 +345,24 @@ function RoomFormDialog({
                   {roomTypes.filter(type => type.id).map((type) => (
                     <SelectItem key={type.id} value={type.id}>
                       {type.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bedConfig">Camaje</Label>
+              <Select
+                value={formData.bedConfig || undefined}
+                onValueChange={(value) => setFormData({ ...formData, bedConfig: value as BedConfig })}
+              >
+                <SelectTrigger id="bedConfig" data-testid="select-bed-config">
+                  <SelectValue placeholder="Seleccionar camaje" />
+                </SelectTrigger>
+                <SelectContent>
+                  {BED_CONFIG_OPTIONS.map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
                     </SelectItem>
                   ))}
                 </SelectContent>

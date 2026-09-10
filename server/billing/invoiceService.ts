@@ -48,6 +48,7 @@ export interface NewInvoiceData {
   operador?: string;
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
+  cashFormaPagoDetalle?: Array<{ method: string; amount: number }>;
   sourceChargeIds?: string[]; // IDs de cargos del folio incluidos en esta factura
   sourceChargeAmounts?: Record<string, number>; // importe emitido por cada cargo del folio
   observaciones?: string;
@@ -289,6 +290,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       items: data.items as any,
       operador: data.operador || null,
       cashFormaPago: data.cashFormaPago || null,
+      cashFormaPagoDetalle: data.cashFormaPagoDetalle ?? null,
       // These are jsonb columns — drizzle-orm serializes them itself. Do NOT
       // JSON.stringify here: doing so stores a jsonb scalar string instead of
       // a jsonb object/array, which silently breaks any SQL-side jsonb_agg()
@@ -472,6 +474,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     items: data.items as any,
     operador: data.operador || null,
     cashFormaPago: data.cashFormaPago || null,
+    cashFormaPagoDetalle: data.cashFormaPagoDetalle ?? null,
     // See the comment on the other insert above: jsonb columns must receive
     // the raw object/array, not a pre-stringified value.
     sourceChargeIds: data.sourceChargeIds ?? null,

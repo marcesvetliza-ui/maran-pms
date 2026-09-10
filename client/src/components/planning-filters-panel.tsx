@@ -10,11 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { PlanningCellStatus } from "@shared/schema";
+import { getLocalToday } from "@/lib/utils";
 
 export type PlanningFilter = {
   showEmpty: boolean;
   showOccupied: boolean;
   showReub: boolean;
+  referenceDate: string;
   roomTypeIds: string[];
   floorFilter: string;
   statusFilter: PlanningCellStatus | "";
@@ -27,6 +29,7 @@ export const DEFAULT_PLANNING_FILTER: PlanningFilter = {
   showEmpty: true,
   showOccupied: true,
   showReub: true,
+  referenceDate: getLocalToday(),
   roomTypeIds: [],
   floorFilter: "",
   statusFilter: "",
@@ -196,6 +199,23 @@ export function PlanningFiltersPanel({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      )}
+
+      {/* Room status — only when NOT in compare mode */}
+      {!isCompareMode && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="planning-reference-date" className="text-xs font-medium text-muted-foreground">
+            Fecha de referencia
+          </Label>
+          <Input
+            id="planning-reference-date"
+            type="date"
+            value={filters.referenceDate}
+            onChange={e => setFilters(f => ({ ...f, referenceDate: e.target.value }))}
+            className="h-8 text-sm"
+            data-testid="filter-reference-date"
+          />
         </div>
       )}
 

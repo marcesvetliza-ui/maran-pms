@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getLocalToday, formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
+import { canUseWalkInRate } from "@/lib/walk-in-rate";
 import {
   LogIn,
   Search,
@@ -52,6 +53,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { getBedConfigLabel } from "@/lib/planning-utils";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
 import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin, GuestPreference } from "@shared/schema";
 
@@ -230,7 +232,10 @@ export default function CheckInPage() {
   const activePrefs = guestPreferences.filter((p) => p.isActive);
   const criticalPrefs = activePrefs.filter((p) => p.priority === "critical" || p.priority === "high");
 
-  const selectedRatePlan = ratePlans?.find((rp) => rp.id === selectedRatePlanId);
+  const selectedRatePlan = applicableRatePlans?.find((rp) => rp.id === selectedRatePlanId);
+  const hasApplicableRatePlans = (applicableRatePlans?.length ?? 0) > 0;
+  const usesSpecialRate = selectedRatePlanId === "__special__" ||
+    (!!selectedRoomTypeId && applicableRatePlans !== undefined && !hasApplicableRatePlans);
 
   const getPaxRate = (plan: RatePlan, pax: number): string => {
     const paxMap: Record<number, string | null | undefined> = {
@@ -239,7 +244,7 @@ export default function CheckInPage() {
     return paxMap[pax] || plan.baseRate;
   };
 
-  const effectiveNightRate = selectedRatePlanId === "__special__"
+  const effectiveNightRate = usesSpecialRate
     ? (walkInSpecialRateAmount || "0")
     : (selectedRatePlan ? getPaxRate(selectedRatePlan, numberOfGuests) : "0");
   const totalAmount = (parseFloat(effectiveNightRate) * nights).toFixed(2);
@@ -354,8 +359,8 @@ export default function CheckInPage() {
         companyId: selectedCompany?.id || null,
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
-        ratePlanId: selectedRatePlanId === "__special__" ? null : (selectedRatePlanId || null),
-        specialRateReason: selectedRatePlanId === "__special__" ? walkInSpecialRateReason : null,
+        ratePlanId: usesSpecialRate ? null : (selectedRatePlanId || null),
+        specialRateReason: usesSpecialRate ? walkInSpecialRateReason : null,
         checkInDate: today,
         checkOutDate,
         nights,
@@ -478,9 +483,12 @@ export default function CheckInPage() {
   };
 
   const canSubmitWalkIn = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0 &&
-    (selectedRatePlanId === "__special__"
-      ? (walkInSpecialRateReason.trim().length > 0 && parseFloat(walkInSpecialRateAmount) > 0)
-      : true);
+    canUseWalkInRate({
+      usesSpecialRate,
+      selectedRatePlanExists: !!selectedRatePlan,
+      effectiveNightRate,
+      specialRateReason: walkInSpecialRateReason,
+    });
 
   const todayDisplay = new Date().toLocaleDateString("es-ES", {
     weekday: "long",
@@ -741,35 +749,41 @@ export default function CheckInPage() {
                     </div>
                   )}
 
-                  {selectedRoomTypeId && applicableRatePlans && applicableRatePlans.length > 0 && (
+                  {selectedRoomTypeId && applicableRatePlans && (
                     <div className="space-y-2">
                       <Label>Plan de Tarifa</Label>
-                      <Select value={selectedRatePlanId} onValueChange={(v) => { setSelectedRatePlanId(v); if (v !== "__special__") { setWalkInSpecialRateReason(""); setWalkInSpecialRateAmount(""); } }}>
-                        <SelectTrigger data-testid="select-rate-plan">
-                          <SelectValue placeholder="Seleccionar tarifa..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {applicableRatePlans.filter(rp => rp.id).map((rp) => {
-                            const hasPaxRates = rp.rate2pax || rp.rate3pax || rp.rate4pax;
-                            return (
-                              <SelectItem key={rp.id} value={rp.id}>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="font-medium">{rp.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    ${fmtMoney(rp.baseRate)}
-                                    {rp.rate2pax ? ` · 2P: $${fmtMoney(rp.rate2pax)}` : ""}
-                                    {rp.rate3pax ? ` · 3P: $${fmtMoney(rp.rate3pax)}` : ""}
-                                    {rp.rate4pax ? ` · 4P: $${fmtMoney(rp.rate4pax)}` : ""}
-                                    {!hasPaxRates ? " (tarifa fija)" : ""}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            );
-                          })}
-                          <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {selectedRatePlanId === "__special__" && (
+                      {hasApplicableRatePlans ? (
+                        <Select value={selectedRatePlanId} onValueChange={(v) => { setSelectedRatePlanId(v); if (v !== "__special__") { setWalkInSpecialRateReason(""); setWalkInSpecialRateAmount(""); } }}>
+                          <SelectTrigger data-testid="select-rate-plan">
+                            <SelectValue placeholder="Seleccionar tarifa..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {applicableRatePlans.filter(rp => rp.id).map((rp) => {
+                              const hasPaxRates = rp.rate2pax || rp.rate3pax || rp.rate4pax;
+                              return (
+                                <SelectItem key={rp.id} value={rp.id}>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-medium">{rp.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      ${fmtMoney(rp.baseRate)}
+                                      {rp.rate2pax ? ` · 2P: $${fmtMoney(rp.rate2pax)}` : ""}
+                                      {rp.rate3pax ? ` · 3P: $${fmtMoney(rp.rate3pax)}` : ""}
+                                      {rp.rate4pax ? ` · 4P: $${fmtMoney(rp.rate4pax)}` : ""}
+                                      {!hasPaxRates ? " (tarifa fija)" : ""}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              );
+                            })}
+                            <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          Este tipo no tiene planes tarifarios. Ingresá una tarifa especial.
+                        </p>
+                      )}
+                      {usesSpecialRate && (
                         <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-2">
                           <div className="space-y-1.5">
                             <Label>Tarifa por noche <span className="text-destructive">*</span></Label>
@@ -855,7 +869,7 @@ export default function CheckInPage() {
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Tarifa:</span>
                     <span className="font-medium">
-                      {(selectedRatePlan || selectedRatePlanId === "__special__") ? `$${fmtMoney(effectiveNightRate)}/noche` : "-"}
+                      {(selectedRatePlan || usesSpecialRate) ? `$${fmtMoney(effectiveNightRate)}/noche` : "-"}
                     </span>
                   </div>
                   <div className="border-t pt-3 mt-3">
@@ -1433,7 +1447,7 @@ export default function CheckInPage() {
                           <p className="text-xs text-muted-foreground mb-0.5">Tipo de cama</p>
                           <p className="font-medium text-foreground">
                             {(selectedReservation as any).bedType?.name || ""}
-                            {selectedReservation.bedTypeNotes ? ` — ${selectedReservation.bedTypeNotes}` : ""}
+                            {selectedReservation.bedTypeNotes ? ` — ${getBedConfigLabel(selectedReservation.bedTypeNotes)}` : ""}
                           </p>
                         </div>
                       )}

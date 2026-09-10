@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArcaQrUrl, getInvoiceRecipientDocument } from "../billing/invoicePdf";
+import { buildArcaQrUrl, getInvoicePaymentAmounts, getInvoiceRecipientDocument } from "../billing/invoicePdf";
 import { isUnsupportedSaleType } from "../billing/invoiceService";
 import { resolveFiscalRecipientDocument } from "../billing/fiscalDocument";
 import { buildIvaBlock } from "../billing/wsfevClient";
@@ -83,5 +83,32 @@ describe("ARCA invoice PDF compliance", () => {
       totals.montoNeto105,
       totals.montoIva105,
     )).toContain("<ar:Id>4</ar:Id><ar:BaseImp>100.00</ar:BaseImp>");
+  });
+
+  it("renders legacy single-payment invoices under their actual payment method", () => {
+    expect(getInvoicePaymentAmounts("efectivo", null, 125000)).toMatchObject({
+      efectivo: 125000,
+      transferencia: 0,
+      cuenta_corriente: 0,
+    });
+    expect(getInvoicePaymentAmounts("cuenta_corriente", null, 125000)).toMatchObject({
+      efectivo: 0,
+      transferencia: 0,
+      cuenta_corriente: 125000,
+    });
+  });
+
+  it("distributes split invoice payments across their PDF cells", () => {
+    expect(getInvoicePaymentAmounts("pago_dividido", [
+      { method: "adelanto", amount: 20000 },
+      { method: "efectivo", amount: 50000 },
+      { method: "tarjeta_credito", amount: 75000 },
+    ], 145000)).toMatchObject({
+      adelanto: 20000,
+      efectivo: 50000,
+      tarjeta: 75000,
+      transferencia: 0,
+      cuenta_corriente: 0,
+    });
   });
 });

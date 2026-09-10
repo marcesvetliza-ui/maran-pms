@@ -46,7 +46,7 @@ import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
 import {
   formatDate, PLANNING_COLORS, getStatusColor, getStatusLabel,
   getSourceColor, getSourceBg, getPlanningCellClasses, getGroupCellStyle, getSourceLabel,
-  ROOM_STATUS_OPTIONS, Legend,
+  getPlanningStatusForDate, isPlanningRoomOccupied, ROOM_STATUS_OPTIONS, Legend,
 } from "@/lib/planning-utils";
 import { QuickReservationDialog } from "@/components/planning-quick-reservation";
 import type { QuickReservationData } from "@/components/planning-quick-reservation";
@@ -695,15 +695,18 @@ export default function PlanningPage() {
     if (filters.roomTypeIds.length > 0 && !filters.roomTypeIds.includes(room.roomTypeId)) return false;
     if (filters.floorFilter && String(room.floor) !== filters.floorFilter) return false;
     const roomOcc = data?.occupancy[room.id] ?? [];
-    const hasReservation = roomOcc.some(s => s !== "available" && s !== "dirty" && s !== "cleaning" && s !== "inspected");
-    if (!filters.showEmpty && !hasReservation) return false;
-    if (!filters.showOccupied && hasReservation) return false;
+    const referenceStatus = getPlanningStatusForDate(roomOcc, dayIndexMap, filters.referenceDate);
+    const isOccupiedOnReferenceDate = isPlanningRoomOccupied(referenceStatus);
+    if (referenceStatus !== undefined) {
+      if (!filters.showEmpty && !isOccupiedOnReferenceDate) return false;
+      if (!filters.showOccupied && isOccupiedOnReferenceDate) return false;
+    }
     if (filters.statusFilter) {
       const cleanlinessStatuses = ["dirty", "cleaning", "inspected"];
       if (cleanlinessStatuses.includes(filters.statusFilter)) {
         if ((room as any).status !== filters.statusFilter) return false;
-      } else {
-        if (!roomOcc.includes(filters.statusFilter as PlanningCellStatus)) return false;
+      } else if (referenceStatus !== undefined) {
+        if (referenceStatus !== filters.statusFilter) return false;
       }
     }
     // Filter by guest name — check all reservations assigned to this room in the visible period
@@ -995,57 +998,6 @@ export default function PlanningPage() {
                         );
                       })}
                     </tr>
-                    {/* ── FILA REUB — siempre inmediatamente debajo de Notas ── */}
-                    {reubRoom && filters.showReub && (
-                      <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
-                        <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
-                          <div className="flex flex-col leading-tight">
-                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400">REUB</span>
-                            <span className="text-[9px] text-amber-600/70 dark:text-amber-500/60">comodín</span>
-                          </div>
-                        </td>
-                        {data.days.map((day) => {
-                          const reservationId = data.cellReservations[reubRoom.id]?.[day];
-                          const reservation = reservationId ? data.reservations[reservationId] : null;
-                          const info = formatDate(day);
-                          return (
-                            <DroppableCell
-                              key={day}
-                              roomId={reubRoom.id}
-                              day={day}
-                              className={`p-0.5 border-b border-r border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
-                            >
-                              {reservation ? (
-                                <DraggableReservationCell
-                                  id={`drag-${reservationId}-${reubRoom.id}-${day}`}
-                                  reservationId={reservationId!}
-                                  roomId={reubRoom.id}
-                                  onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
-                                  onContextMenu={(e: React.MouseEvent) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
-                                  }}
-                                  className="h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing border-2 border-amber-400 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:ring-2 hover:ring-amber-400/50"
-                                  data-testid={`cell-reub-${day}`}
-                                >
-                                  <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
-                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
-                                      ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
-                                      : reservation.guestName.split(" ")[0]}
-                                  </span>
-                                </DraggableReservationCell>
-                              ) : (
-                                <div
-                                  className="h-8 rounded border border-dashed border-amber-300/50 dark:border-amber-700/40"
-                                  data-testid={`cell-reub-empty-${day}`}
-                                />
-                              )}
-                            </DroppableCell>
-                          );
-                        })}
-                      </DroppableRoomRow>
-                    )}
                     {/* ── FILA DE REVENUE ──────────────────────────── */}
                     {showRevenue && (
                       <tr className="border-b">
@@ -1127,6 +1079,58 @@ export default function PlanningPage() {
                     )}
                   </thead>
                   <tbody>
+                    {/* REUB is a body row. Keeping it out of the sticky thead avoids
+                        Safari shifting date cells into the Notes row. */}
+                    {reubRoom && filters.showReub && (
+                      <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
+                        <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
+                          <div className="flex flex-col leading-tight">
+                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400">REUB</span>
+                            <span className="text-[9px] text-amber-600/70 dark:text-amber-500/60">comodín</span>
+                          </div>
+                        </td>
+                        {data.days.map((day) => {
+                          const reservationId = data.cellReservations[reubRoom.id]?.[day];
+                          const reservation = reservationId ? data.reservations[reservationId] : null;
+                          const info = formatDate(day);
+                          return (
+                            <DroppableCell
+                              key={day}
+                              roomId={reubRoom.id}
+                              day={day}
+                              className={`p-0.5 border-b border-r border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
+                            >
+                              {reservation ? (
+                                <DraggableReservationCell
+                                  id={`drag-${reservationId}-${reubRoom.id}-${day}`}
+                                  reservationId={reservationId!}
+                                  roomId={reubRoom.id}
+                                  onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
+                                  onContextMenu={(e: React.MouseEvent) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
+                                  }}
+                                  className="h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing border-2 border-amber-400 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:ring-2 hover:ring-amber-400/50"
+                                  data-testid={`cell-reub-${day}`}
+                                >
+                                  <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
+                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                      ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                                      : reservation.guestName.split(" ")[0]}
+                                  </span>
+                                </DraggableReservationCell>
+                              ) : (
+                                <div
+                                  className="h-8 rounded border border-dashed border-amber-300/50 dark:border-amber-700/40"
+                                  data-testid={`cell-reub-empty-${day}`}
+                                />
+                              )}
+                            </DroppableCell>
+                          );
+                        })}
+                      </DroppableRoomRow>
+                    )}
                     {floors.map((floor) => (
                       <Fragment key={`floor-${floor}`}>
                         <tr className="bg-muted/30">

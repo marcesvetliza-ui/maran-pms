@@ -3457,14 +3457,13 @@ async function handleConfirmationPdf(req: any, res: any) {
       .strokeColor("#e0e0e0").lineWidth(0.5).stroke();
     y += 12;
 
-    // ── DATES GRID (5 cells) ──────────────────────────────────────────────
+    // ── DATES GRID (4 cells) ──────────────────────────────────────────────
     const gridH = 46;
-    const cellW = contentW / 5;
+    const cellW = contentW / 4;
     const gridCells = [
       { label: "CHECK-IN",   value: fmtDatePdf(reservation.checkInDate) },
       { label: "CHECK-OUT",  value: fmtDatePdf(reservation.checkOutDate) },
       { label: "NOCHES",     value: String(nights) },
-      { label: "HABITACIÓN", value: room?.roomNumber || "—" },
       { label: "HUÉSPEDES",  value: String(reservation.numberOfGuests || 1) },
     ];
     doc.roundedRect(margin, y, contentW, gridH, 6)
@@ -3519,7 +3518,7 @@ async function handleConfirmationPdf(req: any, res: any) {
     // Room box
     drawColBox(col2X, y, colW, boxH, "TIPO DE HABITACIÓN");
     doc.fillColor("#111111").fontSize(12).font("Helvetica-Bold")
-      .text(roomType?.name || room?.roomNumber || "—", col2X + 12, y + 27, { width: colW - 24 });
+      .text(roomType?.name || "—", col2X + 12, y + 27, { width: colW - 24 });
 
     // Rate per night
     doc.fillColor("#555555").fontSize(9).font("Helvetica")

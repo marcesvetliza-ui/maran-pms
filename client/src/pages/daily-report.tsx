@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { getBedConfigLabel } from "@/lib/planning-utils";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -378,7 +379,7 @@ export default function DailyReportPage() {
                           </td>
                           <td className="px-2 py-1 col-tipo text-xs">
                             {co.roomTypeName || ""}
-                            {co.bedTypeNotes && <span className="text-muted-foreground"> · {co.bedTypeNotes}</span>}
+                            {co.bedTypeNotes && <span className="text-muted-foreground"> · {getBedConfigLabel(co.bedTypeNotes)}</span>}
                           </td>
                           <td className="px-2 py-1 col-n text-center tabular-nums">{co.nightsStayed || co.nights}</td>
                           <td className="px-2 py-1 col-fecha text-xs text-muted-foreground whitespace-nowrap">{fmtDate(co.checkInDate)}</td>
@@ -489,7 +490,7 @@ export default function DailyReportPage() {
                           </td>
                           <td className="px-2 py-1 text-xs">
                             {ci.roomTypeName || ""}
-                            {ci.bedTypeNotes && <span className="text-muted-foreground"> · {ci.bedTypeNotes}</span>}
+                            {ci.bedTypeNotes && <span className="text-muted-foreground"> · {getBedConfigLabel(ci.bedTypeNotes)}</span>}
                           </td>
                           <td className="px-2 py-1 text-center tabular-nums">{ci.nights}</td>
                           <td className="px-2 py-1 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(ci.checkOutDate)}</td>

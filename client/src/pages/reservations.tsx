@@ -4,6 +4,7 @@ import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { buildPackagePricingPatch } from "@/lib/reservation-package-pricing";
 import {
   formatReservationInvoiceRef,
   canInvoiceReservationPayment,
@@ -1027,13 +1028,6 @@ export function ReservationFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="directo">Directo</SelectItem>
-                  <SelectItem value="telefono">Teléfono</SelectItem>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="booking">Booking</SelectItem>
-                  <SelectItem value="expedia">Expedia</SelectItem>
-                  <SelectItem value="airbnb">Airbnb</SelectItem>
-                  <SelectItem value="despegar">Despegar</SelectItem>
-                  <SelectItem value="ota">OTA (otros)</SelectItem>
                   <SelectItem value="empresa">Empresa</SelectItem>
                   <SelectItem value="agencia">Agencia de Viajes</SelectItem>
                 </SelectContent>
@@ -1295,14 +1289,9 @@ export function ReservationFormDialog({
                         // En edición: solo actualiza precio y notas, NO cambia fechas
                         const currentNights = Number(formData.nights) || 1;
                         const totalPrice = parseFloat(effectiveBasePrice);
-                        const ratePerNight = (totalPrice / currentNights).toFixed(2);
                         setFormData(prev => ({
                           ...prev,
-                          baseRatePerNight: ratePerNight,
-                          finalRatePerNight: ratePerNight,
-                          totalRoomAmount: (totalPrice).toFixed(2),
-                          discountType: "none",
-                          discountValue: "0",
+                          ...buildPackagePricingPatch(totalPrice, currentNights),
                           notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
                             ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
                             : `[Paquete: ${pkg.name}]`,
@@ -1311,7 +1300,6 @@ export function ReservationFormDialog({
                         // En creación: aplica fechas según duración del paquete
                         const nights = pkg.nights || 1;
                         const totalPrice = parseFloat(effectiveBasePrice);
-                        const ratePerNight = (totalPrice / nights).toFixed(2);
                         if (!formData.checkInDate) {
                           // checkInDate aún no fue ingresada: guardamos paquete y precio pero
                           // limpiamos checkOutDate y nights para evitar carryover de valores
@@ -1320,11 +1308,7 @@ export function ReservationFormDialog({
                             ...prev,
                             checkOutDate: "",
                             nights: 0,
-                            baseRatePerNight: ratePerNight,
-                            finalRatePerNight: ratePerNight,
-                            totalRoomAmount: totalPrice.toFixed(2),
-                            discountType: "none",
-                            discountValue: "0",
+                            ...buildPackagePricingPatch(totalPrice, nights),
                             notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
                               ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
                               : `[Paquete: ${pkg.name}]`,
@@ -1337,11 +1321,7 @@ export function ReservationFormDialog({
                             ...prev,
                             checkOutDate: newCheckOut,
                             nights,
-                            baseRatePerNight: ratePerNight,
-                            finalRatePerNight: ratePerNight,
-                            totalRoomAmount: totalPrice.toFixed(2),
-                            discountType: "none",
-                            discountValue: "0",
+                            ...buildPackagePricingPatch(totalPrice, nights),
                             notes: prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()
                               ? `[Paquete: ${pkg.name}] ${prev.notes.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim()}`
                               : `[Paquete: ${pkg.name}]`,

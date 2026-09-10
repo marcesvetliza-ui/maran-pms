@@ -30,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
+import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
 
 export default function NewReservationPage() {
   const { toast } = useToast();
@@ -70,15 +71,6 @@ export default function NewReservationPage() {
   const [lateCheckOutCharge, setLateCheckOutCharge] = useState("");
   const [specialRateReason, setSpecialRateReason] = useState<string>("");
   const [specialRateAmount, setSpecialRateAmount] = useState<string>("");
-
-  const bedConfigOptions = [
-    { value: "MAT", label: "Matrimonial" },
-    { value: "TWIN", label: "Twin (2 individuales)" },
-    { value: "MAT_CC", label: "Matrimonial + Cama chica" },
-    { value: "TWIN_CC", label: "Twin + Cama chica" },
-    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
-    { value: "MAT_CC_EXTRA", label: "Matrimonial + CC + Extra" },
-  ];
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowRecurring: boolean }[]>({
     queryKey: ["/api/charge-types"],
@@ -626,7 +618,7 @@ export default function NewReservationPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin especificar</SelectItem>
-                    {bedConfigOptions.map((opt) => (
+                    {BED_CONFIG_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
                       </SelectItem>

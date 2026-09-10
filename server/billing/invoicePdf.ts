@@ -6,6 +6,52 @@ import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 
 const $n = (v: any) => parseFloat(String(v ?? 0)) || 0;
 
+const INVOICE_PAYMENT_GRID_METHODS = [
+  "efectivo",
+  "tarjeta",
+  "mercadopago",
+  "adelanto",
+  "debito",
+  "transferencia",
+  "cheque",
+  "cuenta_corriente",
+] as const;
+
+function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] {
+  return method === "tarjeta" || method === "tarjeta_credito" ? "tarjeta"
+    : method === "debito" || method === "tarjeta_debito" ? "debito"
+    : method === "cheque" || method === "echeq" ? "cheque"
+    : method === "mercadopago" ? "mercadopago"
+    : method === "transferencia" ? "transferencia"
+    : method === "cuenta_corriente" ? "cuenta_corriente"
+    : method === "adelanto" ? "adelanto"
+    : "efectivo";
+}
+
+export function getInvoicePaymentAmounts(
+  cashFormaPago: string | null | undefined,
+  cashFormaPagoDetalle: unknown,
+  montoTotal: number,
+): Record<string, number> {
+  const amounts = Object.fromEntries(
+    INVOICE_PAYMENT_GRID_METHODS.map(method => [method, 0]),
+  ) as Record<string, number>;
+  const detail = Array.isArray(cashFormaPagoDetalle) ? cashFormaPagoDetalle : [];
+
+  if (detail.length > 0) {
+    for (const entry of detail) {
+      const amount = $n(entry?.amount);
+      if (amount <= 0) continue;
+      const key = invoicePaymentGridKey(String(entry?.method ?? ""));
+      amounts[key] += amount;
+    }
+  } else if (cashFormaPago) {
+    amounts[invoicePaymentGridKey(cashFormaPago)] = montoTotal;
+  }
+
+  return amounts;
+}
+
 export function getInvoiceRecipientDocument(factura: any) {
   const document = resolveFiscalRecipientDocument({
     cuit: factura.cliente_cuit ?? factura.clienteCuit,
@@ -173,6 +219,10 @@ export async function generarFacturaPDF(
     const modoFicticio  = factura.modo_ficticio   ?? factura.modoFicticio    ?? false;
     const operador      = factura.operador        ?? null;
     const cashFormaPago = factura.cash_forma_pago ?? factura.cashFormaPago   ?? null;
+    const cashFormaPagoDetalleRaw = factura.cash_forma_pago_detalle ?? factura.cashFormaPagoDetalle;
+    const cashFormaPagoDetalle = Array.isArray(cashFormaPagoDetalleRaw)
+      ? cashFormaPagoDetalleRaw
+      : [];
 
     const clienteRazonSocial  = factura.cliente_razon_social  ?? factura.clienteRazonSocial  ?? "—";
     const clienteDomicilio    = factura.cliente_domicilio     ?? factura.clienteDomicilio     ?? "—";
@@ -484,20 +534,11 @@ export async function generarFacturaPDF(
     ];
 
     // Determine amounts
-    const pagoAmounts: Record<string, number> = {};
-    for (const m of allMethods) pagoAmounts[m.key] = 0;
-    if (cashFormaPago) {
-      const key = cashFormaPago === "efectivo" ? "efectivo"
-        : cashFormaPago === "tarjeta" || cashFormaPago === "tarjeta_credito" ? "tarjeta"
-        : cashFormaPago === "mercadopago" ? "mercadopago"
-        : cashFormaPago === "transferencia" ? "transferencia"
-        : cashFormaPago === "cheque" ? "cheque"
-        : cashFormaPago === "echeq" ? "cheque"
-        : cashFormaPago === "debito" || cashFormaPago === "tarjeta_debito" ? "debito"
-        : cashFormaPago === "cuenta_corriente" ? "cuenta_corriente"
-        : "efectivo";
-      pagoAmounts[key] = montoTotal;
-    }
+    const pagoAmounts = getInvoicePaymentAmounts(
+      cashFormaPago,
+      cashFormaPagoDetalle,
+      montoTotal,
+    );
 
     const pagoSectionW = Math.floor(W * 0.55);
     const totalsSectionW = W - pagoSectionW;
@@ -663,7 +704,7 @@ export async function generarFacturaPDF(
       tarjeta: "Tarjeta de Crédito", tarjeta_credito: "Tarjeta de Crédito",
       debito: "Tarjeta de Débito", tarjeta_debito: "Tarjeta de Débito",
       cheque: "Cheque", echeq: "eCheq", cuenta_corriente: "Cuenta Corriente",
-      mercadopago: "Mercado Pago", adelanto: "Adelanto",
+      mercadopago: "Mercado Pago", adelanto: "Adelanto", pago_dividido: "Pago Mixto",
     };
     const condVenta = cashFormaPago ? (COND_LABELS[cashFormaPago] ?? cashFormaPago) : "Contado";
 

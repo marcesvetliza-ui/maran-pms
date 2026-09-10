@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
+import { buildInvoicePaymentMethods } from "@/lib/invoice-payment-methods";
 import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   getAvailableReservationAdvancePayments,
@@ -1160,6 +1161,9 @@ export function PrefacturaDialog({
         // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
         const isCcPayment = saleCondition === "cuenta_corriente" &&
           ["guest", "company", "agency"].includes(billingTarget) && !!billingEntityId;
+        const invoicePaymentMethods = isCcPayment
+          ? { cashFormaPago: "cuenta_corriente" }
+          : buildInvoicePaymentMethods(paymentRows, selectedAlreadyPaid);
 
         const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
           tipoComprobante: tipo,
@@ -1181,8 +1185,8 @@ export function PrefacturaDialog({
             nationalityCode,
             hasAccommodation: hasSelectedAccommodation,
           },
+          ...invoicePaymentMethods,
           ...(isCcPayment ? {
-            cashFormaPago: "cuenta_corriente",
             ccEntityType: billingTarget,
             ccEntityId: billingEntityId,
           } : {}),

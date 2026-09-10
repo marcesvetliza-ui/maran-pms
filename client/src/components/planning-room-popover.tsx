@@ -1,6 +1,6 @@
 import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert, ShieldCheck, Ban } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { featureIconMap, bedConfigLabels, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
+import { featureIconMap, getBedConfigLabel, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
 import type { RoomWithType } from "@shared/schema";
 
 interface RoomPopoverProps {
@@ -70,22 +70,22 @@ export function RoomPopover({
         <div className="px-3 py-2 border-b bg-muted/40">
           <p className="font-semibold text-sm">{room.roomNumber} — {room.roomType?.name ?? ""}</p>
           <p className="text-xs text-muted-foreground">Piso {room.floor}{room.maxOccupancy ? ` · máx. ${room.maxOccupancy} pers.` : ""}</p>
-          {room.bedConfig && (
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-xs text-muted-foreground">{bedConfigLabels[room.bedConfig] || room.bedConfig}</span>
-              <button
-                className="text-[10px] text-primary underline decoration-dotted hover:no-underline ml-1"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenChange(false);
-                  onEditBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
-                }}
-                data-testid={`button-edit-bedconfig-${room.id}`}
-              >
-                Cambiar
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-1 mt-1">
+            <span className="text-xs text-muted-foreground">
+              {room.bedConfig ? getBedConfigLabel(room.bedConfig) : "Sin camaje asignado"}
+            </span>
+            <button
+              className="text-[10px] text-primary underline decoration-dotted hover:no-underline ml-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenChange(false);
+                onEditBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
+              }}
+              data-testid={`button-edit-bedconfig-${room.id}`}
+            >
+              Cambiar
+            </button>
+          </div>
           {room.notes && (
             <p className="text-xs text-muted-foreground mt-1 italic">{room.notes}</p>
           )}

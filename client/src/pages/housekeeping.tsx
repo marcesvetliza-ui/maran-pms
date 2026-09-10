@@ -1,3 +1,4 @@
+import { BED_CONFIG_OPTIONS, getBedConfigLabel } from "@/lib/planning-utils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -245,7 +246,7 @@ function RoomCard({
                     data-testid={`button-edit-bedconfig-${room.id}`}
                   >
                     <Bed className="h-3 w-3 mr-2 text-blue-500" />
-                    Cambiar Camaje {room.bedConfig ? `(${room.bedConfig})` : ""}
+                    Cambiar Camaje {room.bedConfig ? `(${getBedConfigLabel(room.bedConfig)})` : ""}
                   </Button>
                 </div>
               </PopoverContent>
@@ -1055,7 +1056,7 @@ function MobileRoomCard({
               </Badge>
             )}
             {room.bedConfig && (
-              <span className="text-xs text-muted-foreground font-medium">{room.bedConfig}</span>
+              <span className="text-xs text-muted-foreground font-medium">{getBedConfigLabel(room.bedConfig)}</span>
             )}
           </div>
         </div>
@@ -1573,15 +1574,6 @@ export default function Housekeeping() {
   const [bedConfigDialogOpen, setBedConfigDialogOpen] = useState(false);
   const [bedConfigRoomId, setBedConfigRoomId] = useState<string | null>(null);
   const [bedConfigValue, setBedConfigValue] = useState("");
-
-  const bedConfigOptions = [
-    { value: "MAT", label: "Matrimonial" },
-    { value: "TWIN", label: "Twin (2 camas)" },
-    { value: "MAT_CC", label: "Matrimonial + Cama cuna" },
-    { value: "TWIN_CC", label: "Twin + Cama cuna" },
-    { value: "MAT_EXTRA", label: "Matrimonial + Extra" },
-    { value: "MAT_CC_EXTRA", label: "Matrimonial + Cuna + Extra" },
-  ];
 
   const updateBedConfigMutation = useMutation({
     mutationFn: ({ roomId, bedConfig }: { roomId: string; bedConfig: string }) =>
@@ -2453,7 +2445,7 @@ export default function Housekeeping() {
                 <SelectValue placeholder="Seleccionar camaje" />
               </SelectTrigger>
               <SelectContent>
-                {bedConfigOptions.map(opt => (
+                {BED_CONFIG_OPTIONS.map(opt => (
                   <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                 ))}
               </SelectContent>

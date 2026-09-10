@@ -66,3 +66,4 @@
 - [Historical Caja recovery](historical-cash-recovery.md) — date-only payments auto-match only one Argentina-day shift; closed-shift repairs preserve physically counted cash.
 - [Existing CC advance invoicing](existing-cc-advance-invoicing.md) — invoice the locked payment itself; preserve exact CC ownership and never create a second settlement.
 - [REUB virtual Planning row](reub-virtual-room.md) — REUB is an operational staging row below Notas, never hotel inventory or an occupancy/revenue metric input.
+- [Invoice payment-method detail](invoice-payment-method-detail.md) — invoice PDFs use persisted method+amount rows; keep the legacy single method only for compatibility.

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { getBedConfigLabel } from "@/lib/planning-utils";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -1764,7 +1765,7 @@ export default function GroupDetailPage() {
 
   const getBedLabel = (res: any) => {
     // Primero: tipo de camaje elegido al hacer/editar la reserva
-    if (res.bedTypeNotes) return res.bedTypeNotes;
+    if (res.bedTypeNotes) return getBedConfigLabel(res.bedTypeNotes);
     // Fallback: tipo de cama por defecto de la habitación
     const btId = res.room?.bedTypeId;
     if (btId && bedTypeMap[btId]) return bedTypeMap[btId];

@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
 
 // ─── MoveConfirmDialog ────────────────────────────────────────────────────────
 
@@ -125,15 +126,6 @@ interface BedConfigDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
 }
-
-const BED_CONFIG_OPTIONS = [
-  { value: "MAT",         label: "Matrimonial" },
-  { value: "TWIN",        label: "Twin (2 camas)" },
-  { value: "MAT_CC",      label: "Matrimonial + Cama cuna" },
-  { value: "TWIN_CC",     label: "Twin + Cama cuna" },
-  { value: "MAT_EXTRA",   label: "Matrimonial + Extra" },
-  { value: "MAT_CC_EXTRA",label: "Matrimonial + Cuna + Extra" },
-];
 
 export function PlanningBedConfigDialog({
   editingBedConfig,

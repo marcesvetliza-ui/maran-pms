@@ -2568,6 +2568,7 @@ export const salesInvoices = pgTable("sales_invoices", {
   items: jsonb("items"),
   operador: text("operador"),
   cashFormaPago: text("cash_forma_pago"),
+  cashFormaPagoDetalle: jsonb("cash_forma_pago_detalle"),
   sourceChargeIds: jsonb("source_charge_ids"), // IDs de cargos del folio incluidos en esta factura
   sourceChargeAmounts: jsonb("source_charge_amounts"), // importe facturado por cada cargo del folio
   observaciones: text("observaciones"),

@@ -923,7 +923,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      let { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, creditOperationId } = req.body;
+      let { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, creditOperationId } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -941,6 +941,15 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "operationId es requerido para una liquidación CC recuperable" });
       }
       if (cashFormaPago === "cuenta_corriente") assertFinancialSchemaReady();
+      const normalizedCashFormaPagoDetalle = Array.isArray(cashFormaPagoDetalle)
+        ? cashFormaPagoDetalle
+          .map((entry: any) => ({
+            method: typeof entry?.method === "string" ? entry.method.trim() : "",
+            amount: Number(entry?.amount),
+          }))
+          .filter((entry: { method: string; amount: number }) =>
+            entry.method.length > 0 && Number.isFinite(entry.amount) && entry.amount > 0)
+        : undefined;
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
@@ -1545,6 +1554,9 @@ export function registerBillingRoutes(app: Express) {
           operador: user?.fullName || user?.username,
           puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
           cashFormaPago: cashFormaPago || undefined,
+          cashFormaPagoDetalle: normalizedCashFormaPagoDetalle?.length
+            ? normalizedCashFormaPagoDetalle
+            : undefined,
           sourceChargeIds: normalizedSourceChargeIds.length > 0 ? normalizedSourceChargeIds : undefined,
           sourceChargeAmounts: Object.keys(sanitizedSourceChargeAmounts).length > 0 ? sanitizedSourceChargeAmounts : undefined,
           observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
