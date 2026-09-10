@@ -801,7 +801,23 @@ export async function refreshRealData() {
       } catch (e) {}
     }
 
-    // REUB virtual room removed — no longer needed
+    await db.execute(sql`
+      INSERT INTO rooms (id, room_number, room_type_id, floor, status, is_virtual, is_active)
+      SELECT
+        gen_random_uuid(),
+        'REUB',
+        (SELECT id FROM room_types ORDER BY name LIMIT 1),
+        0,
+        'available',
+        true,
+        true
+      WHERE NOT EXISTS (SELECT 1 FROM rooms WHERE room_number = 'REUB')
+    `);
+    await db.execute(sql`
+      UPDATE rooms
+      SET floor = 0, status = 'available', is_virtual = true, is_active = true
+      WHERE room_number = 'REUB'
+    `);
 
     const realAreas = [
       { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },

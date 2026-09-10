@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { getArgentinaOperationalParts } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
+import { isOperationalInventoryRoom } from "@shared/room-availability";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -6406,7 +6407,10 @@ export class DatabaseStorage implements IStorage {
 
   async getExecutiveStats(from: string, to: string): Promise<any> {
     const allRooms = await db.select().from(rooms);
-    const realRooms = allRooms.filter(r => !r.isVirtual && r.isActive !== false);
+    const realRooms = allRooms.filter(isOperationalInventoryRoom);
+    const nonOperationalRoomIds = new Set(
+      allRooms.filter(room => !isOperationalInventoryRoom(room)).map(room => room.id),
+    );
     const totalRooms = realRooms.length;
 
     const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };
@@ -6416,8 +6420,11 @@ export class DatabaseStorage implements IStorage {
       else roomsByStatus[s] = (roomsByStatus[s] || 0) + 1;
     }
 
-    const periodReservations = await db.select().from(reservations)
+    const rawPeriodReservations = await db.select().from(reservations)
       .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+    const periodReservations = rawPeriodReservations.filter(
+      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
+    );
 
     let totalNightsSold = 0;
     for (const r of periodReservations) {
@@ -6463,8 +6470,11 @@ export class DatabaseStorage implements IStorage {
 
     const prevFrom = new Date(new Date(from).getTime() - 365 * 86400000).toISOString().split("T")[0];
     const prevTo = new Date(new Date(to).getTime() - 365 * 86400000).toISOString().split("T")[0];
-    const prevReservations = await db.select().from(reservations)
+    const rawPrevReservations = await db.select().from(reservations)
       .where(and(lte(reservations.checkInDate, prevTo), gte(reservations.checkOutDate, prevFrom)));
+    const prevReservations = rawPrevReservations.filter(
+      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
+    );
     const prevPayments = await db.select().from(payments)
       .where(and(gte(payments.date, prevFrom), lte(payments.date, prevTo)));
     const prevTotalRevenue = prevPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
@@ -6500,7 +6510,8 @@ export class DatabaseStorage implements IStorage {
   async getReportOccupancy(from: string, to: string): Promise<any[]> {
     const result: any[] = [];
     const allRooms = await db.select().from(rooms);
-    const totalRooms = allRooms.filter(r => !r.isVirtual).length;
+    const operationalRoomIds = new Set(allRooms.filter(isOperationalInventoryRoom).map(room => room.id));
+    const totalRooms = operationalRoomIds.size;
     const start = new Date(from);
     const end = new Date(to);
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -6508,7 +6519,9 @@ export class DatabaseStorage implements IStorage {
       const dayReservations = await db.select().from(reservations)
         .where(and(lte(reservations.checkInDate, dateStr), gt(reservations.checkOutDate, dateStr),
           inArray(reservations.status, ["checked_in", "checked_out", "confirmed"])));
-      const occupied = dayReservations.length;
+      const occupied = dayReservations.filter(
+        reservation => !!reservation.roomId && operationalRoomIds.has(reservation.roomId),
+      ).length;
       const available = totalRooms - occupied;
       const occupancy = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
       result.push({ date: dateStr, available, occupied, occupancy, totalRooms });

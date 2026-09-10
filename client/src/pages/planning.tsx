@@ -59,6 +59,7 @@ import {
 } from "@/components/planning-dialogs";
 import { RoomPopover } from "@/components/planning-room-popover";
 import { PlanningFiltersPanel, type PlanningFilter, DEFAULT_PLANNING_FILTER, countActiveFilters } from "@/components/planning-filters-panel";
+import { isOperationalInventoryRoom } from "@shared/room-availability";
 
 function DraggableReservationCell({
   id,
@@ -994,6 +995,57 @@ export default function PlanningPage() {
                         );
                       })}
                     </tr>
+                    {/* ── FILA REUB — siempre inmediatamente debajo de Notas ── */}
+                    {reubRoom && filters.showReub && (
+                      <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
+                        <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
+                          <div className="flex flex-col leading-tight">
+                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400">REUB</span>
+                            <span className="text-[9px] text-amber-600/70 dark:text-amber-500/60">comodín</span>
+                          </div>
+                        </td>
+                        {data.days.map((day) => {
+                          const reservationId = data.cellReservations[reubRoom.id]?.[day];
+                          const reservation = reservationId ? data.reservations[reservationId] : null;
+                          const info = formatDate(day);
+                          return (
+                            <DroppableCell
+                              key={day}
+                              roomId={reubRoom.id}
+                              day={day}
+                              className={`p-0.5 border-b border-r border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
+                            >
+                              {reservation ? (
+                                <DraggableReservationCell
+                                  id={`drag-${reservationId}-${reubRoom.id}-${day}`}
+                                  reservationId={reservationId!}
+                                  roomId={reubRoom.id}
+                                  onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
+                                  onContextMenu={(e: React.MouseEvent) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
+                                  }}
+                                  className="h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing border-2 border-amber-400 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:ring-2 hover:ring-amber-400/50"
+                                  data-testid={`cell-reub-${day}`}
+                                >
+                                  <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
+                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                      ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
+                                      : reservation.guestName.split(" ")[0]}
+                                  </span>
+                                </DraggableReservationCell>
+                              ) : (
+                                <div
+                                  className="h-8 rounded border border-dashed border-amber-300/50 dark:border-amber-700/40"
+                                  data-testid={`cell-reub-empty-${day}`}
+                                />
+                              )}
+                            </DroppableCell>
+                          );
+                        })}
+                      </DroppableRoomRow>
+                    )}
                     {/* ── FILA DE REVENUE ──────────────────────────── */}
                     {showRevenue && (
                       <tr className="border-b">
@@ -1007,12 +1059,13 @@ export default function PlanningPage() {
                           </div>
                         </td>
                         {data.days.map((day, dayIndex) => {
-                          const total = data.rooms.length || 66;
-                          const occupied = data.rooms.filter(r => {
+                          const metricRooms = data.rooms.filter(isOperationalInventoryRoom);
+                          const total = metricRooms.length;
+                          const occupied = metricRooms.filter(r => {
                             const st = data.occupancy[r.id]?.[dayIndex] ?? "available";
                             return st !== "available" && st !== "maintenance";
                           }).length;
-                          const pct = Math.round((occupied / total) * 100);
+                          const pct = total > 0 ? Math.round((occupied / total) * 100) : 0;
 
                           let barColor = "bg-green-400";
                           let textColor = "text-green-700 dark:text-green-400";
@@ -1074,57 +1127,6 @@ export default function PlanningPage() {
                     )}
                   </thead>
                   <tbody>
-                    {/* ── FILA REUB — visible según filtro ── */}
-                    {reubRoom && filters.showReub && (
-                      <DroppableRoomRow key="reub" roomId={reubRoom.id} className="border-b-2 border-amber-300 dark:border-amber-700" data-testid="row-reub">
-                        <td className="sticky left-0 z-10 bg-amber-50 dark:bg-amber-950/40 px-2 py-1 border-r border-amber-300 dark:border-amber-700">
-                          <div className="flex flex-col leading-tight">
-                            <span className="text-xs font-bold text-amber-700 dark:text-amber-400">REUB</span>
-                            <span className="text-[9px] text-amber-600/70 dark:text-amber-500/60">comodín</span>
-                          </div>
-                        </td>
-                        {data.days.map((day) => {
-                          const reservationId = data.cellReservations[reubRoom.id]?.[day];
-                          const reservation = reservationId ? data.reservations[reservationId] : null;
-                          const info = formatDate(day);
-                          return (
-                            <DroppableCell
-                              key={day}
-                              roomId={reubRoom.id}
-                              day={day}
-                              className={`p-0.5 border-b border-r border-amber-200/60 dark:border-amber-800/40 ${info.isToday ? "bg-amber-100/60 dark:bg-amber-900/20" : "bg-amber-50/40 dark:bg-amber-950/20"}`}
-                            >
-                              {reservation ? (
-                                <DraggableReservationCell
-                                  id={`drag-${reservationId}-${reubRoom.id}-${day}`}
-                                  reservationId={reservationId!}
-                                  roomId={reubRoom.id}
-                                  onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
-                                  onContextMenu={(e: React.MouseEvent) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setColorContextMenu({ x: e.clientX, y: e.clientY, reservationId: reservationId! });
-                                  }}
-                                  className={`h-8 rounded flex items-center justify-center transition-all cursor-grab active:cursor-grabbing border-2 border-amber-400 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 hover:ring-2 hover:ring-amber-400/50`}
-                                  data-testid={`cell-reub-${day}`}
-                                >
-                                  <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
-                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
-                                      ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
-                                      : reservation.guestName.split(" ")[0]}
-                                  </span>
-                                </DraggableReservationCell>
-                              ) : (
-                                <div
-                                  className="h-8 rounded border border-dashed border-amber-300/50 dark:border-amber-700/40"
-                                  data-testid={`cell-reub-empty-${day}`}
-                                />
-                              )}
-                            </DroppableCell>
-                          );
-                        })}
-                      </DroppableRoomRow>
-                    )}
                     {floors.map((floor) => (
                       <Fragment key={`floor-${floor}`}>
                         <tr className="bg-muted/30">

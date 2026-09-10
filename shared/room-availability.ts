@@ -28,6 +28,14 @@ export function hasCanonicalRoomType(
   return room.roomTypeId === roomTypeId;
 }
 
+export function isOperationalInventoryRoom(room: {
+  roomNumber?: string | null;
+  isActive?: boolean | null;
+  isVirtual?: boolean | null;
+}): boolean {
+  return room.roomNumber !== "REUB" && room.isVirtual !== true && room.isActive !== false;
+}
+
 export function isRoomAvailableForInterval(input: {
   room: { id: string; status: string; roomNumber?: string | null; isActive?: boolean | null; isVirtual?: boolean | null };
   checkIn: string;
@@ -37,8 +45,7 @@ export function isRoomAvailableForInterval(input: {
   excludedReservationIds?: ReadonlySet<string>;
 }): boolean {
   const { room, checkIn, checkOut, reservations, maintenanceBlocks, excludedReservationIds } = input;
-  if (room.roomNumber === "REUB" || room.status === "maintenance" || room.status === "oos") return false;
-  if (room.isActive === false || room.isVirtual === true) return false;
+  if (!isOperationalInventoryRoom(room) || room.status === "maintenance" || room.status === "oos") return false;
 
   const hasReservationConflict = reservations.some((reservation) =>
     reservation.roomId === room.id &&

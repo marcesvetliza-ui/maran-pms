@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
+import { hasCanonicalRoomType, isOperationalInventoryRoom, isRoomAvailableForInterval } from "@shared/room-availability";
 
 describe("room availability for group blocks", () => {
   const room = { id: "room-101", roomTypeId: "type-standard", roomNumber: "101", status: "occupied" };
@@ -28,5 +28,12 @@ describe("room availability for group blocks", () => {
       ...base,
       reservations: [{ id: "checkout", roomId: room.id, status: "confirmed", checkInDate: "2026-10-08", checkOutDate: "2026-10-10" }],
     })).toBe(true);
+  });
+
+  it("excludes REUB and every virtual room from operational inventory metrics", () => {
+    expect(isOperationalInventoryRoom({ roomNumber: "101", isVirtual: false, isActive: true })).toBe(true);
+    expect(isOperationalInventoryRoom({ roomNumber: "REUB", isVirtual: false, isActive: true })).toBe(false);
+    expect(isOperationalInventoryRoom({ roomNumber: "TEMP", isVirtual: true, isActive: true })).toBe(false);
+    expect(isOperationalInventoryRoom({ roomNumber: "102", isVirtual: false, isActive: false })).toBe(false);
   });
 });

@@ -31,6 +31,7 @@ import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentina
 import { assertSameOriginalInvoice, canonicalInvoiceReference, canonicalPaymentLinkState } from "../billing/invoiceLinkIntegrity";
 import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 import { classifyReservationPaymentMethod } from "../payment-method";
+import { isOperationalInventoryRoom } from "@shared/room-availability";
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -680,7 +681,7 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Check-in endpoint
-  app.post("/api/reservations/:id/check-in", async (req, res) => {
+  app.post("/api/reservations/:id/check-in", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
@@ -718,6 +719,13 @@ export function registerReservationsRoutes(app: Express) {
       const room = await storage.getRoom(reservation.roomId);
       if (!room) {
         return res.status(400).json({ error: "Habitación no encontrada" });
+      }
+
+      if (!isOperationalInventoryRoom(room)) {
+        return res.status(400).json({
+          code: "CHECK_IN_REQUIRES_REAL_ROOM",
+          error: "Primero debe asignar la reserva a una habitación real para realizar el check-in.",
+        });
       }
 
       // Fuera de servicio: bloquear siempre

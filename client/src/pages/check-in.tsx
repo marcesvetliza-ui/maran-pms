@@ -280,6 +280,14 @@ export default function CheckInPage() {
         setRetroactivoDialog(true);
         return;
       }
+      if (errorData?.code === "CHECK_IN_REQUIRES_REAL_ROOM") {
+        toast({
+          title: "Asigne una habitación real",
+          description: "La reserva sigue en REUB o en una ubicación virtual. Muévala a una habitación real antes de realizar el check-in.",
+          variant: "destructive",
+        });
+        return;
+      }
       const message = errorData?.error || error?.message || "No se pudo realizar el check-in. Intente nuevamente.";
       toast({
         title: "Check-in no permitido",
