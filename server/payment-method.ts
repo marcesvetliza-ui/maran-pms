@@ -14,6 +14,7 @@ const aliases: Record<string, string> = {
   transferencia: "transfer", transfer: "transfer",
   mercadopago: "mercadopago",
   cuenta_corriente: "current_account", current_account: "current_account",
+  cargo_habitacion: "room_charge", room_charge: "room_charge",
   voucher: "voucher", gift_voucher: "voucher", gift_voucher_room: "voucher",
   voucher_regalo: "voucher", room_charge_voucher: "voucher",
   voucher_habitacion: "voucher",
