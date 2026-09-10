@@ -11,7 +11,7 @@ import {
   getReservationSelectionFinancialSummary,
 } from "@shared/reservationFolio";
 import {
-  LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight,
+  LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   CircleCheck, AlertCircle, Loader2, Building2, User,
    Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
@@ -514,6 +514,7 @@ export function PrefacturaDialog({
   // Safe default is to apply released credit. Staff can explicitly opt out
   // before submitting, in which case the advance remains available.
   const [applyReleasedCredit, setApplyReleasedCredit] = useState(true);
+  const [showCreditDetail, setShowCreditDetail] = useState(false);
   const [creditOperationId, setCreditOperationId] = useState(() => {
     if (typeof window !== "undefined") {
       const persisted = window.sessionStorage.getItem(settlementOperationKey(reservationId));
@@ -628,6 +629,7 @@ export function PrefacturaDialog({
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
       setApplyReleasedCredit(true);
+      setShowCreditDetail(false);
       const key = settlementOperationKey(reservationId);
       const persisted = typeof window !== "undefined" ? window.sessionStorage.getItem(key) : null;
       const operationId = persisted || newSettlementOperationId();
@@ -1597,10 +1599,10 @@ export function PrefacturaDialog({
                   </TableBody>
                 </Table>
                 {/* Totals row */}
-                <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
-                  <div className="text-right">
-                     <div className="text-muted-foreground text-xs">Pendiente de facturar ahora</div>
-                    <div className="font-bold">${fmtMoney(totalSelected)}</div>
+                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
+                   <div className="text-right rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/20">
+                      <div className="font-medium text-xs text-blue-700 dark:text-blue-300">Importe a facturar</div>
+                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200">${fmtMoney(totalSelected)}</div>
                   </div>
                   <div className="text-right">
                      <div className="text-muted-foreground text-xs">Crédito liberado disponible en la reserva</div>
@@ -1612,7 +1614,9 @@ export function PrefacturaDialog({
                   </div>
                   <div className="text-right">
                     <div className="text-muted-foreground text-xs">Nuevo cobro requerido</div>
-                    <div className={`font-bold text-base ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
+                     <div className={selectedBalance > 0.01
+                       ? "font-bold text-lg text-red-600 dark:text-red-400"
+                       : "font-medium text-sm text-emerald-700/70 dark:text-emerald-300/70"}>
                       ${fmtMoney(selectedBalance)}
                     </div>
                   </div>
@@ -1629,11 +1633,27 @@ export function PrefacturaDialog({
                    </Label>
                  </div>
                 {(folio.payments || []).length > 0 && (
-                  <p className="px-4 pb-3 text-xs text-muted-foreground">
-                    Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} ·
-                    {" "}anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}.
-                     {" "}El pendiente de facturar cubierto por crédito no genera nuevo dinero; el importe a facturar conserva el servicio bruto.
-                  </p>
+                  <div className="mx-4 mb-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 text-left font-medium text-foreground/80"
+                      onClick={() => setShowCreditDetail((current) => !current)}
+                      aria-expanded={showCreditDetail}
+                    >
+                      <span>Se aplicará ${fmtMoney(appliedCreditForSelection)} de crédito disponible</span>
+                      <span className="flex shrink-0 items-center gap-1 text-blue-700 dark:text-blue-300">
+                        {showCreditDetail ? "Ocultar detalle" : "Ver detalle"}
+                        {showCreditDetail ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      </span>
+                    </button>
+                    {showCreditDetail && (
+                      <p className="mt-2 border-t pt-2">
+                        Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} ·
+                        {" "}anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}.
+                        {" "}El pendiente de facturar cubierto por crédito no genera nuevo dinero; el importe a facturar conserva el servicio bruto.
+                      </p>
+                    )}
+                  </div>
                 )}
                 <div className="border-t px-4 py-2 flex justify-end">
                   <Button

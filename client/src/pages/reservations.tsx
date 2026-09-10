@@ -4343,13 +4343,13 @@ function ReservationDetailDialog({
                     ${fmtMoney(paidPendingInvoice)} quedan como anticipo disponible después de la Nota de Crédito. La devolución o anulación del cobro se gestiona por separado.
                   </div>
                 )}
-                <div className="flex justify-between font-bold text-lg mt-2 border-t pt-2">
+                <div className={`flex justify-between mt-2 border-t pt-2 ${pendingCollection > 0.01 ? "font-bold text-lg" : "font-medium text-sm text-muted-foreground"}`}>
                   <span>COBRO NUEVO REQUERIDO</span>
-                  <span className={pendingCollection > 0 ? "text-destructive" : "text-green-600"} data-testid="text-balance">
+                  <span className={pendingCollection > 0.01 ? "text-destructive" : "text-emerald-700/70 dark:text-emerald-300/70"} data-testid="text-balance">
                     ${fmtMoney(pendingCollection)}
                   </span>
                 </div>
-                <div className="flex justify-between font-semibold text-sm mt-2 text-blue-700 dark:text-blue-300">
+                <div className={`flex justify-between mt-2 rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 text-blue-800 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-200 ${pendingBilling > 0.01 ? "font-bold text-lg" : "font-medium text-sm"}`}>
                   <span>PENDIENTE DE FACTURACIÓN</span>
                   <span>${fmtMoney(pendingBilling)}</span>
                 </div>
@@ -4403,6 +4403,12 @@ function ReservationDetailDialog({
                   label: c.description,
                   amount: parseFloat(c.amount || "0"),
                   isAnulado: c.status === "anulado",
+                   createdMeta: c.createdBy
+                     ? `${c.createdBy} · ${formatFolioDateAR(c.createdAt || c.date)}`
+                     : "",
+                   voidMeta: c.status === "anulado" && (c.anuladoPor || c.anuladoAt || c.motivoAnulacion)
+                     ? `${c.anuladoPor ? `Anulado por ${c.anuladoPor}` : "Anulado"}${c.anuladoAt ? ` · ${formatFolioDateAR(c.anuladoAt)}` : ""}${c.motivoAnulacion ? ` · ${c.motivoAnulacion}` : ""}`
+                     : "",
                   id: `cargo-${c.id}`,
                 };
               });
@@ -4417,6 +4423,12 @@ function ReservationDetailDialog({
                   invBadge,
                   amount: parseFloat(p.amount || "0"),
                   isAnulado: (p as any).status === "anulado",
+                   createdMeta: p.receivedBy
+                     ? `${p.receivedBy} · ${formatFolioDateAR(p.createdAt || p.paymentDate || p.date)}`
+                     : "",
+                   voidMeta: p.status === "anulado" && (p.anuladoPor || p.anuladoAt || p.motivoAnulacion)
+                     ? `${p.anuladoPor ? `Anulado por ${p.anuladoPor}` : "Anulado"}${p.anuladoAt ? ` · ${formatFolioDateAR(p.anuladoAt)}` : ""}${p.motivoAnulacion ? ` · ${p.motivoAnulacion}` : ""}`
+                     : "",
                   id: `pago-${p.id}`,
                 };
               });
@@ -4512,8 +4524,9 @@ function ReservationDetailDialog({
                   </div>
                   <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
                     {allItems.map((item) => (
-                      <div key={item.id} className={`flex items-center gap-2 text-xs p-1.5 rounded border ${colorMap[item.type]} ${item.isAnulado ? "opacity-40 line-through" : ""}`} data-testid={`timeline-${item.id}`}>
-                        <span className="text-muted-foreground shrink-0 w-14">{item.dateLabel}</span>
+                      <div key={item.id} className={`rounded border p-1.5 text-xs ${colorMap[item.type]} ${item.isAnulado ? "opacity-60" : ""}`} data-testid={`timeline-${item.id}`}>
+                       <div className={`flex items-center gap-2 ${item.isAnulado ? "line-through" : ""}`}>
+                        <span className="text-muted-foreground shrink-0 w-14" title={(item as any).createdMeta || undefined}>{item.dateLabel}</span>
                         {item.type === "anulacion" ? (
                           <Badge className="text-[10px] shrink-0 px-1 py-0 h-4 bg-orange-100 text-orange-700 border border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700">{labelMap[item.type]}</Badge>
                         ) : item.type === "nota_debito" ? (
@@ -4537,6 +4550,17 @@ function ReservationDetailDialog({
                         <span className={`font-medium shrink-0 ${amtColor[item.type]}`}>
                           {(item.type === "pago" || item.type === "anulacion") ? "−" : ""}${item.amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
+                       </div>
+                       {(item as any).createdMeta && (
+                         <div className="ml-16 mt-0.5 text-[10px] text-muted-foreground">
+                           Registrado por {(item as any).createdMeta}
+                         </div>
+                       )}
+                       {(item as any).voidMeta && (
+                         <div className="ml-16 mt-0.5 text-[10px] font-medium text-red-700 dark:text-red-300">
+                           {(item as any).voidMeta}
+                         </div>
+                       )}
                       </div>
                     ))}
                   </div>
