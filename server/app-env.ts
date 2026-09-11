@@ -11,6 +11,20 @@
  * producción real?" debe importar `getAppEnv()`/`isPilotEnv()` de este
  * módulo — no comparar `process.env.APP_ENV` (ni `process.env.NODE_ENV`
  * para esta pregunta) directamente en otros archivos.
+ *
+ * IMPORTANTE — dónde NO llamar a `getAppEnv()`/`isPilotEnv()`/`isProductionDataEnv()`:
+ * ninguno de los tres debe invocarse en el nivel superior de un módulo (es
+ * decir, durante la evaluación de imports ESM — código que corre al importar
+ * el archivo, fuera del cuerpo de una función). El orden en que Node evalúa
+ * los imports no está garantizado respecto de cuándo `server/index.ts` llama
+ * a `initAppEnv()` en el arranque, así que una llamada a nivel de módulo
+ * puede ejecutarse ANTES de `initAppEnv()` y lanzar
+ * "getAppEnv() llamado antes de initAppEnv()" de forma intermitente, según
+ * el orden de imports de turno — un bug muy difícil de reproducir. Estas
+ * funciones deben llamarse siempre dentro del cuerpo de una función (un
+ * handler de ruta, el inicio de una función async, etc.), en el momento en
+ * que efectivamente se necesita el valor, nunca como inicializador de una
+ * constante de módulo.
  */
 
 export const APP_ENVS = ["development", "test", "pilot", "production"] as const;
@@ -55,9 +69,15 @@ function isValidAppEnv(value: string): value is AppEnv {
  *      "development" y se devuelve una advertencia. Este modo existe solo
  *      mientras se termina de adoptar APP_ENV en todos los ambientes y no
  *      debe usarse como comportamiento definitivo.
- * 3. APP_ENV=pilot exige NODE_ENV=production — el piloto debe correr con
- *    las mismas protecciones de producción (cookies seguras, endpoints de
- *    diagnóstico/setup deshabilitados, etc.), nunca con las de desarrollo.
+ * 3. APP_ENV=pilot o APP_ENV=production exigen NODE_ENV=production — ambos
+ *    son "modos productivos" (el piloto debe correr con las mismas
+ *    protecciones de producción: cookies seguras, endpoints de
+ *    diagnóstico/setup deshabilitados, etc.) y no deben ejecutarse nunca
+ *    con las protecciones relajadas del modo desarrollo de Node/Express.
+ * 4. APP_ENV=development o APP_ENV=test, a la inversa, no pueden declararse
+ *    en un proceso publicado (NODE_ENV=production) — sería una
+ *    configuración contradictoria (un proceso que ya corre con las
+ *    protecciones de producción pero se autodeclara "desarrollo" o "test").
  */
 export function resolveAppEnv(env: AppEnvInput): AppEnvResolution {
   const rawAppEnv = env.APP_ENV?.trim();
@@ -88,11 +108,23 @@ export function resolveAppEnv(env: AppEnvInput): AppEnvResolution {
     );
   }
 
-  if (normalized === "pilot" && !isPublishedProcess) {
+  const receivedNodeEnvLabel = nodeEnv ? `"${nodeEnv}"` : "no configurado";
+  const isProductiveAppEnv = normalized === "pilot" || normalized === "production";
+
+  if (isProductiveAppEnv && !isPublishedProcess) {
     throw new InvalidAppEnvError(
-      "APP_ENV=pilot requiere NODE_ENV=production " +
-        `(NODE_ENV recibido: ${nodeEnv ? `"${nodeEnv}"` : "no configurado"}). ` +
-        "El ambiente piloto debe ejecutarse con las mismas protecciones de producción.",
+      `APP_ENV=${normalized} requiere NODE_ENV=production ` +
+        `(NODE_ENV recibido: ${receivedNodeEnvLabel}). ` +
+        `El ambiente ${normalized === "pilot" ? "piloto" : "de producción"} debe ejecutarse ` +
+        "con las protecciones de producción (cookies seguras, endpoints de diagnóstico/setup deshabilitados).",
+    );
+  }
+
+  if (!isProductiveAppEnv && isPublishedProcess) {
+    throw new InvalidAppEnvError(
+      `APP_ENV=${normalized} no puede usarse con NODE_ENV=production ` +
+        "(configuración contradictoria: un proceso publicado no puede autodeclararse " +
+        `"${normalized}"). Usar APP_ENV=production o APP_ENV=pilot en procesos publicados.`,
     );
   }
 
@@ -117,6 +149,12 @@ export function resetAppEnvForTests(): void {
   currentResolution = null;
 }
 
+/**
+ * No llamar desde el nivel superior de un módulo (evaluación de imports
+ * ESM) — solo dentro del cuerpo de una función, después de que `initAppEnv()`
+ * ya se haya ejecutado en el arranque. Ver la nota "IMPORTANTE" al inicio
+ * de este archivo.
+ */
 export function getAppEnv(): AppEnv {
   if (!currentResolution) {
     throw new Error(
