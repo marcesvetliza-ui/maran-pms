@@ -3,10 +3,31 @@
  * si una integración con un servicio externo real (email, ARCA/AFIP,
  * webhook MARA) puede ejecutarse en este proceso.
  *
- * Regla: solo APP_ENV=production preserva el comportamiento actual (llamadas
- * reales habilitadas, sujetas a su propia configuración existente). Los
- * ambientes pilot, development y test bloquean de forma fail-closed — el
- * bloqueo es la opción por defecto ante cualquier duda, nunca al revés.
+ * ALCANCE — esto NO es una garantía general de "cero comunicaciones
+ * externas" en pilot/development/test. Cubre únicamente las cuatro
+ * integraciones operativas reales auditadas y decididas explícitamente
+ * (decisión de producto, no silenciosa): email, backup por email, ARCA/AFIP
+ * y el webhook MARA (entrante y saliente). Dos llamadas de red reales
+ * quedan deliberadamente FUERA de este bloqueo, porque no envían datos de
+ * huéspedes ni afectan reservas/facturación real:
+ *   - OpenAI en `POST /api/help/chat` (server/routes.ts) — asistente de
+ *     ayuda para el staff.
+ *   - La descarga de `logoUrl` en `loadLogoBuffer()`
+ *     (server/billing/routes.ts) — trae la imagen de logo configurada por
+ *     un admin para insertarla en los PDF de factura. Nota de riesgo
+ *     independiente de esta política: al ser una URL configurable por un
+ *     admin y resuelta server-side, es una superficie de SSRF (podría
+ *     apuntarse a una URL interna). No se corrige en esta fase — queda
+ *     documentado para una decisión y corrección explícita posteriores.
+ * Si en el futuro se decide aislar también estas dos, debe ser una
+ * decisión de producto explícita (como esta), no una ampliación silenciosa
+ * de esta política.
+ *
+ * Regla para las cuatro integraciones que SÍ cubre este módulo: solo
+ * APP_ENV=production preserva el comportamiento actual (llamadas reales
+ * habilitadas, sujetas a su propia configuración existente). Los ambientes
+ * pilot, development y test bloquean de forma fail-closed — el bloqueo es
+ * la opción por defecto ante cualquier duda, nunca al revés.
  *
  * Ningún módulo debe comparar `getAppEnv()`/`process.env.APP_ENV` por su
  * cuenta para esta pregunta — deben usar `shouldBlockExternalComm()` o

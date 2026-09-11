@@ -10,7 +10,7 @@ import { insertGuestReviewSchema, reservationChangelog, reservations, guests, ho
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
-import { shouldBlockExternalComm } from "./external-comms-policy";
+import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -1149,29 +1149,13 @@ export async function registerRoutes(
       if (!notification) return res.status(404).json({ error: "Notification not found" });
 
       // Send confirmation back to guest via MARA if sessionId is available
-      const maraBaseUrl = process.env.MARA_BASE_URL;
-      const maraSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (
-        maraBaseUrl &&
-        maraSecret &&
-        (notification as any).sessionId &&
-        !shouldBlockExternalComm({ integration: "mara-outbound", action: "status-update" })
-      ) {
-        const guestName = (notification as any).guestName || "Huésped";
-        const maraMessages: Record<string, string> = {
-          en_proceso: `¡Hola ${guestName}! 👋 Tu solicitud fue recibida por nuestro equipo y ya está siendo atendida. Te avisamos en cuanto esté lista.`,
-          completado: `¡Hola ${guestName}! ✅ Tu solicitud fue completada. Si necesitás algo más, escribinos cuando quieras.`,
-          rechazado: `Hola ${guestName}, lamentablemente no podemos atender tu solicitud en este momento. Por favor acercate a recepción y con gusto te ayudamos. 🙏`,
-        };
-        const maraMessage = maraMessages[status];
-        if (maraMessage) {
-          fetch(`${maraBaseUrl}/api/send-message`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Chatbot-Secret": maraSecret },
-            body: JSON.stringify({ sessionId: (notification as any).sessionId, message: maraMessage }),
-          }).catch((err) => console.error("[MARA] Error sending confirmation:", err));
-        }
-      }
+      sendMaraStatusUpdate({
+        maraBaseUrl: process.env.MARA_BASE_URL,
+        maraSecret: process.env.CHATBOT_WEBHOOK_SECRET,
+        sessionId: (notification as any).sessionId,
+        guestName: (notification as any).guestName || "Huésped",
+        status,
+      });
 
       res.json(notification);
     } catch (error) {
@@ -1200,127 +1184,9 @@ export async function registerRoutes(
   });
 
   // ==================== CHATBOT WEBHOOK ====================
-
-  // Helper: get or auto-generate the chatbot webhook secret
-  async function getChatbotWebhookSecret(): Promise<string> {
-    try {
-      // 1. Prefer env var if set
-      const envSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (envSecret && envSecret.trim()) return envSecret.trim();
-      // 2. Try DB
-      const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, "chatbot_webhook_secret"));
-      if (row?.value) return row.value;
-      // 3. Auto-generate and persist
-      const generated = randomUUID();
-      await db.insert(systemSettings).values({
-        id: randomUUID(),
-        key: "chatbot_webhook_secret",
-        value: generated,
-        category: "integrations",
-        description: "Auto-generated MARA webhook secret",
-        updatedAt: new Date(),
-        updatedBy: null,
-      } as any);
-      console.log("[webhook/chatbot] Secreto auto-generado y guardado en DB:", generated.slice(-4));
-      return generated;
-    } catch (err) {
-      console.error("[webhook/chatbot] Error en getChatbotWebhookSecret:", err);
-      return "";
-    }
-  }
-
-  app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
-    if ((req.user as any)?.role !== "admin") {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-    const secret = await getChatbotWebhookSecret();
-    res.json({ secret });
-  });
-
-  app.post("/api/webhook/chatbot", async (req, res) => {
-    try {
-      const secret = req.headers["x-chatbot-secret"] as string;
-      const expectedSecret = await getChatbotWebhookSecret();
-      if (!secret || secret !== expectedSecret) {
-        const receivedHint = secret ? `"...${secret.slice(-4)}" (${secret.length} chars)` : "ninguno";
-        const expectedHint = `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)`;
-        console.warn(`[webhook/chatbot] 401 — recibido: ${receivedHint} | esperado: ${expectedHint}`);
-        return res.status(401).json({ error: "Invalid or missing webhook secret" });
-      }
-
-      if (shouldBlockExternalComm({ integration: "mara-inbound", action: "process-notification" })) {
-        return res.status(503).json({ error: "Webhook deshabilitado en este ambiente (piloto/desarrollo/test)." });
-      }
-
-      const { eventType, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;
-      let { area } = req.body;
-
-      const validAreas = ["housekeeping", "maintenance", "restaurant", "spa", "reception", "all"];
-      const validPriorities = ["normal", "high", "urgent"];
-
-      if (!message) {
-        return res.status(400).json({ error: "message is required" });
-      }
-      if (!area || !validAreas.includes(area)) {
-        area = "all";
-      }
-      if (priority && !validPriorities.includes(priority)) {
-        return res.status(400).json({ error: `Invalid priority. Must be one of: ${validPriorities.join(", ")}` });
-      }
-
-      const areaLabels: Record<string, string> = {
-        housekeeping: "Housekeeping",
-        maintenance: "Mantenimiento",
-        restaurant: "Restaurante",
-        spa: "SPA",
-        reception: "Recepción",
-        all: "General",
-      };
-
-      const typeMap: Record<string, string> = {
-        housekeeping: "chatbot_housekeeping",
-        maintenance: "chatbot_maintenance",
-        restaurant: "chatbot_restaurant",
-        spa: "chatbot_spa",
-        reception: "chatbot_request",
-        all: "chatbot_request",
-      };
-
-      const notification = await storage.createNotification({
-        type: (typeMap[area] || "chatbot_request") as any,
-        title: `Solicitud de ${guestName || "Huésped"} - Hab. ${roomNumber || "N/A"}`,
-        message,
-        targetArea: area,
-        relatedEntityType: reservationId ? "reservation" : "room",
-        relatedEntityId: reservationId ? String(reservationId) : roomNumber,
-        priority: priority || "normal",
-        sessionId: sessionId || null,
-        guestName: guestName || null,
-      } as any);
-
-      if (area === "housekeeping" && roomNumber) {
-        const rooms = await storage.getRooms();
-        const room = rooms.find(r => r.roomNumber === roomNumber);
-        if (room) {
-          try {
-            await storage.createHousekeepingTask({
-              roomId: room.id,
-              taskType: "guest_request",
-              status: "pending",
-              priority: priority === "urgent" ? "urgent" : "normal",
-              notes: `Chatbot: ${message} (${guestName || "Huésped"})`,
-              scheduledDate: getArgentinaToday(),
-              createdAt: new Date(),
-            });
-          } catch {}
-        }
-      }
-
-      res.json({ success: true, notificationId: notification.id });
-    } catch (error) {
-      res.status(500).json({ error: "Error processing webhook" });
-    }
-  });
+  // Extraído a server/mara.ts (registerMaraRoutes, llamado más abajo junto
+  // al resto de los registradores de rutas) para poder testearlo aislado
+  // sin registrar todo este archivo.
 
   // ==================== WEB CHECK-IN ====================
 
@@ -4085,6 +3951,7 @@ export async function registerRoutes(
   registerAdminCashRoutes(app);
   registerBillingRoutes(app);
   registerReportsRoutes(app);
+  registerMaraRoutes(app);
 
   // ==================== NIGHT AUDIT ====================
   app.post("/api/night-audit/run", requireAuth, async (req, res) => {

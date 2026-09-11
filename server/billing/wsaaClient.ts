@@ -56,6 +56,13 @@ function signTRA(traXml: string, certPem: string, keyPem: string): string {
 }
 
 async function soapPost(url: string, body: string): Promise<string> {
+  // Defensa en profundidad: es el único fetch() real de este archivo. Ya
+  // queda cubierto porque getTokenAuth() (su único caller) chequea primero,
+  // pero se repite acá — el punto más bajo posible antes de la llamada de
+  // red — para que agregar un nuevo caller interno en el futuro no pueda
+  // saltarse el bloqueo por accidente.
+  assertExternalCommAllowed({ integration: "arca", action: "wsaa-soap-post" });
+
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '""' },

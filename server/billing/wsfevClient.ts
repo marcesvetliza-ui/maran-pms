@@ -46,6 +46,13 @@ export interface FECompConsulta {
 }
 
 async function soapPost(url: string, action: string, body: string): Promise<string> {
+  // Defensa en profundidad: es el único fetch() real de este archivo. Ya
+  // queda cubierto porque feCompConsultar()/feCAESolicitar() (sus únicos
+  // callers) chequean primero, pero se repite acá — el punto más bajo
+  // posible antes de la llamada de red — para que agregar un nuevo caller
+  // interno en el futuro no pueda saltarse el bloqueo por accidente.
+  assertExternalCommAllowed({ integration: "arca", action: `wsfev-soap-post-${action}` });
+
   const resp = await fetch(url, {
     method: "POST",
     headers: {

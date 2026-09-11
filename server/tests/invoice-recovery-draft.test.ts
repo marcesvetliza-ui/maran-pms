@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 const originalFetch = global.fetch;
 
@@ -105,7 +106,15 @@ vi.mock("../billing/wsfevClient", () => ({
 const { emitirFactura } = await import("../billing/invoiceService");
 
 describe("recoverable reservation credit-note emission", () => {
+  // Este archivo mockea wsaaClient/wsfevClient por completo pero ejercita el
+  // camino real de invoiceService.ts (incluida su llamada directa a AFIP en
+  // getNextInvoiceNumberFromAfip cuando arcaAmbiente="homologacion"/
+  // "produccion"). El default global de test es APP_ENV=test (fail-closed),
+  // así que acá se simula production explícitamente para llegar al fetch
+  // mockeado — ver server/tests/setup.ts.
   beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     state.events = [];
     state.insertValues = [];
     state.executeCount = 0;
@@ -120,6 +129,7 @@ describe("recoverable reservation credit-note emission", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+    resetAppEnvForTests();
   });
 
   it("persists an authorization-pending NC with its charge map before finalizing it", async () => {
