@@ -4100,13 +4100,12 @@ export async function registerRoutes(
   registerReportsRoutes(app);
 
   // ==================== NIGHT AUDIT ====================
-  app.post("/api/night-audit/run", requireAuth, async (req, res) => {
+  app.post("/api/night-audit/run", requireAuth, requireRole(["admin", "manager", "reception", "jefe_recepcion"]), async (req, res) => {
     try {
-      const { runNightAudit, nightAuditAlreadyRan } = await import("./night-audit");
+      const { runNightAudit, nightAuditAlreadyRan, resolveNightAuditDate } = await import("./night-audit");
       const { forceDate, force } = req.body;
       const userName = (req.user as any)?.fullName || (req.user as any)?.username || "manual";
-      const targetDate = forceDate ||
-        new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const targetDate = resolveNightAuditDate(forceDate);
       const alreadyRan = await nightAuditAlreadyRan(targetDate);
       if (alreadyRan && !force) {
         return res.status(409).json({
@@ -4141,9 +4140,9 @@ export async function registerRoutes(
 
   app.get("/api/night-audit/status", requireAuth, async (req, res) => {
     try {
-      const { nightAuditAlreadyRan } = await import("./night-audit");
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      const yesterday = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const { nightAuditAlreadyRan, resolveNightAuditDate, addCalendarDays } = await import("./night-audit");
+      const yesterday = resolveNightAuditDate();
+      const today = addCalendarDays(yesterday, 1);
       const [lastAudit] = await db
         .select()
         .from(nightAuditLogs)

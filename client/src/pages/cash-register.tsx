@@ -59,9 +59,11 @@ import {
   User,
   ChevronDown,
   ChevronUp,
+  FileWarning,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { parseNightAuditDetail } from "@shared/nightAudit";
 
 type CashConfig = {
   area: string;
@@ -2153,36 +2155,70 @@ const NA_STATUS_LABEL: Record<string, string> = {
   success: "Exitoso", partial: "Parcial", failed: "Fallido",
 };
 
+const nightAuditNumber = (value: unknown, fallback = 0) => {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : fallback;
+};
+const nightAuditRoomSort = (value: unknown) => {
+  const text = String(value ?? "");
+  const number = Number.parseInt(text.replace(/[^\d-]/g, ""), 10);
+  return Number.isFinite(number) ? number : Number.MAX_SAFE_INTEGER;
+};
+const nightAuditText = (value: unknown, fallback = "—") => {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+};
+
 function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: boolean; onClose: () => void }) {
   if (!audit) return null;
-  let detail: { inHouse?: any[]; arrivals?: any[] } = {};
-  try { detail = JSON.parse(audit.detail || "{}"); } catch {}
-  const inHouse = (detail.inHouse || []).slice().sort((a: any, b: any) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
-  const arrivals = (detail.arrivals || []).slice().sort((a: any, b: any) => parseInt(a.roomNumber) - parseInt(b.roomNumber));
+  const parsed = parseNightAuditDetail(audit.detail);
+  const detail: any = parsed;
+  const snapshot: any = parsed.snapshot ?? {};
+  const indicators: any = parsed.indicators ?? snapshot.indicators ?? {};
+  const inHouse = (Array.isArray(detail.inHouse) ? detail.inHouse : []).slice().sort((a: any, b: any) => nightAuditRoomSort(a?.roomNumber) - nightAuditRoomSort(b?.roomNumber));
+  const arrivals = (Array.isArray(detail.arrivals) ? detail.arrivals : []).slice().sort((a: any, b: any) => nightAuditRoomSort(a?.roomNumber) - nightAuditRoomSort(b?.roomNumber));
   const conSaldo = inHouse.filter((r: any) => r.hasBalance);
-  const fmt = (n: number) => n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0 });
+  const fmt = (n: unknown) => nightAuditNumber(n).toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0 });
+  const exceptionGroups = [
+    ["No-shows", indicators.noShows?.reservations],
+    ["Tarifas a revisar", indicators.rateIssues],
+    ["Tarifa cero", indicators.zeroRate],
+    ["Camaje faltante", indicators.missingBedType],
+    ["Origen incompleto", indicators.sourceIssues],
+    ["Late checkout", snapshot.inHouse?.lateCheckout],
+  ].filter(([, rows]) => Array.isArray(rows) && rows.length > 0) as [string, any[]][];
+  const webCheckins = Array.isArray(indicators.webCheckin) ? indicators.webCheckin : [];
+  const webCheckinSummary = webCheckins.reduce((summary: Record<string, number>, item: any) => {
+    const status = nightAuditText(item?.status, "missing");
+    summary[status] = (summary[status] ?? 0) + 1;
+    return summary;
+  }, {});
+  const events = Array.isArray(indicators.events) ? indicators.events : [];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Moon className="h-4 w-4" />
-            Night Audit — {audit.auditDate}
+            <Moon className="h-4 w-4 text-indigo-600" />
+            Corte nocturno — {detail.auditDate ?? audit.auditDate}
           </DialogTitle>
           <DialogDescription>
-            Ejecutado el {formatHotelDateTime(audit.executedAt)} por {audit.executedBy}
+            {detail.nextDate && <span>Operación para {detail.nextDate} · </span>}
+            Generado {formatHotelDateTime(detail.generatedAt ?? audit.executedAt)} por {audit.executedBy}
             {audit.isManual && <Badge variant="outline" className="ml-2 text-[10px]">manual</Badge>}
+            {detail.recalculatedAt && <Badge variant="secondary" className="ml-2 text-[10px]">Recalculado {formatHotelDateTime(detail.recalculatedAt)}{detail.recalculatedBy ? ` · ${detail.recalculatedBy}` : ""}</Badge>}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {[
-              { label: "Hab. ocupadas", value: audit.reservationsProcessed },
-              { label: "Con saldo", value: audit.reservationsSkipped },
-              { label: "Llegadas mañana", value: audit.arrivalsNextDay },
-              { label: "Sin prepago", value: audit.arrivalsWithoutPrepago },
+              { label: "Habitaciones", value: nightAuditNumber(snapshot.inHouse?.totalRooms ?? audit.reservationsProcessed) },
+              { label: "PAX in-house", value: nightAuditNumber(snapshot.inHouse?.totalPax, NaN) || "—" },
+              { label: "Folios con saldo", value: nightAuditNumber(audit.reservationsSkipped) },
+              { label: "Llegadas", value: nightAuditNumber(audit.arrivalsNextDay) },
+              { label: "Sin prepago", value: nightAuditNumber(audit.arrivalsWithoutPrepago) },
             ].map(({ label, value }) => (
               <div key={label} className="text-center p-3 bg-muted/40 rounded-lg">
                 <p className="text-2xl font-bold">{value}</p>
@@ -2190,6 +2226,40 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
               </div>
             ))}
           </div>
+
+          {exceptionGroups.length > 0 && (
+            <section className="rounded-lg border bg-muted/10 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="flex items-center gap-2 text-sm font-semibold"><FileWarning className="h-4 w-4 text-amber-600" />Excepciones detectadas</h4>
+                <span className="text-xs text-muted-foreground">{exceptionGroups.reduce((total, [, rows]) => total + rows.length, 0)} registros</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {exceptionGroups.map(([label, rows]) => (
+                  <div key={label} className="rounded-md border bg-background p-3">
+                    <div className="flex items-center justify-between text-xs font-medium"><span>{label}</span><Badge variant="outline" className="text-[10px]">{rows.length}</Badge></div>
+                    <p className="mt-2 truncate text-[11px] text-muted-foreground">{rows.slice(0, 3).map((row: any) => [row.guestName, row.roomNumber && `Hab. ${row.roomNumber}`, row.companyName, row.agencyName, row.reservationCode ?? row.reservationId ?? row.name].filter(Boolean).join(" · ") || "Registro").join(" / ")}{rows.length > 3 ? ` +${rows.length - 3}` : ""}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {(webCheckins.length > 0 || events.length > 0) && (
+            <section className="grid gap-3 md:grid-cols-2">
+              {webCheckins.length > 0 && (
+                <div className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between"><h4 className="text-sm font-semibold">Web check-in</h4><Badge variant="outline" className="text-[10px]">{webCheckins.length}</Badge></div>
+                  <div className="mt-2 flex flex-wrap gap-2">{Object.entries(webCheckinSummary).map(([status, count]) => <Badge key={status} variant={status === "completed" || status === "approved" ? "default" : "secondary"} className="text-[10px]">{status}: {String(count)}</Badge>)}</div>
+                </div>
+              )}
+              {events.length > 0 && (
+                <div className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between"><h4 className="text-sm font-semibold">Eventos activos</h4><Badge variant="outline" className="text-[10px]">{events.length}</Badge></div>
+                  <p className="mt-2 text-xs text-muted-foreground">{events.slice(0, 3).map((event: any) => nightAuditText(event?.name, "Evento")).join(" · ")}{events.length > 3 ? ` +${events.length - 3}` : ""}</p>
+                </div>
+              )}
+            </section>
+          )}
 
           {inHouse.length > 0 && (
             <div>
@@ -2212,13 +2282,14 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                   <TableBody>
                     {inHouse.map((r: any) => (
                       <TableRow key={r.reservationId} className={r.hasBalance ? "bg-amber-50 dark:bg-amber-950/20" : ""}>
-                        <TableCell className="text-sm font-medium">{r.roomNumber}</TableCell>
-                        <TableCell className="text-xs font-mono text-muted-foreground">{r.reservationCode}</TableCell>
-                        <TableCell className="text-xs">{r.checkOutDate}</TableCell>
+                        <TableCell className="text-sm font-medium">{nightAuditText(r.roomNumber)}</TableCell>
+                        <TableCell><div className="text-xs">{nightAuditText(r.guestName, "Sin huésped")}</div><div className="font-mono text-[10px] text-muted-foreground">{nightAuditText(r.reservationCode)}</div><div className="text-[10px] text-muted-foreground">{[r.companyName, r.agencyName].filter(Boolean).join(" · ")}</div></TableCell>
+                        <TableCell className="text-xs">{nightAuditText(r.checkOutDate)}</TableCell>
                         <TableCell className="text-xs text-right">{fmt(r.totalCharges)}</TableCell>
                         <TableCell className="text-xs text-right">{fmt(r.totalPaid)}</TableCell>
                         <TableCell className={`text-xs text-right font-semibold ${r.hasBalance ? "text-amber-600" : "text-muted-foreground"}`}>
                           {r.hasBalance ? fmt(r.balance) : "—"}
+                          {nightAuditNumber(r.pendingGrossInvoice) > 0 && <div className="mt-1 text-[10px] font-normal text-rose-600">Factura pendiente {fmt(r.pendingGrossInvoice)}</div>}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -2249,7 +2320,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                   <TableBody>
                     {arrivals.map((a: any) => (
                       <TableRow key={a.reservationId}>
-                        <TableCell className="text-xs font-mono">{a.reservationCode}</TableCell>
+                        <TableCell><div className="text-xs font-mono">{nightAuditText(a.reservationCode)}</div><div className="text-[10px] text-muted-foreground">{nightAuditText(a.guestName, "Sin huésped")} {[a.companyName, a.agencyName].filter(Boolean).join(" · ")}</div></TableCell>
                         <TableCell className="text-xs text-right">{fmt(a.totalPaid)}</TableCell>
                         <TableCell className="text-center">
                           {a.hasPrepago

@@ -60,6 +60,19 @@ describe("reservation operational balances for listings", () => {
     });
   });
 
+  it("does not report already invoiced services as pending gross invoice", () => {
+    const summaries = calculateReservationOperationalSummaries(
+      [{ id: "invoiced", totalRoomAmount: "1000" }],
+      [],
+      [],
+      [{ reservaId: "invoiced", tipoComprobante: "FA", montoTotal: "1000", estado: "emitida" }] as any,
+    );
+    expect(summaries.get("invoiced")).toMatchObject({
+      pendingGrossInvoice: 0,
+      operationalFolioBalance: 1000,
+    });
+  });
+
   it("shows only current debt on the operational dashboard, ordered by amount", () => {
     const reservations = [
       { id: "settled", totalRoomAmount: "500" },

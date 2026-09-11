@@ -1,6 +1,6 @@
-import { db } from "./db";
+import { db, pool } from "./db";
 import { randomUUID } from "crypto";
-import { eq, and, inArray, sql, lte, gt } from "drizzle-orm";
+import { eq, and, inArray, sql, lte, gt, gte, ne, or, isNull } from "drizzle-orm";
 import { runReminderScheduler } from "./email-service";
 import {
   reservations,
@@ -12,14 +12,32 @@ import {
   systemNotifications,
   guestPreferences,
   hospitalityAlerts,
+  companies,
+  agencies,
+  webCheckins,
+  events,
 } from "@shared/schema";
 import { loadReservationOperationalSummaries } from "./reservation-operational-balances";
+import { isZeroReservationRate } from "@shared/reservationRate";
+import { classifyReservationRate } from "@shared/nightAudit";
+import { addCalendarDays } from "@shared/nightAuditDate";
+import { isNightAuditReportingOnly, isActiveNightAuditPayment } from "@shared/nightAudit";
+
+export { addCalendarDays } from "@shared/nightAuditDate";
 
 function naLog(message: string) {
   const t = new Date().toLocaleTimeString("en-US", {
     hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true,
   });
   console.log(`${t} [night-audit] ${message}`);
+}
+
+export function resolveNightAuditDate(forceDate?: string, now = new Date()): string {
+  if (forceDate) return forceDate;
+  const today = new Date(now.getTime()).toLocaleDateString("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
+  return addCalendarDays(today, -1);
 }
 
 function getArgentinaDateStr(offsetDays = 0): string {
@@ -39,21 +57,30 @@ export async function nightAuditAlreadyRan(auditDate: string): Promise<boolean> 
   return existing.length > 0;
 }
 
-export async function runNightAudit(options: {
+async function runNightAuditUnlocked(options: {
   executedBy?: string;
   isManual?: boolean;
   forceDate?: string;
 }): Promise<{ success: boolean; message: string; data?: any }> {
-  const auditDate = options.forceDate || getArgentinaDateStr(-1);
-  const tomorrow = getArgentinaDateStr(1);
+  const auditDate = resolveNightAuditDate(options.forceDate);
+  const tomorrow = addCalendarDays(auditDate, 1);
   const executedBy = options.executedBy || "sistema";
   const isManual = options.isManual ?? false;
 
   naLog(`Iniciando audit para fecha: ${auditDate}`);
 
+  const existingAudit = await db
+    .select({
+      id: nightAuditLogs.id, detail: nightAuditLogs.detail,
+      executedAt: nightAuditLogs.executedAt, executedBy: nightAuditLogs.executedBy,
+      isManual: nightAuditLogs.isManual,
+    })
+    .from(nightAuditLogs)
+    .where(eq(nightAuditLogs.auditDate, auditDate))
+    .limit(1);
+  const reportingOnlyRerun = isNightAuditReportingOnly(options, existingAudit.length > 0);
   if (!isManual) {
-    const alreadyRan = await nightAuditAlreadyRan(auditDate);
-    if (alreadyRan) {
+    if (existingAudit.length > 0) {
       naLog(`Ya se ejecutó para ${auditDate}, saltando`);
       return { success: true, message: `Night audit ya ejecutado para ${auditDate}` };
     }
@@ -75,10 +102,19 @@ export async function runNightAudit(options: {
         checkInDate: reservations.checkInDate,
         checkOutDate: reservations.checkOutDate,
         guestId: reservations.guestId,
+         companyId: reservations.companyId,
+         agencyId: reservations.agencyId,
+         source: reservations.source,
+         otaChannelId: reservations.otaChannelId,
+         specialRateReason: reservations.specialRateReason,
         finalRatePerNight: reservations.finalRatePerNight,
         baseRatePerNight: reservations.baseRatePerNight,
          totalRoomAmount: reservations.totalRoomAmount,
          nights: reservations.nights,
+         numberOfGuests: reservations.numberOfGuests,
+         lateCheckOut: reservations.lateCheckOut,
+         bedTypeId: reservations.bedTypeId,
+         bedTypeNotes: reservations.bedTypeNotes,
       })
       .from(reservations)
       .where(
@@ -95,7 +131,7 @@ export async function runNightAudit(options: {
     let folioDetail: any[] = [];
 
     if (inHouseReservations.length > 0) {
-      const summaries = await loadReservationOperationalSummaries(inHouseReservations);
+      const summaries = await loadReservationOperationalSummaries(inHouseReservations, { includeInvoices: true });
       // Obtener números de habitación
       const roomIds = inHouseReservations.map((r) => r.roomId).filter(Boolean) as string[];
       const roomNumbers = roomIds.length > 0
@@ -111,11 +147,13 @@ export async function runNightAudit(options: {
         return {
           reservationId: r.id,
           reservationCode: r.reservationCode,
+          guestId: r.guestId,
           roomNumber: r.roomId ? roomMap.get(r.roomId) ?? "?" : "?",
           checkOutDate: r.checkOutDate,
           totalCharges: summary.operationalServices,
           totalPaid: summary.activeHistoricalSettlements,
           balance: summary.operationalFolioBalance,
+           pendingGrossInvoice: summary.pendingGrossInvoice,
           hasBalance: summary.operationalFolioBalance > 0.01,
         };
       });
@@ -130,7 +168,11 @@ export async function runNightAudit(options: {
     // ============================================================
     let autoCerradasCount = 0;
     let autoNoShowCount = 0;
+    const noShowDetails: Array<{ reservationId: string; reservationCode: string }> = [];
     try {
+      if (reportingOnlyRerun) {
+        naLog("Rerun manual: solo reporte; se omiten cierres y no-show automáticos");
+      } else {
       // Buscar checked_in con checkout vencido
       const overdueCheckedIn = await db
         .select({
@@ -178,8 +220,10 @@ export async function runNightAudit(options: {
         for (const r of noShows) {
           await db.update(reservations).set({ status: "no_show" } as any).where(eq(reservations.id, r.id));
           autoNoShowCount++;
+          noShowDetails.push({ reservationId: r.id, reservationCode: r.reservationCode });
         }
         naLog(`Auto no-show: ${autoNoShowCount} reservas marcadas como no_show`);
+      }
       }
     } catch (autoErr: any) {
       naLog(`Error en auto-cierre de vencidas: ${autoErr.message}`);
@@ -211,7 +255,7 @@ export async function runNightAudit(options: {
           total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)`,
         })
         .from(payments)
-        .where(inArray(payments.reservationId, ids))
+        .where(and(inArray(payments.reservationId, ids), or(isNull(payments.status), eq(payments.status, "active"))))
         .groupBy(payments.reservationId);
 
       const paymentMap = new Map(paymentSums.map((p) => [p.reservationId, Number(p.total)]));
@@ -237,7 +281,7 @@ export async function runNightAudit(options: {
     // ============================================================
     let advanceAlertsCreated = 0;
     try {
-      if (arrivalsNextDay.length > 0) {
+      if (!reportingOnlyRerun && arrivalsNextDay.length > 0) {
         const guestIds = arrivalsNextDay.map((r) => r.guestId).filter(Boolean) as string[];
         if (guestIds.length > 0) {
           const activePrefs = await db
@@ -318,34 +362,131 @@ export async function runNightAudit(options: {
     // ============================================================
     // PASO 3 — Guardar registro del audit
     // ============================================================
-    const [auditLog] = await db
-      .insert(nightAuditLogs)
-      .values({
-        id: randomUUID(),
-        auditDate,
-        executedAt: new Date(),
-        executedBy,
-        isManual,
-        reservationsProcessed: inHouseReservations.length, // habitaciones ocupadas
-        reservationsSkipped: foliosConSaldo.length,         // folios con saldo
-        totalPosted: "0",                                   // no se postean cargos
-        arrivalsNextDay: arrivalsNextDay.length,
-        arrivalsWithPrepago,
-        arrivalsWithoutPrepago,
-        status: auditStatus,
-        notes: errors.length > 0 ? errors.join(" | ") : null,
-        detail: JSON.stringify({
-          inHouse: folioDetail,
-          arrivals: arrivalsDetail,
+    const allReservations = [...inHouseReservations, ...arrivalsNextDay];
+    const companyIds = allReservations.map(r => r.companyId).filter(Boolean) as string[];
+    const agencyIds = allReservations.map(r => r.agencyId).filter(Boolean) as string[];
+    const guestIds = allReservations.map(r => r.guestId).filter(Boolean) as string[];
+    const companyRows = companyIds.length > 0
+      ? await db.select({ id: companies.id, name: companies.razonSocial })
+        .from(companies).where(inArray(companies.id, companyIds))
+      : [];
+    const companyNames = new Map(companyRows.map(company => [company.id, company.name]));
+    const agencyRows = agencyIds.length > 0
+      ? await db.select({ id: agencies.id, name: agencies.razonSocial }).from(agencies).where(inArray(agencies.id, agencyIds))
+      : [];
+    const agencyNames = new Map(agencyRows.map(agency => [agency.id, agency.name]));
+    const guestRows = guestIds.length > 0
+      ? await db.select({ id: guests.id, name: sql<string>`concat_ws(' ', ${guests.firstName}, ${guests.lastName})` })
+        .from(guests).where(inArray(guests.id, guestIds))
+      : [];
+    const guestNames = new Map(guestRows.map(guest => [guest.id, guest.name]));
+    const roomIds = allReservations.map(r => r.roomId).filter(Boolean) as string[];
+    const roomRows = roomIds.length > 0
+      ? await db.select({ id: rooms.id, roomNumber: rooms.roomNumber }).from(rooms).where(inArray(rooms.id, roomIds))
+      : [];
+    const roomNames = new Map(roomRows.map(room => [room.id, room.roomNumber]));
+    const reservationIds = allReservations.map(r => r.id);
+    const checkins = reservationIds.length > 0
+      ? await db.select({ reservationId: webCheckins.reservationId, status: webCheckins.status })
+        .from(webCheckins).where(inArray(webCheckins.reservationId, reservationIds))
+      : [];
+    const checkinStatus = new Map(checkins.map(checkin => [checkin.reservationId, checkin.status]));
+    const auditEvents = await db.select({
+      id: events.id, name: events.name, startDate: events.startDate, endDate: events.endDate,
+      status: events.status,
+    }).from(events).where(and(lte(events.startDate, auditDate), gte(events.endDate, auditDate), ne(events.status, "cancelled")));
+    const stableFields = (row: any) => ({
+      roomNumber: row.roomId ? roomNames.get(row.roomId) ?? null : null,
+      guestName: row.guestId ? guestNames.get(row.guestId) ?? null : null,
+      companyName: row.companyId ? companyNames.get(row.companyId) ?? null : null,
+      agencyName: row.agencyId ? agencyNames.get(row.agencyId) ?? null : null,
+    });
+    const stableById = new Map(allReservations.map(row => [row.id, stableFields(row)]));
+    folioDetail = folioDetail.map(row => ({ ...row, ...stableById.get(row.reservationId) }));
+    for (const row of arrivalsDetail) Object.assign(row, stableById.get(row.reservationId));
+    const priorDetail = reportingOnlyRerun && existingAudit[0]?.detail
+      ? (() => { try { return JSON.parse(existingAudit[0].detail!); } catch { return null; } })()
+      : null;
+    const priorNoShows = priorDetail?.snapshot?.indicators?.noShows
+      || priorDetail?.indicators?.noShows
+      || { count: 0, reservations: [] };
+    const snapshot = {
+      version: 1,
+      auditDate,
+      nextDate: tomorrow,
+      generatedAt: new Date().toISOString(),
+      ...(reportingOnlyRerun ? {
+        recalculatedAt: new Date().toISOString(),
+        recalculatedBy: executedBy,
+      } : {}),
+      inHouse: folioDetail,
+      arrivals: arrivalsDetail,
+      snapshot: {
+       inHouse: {
+        totalRooms: inHouseReservations.length,
+        totalPax: inHouseReservations.reduce((sum, r) => sum + (r.numberOfGuests || 0), 0),
+        folios: folioDetail,
+        lateCheckout: inHouseReservations.filter(r => r.lateCheckOut).map(r => ({
+          reservationId: r.id, reservationCode: r.reservationCode,
+        })),
+        missingBedType: inHouseReservations.filter(r => !r.bedTypeId && !r.bedTypeNotes)
+          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode })),
+       },
+       arrivals: arrivalsDetail,
+       indicators: {
+        noShows: reportingOnlyRerun ? priorNoShows : { count: autoNoShowCount, reservations: noShowDetails },
+        zeroRate: allReservations.filter(r => isZeroReservationRate(r.finalRatePerNight)).map(r => ({
+          reservationId: r.id, reservationCode: r.reservationCode,
+          scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival",
+          roomId: r.roomId, guestId: r.guestId, specialRateReason: r.specialRateReason,
+          companyId: r.companyId, companyName: r.companyId ? companyNames.get(r.companyId) ?? null : null,
+          agencyId: r.agencyId, agencyName: r.agencyId ? agencyNames.get(r.agencyId) ?? null : null,
+        })),
+        rateIssues: allReservations.flatMap(r => {
+          const kind = classifyReservationRate(r.finalRatePerNight, r.specialRateReason);
+          if (!kind) return [];
+          return [{ reservationId: r.id, reservationCode: r.reservationCode,
+            scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", kind }];
         }),
-      })
-      .returning();
+        missingBedType: allReservations.filter(r => !r.bedTypeId && !r.bedTypeNotes)
+          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", roomId: r.roomId })),
+        webCheckin: allReservations.map(r => ({
+          reservationId: r.id, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", status: checkinStatus.get(r.id) ?? "missing",
+        })),
+        events: auditEvents,
+        sourceIssues: allReservations.filter(r =>
+          (r.source === "agencia" && !r.agencyId) ||
+          (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(r.source as string) && !r.otaChannelId)
+        ).map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", source: r.source })),
+       },
+      },
+    };
+    const auditDetail = JSON.stringify(snapshot);
+    const auditPayload = {
+      auditDate, executedAt: new Date(), executedBy, isManual,
+      reservationsProcessed: inHouseReservations.length,
+      reservationsSkipped: foliosConSaldo.length, totalPosted: "0",
+      arrivalsNextDay: arrivalsNextDay.length, arrivalsWithPrepago, arrivalsWithoutPrepago,
+      status: auditStatus, notes: errors.length > 0 ? errors.join(" | ") : null,
+      detail: auditDetail,
+    };
+    const [auditLog] = existingAudit.length > 0
+      ? await db.update(nightAuditLogs).set({
+          ...auditPayload,
+          executedAt: existingAudit[0].executedAt,
+          executedBy: existingAudit[0].executedBy,
+          isManual: existingAudit[0].isManual,
+        }).where(eq(nightAuditLogs.id, existingAudit[0].id)).returning()
+      : await db.insert(nightAuditLogs).values({
+        id: randomUUID(),
+        ...auditPayload,
+      }).returning();
 
     // ============================================================
     // PASO 4 — Notificación interna
     // ============================================================
     try {
-      await db.insert(systemNotifications).values({
+      if (!reportingOnlyRerun) await db.insert(systemNotifications).values({
         id: randomUUID(),
         type: "hospitality_alert" as any,
         title: `Night Audit ${auditDate} — ✓ Completado`,
@@ -384,8 +525,7 @@ export async function runNightAudit(options: {
   } catch (err: any) {
     naLog(`✗ Error crítico: ${err.message}`);
     try {
-      await db.insert(nightAuditLogs).values({
-        id: randomUUID(),
+      const failure = {
         auditDate,
         executedAt: new Date(),
         executedBy,
@@ -396,14 +536,43 @@ export async function runNightAudit(options: {
         arrivalsNextDay: 0,
         arrivalsWithPrepago: 0,
         arrivalsWithoutPrepago: 0,
-        status: "failed",
+        status: "failed" as const,
         notes: err.message,
-        detail: JSON.stringify({ error: err.message }),
+        detail: JSON.stringify({ version: 1, auditDate, nextDate: tomorrow, error: err.message }),
+      };
+      if (existingAudit.length > 0) {
+        await db.update(nightAuditLogs).set(failure).where(eq(nightAuditLogs.id, existingAudit[0].id));
+      } else await db.insert(nightAuditLogs).values({
+        id: randomUUID(),
+        ...failure,
       });
     } catch {
       // ignorar
     }
     return { success: false, message: `Error en night audit: ${err.message}` };
+  }
+}
+
+/**
+ * Serialize all mutations for a date across processes. A dedicated pool client
+ * is required because advisory locks are connection-scoped.
+ */
+export async function runNightAudit(options: {
+  executedBy?: string;
+  isManual?: boolean;
+  forceDate?: string;
+}): Promise<{ success: boolean; message: string; data?: any }> {
+  const auditDate = resolveNightAuditDate(options.forceDate);
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [auditDate]);
+    return await runNightAuditUnlocked(options);
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [auditDate]);
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -414,7 +583,7 @@ export function setupNightAuditScheduler(): void {
   // Startup recovery: si el audit de ayer no se ejecutó, correrlo ahora
   (async () => {
     try {
-      const yesterday = getArgentinaDateStr(-1);
+      const yesterday = resolveNightAuditDate();
       const alreadyRan = await nightAuditAlreadyRan(yesterday);
       if (!alreadyRan) {
         naLog(`Startup recovery: audit de ${yesterday} no se ejecutó, corriendo ahora...`);

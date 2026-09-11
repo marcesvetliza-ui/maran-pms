@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { getReservationFinancialSummary } from "@shared/reservationFolio";
-import { charges, payments } from "@shared/schema";
+import { charges, payments, salesInvoices } from "@shared/schema";
 import { db } from "./db";
 
 export type OperationalBalanceReservation = {
@@ -17,6 +17,7 @@ export function calculateReservationOperationalSummaries(
   reservationList: OperationalBalanceReservation[],
   chargeRows: OperationalCharge[],
   paymentRows: OperationalPayment[],
+  invoiceRows: (typeof salesInvoices.$inferSelect)[] = [],
 ) {
   const chargesByReservation = new Map<string, OperationalCharge[]>();
   for (const charge of chargeRows) {
@@ -31,6 +32,13 @@ export function calculateReservationOperationalSummaries(
     current.push(payment);
     paymentsByReservation.set(payment.reservationId, current);
   }
+  const invoicesByReservation = new Map<string, (typeof salesInvoices.$inferSelect)[]>();
+  for (const invoice of invoiceRows) {
+    if (!invoice.reservaId) continue;
+    const current = invoicesByReservation.get(invoice.reservaId) ?? [];
+    current.push(invoice);
+    invoicesByReservation.set(invoice.reservaId, current);
+  }
 
   return new Map(reservationList.map(reservation => {
     const savedRoomTotal = Number(reservation.totalRoomAmount) || 0;
@@ -43,7 +51,7 @@ export function calculateReservationOperationalSummaries(
         roomTotal,
         chargesByReservation.get(reservation.id) ?? [],
         paymentsByReservation.get(reservation.id) ?? [],
-        [],
+        invoicesByReservation.get(reservation.id) ?? [],
       ),
     ];
   }));
@@ -51,6 +59,7 @@ export function calculateReservationOperationalSummaries(
 
 export async function loadReservationOperationalSummaries(
   reservationList: OperationalBalanceReservation[],
+  options: { includeInvoices?: boolean } = {},
 ) {
   if (reservationList.length === 0) return new Map();
 
@@ -59,8 +68,11 @@ export async function loadReservationOperationalSummaries(
     db.select().from(charges).where(inArray(charges.reservationId, reservationIds)),
     db.select().from(payments).where(inArray(payments.reservationId, reservationIds)),
   ]);
+  const invoiceRows = options.includeInvoices
+    ? await db.select().from(salesInvoices).where(inArray(salesInvoices.reservaId, reservationIds))
+    : [];
 
-  return calculateReservationOperationalSummaries(reservationList, chargeRows, paymentRows);
+  return calculateReservationOperationalSummaries(reservationList, chargeRows, paymentRows, invoiceRows);
 }
 
 export async function loadReservationOperationalBalances(
