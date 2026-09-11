@@ -53,6 +53,12 @@ import {
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
 } from "@shared/purchaseInvoiceTotals";
+import {
+  buildPendingOperationalReservationRows,
+  loadReservationOperationalBalances,
+  loadReservationOperationalSummaries,
+  projectReservationOperationalReportRows,
+} from "./reservation-operational-balances";
 
 function normalizeReceivedRetentionAmounts(body: any, tipoComprobante: string): any {
   if (!isReceivedRetention(tipoComprobante)) return body;
@@ -1738,6 +1744,7 @@ export async function registerRoutes(
       if (!from || !to) return res.status(400).json({ error: "from y to son requeridos" });
 
       const rowMapper = (r: any) => ({
+        id: r.id,
         code: r.code,
         guest: r.guest,
         room: r.room,
@@ -1747,19 +1754,17 @@ export async function registerRoutes(
         nights: Number(r.nights),
         pax: Number(r.pax),
         status: r.status,
-        total: Number(r.total),
-        paid: Number(r.paid),
-        balance: Number(r.total) - Number(r.paid),
+        totalRoomAmount: r.total_room_amount,
+        finalRatePerNight: r.final_rate_per_night,
       });
 
       const arrRows = await db.execute(sql`
-        SELECT r.reservation_code AS code,
+        SELECT r.id, r.reservation_code AS code,
                g.first_name || ' ' || g.last_name AS guest,
                ro.room_number AS room, rt.name AS room_type,
                r.check_in_date AS check_in, r.check_out_date AS check_out,
                r.nights, r.number_of_guests AS pax, r.status,
-               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
-               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
+               r.total_room_amount, r.final_rate_per_night
         FROM reservations r
         LEFT JOIN guests g ON r.guest_id = g.id
         LEFT JOIN rooms ro ON r.room_id = ro.id
@@ -1769,13 +1774,12 @@ export async function registerRoutes(
       `);
 
       const depRows = await db.execute(sql`
-        SELECT r.reservation_code AS code,
+        SELECT r.id, r.reservation_code AS code,
                g.first_name || ' ' || g.last_name AS guest,
                ro.room_number AS room, rt.name AS room_type,
                r.check_in_date AS check_in, r.check_out_date AS check_out,
                r.nights, r.number_of_guests AS pax, r.status,
-               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
-               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
+               r.total_room_amount, r.final_rate_per_night
         FROM reservations r
         LEFT JOIN guests g ON r.guest_id = g.id
         LEFT JOIN rooms ro ON r.room_id = ro.id
@@ -1784,7 +1788,17 @@ export async function registerRoutes(
         ORDER BY r.check_out_date, ro.room_number
       `);
 
-      res.json({ arrivals: (arrRows.rows as any[]).map(rowMapper), departures: (depRows.rows as any[]).map(rowMapper) });
+      const arrivals = (arrRows.rows as any[]).map(rowMapper);
+      const departures = (depRows.rows as any[]).map(rowMapper);
+      const uniqueReservations = Array.from(
+        new Map([...arrivals, ...departures].map(row => [row.id, row])).values(),
+      );
+      const summaries = await loadReservationOperationalSummaries(uniqueReservations);
+      const cleanReportRow = ({ id, totalRoomAmount, finalRatePerNight, ...row }: any) => row;
+      res.json({
+        arrivals: projectReservationOperationalReportRows(arrivals, summaries).map(cleanReportRow),
+        departures: projectReservationOperationalReportRows(departures, summaries).map(cleanReportRow),
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1793,28 +1807,30 @@ export async function registerRoutes(
   app.get("/api/reports/pending-balances", requireAuth, async (req, res) => {
     try {
       const rows = await db.execute(sql`
-        SELECT * FROM (
-          SELECT r.reservation_code AS code,
-                 g.first_name || ' ' || g.last_name AS guest,
-                 ro.room_number AS room, rt.name AS room_type,
-                 r.check_in_date AS check_in, r.check_out_date AS check_out,
-                 r.nights, r.number_of_guests AS pax, r.status,
-                 COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND c.status = 'active'), 0) AS total,
-                 COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS paid
-          FROM reservations r
-          LEFT JOIN guests g ON r.guest_id = g.id
-          LEFT JOIN rooms ro ON r.room_id = ro.id
-          LEFT JOIN room_types rt ON r.room_type_id = rt.id
-          WHERE r.status IN ('checked_in', 'confirmed', 'pending')
-        ) sub WHERE (total - paid) > 0.01
+        SELECT r.id, r.reservation_code AS code,
+               g.first_name || ' ' || g.last_name AS guest,
+               ro.room_number AS room, rt.name AS room_type,
+               r.check_in_date AS check_in, r.check_out_date AS check_out,
+               r.nights, r.number_of_guests AS pax, r.status,
+               r.total_room_amount, r.final_rate_per_night
+        FROM reservations r
+        LEFT JOIN guests g ON r.guest_id = g.id
+        LEFT JOIN rooms ro ON r.room_id = ro.id
+        LEFT JOIN room_types rt ON r.room_type_id = rt.id
+        WHERE r.status IN ('checked_in', 'confirmed', 'pending')
         ORDER BY room
       `);
-      res.json((rows.rows as any[]).map((r: any) => ({
-        code: r.code, guest: r.guest, room: r.room, roomType: r.room_type,
+      const reportRows = (rows.rows as any[]).map((r: any) => ({
+        id: r.id, code: r.code, guest: r.guest, room: r.room, roomType: r.room_type,
         checkIn: r.check_in, checkOut: r.check_out,
         nights: Number(r.nights), pax: Number(r.pax), status: r.status,
-        total: Number(r.total), paid: Number(r.paid), balance: Number(r.total) - Number(r.paid),
-      })));
+        totalRoomAmount: r.total_room_amount,
+        finalRatePerNight: r.final_rate_per_night,
+      }));
+      const summaries = await loadReservationOperationalSummaries(reportRows);
+      res.json(projectReservationOperationalReportRows(reportRows, summaries, true).map(
+        ({ id, totalRoomAmount, finalRatePerNight, ...row }) => row,
+      ));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2037,28 +2053,27 @@ export async function registerRoutes(
           r.check_out_date,
           r.status,
           rm.room_number,
-          COALESCE(r.final_rate_per_night::numeric * r.nights, 0) AS alojamiento,
-          COALESCE(
-            (SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0
-          ) AS extras,
-          COALESCE(
-            (SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id), 0
-          ) AS pagado
+           r.total_room_amount,
+           r.final_rate_per_night,
+           r.nights
         FROM reservations r
         JOIN guests g ON g.id = r.guest_id
         LEFT JOIN rooms rm ON rm.id = r.room_id
         WHERE r.status IN ('confirmed', 'checked_in')
-          AND (
-            COALESCE(r.final_rate_per_night::numeric * r.nights, 0) +
-            COALESCE((SELECT SUM(ch.amount::numeric) FROM charges ch WHERE ch.reservation_id = r.id AND ch.category != 'adjustment'), 0) -
-            COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id), 0)
-          ) > 0.01
         ORDER BY g.last_name, g.first_name, r.check_in_date
       `)).rows as any[];
+      const debtSummaries = await loadReservationOperationalSummaries(rows.map(row => ({
+        id: row.reservation_id,
+        totalRoomAmount: row.total_room_amount,
+        finalRatePerNight: row.final_rate_per_night,
+        nights: Number(row.nights),
+      })));
 
       // Group by guest
       const byGuest: Record<string, any> = {};
       for (const row of rows) {
+        const summary = debtSummaries.get(row.reservation_id);
+        if (!summary || summary.operationalFolioBalance <= 0.01) continue;
         const gid = row.guest_id;
         if (!byGuest[gid]) {
           byGuest[gid] = {
@@ -2073,10 +2088,13 @@ export async function registerRoutes(
             totalDeuda: 0,
           };
         }
-        const aloj = parseFloat(row.alojamiento) || 0;
-        const extr = parseFloat(row.extras) || 0;
-        const pag  = parseFloat(row.pagado) || 0;
-        const saldo = aloj + extr - pag;
+        const savedRoomTotal = parseFloat(row.total_room_amount || "0");
+        const aloj = savedRoomTotal > 0
+          ? savedRoomTotal
+          : (parseFloat(row.final_rate_per_night || "0") || 0) * (Number(row.nights) || 0);
+        const extr = summary.operationalServices - aloj;
+        const pag = summary.activeHistoricalSettlements;
+        const saldo = summary.operationalFolioBalance;
         byGuest[gid].reservations.push({
           reservationId: row.reservation_id,
           reservationCode: row.reservation_code,
@@ -3810,29 +3828,30 @@ export async function registerRoutes(
           eq(reservations.status, "checked_in")
         ));
 
-      // 3. Folios con saldo — query única optimizada con JOIN
-      const foliosRaw = await db.execute(sql`
-        SELECT
-          r.id AS "reservationId",
-          r.reservation_code AS "reservationCode",
-          r.room_id AS "roomId",
-          r.guest_id AS "guestId",
-          COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.amount::numeric ELSE 0 END), 0) -
-          COALESCE(SUM(CASE WHEN p.status = 'active' THEN p.amount::numeric ELSE 0 END), 0) AS balance
-        FROM reservations r
-        LEFT JOIN charges c ON c.reservation_id = r.id
-        LEFT JOIN payments p ON p.reservation_id = r.id
-        WHERE r.status = 'checked_in'
-        GROUP BY r.id, r.reservation_code, r.room_id, r.guest_id
-        HAVING (
-          COALESCE(SUM(CASE WHEN c.status = 'active' THEN c.amount::numeric ELSE 0 END), 0) -
-          COALESCE(SUM(CASE WHEN p.status = 'active' THEN p.amount::numeric ELSE 0 END), 0)
-        ) > 0.01
-        ORDER BY balance DESC
-      `);
-      const foliosConSaldo = (foliosRaw.rows as any[]).map(r => ({
-        ...r,
-        balance: Math.round(Number(r.balance) * 100) / 100,
+      // 3. Reservas in-house con saldo operativo. Los cargos y pagos se cargan
+      // en bloque y se calculan con el mismo contrato que el folio de reserva.
+      const inHouseForBalances = await db
+        .select({
+          id: reservations.id,
+          reservationCode: reservations.reservationCode,
+          roomId: reservations.roomId,
+          guestId: reservations.guestId,
+          totalRoomAmount: reservations.totalRoomAmount,
+          finalRatePerNight: reservations.finalRatePerNight,
+          nights: reservations.nights,
+        })
+        .from(reservations)
+        .where(eq(reservations.status, "checked_in"));
+      const operationalBalances = await loadReservationOperationalBalances(inHouseForBalances);
+      const foliosConSaldo = buildPendingOperationalReservationRows(
+        inHouseForBalances,
+        operationalBalances,
+      ).map(reservation => ({
+        reservationId: reservation.id,
+        reservationCode: reservation.reservationCode,
+        roomId: reservation.roomId,
+        guestId: reservation.guestId,
+        balance: reservation.balance,
       }));
 
       // 4. Cajas abiertas

@@ -12,9 +12,10 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
 import { requireRole } from "../auth";
 import { db } from "../db";
-import { reservations, rooms as roomsTable, guests, guestPreferences, folios, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
+import { reservations, rooms as roomsTable, guests, guestPreferences, charges, payments, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
 import type { RoomTypeReferenceSource } from "@shared/schema";
 import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
+import { loadReservationOperationalBalances } from "../reservation-operational-balances";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
 const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
@@ -590,10 +591,10 @@ export function registerRoomsRoutes(app: Express) {
       const reservationIds = activeRows.map(r => r.res.id);
       const guestIds = activeRows.map(r => r.res.guestId).filter(Boolean) as string[];
 
-      const [guestList, allPrefs, allFolios, allAlerts, allCompanions, allRoomTypesList] = await Promise.all([
+      const [guestList, allPrefs, balanceByReservation, allAlerts, allCompanions, allRoomTypesList] = await Promise.all([
         guestIds.length > 0 ? db.select().from(guests).where(inArray(guests.id, guestIds)) : Promise.resolve([]),
         guestIds.length > 0 ? db.select().from(guestPreferences).where(and(eq(guestPreferences.isActive, true), inArray(guestPreferences.guestId, guestIds))) : Promise.resolve([]),
-        db.select().from(folios).where(and(eq(folios.entityType, "reservation"), inArray(folios.entityId, reservationIds))),
+        loadReservationOperationalBalances(activeRows.map(row => row.res)),
         db.select().from(hospitalityAlerts).where(and(ne(hospitalityAlerts.status, "completed"), inArray(hospitalityAlerts.reservationId, reservationIds))),
         db.select().from(reservationCompanions).where(inArray(reservationCompanions.reservationId, reservationIds)),
         db.select().from(roomTypesTable),
@@ -605,7 +606,6 @@ export function registerRoomsRoutes(app: Express) {
         if (!prefsByGuest.has(p.guestId)) prefsByGuest.set(p.guestId, []);
         prefsByGuest.get(p.guestId)!.push(p);
       }
-      const folioByRes = new Map(allFolios.map(f => [f.entityId, f]));
       const alertsByRes = new Map<string, number>();
       for (const a of allAlerts) {
         alertsByRes.set(a.reservationId, (alertsByRes.get(a.reservationId) ?? 0) + 1);
@@ -627,7 +627,6 @@ export function registerRoomsRoutes(app: Express) {
         .map(({ res, room }) => {
           const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
           const prefs = res.guestId ? (prefsByGuest.get(res.guestId) ?? []) : [];
-          const folio = folioByRes.get(res.id);
           const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
           return {
             roomId: room.id,
@@ -659,7 +658,7 @@ export function registerRoomsRoutes(app: Express) {
               segment: (guest as any).segment ?? null,
             } : null,
             companionsCount: companionCountByRes.get(res.id) ?? 0,
-            folioBalance: folio ? parseFloat(String(folio.balance ?? "0")) : 0,
+            folioBalance: balanceByReservation.get(res.id) ?? 0,
             hasPreferences: prefs.length > 0,
             hasCritical: prefs.some(p => p.priority === "critical"),
             hasSpecialDate: prefs.some(p => p.category === "fecha_especial"),
@@ -708,19 +707,16 @@ export function registerRoomsRoutes(app: Express) {
       ].filter(Boolean) as string[];
       const checkOutResIds = checkOutRows.map(r => r.res.id);
 
-      const [guestList, allFolios, allRoomTypes, allBedTypeList] = await Promise.all([
+      const [guestList, balanceByReservation, allRoomTypes, allBedTypeList] = await Promise.all([
         allGuestIds.length > 0
           ? db.select().from(guests).where(inArray(guests.id, allGuestIds))
           : Promise.resolve([]),
-        checkOutResIds.length > 0
-          ? db.select().from(folios).where(and(eq(folios.entityType, "reservation"), inArray(folios.entityId, checkOutResIds)))
-          : Promise.resolve([]),
+        loadReservationOperationalBalances(checkOutRows.map(row => row.res)),
         db.select().from(roomTypesTable),
         db.select().from(bedTypes),
       ]);
 
       const guestMap = new Map(guestList.map(g => [g.id, g]));
-      const folioByRes = new Map(allFolios.map(f => [f.entityId, f]));
       const roomTypeMap = new Map(allRoomTypes.map(rt => [rt.id, rt]));
       const bedTypeMap = new Map(allBedTypeList.map(bt => [bt.id, bt]));
 
@@ -732,7 +728,6 @@ export function registerRoomsRoutes(app: Express) {
 
       const checkOuts = checkOutRows.sort(sortByRoom).map(({ res, room }) => {
         const guest = res.guestId ? guestMap.get(res.guestId) : undefined;
-        const folio = folioByRes.get(res.id);
         const roomType = room.roomTypeId ? roomTypeMap.get(room.roomTypeId) : undefined;
         const bedTypeName = res.bedTypeNotes || (res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) as any)?.name : null) || null;
         return {
@@ -748,7 +743,7 @@ export function registerRoomsRoutes(app: Express) {
           nights: res.nights ?? daysDiff(res.checkInDate, res.checkOutDate),
           finalRatePerNight: res.finalRatePerNight ? parseFloat(String(res.finalRatePerNight)) : null,
           totalRoomAmount: res.totalRoomAmount ? parseFloat(String(res.totalRoomAmount)) : null,
-          folioBalance: folio ? parseFloat(String(folio.balance ?? "0")) : 0,
+          folioBalance: balanceByReservation.get(res.id) ?? 0,
           bedTypeNotes: bedTypeName,
           lateCheckOut: res.lateCheckOut ?? false,
           lateCheckOutTime: res.lateCheckOutTime ?? null,

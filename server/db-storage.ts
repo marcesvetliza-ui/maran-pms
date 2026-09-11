@@ -2,6 +2,10 @@ import { randomUUID } from "crypto";
 import { getArgentinaOperationalParts } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
+import {
+  loadReservationOperationalSummaries,
+  projectReservationOperationalReportRows,
+} from "./reservation-operational-balances";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -6582,23 +6586,38 @@ export class DatabaseStorage implements IStorage {
       allRes = allRes.filter(r => r.status === status);
     }
 
-    const result: any[] = [];
-    for (const r of allRes) {
-      const guest = r.guestId ? await db.select().from(guests).where(eq(guests.id, r.guestId)).then(g => g[0]) : null;
-      const room = r.roomId ? await db.select().from(rooms).where(eq(rooms.id, r.roomId)).then(rm => rm[0]) : null;
-      const type = r.roomTypeId ? await db.select().from(roomTypes).where(eq(roomTypes.id, r.roomTypeId)).then(t => t[0]) : null;
-      const company = r.companyId ? await db.select().from(companies).where(eq(companies.id, r.companyId)).then(c => c[0]) : null;
-      const resPay = await db.select().from(payments).where(eq(payments.reservationId, r.id));
-      const totalPaid = resPay.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
-      const total = parseFloat(r.totalRoomAmount || "0");
-      result.push({
+    const guestIds = allRes.map(r => r.guestId).filter(Boolean) as string[];
+    const roomIds = allRes.map(r => r.roomId).filter(Boolean) as string[];
+    const roomTypeIds = allRes.map(r => r.roomTypeId).filter(Boolean) as string[];
+    const companyIds = allRes.map(r => r.companyId).filter(Boolean) as string[];
+    const [guestRows, roomRows, typeRows, companyRows, summaries] = await Promise.all([
+      guestIds.length ? db.select().from(guests).where(inArray(guests.id, guestIds)) : [],
+      roomIds.length ? db.select().from(rooms).where(inArray(rooms.id, roomIds)) : [],
+      roomTypeIds.length ? db.select().from(roomTypes).where(inArray(roomTypes.id, roomTypeIds)) : [],
+      companyIds.length ? db.select().from(companies).where(inArray(companies.id, companyIds)) : [],
+      loadReservationOperationalSummaries(allRes),
+    ]);
+    const guestMap = new Map(guestRows.map(row => [row.id, row]));
+    const roomMap = new Map(roomRows.map(row => [row.id, row]));
+    const typeMap = new Map(typeRows.map(row => [row.id, row]));
+    const companyMap = new Map(companyRows.map(row => [row.id, row]));
+
+    const reportRows = allRes.map(r => {
+      const guest = r.guestId ? guestMap.get(r.guestId) : null;
+      const room = r.roomId ? roomMap.get(r.roomId) : null;
+      const type = r.roomTypeId ? typeMap.get(r.roomTypeId) : null;
+      const company = r.companyId ? companyMap.get(r.companyId) : null;
+      return {
+        id: r.id,
         code: r.reservationCode, guest: guest ? `${guest.lastName} ${guest.firstName}` : "-",
         company: company?.razonSocial || "-", room: room?.roomNumber || "-", type: type?.name || "-",
         checkIn: r.checkInDate, checkOut: r.checkOutDate, nights: r.nights,
-        source: r.source, status: r.status, total: Math.round(total), paid: Math.round(totalPaid), balance: Math.round(total - totalPaid),
-      });
-    }
-    return result;
+        source: r.source,
+        status: r.status,
+      };
+    });
+    return projectReservationOperationalReportRows(reportRows, summaries)
+      .map(({ id, ...row }) => row);
   }
 
   async getReportPayments(from: string, to: string): Promise<any> {

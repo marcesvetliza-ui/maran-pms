@@ -13,6 +13,7 @@ import {
   guestPreferences,
   hospitalityAlerts,
 } from "@shared/schema";
+import { loadReservationOperationalSummaries } from "./reservation-operational-balances";
 
 function naLog(message: string) {
   const t = new Date().toLocaleTimeString("en-US", {
@@ -76,6 +77,8 @@ export async function runNightAudit(options: {
         guestId: reservations.guestId,
         finalRatePerNight: reservations.finalRatePerNight,
         baseRatePerNight: reservations.baseRatePerNight,
+         totalRoomAmount: reservations.totalRoomAmount,
+         nights: reservations.nights,
       })
       .from(reservations)
       .where(
@@ -88,32 +91,11 @@ export async function runNightAudit(options: {
 
     naLog(`Habitaciones ocupadas: ${inHouseReservations.length}`);
 
-    // Calcular saldo pendiente por folio (cargos - pagos) — un solo JOIN cada uno
-    const inHouseIds = inHouseReservations.map((r) => r.id);
+    // Calcular saldos operativos con cargas masivas, incluyendo alojamiento.
     let folioDetail: any[] = [];
 
-    if (inHouseIds.length > 0) {
-      const chargesSums = await db
-        .select({
-          reservationId: charges.reservationId,
-          total: sql<number>`COALESCE(SUM(${charges.amount}::numeric), 0)`,
-        })
-        .from(charges)
-        .where(inArray(charges.reservationId, inHouseIds))
-        .groupBy(charges.reservationId);
-
-      const paymentsSums = await db
-        .select({
-          reservationId: payments.reservationId,
-          total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)`,
-        })
-        .from(payments)
-        .where(inArray(payments.reservationId, inHouseIds))
-        .groupBy(payments.reservationId);
-
-      const chargesMap = new Map(chargesSums.map((c) => [c.reservationId, Number(c.total)]));
-      const paymentsMap = new Map(paymentsSums.map((p) => [p.reservationId, Number(p.total)]));
-
+    if (inHouseReservations.length > 0) {
+      const summaries = await loadReservationOperationalSummaries(inHouseReservations);
       // Obtener números de habitación
       const roomIds = inHouseReservations.map((r) => r.roomId).filter(Boolean) as string[];
       const roomNumbers = roomIds.length > 0
@@ -125,18 +107,16 @@ export async function runNightAudit(options: {
       const roomMap = new Map(roomNumbers.map((r) => [r.id, r.roomNumber]));
 
       folioDetail = inHouseReservations.map((r) => {
-        const totalCharges = chargesMap.get(r.id) ?? 0;
-        const totalPaid = paymentsMap.get(r.id) ?? 0;
-        const balance = totalCharges - totalPaid;
+        const summary = summaries.get(r.id)!;
         return {
           reservationId: r.id,
           reservationCode: r.reservationCode,
           roomNumber: r.roomId ? roomMap.get(r.roomId) ?? "?" : "?",
           checkOutDate: r.checkOutDate,
-          totalCharges,
-          totalPaid,
-          balance,
-          hasBalance: balance > 0,
+          totalCharges: summary.operationalServices,
+          totalPaid: summary.activeHistoricalSettlements,
+          balance: summary.operationalFolioBalance,
+          hasBalance: summary.operationalFolioBalance > 0.01,
         };
       });
     }
@@ -153,7 +133,14 @@ export async function runNightAudit(options: {
     try {
       // Buscar checked_in con checkout vencido
       const overdueCheckedIn = await db
-        .select({ id: reservations.id, roomId: reservations.roomId, reservationCode: reservations.reservationCode })
+        .select({
+          id: reservations.id,
+          roomId: reservations.roomId,
+          reservationCode: reservations.reservationCode,
+          totalRoomAmount: reservations.totalRoomAmount,
+          finalRatePerNight: reservations.finalRatePerNight,
+          nights: reservations.nights,
+        })
         .from(reservations)
         .where(and(
           eq(reservations.status, "checked_in"),
@@ -161,19 +148,10 @@ export async function runNightAudit(options: {
         ));
 
       if (overdueCheckedIn.length > 0) {
-        const overdueIds = overdueCheckedIn.map((r) => r.id);
-        // Calcular balances
-        const chargeSums = await db
-          .select({ reservationId: charges.reservationId, total: sql<number>`COALESCE(SUM(${charges.amount}::numeric), 0)` })
-          .from(charges).where(inArray(charges.reservationId, overdueIds)).groupBy(charges.reservationId);
-        const paymentSums = await db
-          .select({ reservationId: payments.reservationId, total: sql<number>`COALESCE(SUM(${payments.amount}::numeric), 0)` })
-          .from(payments).where(inArray(payments.reservationId, overdueIds)).groupBy(payments.reservationId);
-        const cMap = new Map(chargeSums.map((c) => [c.reservationId, Number(c.total)]));
-        const pMap = new Map(paymentSums.map((p) => [p.reservationId, Number(p.total)]));
+        const overdueSummaries = await loadReservationOperationalSummaries(overdueCheckedIn);
 
         for (const r of overdueCheckedIn) {
-          const balance = (cMap.get(r.id) ?? 0) - (pMap.get(r.id) ?? 0);
+          const balance = overdueSummaries.get(r.id)?.operationalFolioBalance ?? 0;
           if (balance <= 0.01) {
             await db.update(reservations).set({ status: "checked_out" } as any).where(eq(reservations.id, r.id));
             if (r.roomId) {

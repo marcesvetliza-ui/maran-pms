@@ -88,6 +88,27 @@ describe("reservation folio financial summary", () => {
       newCollectionNeeded: 0,
     });
   });
+
+  it("uses active charges and payments while ignoring annulled rows", () => {
+    const summary = getReservationFinancialSummary(
+      1000,
+      [
+        { id: "active-charge", amount: "250", category: "otros", status: "active" },
+        { id: "void-charge", amount: "900", category: "otros", status: "anulado" },
+      ],
+      [
+        { id: "active-payment", amount: "1250", method: "efectivo", status: "active" },
+        { id: "void-payment", amount: "600", method: "efectivo", status: "anulado" },
+      ],
+      [],
+    );
+
+    expect(summary).toMatchObject({
+      operationalServices: 1250,
+      activeHistoricalSettlements: 1250,
+      operationalFolioBalance: 0,
+    });
+  });
 });
 
 describe("reservation rate chronology", () => {

@@ -11,6 +11,7 @@ import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getReservationFinancialSummary } from "@shared/reservationFolio";
+import { loadReservationOperationalSummaries } from "../reservation-operational-balances";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -58,7 +59,41 @@ const PAYMENT_LABELS: Record<string, string> = {
   room_charge: "Cargo a Habitación",
 };
 
-function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInvoiceMap?: Record<string, string>): Promise<Buffer> {
+type FolioPdfOperationalSummary = {
+  operationalServices: number;
+  activeHistoricalSettlements: number;
+  operationalFolioBalance: number;
+};
+
+export function getFolioPdfTotals(
+  folio: Pick<FolioWithMovements, "totalCharges" | "totalPayments" | "balance">,
+  operationalSummary?: FolioPdfOperationalSummary,
+) {
+  return operationalSummary
+    ? {
+        chargesLabel: "Total Servicios",
+        paymentsLabel: "Total Liquidaciones",
+        balanceLabel: "SALDO OPERATIVO",
+        charges: operationalSummary.operationalServices,
+        payments: operationalSummary.activeHistoricalSettlements,
+        balance: operationalSummary.operationalFolioBalance,
+      }
+    : {
+        chargesLabel: "Total Cargos",
+        paymentsLabel: "Total Pagado",
+        balanceLabel: null,
+        charges: folio.totalCharges ?? "0",
+        payments: folio.totalPayments ?? "0",
+        balance: parseFloat(folio.balance ?? "0"),
+      };
+}
+
+function genFolioPDF(
+  folio: FolioWithMovements,
+  entityLabel?: string,
+  paymentInvoiceMap?: Record<string, string>,
+  operationalSummary?: FolioPdfOperationalSummary,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 0, size: "A4" });
     const chunks: Buffer[] = [];
@@ -238,11 +273,12 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     y += 12;
 
     const totalPanelX = R - 200;
-    const balance = parseFloat(folio.balance ?? "0");
+    const displayTotals = getFolioPdfTotals(folio, operationalSummary);
+    const balance = Number(displayTotals.balance);
 
     const totals = [
-      { label: "Total Cargos",  value: folio.totalCharges ?? "0",  color: red },
-      { label: "Total Pagado",  value: folio.totalPayments ?? "0", color: green },
+      { label: displayTotals.chargesLabel, value: displayTotals.charges, color: red },
+      { label: displayTotals.paymentsLabel, value: displayTotals.payments, color: green },
     ];
     for (const t of totals) {
       doc.font("Helvetica").fontSize(9).fillColor(MUTED)
@@ -255,7 +291,8 @@ function genFolioPDF(folio: FolioWithMovements, entityLabel?: string, paymentInv
     // Saldo final
     y += 4;
     const saldoColor = balance > 0 ? balOrange : balance < 0 ? "#2b6cb0" : green;
-    const saldoLabel = balance > 0 ? "SALDO PENDIENTE" : balance < 0 ? "SALDO A FAVOR" : "SALDO SALDADO";
+    const saldoLabel = displayTotals.balanceLabel ??
+      (balance > 0 ? "SALDO PENDIENTE" : balance < 0 ? "SALDO A FAVOR" : "SALDO SALDADO");
     doc.roundedRect(totalPanelX - 6, y - 5, 202, 28, 4)
        .fill(balance > 0 ? "#fff5e6" : balance < 0 ? "#ebf4ff" : "#f0fff4");
     doc.rect(totalPanelX - 6, y - 5, 3, 28).fill(saldoColor);
@@ -461,9 +498,11 @@ export function registerFolioRoutes(app: Express) {
 
       // Try to build a readable entity label
       let entityLabel = entityId;
+      let reservationForPdf: Awaited<ReturnType<typeof storage.getReservation>> | null = null;
       try {
         if (entityType === "reservation") {
           const resv = await storage.getReservation(entityId);
+          reservationForPdf = resv ?? null;
           if (resv) {
             const g = resv.guest as any;
             const guestName = g
@@ -482,6 +521,12 @@ export function registerFolioRoutes(app: Express) {
           if (grp) entityLabel = `${grp.name}`;
         }
       } catch { /* non-critical */ }
+      if (entityType === "reservation" && !reservationForPdf) {
+        return res.status(404).json({ error: "Reserva no encontrada para el folio" });
+      }
+      const reservationSummary = reservationForPdf
+        ? (await loadReservationOperationalSummaries([reservationForPdf])).get(entityId)
+        : undefined;
 
       // Build invoice map: folio_movement.sourceId (payment id) -> invoice badge text
       let paymentInvoiceMap: Record<string, string> | undefined;
@@ -536,7 +581,7 @@ export function registerFolioRoutes(app: Express) {
         } catch (e) { console.error("[folio-pdf] invoice map event:", e); }
       }
 
-      const pdf = await genFolioPDF(folio, entityLabel, paymentInvoiceMap);
+      const pdf = await genFolioPDF(folio, entityLabel, paymentInvoiceMap, reservationSummary);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="folio-${folio.codigo}.pdf"`);
       res.send(pdf);
