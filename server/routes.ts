@@ -573,7 +573,10 @@ export async function registerRoutes(
   });
 
   // Breakfast list for tomorrow: reservations staying tonight (checked_in, non-virtual rooms)
-  app.get("/api/dashboard/breakfasts", requireAuth, async (req, res) => {
+  app.get(
+    "/api/dashboard/breakfasts",
+    requireRole(["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"]),
+    async (req, res) => {
     try {
       const { getArgentinaToday } = await import("./db-storage");
       const today = getArgentinaToday();
@@ -611,7 +614,8 @@ export async function registerRoutes(
       console.error("[breakfasts] error:", e.message);
       res.status(500).json({ error: e.message });
     }
-  });
+    },
+  );
 
   // Today's departures (check-outs scheduled for today)
   app.get("/api/dashboard/departures", async (req, res) => {

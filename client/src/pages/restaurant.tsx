@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
+import { BreakfastList } from "@/components/breakfast-list";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { VAT_CONDITION_LABELS } from "@/pages/guests";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -80,6 +81,7 @@ import {
   Tag,
   Mail,
   Send,
+  Coffee,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -694,6 +696,7 @@ export default function RestaurantPage() {
   const [restEmailReceiptAddress, setRestEmailReceiptAddress] = useState("");
   const [isReservationDialogOpen, setIsReservationDialogOpen] = useState(false);
   const [isDailyReservationsOpen, setIsDailyReservationsOpen] = useState(false);
+  const [isBreakfastDialogOpen, setIsBreakfastDialogOpen] = useState(false);
   const [reservationDate, setReservationDate] = useState(getArgentinaToday());
   const [editingReservation, setEditingReservation] = useState<TableReservation | null>(null);
   const [isEditReservationOpen, setIsEditReservationOpen] = useState(false);
@@ -2438,6 +2441,14 @@ export default function RestaurantPage() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => setIsBreakfastDialogOpen(true)}
+            data-testid="button-breakfasts-tomorrow"
+          >
+            <Coffee className="h-4 w-4 mr-2" />
+            Desayunos de mañana
+          </Button>
+          <Button
+            variant="outline"
             size="sm"
             className="gap-1.5"
             onClick={() => setIsEmitirComprobanteOpen(true)}
@@ -2452,6 +2463,16 @@ export default function RestaurantPage() {
           </Badge>
         </div>
       </div>
+
+      <Dialog open={isBreakfastDialogOpen} onOpenChange={setIsBreakfastDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Desayunos de mañana</DialogTitle>
+            <DialogDescription>Listado de habitaciones con desayuno incluido</DialogDescription>
+          </DialogHeader>
+          <BreakfastList enabled={isBreakfastDialogOpen} variant="plain" />
+        </DialogContent>
+      </Dialog>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
