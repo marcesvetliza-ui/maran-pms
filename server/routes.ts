@@ -10,6 +10,7 @@ import { insertGuestReviewSchema, reservationChangelog, reservations, guests, ho
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
+import { shouldBlockExternalComm } from "./external-comms-policy";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -1150,7 +1151,12 @@ export async function registerRoutes(
       // Send confirmation back to guest via MARA if sessionId is available
       const maraBaseUrl = process.env.MARA_BASE_URL;
       const maraSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (maraBaseUrl && maraSecret && (notification as any).sessionId) {
+      if (
+        maraBaseUrl &&
+        maraSecret &&
+        (notification as any).sessionId &&
+        !shouldBlockExternalComm({ integration: "mara-outbound", action: "status-update" })
+      ) {
         const guestName = (notification as any).guestName || "Huésped";
         const maraMessages: Record<string, string> = {
           en_proceso: `¡Hola ${guestName}! 👋 Tu solicitud fue recibida por nuestro equipo y ya está siendo atendida. Te avisamos en cuanto esté lista.`,
@@ -1240,6 +1246,10 @@ export async function registerRoutes(
         const expectedHint = `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)`;
         console.warn(`[webhook/chatbot] 401 — recibido: ${receivedHint} | esperado: ${expectedHint}`);
         return res.status(401).json({ error: "Invalid or missing webhook secret" });
+      }
+
+      if (shouldBlockExternalComm({ integration: "mara-inbound", action: "process-notification" })) {
+        return res.status(503).json({ error: "Webhook deshabilitado en este ambiente (piloto/desarrollo/test)." });
       }
 
       const { eventType, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;

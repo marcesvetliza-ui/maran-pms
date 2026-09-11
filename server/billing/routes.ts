@@ -9,6 +9,7 @@ import { calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceSer
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
 import {
@@ -518,6 +519,7 @@ export function registerBillingRoutes(app: Express) {
   // GET /api/billing/debug-wsaa — devuelve respuesta CRUDA de WSAA (debug temporal)
   app.get("/api/billing/debug-wsaa", requireAuth, async (req, res) => {
     try {
+      assertExternalCommAllowed({ integration: "arca", action: "debug-wsaa" });
       const config = await getBillingConfig();
       if (!config.arcaCert || !config.arcaKey) return res.json({ error: "Sin cert/key" });
 

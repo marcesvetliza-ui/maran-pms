@@ -7,6 +7,7 @@ import {
 import { eq, desc, and, gte } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { runReminderScheduler } from "../email-service";
+import { shouldBlockExternalComm } from "../external-comms-policy";
 
 const HOTEL_BASE_URL_ROUTES =
   process.env.REPLIT_DEPLOYMENT_URL ||
@@ -215,6 +216,9 @@ export function registerEmailRoutes(app: Express) {
   // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/email/test", requireAuth, async (req, res) => {
     try {
+      if (shouldBlockExternalComm({ integration: "email", action: "test-config" })) {
+        return res.status(503).json({ error: "Envío de emails bloqueado en este ambiente (piloto/desarrollo/test)." });
+      }
       const { to } = req.body;
       if (!to) return res.status(400).json({ error: "Email requerido" });
       const [cfg] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));

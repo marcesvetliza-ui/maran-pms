@@ -2,6 +2,7 @@ import forge from "node-forge";
 import { db } from "../db";
 import { billingConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 
 const WSAA_HOMOLOG = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms";
 const WSAA_PROD    = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
@@ -106,6 +107,8 @@ export async function getTokenAuth(
   keyPem: string,
   ambiente: "homologacion" | "produccion"
 ): Promise<{ token: string; sign: string }> {
+  assertExternalCommAllowed({ integration: "arca", action: `wsaa-login-${ambiente}` });
+
   // 1. Intentar desde DB (persiste entre restarts)
   const cached = await loadFromDb(ambiente);
   if (cached) return cached;

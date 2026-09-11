@@ -1,4 +1,5 @@
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
@@ -100,6 +101,8 @@ export async function feCompConsultar(
   req: FECompConsulta,
   ambiente: "homologacion" | "produccion"
 ): Promise<FECAEResult | null> {
+  assertExternalCommAllowed({ integration: "arca", action: `fecomp-consultar-${ambiente}` });
+
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
@@ -131,6 +134,8 @@ export async function feCAESolicitar(
   req: FECAERequest,
   ambiente: "homologacion" | "produccion"
 ): Promise<FECAEResult> {
+  assertExternalCommAllowed({ integration: "arca", action: `fecae-solicitar-${ambiente}` });
+
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
   const recipientDocument = resolveFiscalRecipientDocument({
