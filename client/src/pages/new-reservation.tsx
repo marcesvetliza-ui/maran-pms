@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
+import { isZeroReservationRate, parseReservationRate } from "@shared/reservationRate";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
@@ -205,9 +206,13 @@ export default function NewReservationPage() {
 
   const totalAmount = fmtMoney(finalRate * nights);
   // Valores para la API: siempre en formato decimal estándar (sin locale)
-  const apiBaseRate = baseRate > 0 ? baseRate.toFixed(2) : null;
-  const apiFinaRate = finalRate > 0 ? finalRate.toFixed(2) : null;
-  const apiTotalAmount = (finalRate > 0 && nights > 0) ? (finalRate * nights).toFixed(2) : null;
+  const apiBaseRate = Number.isFinite(baseRate) ? baseRate.toFixed(2) : null;
+  const apiFinaRate = Number.isFinite(finalRate) ? finalRate.toFixed(2) : null;
+  const apiTotalAmount = (Number.isFinite(finalRate) && nights > 0) ? (finalRate * nights).toFixed(2) : null;
+  const specialRateAmountProvided = selectedRatePlanId !== "__special__" || specialRateAmount.trim() !== "";
+  const requiresRateReason = selectedRatePlanId === "__special__" || isZeroReservationRate(finalRate);
+  const validSpecialRateAmount = selectedRatePlanId !== "__special__" ||
+    (specialRateAmountProvided && Number.isFinite(parseReservationRate(specialRateAmount)) && parseReservationRate(specialRateAmount)! >= 0);
 
   const createGuestMutation = useMutation({
     mutationFn: async (guest: InsertGuest): Promise<Guest> => {
@@ -276,7 +281,7 @@ export default function NewReservationPage() {
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
         ratePlanId: selectedRatePlanId === "__special__" ? null : (selectedRatePlanId || null),
-        specialRateReason: selectedRatePlanId === "__special__" ? specialRateReason : null,
+        specialRateReason: requiresRateReason ? specialRateReason : null,
         checkInDate,
         checkOutDate,
         nights,
@@ -346,9 +351,8 @@ export default function NewReservationPage() {
   });
 
   const canSubmit = selectedGuest && selectedRoomTypeId && selectedRoomId && nights > 0 && checkInDate && checkOutDate &&
-    (selectedRatePlanId === "__special__"
-      ? (specialRateReason.trim().length > 0 && parseFloat(specialRateAmount) > 0)
-      : !!selectedRatePlanId);
+    (!!selectedRatePlanId && validSpecialRateAmount &&
+      (!requiresRateReason || specialRateReason.trim().length > 0));
 
   const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
     if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";
@@ -657,7 +661,7 @@ export default function NewReservationPage() {
                     <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                   </SelectContent>
                 </Select>
-                {selectedRatePlanId === "__special__" && (
+              {requiresRateReason && (
                   <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-2">
                     <div className="space-y-1.5">
                       <Label>Tarifa por noche <span className="text-destructive">*</span></Label>

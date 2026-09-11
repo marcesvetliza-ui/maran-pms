@@ -6,6 +6,7 @@ import {
   loadReservationOperationalSummaries,
   projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
+import { visibleGuestCondition } from "./guest-visibility";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -771,9 +772,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getGuests(): Promise<Guest[]> {
-    return db.select().from(guests).where(
-      or(isNull(guests.codigo), not(ilike(guests.codigo, 'GROUP-%')))
-    );
+    return db.select().from(guests).where(visibleGuestCondition());
   }
 
   async getGuest(id: string): Promise<Guest | undefined> {
@@ -784,7 +783,7 @@ export class DatabaseStorage implements IStorage {
   async searchGuests(query: string): Promise<Guest[]> {
     return db.select().from(guests).where(
       and(
-        or(isNull(guests.codigo), not(ilike(guests.codigo, 'GROUP-%'))),
+        visibleGuestCondition(),
         or(
           ilike(guests.firstName, `%${query}%`),
           ilike(guests.lastName, `%${query}%`),
@@ -1879,7 +1878,7 @@ export class DatabaseStorage implements IStorage {
 
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-    const totalGuestsResult = await db.select({ cnt: count() }).from(guests);
+    const totalGuestsResult = await db.select({ cnt: count() }).from(guests).where(visibleGuestCondition());
     const totalGuests = totalGuestsResult[0]?.cnt ?? 0;
 
     const pendingResult = await db.select({ cnt: count() }).from(reservations).where(
@@ -6535,8 +6534,13 @@ export class DatabaseStorage implements IStorage {
 
   async getReportRevenueByRoomType(from: string, to: string): Promise<any[]> {
     const types = await db.select().from(roomTypes);
-    const periodRes = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
+    const periodRes = await db.select({ reservation: reservations }).from(reservations)
+      .leftJoin(guests, eq(reservations.guestId, guests.id))
+      .where(and(
+        lte(reservations.checkInDate, to),
+        gte(reservations.checkOutDate, from),
+        visibleGuestCondition(),
+      )).then(rows => rows.map(row => row.reservation));
 
     const result: any[] = [];
     let grandTotal = 0;

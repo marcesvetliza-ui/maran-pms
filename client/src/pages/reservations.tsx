@@ -15,6 +15,7 @@ import {
   parseReservationInvoiceRef,
 } from "@shared/reservationFolio";
 import { resolveReservationBillingTarget } from "@shared/reservationBillingTarget";
+import { isZeroReservationRate, parseReservationRate } from "@shared/reservationRate";
 import {
   CalendarCheck,
   CalendarRange,
@@ -852,14 +853,17 @@ export function ReservationFormDialog({
       toast({ title: "Fechas inválidas", description: "La fecha de Check-out debe ser posterior al Check-in.", variant: "destructive" });
       return;
     }
-    if (formData.ratePlanId === "__special__" && !formData.specialRateReason?.trim()) {
-      toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa especial para guardar.", variant: "destructive" });
+    const effectiveRate = parseReservationRate(formData.finalRatePerNight);
+    const requiresRateReason = formData.ratePlanId === "__special__" || isZeroReservationRate(effectiveRate);
+    if (requiresRateReason && !formData.specialRateReason?.trim()) {
+      toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa $0 para guardar.", variant: "destructive" });
       return;
     }
     mutation.mutate({
       ...formData,
       ratePlanId: formData.ratePlanId === "__special__" ? null : (formData.ratePlanId || null),
-      specialRateReason: formData.ratePlanId === "__special__" ? (formData.specialRateReason || null) : null,
+      specialRateReason: requiresRateReason
+        ? (formData.specialRateReason || null) : null,
       roomId: finalRoomId,
       roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
       guestId: finalGuestId,
@@ -1133,7 +1137,8 @@ export function ReservationFormDialog({
                   <SelectItem value="__special__">⭐ Tarifa Especial (manual)</SelectItem>
                 </SelectContent>
               </Select>
-              {formData.ratePlanId === "__special__" && (
+              {(formData.ratePlanId === "__special__" ||
+                isZeroReservationRate(parseReservationRate(formData.finalRatePerNight))) && (
                 <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-1">
                   <div className="space-y-1.5">
                     <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>

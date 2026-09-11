@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getLocalToday, formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { canUseWalkInRate } from "@/lib/walk-in-rate";
+import { isZeroReservationRate, parseReservationRate } from "@shared/reservationRate";
 import {
   LogIn,
   Search,
@@ -247,6 +248,8 @@ export default function CheckInPage() {
   const effectiveNightRate = usesSpecialRate
     ? (walkInSpecialRateAmount || "0")
     : (selectedRatePlan ? getPaxRate(selectedRatePlan, numberOfGuests) : "0");
+  const specialRateAmountProvided = !usesSpecialRate || walkInSpecialRateAmount.trim() !== "";
+  const requiresRateReason = usesSpecialRate || isZeroReservationRate(effectiveNightRate);
   const totalAmount = (parseFloat(effectiveNightRate) * nights).toFixed(2);
 
   const checkInMutation = useMutation({
@@ -360,7 +363,7 @@ export default function CheckInPage() {
         roomTypeId: selectedRoomTypeId,
         roomId: selectedRoomId,
         ratePlanId: usesSpecialRate ? null : (selectedRatePlanId || null),
-        specialRateReason: usesSpecialRate ? walkInSpecialRateReason : null,
+        specialRateReason: isZeroReservationRate(effectiveNightRate) ? walkInSpecialRateReason : (usesSpecialRate ? walkInSpecialRateReason : null),
         checkInDate: today,
         checkOutDate,
         nights,
@@ -488,6 +491,7 @@ export default function CheckInPage() {
       selectedRatePlanExists: !!selectedRatePlan,
       effectiveNightRate,
       specialRateReason: walkInSpecialRateReason,
+      specialRateAmountProvided,
     });
 
   const todayDisplay = new Date().toLocaleDateString("es-ES", {
@@ -783,7 +787,7 @@ export default function CheckInPage() {
                           Este tipo no tiene planes tarifarios. Ingresá una tarifa especial.
                         </p>
                       )}
-                      {usesSpecialRate && (
+                      {requiresRateReason && (
                         <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-2">
                           <div className="space-y-1.5">
                             <Label>Tarifa por noche <span className="text-destructive">*</span></Label>
