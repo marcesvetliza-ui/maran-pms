@@ -8,6 +8,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
+import { InvalidAppEnvError, initAppEnv } from "./app-env";
 
 // log must be defined first — it's used in the listen callback below
 export function log(message: string, source = "express") {
@@ -45,6 +46,22 @@ if (missingVars.length > 0) {
     `El servidor no puede iniciar sin estas variables. Configurelas en el panel de Secretos de Replit.`
   );
   process.exit(1);
+}
+
+// APP_ENV — política central de ambiente (development/test/pilot/production),
+// independiente de NODE_ENV. Ver server/app-env.ts. Debe inicializarse antes
+// de cualquier código que dependa de getAppEnv()/isPilotEnv().
+try {
+  const appEnvResolution = initAppEnv();
+  if (appEnvResolution.warning) {
+    console.warn(`[APP_ENV] ${appEnvResolution.warning}`);
+  }
+} catch (err) {
+  if (err instanceof InvalidAppEnvError) {
+    console.error(`[ERROR DE INICIO] ${err.message}`);
+    process.exit(1);
+  }
+  throw err;
 }
 
 initSentry();
