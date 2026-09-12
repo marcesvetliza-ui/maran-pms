@@ -36,6 +36,7 @@ import {
   FileCheck,
 } from "lucide-react";
 import { getReservationFinancialSummary } from "@shared/reservationFolio";
+import { getFolioDisplayTotals } from "@/lib/folio-display";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -600,11 +601,10 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
     );
   }
 
-  const balance = Number(folio.balance);
-  const charges = Number(folio.totalCharges);
-  const paymentsTotal = Number(folio.totalPayments);
   const EntityIcon = ENTITY_ICONS[entityType] ?? ReceiptText;
   const reservationSummary = folio.financialSummary;
+  const displayTotals = getFolioDisplayTotals(entityType, folio);
+  const { balance, charges, payments: paymentsTotal, labels: totalLabels } = displayTotals;
 
   return (
     <div className="space-y-4">
@@ -659,15 +659,15 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
       {/* Totals */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-lg border bg-red-50 dark:bg-red-950/20 p-3 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Cargos</p>
+          <p className="text-xs text-muted-foreground mb-1">{totalLabels.charges}</p>
           <p className="font-bold text-red-600 dark:text-red-400">{formatCurrency(charges)}</p>
         </div>
         <div className="rounded-lg border bg-green-50 dark:bg-green-950/20 p-3 text-center">
-          <p className="text-xs text-muted-foreground mb-1">Pagado</p>
+          <p className="text-xs text-muted-foreground mb-1">{totalLabels.payments}</p>
           <p className="font-bold text-green-600 dark:text-green-400">{formatCurrency(paymentsTotal)}</p>
         </div>
         <div className={`rounded-lg border p-3 text-center ${balance > 0 ? "bg-orange-50 dark:bg-orange-950/20" : balance < 0 ? "bg-purple-50 dark:bg-purple-950/20" : "bg-blue-50 dark:bg-blue-950/20"}`}>
-          <p className="text-xs text-muted-foreground mb-1">Saldo</p>
+          <p className="text-xs text-muted-foreground mb-1">{totalLabels.balance}</p>
           <p className={`font-bold text-lg ${balance > 0 ? "text-orange-600 dark:text-orange-400" : balance < 0 ? "text-purple-600 dark:text-purple-400" : "text-blue-600 dark:text-blue-400"}`}>
             {formatCurrency(balance)}
           </p>

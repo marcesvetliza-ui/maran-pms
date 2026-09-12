@@ -32,6 +32,7 @@ import { assertSameOriginalInvoice, canonicalInvoiceReference, canonicalPaymentL
 import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 import { classifyReservationPaymentMethod } from "../payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
+import { getReservationRateValidationError, normalizeZeroRateNotes } from "@shared/reservationRate";
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -265,6 +266,12 @@ export function registerReservationsRoutes(app: Express) {
         reservationCode: req.body.reservationCode || storage.generateReservationCode(),
         createdAt: req.body.createdAt ? new Date(req.body.createdAt) : new Date(),
       };
+      const rateError = getReservationRateValidationError(data.finalRatePerNight, data.specialRateReason);
+      if (rateError) return res.status(400).json({ error: rateError });
+      if (data.specialRateReason !== undefined && data.specialRateReason !== null) {
+        data.specialRateReason = String(data.specialRateReason).trim();
+      }
+      data.notes = normalizeZeroRateNotes(data.notes, data.finalRatePerNight, data.specialRateReason);
 
       // Date integrity check — checkout must be strictly after checkin
       if (data.checkInDate && data.checkOutDate && data.checkOutDate <= data.checkInDate) {
@@ -356,6 +363,24 @@ export function registerReservationsRoutes(app: Express) {
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      const hasRate = Object.prototype.hasOwnProperty.call(req.body, "finalRatePerNight");
+      const hasReason = Object.prototype.hasOwnProperty.call(req.body, "specialRateReason");
+      const effectiveRate = hasRate ? req.body.finalRatePerNight : existing.finalRatePerNight;
+      const effectiveReason = hasReason
+        ? (req.body.specialRateReason == null ? "" : String(req.body.specialRateReason).trim())
+        : String(existing.specialRateReason ?? "").trim();
+      const rateError = hasRate && (req.body.finalRatePerNight === null || req.body.finalRatePerNight === "")
+        ? "La tarifa asignada por noche no puede quedar vacía."
+        : getReservationRateValidationError(effectiveRate, effectiveReason);
+      if (rateError) return res.status(400).json({ error: rateError });
+      if (hasReason) {
+        req.body.specialRateReason = effectiveReason || null;
+      }
+      req.body.notes = normalizeZeroRateNotes(
+        req.body.notes !== undefined ? req.body.notes : existing.notes,
+        effectiveRate,
+        effectiveReason,
+      );
       if (isReservationLocked(existing)) {
         return res.status(403).json({ error: "No se puede modificar una reserva cerrada de días anteriores" });
       }

@@ -28,6 +28,7 @@ import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from ".
 import { emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
+import { visibleGuestCondition } from "../guest-visibility";
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -1876,7 +1877,7 @@ export function registerSpaRoutes(app: Express) {
   app.get("/api/spa/clients", requireAuth, async (req, res) => {
     try {
       const { search } = req.query;
-      const allGuests = await db.select().from(guests).orderBy(desc(guests.fechaAlta));
+      const allGuests = await db.select().from(guests).where(visibleGuestCondition()).orderBy(desc(guests.fechaAlta));
       if (search) {
         const s = (search as string).toLowerCase();
         return res.json(allGuests.filter((c: any) =>

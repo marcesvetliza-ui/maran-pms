@@ -84,11 +84,14 @@ async function checkIn(baseUrl: string, authenticated = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  const today = new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+  });
   state.reservation = {
     id: "reservation-1",
     reservationCode: "RES-1",
     roomId: "room-1",
-    checkInDate: "2026-09-10",
+    checkInDate: today,
     nights: 1,
     totalRoomAmount: "0",
     earlyCheckInCharge: "0",

@@ -6,6 +6,7 @@ import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
+import { visibleGuestCondition } from "../guest-visibility";
 
 const PAYMENT_TOLERANCE = 0.01;
 
@@ -703,6 +704,7 @@ export function registerGuestsRoutes(app: Express) {
       const { from, to } = req.query as { from?: string; to?: string };
       const conditions: any[] = [
         sql`${reservations.status} = 'checked_out'`,
+        visibleGuestCondition(),
       ];
       if (from) conditions.push(gte(reservations.checkOutDate, from));
       if (to)   conditions.push(lte(reservations.checkOutDate, to));

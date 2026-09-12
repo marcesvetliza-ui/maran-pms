@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { BreakfastList } from "@/components/breakfast-list";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, RoomWithType } from "@shared/schema";
 import { useState as useLocalState } from "react";
@@ -182,16 +183,6 @@ function RoomStatusBadge({ status }: { status: string }) {
   return <Badge className={config.className}>{config.label}</Badge>;
 }
 
-type BreakfastEntry = {
-  reservationId: string;
-  roomNumber: string;
-  checkIn: string;
-  checkOut: string;
-  adults: number;
-  children: number;
-  guestName: string;
-};
-
 type InHouseEntry = {
   reservationId: string;
   reservationNumber: string | null;
@@ -273,11 +264,6 @@ export default function Dashboard() {
     enabled: inHouseOpen,
   });
 
-  const { data: breakfastData = [], isLoading: breakfastLoading } = useQuery<BreakfastEntry[]>({
-    queryKey: ["/api/dashboard/breakfasts"],
-    enabled: breakfastOpen,
-  });
-
   const totalInHouse = stats ? stats.inHouseGuests : 0;
 
   const printInHouseList = () => {
@@ -340,50 +326,6 @@ export default function Dashboard() {
     <script>window.onload=()=>{window.print();}</script>
     </body></html>`;
 
-    const w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); }
-  };
-
-  const printBreakfastList = () => {
-    const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-    const tomorrowDate = new Date();
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrowStr = tomorrowDate.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const totalPax = breakfastData.reduce((s, e) => s + e.adults, 0);
-    const rows = breakfastData.map((e) => `<tr>
-      <td>${e.roomNumber}</td>
-      <td>${e.guestName}</td>
-      <td style="text-align:center">${e.adults}</td>
-      <td>${fmt(e.checkIn)}</td>
-      <td>${fmt(e.checkOut)}</td>
-    </tr>`).join("");
-    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-    <title>Listado Desayunos — ${tomorrowStr}</title>
-    <style>
-      body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; color: #111; }
-      h1 { font-size: 15px; margin-bottom: 2px; }
-      p.sub { font-size: 11px; color: #555; margin: 0 0 12px; }
-      table { width: 100%; border-collapse: collapse; }
-      th { background: #f0f0f0; border: 1px solid #ccc; padding: 5px 6px; text-align: left; font-size: 10px; text-transform: uppercase; }
-      td { border: 1px solid #ddd; padding: 4px 6px; }
-      tfoot td { background: #f0f0f0; font-weight: bold; }
-      @media print { @page { margin: 15mm; } }
-    </style></head><body>
-    <h1>Listado de Desayunos — Maran Suites & Towers</h1>
-    <p class="sub">${tomorrowStr} · ${breakfastData.length} habitación(es) · ${totalPax} persona(s)</p>
-    <table>
-      <thead><tr>
-        <th>Hab.</th><th>Titular</th><th>Pax</th><th>Ingreso</th><th>Egreso</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr>
-        <td colspan="2">TOTAL</td>
-        <td style="text-align:center">${totalPax}</td>
-        <td colspan="2"></td>
-      </tr></tfoot>
-    </table>
-    <script>window.onload=()=>{window.print();}</script>
-    </body></html>`;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); }
   };
@@ -666,73 +608,7 @@ export default function Dashboard() {
 
       {/* Breakfast Panel */}
       {breakfastOpen && (
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Coffee className="h-5 w-5" />
-                Desayunos — {(() => {
-                  const t = new Date(); t.setDate(t.getDate() + 1);
-                  return t.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-                })()}
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                {!breakfastLoading && breakfastData.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={printBreakfastList} data-testid="button-print-breakfasts">
-                    <Printer className="h-4 w-4 mr-1" />
-                    Imprimir
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" onClick={() => setBreakfastOpen(false)}>Cerrar</Button>
-              </div>
-            </div>
-            <CardDescription>Habitaciones con desayuno incluido para mañana</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {breakfastLoading ? (
-              <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
-            ) : breakfastData.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No hay reservas activas para mañana.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground text-xs uppercase">
-                      <th className="text-left py-2 px-2 font-medium">Hab.</th>
-                      <th className="text-left py-2 px-2 font-medium">Titular</th>
-                      <th className="text-center py-2 px-2 font-medium">Pax</th>
-                      <th className="text-left py-2 px-2 font-medium">Ingreso</th>
-                      <th className="text-left py-2 px-2 font-medium">Egreso</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {breakfastData.map((entry) => {
-                      const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-                      return (
-                        <tr key={entry.reservationId} className="border-b hover:bg-muted/40">
-                          <td className="py-1.5 px-2 font-semibold">{entry.roomNumber}</td>
-                          <td className="py-1.5 px-2 font-medium">{entry.guestName}</td>
-                          <td className="py-1.5 px-2 text-center font-semibold">{entry.adults}</td>
-                          <td className="py-1.5 px-2">{fmt(entry.checkIn)}</td>
-                          <td className="py-1.5 px-2">{fmt(entry.checkOut)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 bg-muted/30">
-                      <td colSpan={2} className="py-1.5 px-2 font-semibold text-xs uppercase text-muted-foreground">Total</td>
-                      <td className="py-1.5 px-2 text-center font-bold">
-                        {breakfastData.reduce((s, e) => s + e.adults, 0)}
-                      </td>
-                      <td colSpan={2} />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <BreakfastList enabled={breakfastOpen} onClose={() => setBreakfastOpen(false)} />
       )}
 
       {/* Quick Actions */}

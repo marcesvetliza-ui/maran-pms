@@ -8,6 +8,7 @@ describe("walk-in rate validation", () => {
       selectedRatePlanExists: false,
       effectiveNightRate: "0",
       specialRateReason: "",
+      specialRateAmountProvided: false,
     })).toBe(false);
   });
 
@@ -17,13 +18,15 @@ describe("walk-in rate validation", () => {
       selectedRatePlanExists: true,
       effectiveNightRate: "85000",
       specialRateReason: "",
+      specialRateAmountProvided: true,
     })).toBe(true);
   });
 
-  it("requires both a positive amount and a reason for a special rate", () => {
+  it("requires a reason for a special rate, including a valid zero rate", () => {
     const base = {
       usesSpecialRate: true,
       selectedRatePlanExists: false,
+      specialRateAmountProvided: true,
     };
 
     expect(canUseWalkInRate({
@@ -35,11 +38,38 @@ describe("walk-in rate validation", () => {
       ...base,
       effectiveNightRate: "0",
       specialRateReason: "Convenio comercial",
-    })).toBe(false);
+    })).toBe(true);
     expect(canUseWalkInRate({
       ...base,
       effectiveNightRate: "65000",
       specialRateReason: "Convenio comercial",
+    })).toBe(true);
+  });
+
+  it("does not treat an empty manual-rate field as an explicit zero", () => {
+    expect(canUseWalkInRate({
+      usesSpecialRate: true,
+      selectedRatePlanExists: false,
+      effectiveNightRate: "0",
+      specialRateReason: "Cortesía",
+      specialRateAmountProvided: false,
+    })).toBe(false);
+  });
+
+  it("requires a reason when an ordinary rate plan resolves to zero", () => {
+    expect(canUseWalkInRate({
+      usesSpecialRate: false,
+      selectedRatePlanExists: true,
+      effectiveNightRate: "0",
+      specialRateReason: "",
+      specialRateAmountProvided: true,
+    })).toBe(false);
+    expect(canUseWalkInRate({
+      usesSpecialRate: false,
+      selectedRatePlanExists: true,
+      effectiveNightRate: "0",
+      specialRateReason: "Canje",
+      specialRateAmountProvided: true,
     })).toBe(true);
   });
 });
