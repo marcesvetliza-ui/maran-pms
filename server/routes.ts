@@ -11,6 +11,7 @@ import { charges, payments, spaPayments, eventPayments, cashMovements, cashShift
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
+import { getAppEnv, isPilotEnv } from "./app-env";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -194,6 +195,12 @@ export async function registerRoutes(
       status,
       database: dbStatus,
       environment,
+      // Indicador visual del piloto (Fase 5) — a diferencia de `environment`
+      // (heredado, basado en NODE_ENV), esto lee APP_ENV, la fuente de
+      // verdad real. Ruta pública y sin autenticación a propósito: el
+      // indicador debe verse también en la pantalla de login.
+      appEnv: getAppEnv(),
+      isPilot: isPilotEnv(),
       version: "1.0.0",
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
