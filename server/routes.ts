@@ -10,6 +10,7 @@ import { insertGuestReviewSchema, reservationChangelog, reservations, guests, ho
 import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
+import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -236,45 +237,7 @@ export async function registerRoutes(
     res.status(401).json({ message: "No autenticado" });
   });
 
-  app.post("/api/auth/setup", async (req, res) => {
-    if (process.env.NODE_ENV === "production") {
-      return res.status(404).json({ message: "Not found" });
-    }
-    try {
-      const allUsers = await db.select().from(systemUsers);
-      const anyUserWithPassword = allUsers.some(u => u.password !== null);
-      if (anyUserWithPassword) {
-        return res.status(400).json({ message: "Setup ya fue completado. Este endpoint está deshabilitado." });
-      }
-
-      const hashedPassword = await hashPassword("maran2026");
-      
-      const adminUser = allUsers.find(u => u.username === "admin");
-      if (adminUser) {
-        await db
-          .update(systemUsers)
-          .set({ password: hashedPassword })
-          .where(eq(systemUsers.id, adminUser.id));
-      } else {
-        await db.insert(systemUsers).values({
-          id: randomUUID(),
-          username: "admin",
-          password: hashedPassword,
-          email: "admin@maransuites.com",
-          fullName: "Administrador Sistema",
-          role: "admin",
-          department: "Sistemas",
-          phone: "+54 343 400-0001",
-          isActive: "true",
-          createdAt: new Date(),
-        });
-      }
-
-      res.json({ message: "Usuario admin configurado con contraseña" });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
+  registerAuthBootstrapRoute(app);
 
   app.use("/api", (req, res, next) => {
     const publicPaths = [
