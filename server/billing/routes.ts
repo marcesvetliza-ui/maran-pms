@@ -9,6 +9,8 @@ import { calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceSer
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
+import { assertExternalCommAllowed } from "../external-comms-policy";
+import { registerWsaaDebugRoute } from "./wsaaDebug";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
 import {
@@ -515,53 +517,9 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
-  // GET /api/billing/debug-wsaa — devuelve respuesta CRUDA de WSAA (debug temporal)
-  app.get("/api/billing/debug-wsaa", requireAuth, async (req, res) => {
-    try {
-      const config = await getBillingConfig();
-      if (!config.arcaCert || !config.arcaKey) return res.json({ error: "Sin cert/key" });
-
-      const forge = (await import("node-forge")).default;
-      const certPem = config.arcaCert;
-      const keyPem  = config.arcaKey;
-
-      const now = new Date();
-      const exp = new Date(now.getTime() + 12 * 60 * 60 * 1000);
-      const toAR = (d: Date) => {
-        const local = new Date(d.getTime() + -3 * 60 * 60 * 1000);
-        return local.toISOString().slice(0, 19) + "-03:00";
-      };
-      const uniqueId = Math.floor(now.getTime() / 1000);
-      const tra = `<?xml version="1.0" encoding="UTF-8"?>\n<loginTicketRequest version="1.0">\n  <header>\n    <uniqueId>${uniqueId}</uniqueId>\n    <generationTime>${toAR(now)}</generationTime>\n    <expirationTime>${toAR(exp)}</expirationTime>\n  </header>\n  <service>wsfe</service>\n</loginTicketRequest>`;
-
-      const cert = forge.pki.certificateFromPem(certPem);
-      const privateKey = forge.pki.privateKeyFromPem(keyPem);
-      const p7 = (forge.pkcs7 as any).createSignedData();
-      p7.content = forge.util.createBuffer(tra, "utf8");
-      p7.addCertificate(cert);
-      p7.addSigner({ key: privateKey, certificate: cert, digestAlgorithm: forge.pki.oids.sha256,
-        authenticatedAttributes: [
-          { type: forge.pki.oids.contentType, value: forge.pki.oids.data },
-          { type: forge.pki.oids.messageDigest },
-          { type: forge.pki.oids.signingTime, value: new Date() },
-        ] });
-      p7.sign({ detached: false });
-      const cms = Buffer.from(forge.asn1.toDer(p7.toAsn1()).getBytes(), "binary").toString("base64");
-
-      const envelope = `<?xml version="1.0" encoding="utf-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsaa="http://wsaa.view.sua.dvadac.desein.afip.gov"><soapenv:Body><wsaa:loginCms><wsaa:in0>${cms}</wsaa:in0></wsaa:loginCms></soapenv:Body></soapenv:Envelope>`;
-
-      const resp = await fetch("https://wsaa.afip.gov.ar/ws/services/LoginCms", {
-        method: "POST",
-        headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '""' },
-        body: envelope,
-      });
-
-      const text = await resp.text();
-      res.json({ httpStatus: resp.status, rawResponse: text.slice(0, 2000) });
-    } catch (e: any) {
-      res.json({ error: e.message });
-    }
-  });
+  // GET /api/billing/debug-wsaa — extraído a server/billing/wsaaDebug.ts
+  // (módulo liviano, testeable sin registrar todo este archivo).
+  registerWsaaDebugRoute(app);
 
   // GET /api/billing/test-arca — diagnóstico de conexión ARCA (solo admin)
   app.get("/api/billing/test-arca", requireAuth, async (req, res) => {
@@ -596,6 +554,11 @@ export function registerBillingRoutes(app: Express) {
         `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
         `<soapenv:Body><ar:FEParamGetTiposCbte>${auth}</ar:FEParamGetTiposCbte></soapenv:Body></soapenv:Envelope>`;
 
+      // Defensa en profundidad: este fetch ya queda bloqueado porque
+      // getTokenAuth() (arriba) lanza primero, pero se repite el chequeo acá
+      // para que una futura refactorización que reordene o reutilice este
+      // bloque no pueda saltarse el bloqueo por accidente.
+      assertExternalCommAllowed({ integration: "arca", action: `test-arca-feparam-${ambiente}` });
       const wsfeResp = await fetch(wsfeUrl, {
         method: "POST",
         headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '"http://ar.gov.afip.dif.FEV1/FEParamGetTiposCbte"' },
@@ -623,6 +586,8 @@ export function registerBillingRoutes(app: Express) {
         `<?xml version="1.0" encoding="utf-8"?>` +
         `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ar="http://ar.gov.afip.dif.FEV1/">` +
         `<soapenv:Body><ar:FECompUltimoAutorizado>${auth}<ar:PtoVta>${pv}</ar:PtoVta><ar:CbteTipo>6</ar:CbteTipo></ar:FECompUltimoAutorizado></soapenv:Body></soapenv:Envelope>`;
+      // Defensa en profundidad — ver comentario del fetch anterior.
+      assertExternalCommAllowed({ integration: "arca", action: `test-arca-fecompultimo-${ambiente}` });
       const ultResp = await fetch(wsfeUrl, {
         method: "POST",
         headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"' },

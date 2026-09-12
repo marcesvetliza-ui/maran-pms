@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Hotel, LogIn, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { PilotEnvironmentBanner } from "@/components/pilot-environment-banner";
 
 interface LoginForm {
   username: string;
@@ -49,7 +50,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+      <PilotEnvironmentBanner />
+      <div className="flex-1 flex items-center justify-center p-4">
       <Card className="w-full max-w-md" data-testid="card-login">
         <CardHeader className="text-center space-y-4 pb-2">
           <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
@@ -113,6 +116,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

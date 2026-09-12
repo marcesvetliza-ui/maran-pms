@@ -1,4 +1,5 @@
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
@@ -45,6 +46,13 @@ export interface FECompConsulta {
 }
 
 async function soapPost(url: string, action: string, body: string): Promise<string> {
+  // Defensa en profundidad: es el único fetch() real de este archivo. Ya
+  // queda cubierto porque feCompConsultar()/feCAESolicitar() (sus únicos
+  // callers) chequean primero, pero se repite acá — el punto más bajo
+  // posible antes de la llamada de red — para que agregar un nuevo caller
+  // interno en el futuro no pueda saltarse el bloqueo por accidente.
+  assertExternalCommAllowed({ integration: "arca", action: `wsfev-soap-post-${action}` });
+
   const resp = await fetch(url, {
     method: "POST",
     headers: {
@@ -100,6 +108,8 @@ export async function feCompConsultar(
   req: FECompConsulta,
   ambiente: "homologacion" | "produccion"
 ): Promise<FECAEResult | null> {
+  assertExternalCommAllowed({ integration: "arca", action: `fecomp-consultar-${ambiente}` });
+
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
@@ -131,6 +141,8 @@ export async function feCAESolicitar(
   req: FECAERequest,
   ambiente: "homologacion" | "produccion"
 ): Promise<FECAEResult> {
+  assertExternalCommAllowed({ integration: "arca", action: `fecae-solicitar-${ambiente}` });
+
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
   const recipientDocument = resolveFiscalRecipientDocument({

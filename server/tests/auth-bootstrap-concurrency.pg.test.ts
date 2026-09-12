@@ -2,6 +2,7 @@ import express from "express";
 import * as http from "node:http";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 // Prueba de concurrencia real contra PostgreSQL: el mock de db usado en
 // auth-bootstrap.test.ts no puede demostrar que el advisory lock realmente
@@ -53,6 +54,11 @@ runIfDatabaseIsConfigured("PostgreSQL real: bootstrap de admin bajo concurrencia
     }
     process.env.ADMIN_BOOTSTRAP_ENABLED = "true";
     process.env.ADMIN_BOOTSTRAP_SECRET = BOOTSTRAP_SECRET;
+    // isBootstrapEnabled() consulta isProductionDataEnv()/isPilotEnv()
+    // (APP_ENV) además de NODE_ENV — hace falta inicializarlo, ya que este
+    // test importa routes.ts directamente sin pasar por server/index.ts
+    // (que es quien normalmente llama a initAppEnv() al arrancar).
+    initAppEnv({ APP_ENV: "development", NODE_ENV: process.env.NODE_ENV ?? "test" });
 
     const { registerRoutes } = await import("../routes");
     const app = express();
@@ -75,6 +81,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: bootstrap de admin bajo concurrencia
     await testPool?.end();
     const { pool } = await import("../db");
     await pool.end();
+    resetAppEnvForTests();
   });
 
   it("dos solicitudes de bootstrap simultáneas: solo una resulta exitosa, la contraseña no queda pisada a medias", async () => {

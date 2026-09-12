@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    setupFiles: ["./server/tests/setup.ts"],
     // Every server test file matches automatically — no per-file allowlist
     // to maintain. Files ending in `.pg.test.ts` need a real PostgreSQL
     // database and run separately (see vitest.server.pg.config.ts /

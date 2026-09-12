@@ -5,6 +5,7 @@ import { db } from "./db";
 import { systemUsers } from "@shared/schema";
 import { hashPassword } from "./auth";
 import { logger } from "./logger";
+import { isPilotEnv, isProductionDataEnv } from "./app-env";
 
 /**
  * Reemplaza el bootstrap anterior de `POST /api/auth/setup`, que fijaba una
@@ -14,12 +15,14 @@ import { logger } from "./logger";
  *   debe proveer tanto el secreto de bootstrap (`ADMIN_BOOTSTRAP_SECRET`,
  *   configurado por variable de entorno, nunca en código) como la
  *   contraseña real que va a tener el admin.
- * - Habilitación explícita, no por exclusión: requiere NODE_ENV distinto de
- *   "production" (veto absoluto, nunca se levanta) Y
- *   ADMIN_BOOTSTRAP_ENABLED=true configurado aparte. Un NODE_ENV vacío, mal
- *   escrito o inesperado (staging, preview, etc.) ya no deja el endpoint
- *   habilitado por accidente — hace falta encender explícitamente las dos
- *   condiciones.
+ * - Habilitación explícita, no por exclusión: veto absoluto si
+ *   `NODE_ENV === "production"` o si `isProductionDataEnv()`/`isPilotEnv()`
+ *   (Fase 2) indican un ambiente de datos reales — este último por ser el
+ *   que se expone a un tercero externo; el bootstrap de sus cuentas se hace
+ *   vía `seedDatabase()` (Fase 7). Fuera de esos vetos, además hace falta
+ *   `ADMIN_BOOTSTRAP_ENABLED=true` configurado aparte: un NODE_ENV vacío,
+ *   mal escrito o inesperado (staging, preview, etc.) no deja el endpoint
+ *   habilitado por accidente.
  * - ADMIN_BOOTSTRAP_SECRET también debe tener una longitud mínima razonable;
  *   si no está configurada o es demasiado corta, se trata como "bootstrap no
  *   configurado" (503), no como "secreto inválido".
@@ -28,8 +31,10 @@ import { logger } from "./logger";
  *   server/db-storage.ts, server/billing/routes.ts): dos solicitudes
  *   concurrentes ya no pueden pasar ambas la verificación de "un solo uso"
  *   antes de que la primera escriba.
+ * - Sigue siendo de un solo uso: se niega si ya existe algún usuario con
+ *   contraseña seteada (igual que antes).
  * - Nunca loguea ni devuelve el secreto ni la contraseña. Los errores
- *   internos se registran con detalle en el logger del servidor, pero la
+ *   internos se registran sin detalle en el logger del servidor, pero la
  *   respuesta al cliente es siempre un mensaje fijo — nunca el error crudo
  *   de la base de datos.
  */
@@ -39,6 +44,7 @@ const MIN_PASSWORD_LENGTH = 8;
 
 function isBootstrapEnabled(): boolean {
   if (process.env.NODE_ENV === "production") return false;
+  if (isProductionDataEnv() || isPilotEnv()) return false;
   return process.env.ADMIN_BOOTSTRAP_ENABLED === "true";
 }
 

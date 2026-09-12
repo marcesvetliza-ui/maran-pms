@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
+import { shouldBlockExternalComm } from "./external-comms-policy";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Template interpolation
@@ -227,14 +228,27 @@ async function logEmail(opts: {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Core send function — routes to Resend or SMTP, always sends HTML + text
+// Exportada (además de usarse internamente) para poder testear directamente
+// el bloqueo por ambiente sin pasar por una reserva/huésped real en DB.
 // ─────────────────────────────────────────────────────────────────────────────
-async function sendEmail(opts: {
+export async function sendEmail(opts: {
   reservationId: string;
   type: "confirmation" | "reminder" | "checkout";
   to: string;
   subject: string;
   body: string;
 }): Promise<void> {
+  if (shouldBlockExternalComm({ integration: "email", action: opts.type })) {
+    await logEmail({
+      reservationId: opts.reservationId,
+      type: opts.type,
+      status: "skipped",
+      recipientEmail: opts.to,
+      errorMessage: "Bloqueado por ambiente (APP_ENV≠production)",
+    });
+    return;
+  }
+
   const cfg = await getConfig();
   if (!cfg) return;
   if (!cfg.globalEnabled) {
@@ -315,6 +329,10 @@ export async function sendEmailWithPdfAttachment(opts: {
   attachmentFilename: string;
   attachmentBuffer: Buffer;
 }): Promise<{ ok: boolean; error?: string }> {
+  if (shouldBlockExternalComm({ integration: "email", action: "pdf-attachment" })) {
+    return { ok: false, error: "Envío de email bloqueado por ambiente (APP_ENV≠production)" };
+  }
+
   const cfg = await getConfig();
   if (!cfg) return { ok: false, error: "Email no configurado" };
   if (!cfg.globalEnabled) return { ok: false, error: "Sistema de email desactivado" };

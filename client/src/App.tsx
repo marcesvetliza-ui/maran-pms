@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { PilotEnvironmentBanner } from "@/components/pilot-environment-banner";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import { LogOut, User, Monitor } from "lucide-react";
@@ -371,6 +372,7 @@ function AppLayout() {
               <span>⚠ ENTORNO STAGING — los cambios aquí NO afectan producción</span>
             </div>
           )}
+          <PilotEnvironmentBanner />
           <main className="flex-1 overflow-y-auto">
             <RouteAwareErrorBoundary />
           </main>

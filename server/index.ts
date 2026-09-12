@@ -3,11 +3,12 @@ import { registerRoutes } from "./routes";
 import { serveStaticFiles, serveSpaFallback } from "./static";
 import { createServer } from "http";
 import { setupAuth } from "./auth";
-import { registerDebugAssetRoutes } from "./debug-assets-routes";
+import { registerDebugPdfDownloadRoute } from "./debug-assets-routes";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
+import { InvalidAppEnvError, initAppEnv } from "./app-env";
 
 // log must be defined first — it's used in the listen callback below
 export function log(message: string, source = "express") {
@@ -45,6 +46,22 @@ if (missingVars.length > 0) {
     `El servidor no puede iniciar sin estas variables. Configurelas en el panel de Secretos de Replit.`
   );
   process.exit(1);
+}
+
+// APP_ENV — política central de ambiente (development/test/pilot/production),
+// independiente de NODE_ENV. Ver server/app-env.ts. Debe inicializarse antes
+// de cualquier código que dependa de getAppEnv()/isPilotEnv().
+try {
+  const appEnvResolution = initAppEnv();
+  if (appEnvResolution.warning) {
+    console.warn(`[APP_ENV] ${appEnvResolution.warning}`);
+  }
+} catch (err) {
+  if (err instanceof InvalidAppEnvError) {
+    console.error(`[ERROR DE INICIO] ${err.message}`);
+    process.exit(1);
+  }
+  throw err;
 }
 
 initSentry();
@@ -102,9 +119,13 @@ app.use(express.urlencoded({ extended: false }));
 
 setupAuth(app);
 
-// Diagnóstico temporal de assets — requiere sesión autenticada (antes eran
-// públicas, ver server/debug-assets-routes.ts).
-registerDebugAssetRoutes(app);
+// Descarga temporal de PDF — requiere sesión autenticada y bloquea
+// explícitamente al rol piloto_externo (Fase 9, ronda 2): no vive bajo
+// /api, así que authorizePilotExternalRole (montado solo ahí, en
+// server/routes.ts) nunca la cubriría sin importar dónde se registre.
+// GET /api/debug/assets se registra aparte, dentro de registerRoutes()
+// (server/routes.ts), para quedar cubierta por ese middleware.
+registerDebugPdfDownloadRoute(app);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -192,6 +213,9 @@ app.use((req, res, next) => {
       );
       return;
     }
+
+    const { warnIfDatabaseIdentityMissing } = await import("./database-identity");
+    await mig("database-identity check", warnIfDatabaseIdentityMissing);
 
     const { seedDatabase, refreshRealData } = await import("./seed");
     await mig("seedDatabase", seedDatabase);

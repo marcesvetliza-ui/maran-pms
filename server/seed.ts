@@ -1,4 +1,6 @@
 import { db } from "./db";
+import { hashPassword } from "./auth";
+import { isProductionDataEnv } from "./app-env";
 import { eq, sql, notInArray } from "drizzle-orm";
 import {
   roomTypes,
@@ -394,6 +396,33 @@ export async function seedDatabase() {
     { id: "su5", username: "restaurante1", email: "restaurante@maransuites.com", fullName: "Carlos Lopez", role: "restaurant", department: "Restaurante", phone: "+54 343 400-0005", isActive: "true", lastLogin: null, createdAt: now },
     { id: "su6", username: "spa1", email: "spa@maransuites.com", fullName: "Laura Fernandez", role: "spa", department: "SPA", phone: "+54 343 400-0006", isActive: "true", lastLogin: null, createdAt: now },
   ]);
+
+  // Fase 6/7 del ambiente piloto: cuenta de demo con acceso limitado, para
+  // que un usuario externo (ej. vendedor de Channel Manager) pueda entrar
+  // directo sin pasos de setup adicionales. A diferencia del resto de los
+  // usuarios de este seed, esta cuenta necesita una contraseña utilizable
+  // desde el arranque. Nunca se crea fuera del ambiente piloto: seedDatabase()
+  // corre en cada arranque y solo actúa si la base está vacía, así que esta
+  // guarda evita crear esta cuenta de demo si esa base vacía resultara ser de
+  // producción (ver server/app-env.ts).
+  if (!isProductionDataEnv()) {
+    console.log("Seeding piloto_externo demo user...");
+    await db.insert(systemUsers).values([
+      {
+        id: "su-piloto-externo",
+        username: "piloto_externo",
+        password: await hashPassword("PilotoDemo2026!"),
+        email: "piloto-externo@maransuites-demo.local",
+        fullName: "Usuario Demo (Piloto Externo)",
+        role: "piloto_externo",
+        department: "Demo",
+        phone: null,
+        isActive: "true",
+        lastLogin: null,
+        createdAt: now,
+      },
+    ]);
+  }
 
   console.log("Seeding system settings...");
   await db.insert(systemSettings).values([

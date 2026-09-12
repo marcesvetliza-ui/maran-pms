@@ -108,6 +108,7 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     expect(INCREMENTAL_NON_INDEX_DDL.chargeTypesTable).toContain("to_regclass");
     expect(INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn).toContain("pg_attribute");
     expect(INCREMENTAL_NON_INDEX_DDL.groupPaymentsReceiptNumberSequence).toContain("to_regclass");
+    expect(INCREMENTAL_NON_INDEX_DDL.databaseIdentityTable).toContain("to_regclass");
   });
 
   it("does not leave notice-producing non-index DDL in production migrations", () => {
@@ -227,6 +228,13 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     if (!client) throw new Error("DATABASE_URL no está configurado");
     await inIsolatedSchema(client, "table", async () => {
       await expectSilentSecondRun(client, INCREMENTAL_NON_INDEX_DDL.chargeTypesTable);
+    });
+  });
+
+  it("silences database_identity table-creation notices in an isolated schema", async () => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, "database_identity_table", async () => {
+      await expectSilentSecondRun(client, INCREMENTAL_NON_INDEX_DDL.databaseIdentityTable);
     });
   });
 
