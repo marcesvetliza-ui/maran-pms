@@ -52,7 +52,11 @@ vi.mock("@/components/entity-selector", () => ({
 }));
 
 // Lazy import after mocks are registered
-const { QuickReservationDialog } = await import("./planning-quick-reservation");
+const {
+  QuickReservationDialog,
+  getQuickReservationRateState,
+  getQuickReservationErrorToast,
+} = await import("./planning-quick-reservation");
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -123,7 +127,7 @@ function buildFetchMock_reservationFail() {
 
     // Reservation creation — server error
     if (strUrl.includes("/api/reservations") && method === "POST") {
-      return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      return new Response(JSON.stringify({ error: "Ingresá el motivo de la tarifa $0 para guardar la reserva." }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
@@ -316,6 +320,20 @@ describe("QuickReservationDialog — charge creation failure path", () => {
       expect(allToastTitles).not.toContain("Reserva creada");
     });
 
+    it("shows the real server validation message without the navigation fallback", async () => {
+      const { user } = await renderAndFill(true);
+
+      await user.click(screen.getByTestId("button-create-quick"));
+
+      await waitFor(() => {
+        const errorToast = toastSpy.mock.calls.find((call: any[]) => call[0]?.variant === "destructive");
+        expect(errorToast?.[0]).toEqual(expect.objectContaining({
+          description: "Ingresá el motivo de la tarifa $0 para guardar la reserva.",
+        }));
+        expect(errorToast?.[0]?.action).toBeUndefined();
+      });
+    });
+
     it("does NOT close the dialog when the reservation POST fails", async () => {
       const { user, onOpenChange } = await renderAndFill(true);
 
@@ -354,6 +372,54 @@ describe("QuickReservationDialog — charge creation failure path", () => {
         (args[1]?.method ?? "GET").toUpperCase() === "POST"
       );
       expect(chargeCalls).toHaveLength(0);
+    });
+  });
+});
+
+describe("QuickReservationDialog — effective zero-rate reason", () => {
+  it("requires and trims a reason for a normal plan whose rate is zero", () => {
+    const state = getQuickReservationRateState({
+      manualRate: "",
+      packageRate: "",
+      planRate: "0",
+      ratePlanId: "plan-zero",
+      specialRateReason: "  cortesía  ",
+    });
+    expect(state.effectiveRate).toBe("0.00");
+    expect(state.requiresRateReason).toBe(true);
+    expect(state.payloadReason).toBe("cortesía");
+  });
+
+  it("requires a reason for a zero package", () => {
+    const state = getQuickReservationRateState({
+      manualRate: "",
+      packageRate: "0.00",
+      planRate: "1200",
+      ratePlanId: "",
+      specialRateReason: " paquete promocional ",
+    });
+    expect(state.requiresRateReason).toBe(true);
+    expect(state.payloadReason).toBe("paquete promocional");
+  });
+
+  it("keeps manual special rates nonnegative and requires a reason even when positive", () => {
+    const state = getQuickReservationRateState({
+      manualRate: "1500",
+      ratePlanId: "__special__",
+    });
+    expect(state.manualSpecialRateValid).toBe(true);
+    expect(state.requiresRateReason).toBe(true);
+    expect(state.payloadReason).toBe("");
+  });
+
+  it("uses the generic fallback and navigation action for opaque errors", () => {
+    expect(getQuickReservationErrorToast(new Error("Error inesperado"))).toEqual({
+      description: "No se pudo crear la reserva. Intente nuevamente.",
+      showNavigateAction: true,
+    });
+    expect(getQuickReservationErrorToast(new Error('500: {"error":"Internal Server Error"}'))).toEqual({
+      description: "No se pudo crear la reserva. Intente nuevamente.",
+      showNavigateAction: true,
     });
   });
 });

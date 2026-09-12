@@ -15,12 +15,75 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, RatePlan, Package, BedType, Company, Agency } from "@shared/schema";
 import { GuestFormDialog } from "@/pages/guests";
+import { isZeroReservationRate } from "@shared/reservationRate";
+
+const GENERIC_RESERVATION_ERROR = "No se pudo crear la reserva. Intente nuevamente.";
+
+/** The toast policy is kept pure so server and transport failures are easy to test. */
+export function getQuickReservationErrorToast(error: unknown): {
+  description: string;
+  showNavigateAction: boolean;
+} {
+  const message = parseApiError(error).trim();
+  const genericMessages = new Set([
+    "Error inesperado",
+    "Unexpected error",
+    "Internal Server Error",
+    "Failed to fetch",
+  ]);
+  const usefulMessage = message && !genericMessages.has(message);
+  return {
+    description: usefulMessage ? message : GENERIC_RESERVATION_ERROR,
+    showNavigateAction: !usefulMessage,
+  };
+}
+
+function normalizeRate(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  const clean = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const number = Number(clean);
+  return Number.isFinite(number) ? number.toFixed(2) : null;
+}
+
+function getPlanPaxRate(plan: RatePlan, pax: number) {
+  const paxMap: Record<number, string | null | undefined> = {
+    1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax,
+  };
+  return paxMap[pax] || plan.baseRate;
+}
+
+export function getQuickReservationRateState({
+  manualRate,
+  packageRate,
+  planRate,
+  ratePlanId,
+  specialRateReason,
+}: {
+  manualRate?: unknown;
+  packageRate?: unknown;
+  planRate?: unknown;
+  ratePlanId: string;
+  specialRateReason?: unknown;
+}) {
+  const effectiveRate = normalizeRate(manualRate || packageRate || planRate);
+  const effectiveRateNumber = effectiveRate === null ? null : Number(effectiveRate);
+  const requiresRateReason = ratePlanId === "__special__" || isZeroReservationRate(effectiveRateNumber);
+  return {
+    effectiveRate,
+    effectiveRateNumber,
+    requiresRateReason,
+    payloadReason: requiresRateReason ? String(specialRateReason ?? "").trim() : null,
+    manualSpecialRateValid: ratePlanId !== "__special__"
+      || (normalizeRate(manualRate) !== null && Number(normalizeRate(manualRate)) >= 0),
+  };
+}
 
 export type QuickReservationData = {
   roomId: string;
@@ -105,11 +168,7 @@ export function QuickReservationDialog({
     if (!ratePlanId || !ratePlans) return;
     const plan = ratePlans.find(rp => rp.id === ratePlanId);
     if (!plan) return;
-    const paxMap: Record<number, string | null | undefined> = {
-      1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax,
-    };
-    const paxRate = paxMap[numberOfGuests];
-    const rate = paxRate || plan.baseRate;
+    const rate = getPlanPaxRate(plan, numberOfGuests);
     setManualRate(rate || "");
   }, [ratePlanId, numberOfGuests, ratePlans]);
 
@@ -118,6 +177,17 @@ export function QuickReservationDialog({
         `${g.lastName} ${g.firstName} ${g.documentNumber || ""}`.toLowerCase().includes(guestSearch.toLowerCase())
       ).slice(0, 10)
     : guests.slice(0, 10);
+
+  const selectedPlan = ratePlans?.find(rp => rp.id === ratePlanId);
+  const selectedPackage = activePackages?.find(p => p.id === packageId);
+  const planRate = selectedPlan ? getPlanPaxRate(selectedPlan, numberOfGuests) : null;
+  const packageRate = selectedPackage
+    ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2)
+    : null;
+  const rateState = getQuickReservationRateState({
+    manualRate, packageRate, planRate, ratePlanId, specialRateReason,
+  });
+  const { effectiveRate, requiresRateReason } = rateState;
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
@@ -138,29 +208,30 @@ export function QuickReservationDialog({
       onOpenChange(false);
       resetForm();
     },
-    onError: () => {
+    onError: (error) => {
       const roomId = reservationData?.roomId;
       const checkIn = reservationData?.checkInDate;
       const params = new URLSearchParams();
       if (roomId) params.set("roomId", roomId);
       if (checkIn) params.set("checkIn", checkIn);
       const href = `/reservations?${params.toString()}`;
+      const errorToast = getQuickReservationErrorToast(error);
       toast({
         title: "Error",
-        description: "No se pudo crear la reserva. Intente nuevamente.",
+        description: errorToast.description,
         variant: "destructive",
-        action: (
+        ...(errorToast.showNavigateAction ? { action: (
           <ToastAction altText="Ir a Reservas" onClick={() => navigate(href)}>
             Ir a Reservas
           </ToastAction>
-        ),
+        ) } : {}),
       });
     },
   });
 
   const resetForm = () => {
     setGuestId(""); setCheckOutDate(""); setNumberOfGuests(1); setBedConfig(""); setBedTypeId(null);
-    setRatePlanId(""); setSource("directo"); setManualRate(""); setNotes(""); setGuestSearch("");
+    setRatePlanId(""); setSource("directo"); setManualRate(""); setNotes(""); setGuestSearch(""); setSpecialRateReason("");
     setShowGuestCreateDialog(false);
     setCompanyId(null); setSelectedCompany(null); setAgencyId(null); setSelectedAgency(null); setPackageId("");
     setPendingCharges([]); setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1);
@@ -175,11 +246,11 @@ export function QuickReservationDialog({
       toast({ title: "Fechas inválidas", description: "La fecha de check-out debe ser posterior al check-in.", variant: "destructive" });
       return;
     }
-    if (ratePlanId === "__special__" && (!manualRate || parseFloat(manualRate) <= 0)) {
+    if (!rateState.manualSpecialRateValid) {
       toast({ title: "Tarifa requerida", description: "Ingrese la tarifa por noche para la tarifa especial.", variant: "destructive" });
       return;
     }
-    if (ratePlanId === "__special__" && !specialRateReason.trim()) {
+    if (requiresRateReason && !specialRateReason.trim()) {
       toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa especial.", variant: "destructive" });
       return;
     }
@@ -191,29 +262,13 @@ export function QuickReservationDialog({
     const checkIn = new Date(reservationData.checkInDate + "T12:00:00");
     const checkOut = new Date(checkOutDate + "T12:00:00");
     const nights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
-    const selectedPlan = ratePlans?.find(rp => rp.id === ratePlanId);
-    const selectedPackage = activePackages?.find(p => p.id === packageId);
-    const getPlanPaxRate = (plan: any, pax: number) => {
-      const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };
-      return paxMap[pax] || plan.baseRate;
-    };
-    const planRate = selectedPlan ? getPlanPaxRate(selectedPlan, numberOfGuests) : null;
-    // Normaliza el rate para la API: elimina separadores de miles (puntos) y convierte coma decimal a punto
-    const normalizeRate = (r: string) => {
-      const clean = r.replace(/\./g, "").replace(",", ".");
-      const n = parseFloat(clean);
-      return isNaN(n) ? null : n.toFixed(2);
-    };
-    const packageRate = selectedPackage ? (parseFloat(selectedPackage.basePrice) / (selectedPackage.nights || 1)).toFixed(2) : null;
-    const rawEffective = manualRate || packageRate || planRate || null;
-    const effectiveRate = rawEffective ? normalizeRate(rawEffective) : null;
     const packageNote = selectedPackage ? `[Paquete: ${selectedPackage.name}]` : "";
     const finalNotes = [packageNote, notes].filter(Boolean).join(" ") || null;
     try {
       const createdRes = await mutation.mutateAsync({
         guestId: finalGuestId, roomId: reservationData.roomId, roomTypeId: reservationData.roomTypeId,
         checkInDate: reservationData.checkInDate, checkOutDate, numberOfGuests, nights,
-        status: "confirmed", source, ratePlanId: ratePlanId === "__special__" ? null : (ratePlanId || null), specialRateReason: ratePlanId === "__special__" ? specialRateReason : null, companyId: companyId || null,
+        status: "confirmed", source, ratePlanId: ratePlanId === "__special__" ? null : (ratePlanId || null), specialRateReason: requiresRateReason ? specialRateReason.trim() : null, companyId: companyId || null,
         agencyId: agencyId || null, bedTypeId: bedTypeId || null, bedTypeNotes: bedConfig || null,
         baseRatePerNight: effectiveRate, finalRatePerNight: effectiveRate,
         totalRoomAmount: effectiveRate ? (parseFloat(effectiveRate) * nights).toFixed(2) : null,
@@ -345,7 +400,7 @@ export function QuickReservationDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1">
               <Label>Plan tarifario</Label>
-              <Select value={ratePlanId} onValueChange={(val) => { setRatePlanId(val); if (val !== "__special__") setSpecialRateReason(""); }}>
+              <Select value={ratePlanId} onValueChange={(val) => { setRatePlanId(val); }}>
                 <SelectTrigger data-testid="select-rate-plan"><SelectValue placeholder="Seleccionar plan" /></SelectTrigger>
                 <SelectContent>
                   {roomRatePlans.length === 0 ? (
@@ -447,7 +502,7 @@ export function QuickReservationDialog({
             </Label>
             <Input type="number" min={0} step="0.01" placeholder="Ingresar tarifa manualmente" value={manualRate} onChange={(e) => setManualRate(e.target.value)} data-testid="input-manual-rate" />
           </div>
-          {ratePlanId === "__special__" && (
+          {requiresRateReason && (
             <div className="grid gap-1 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700">
               <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
               <Textarea placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..." value={specialRateReason} onChange={(e) => setSpecialRateReason(e.target.value)} rows={2} data-testid="input-special-rate-reason" />

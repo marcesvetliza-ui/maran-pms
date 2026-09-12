@@ -323,22 +323,39 @@ describe("room type catalog integrity routes", () => {
 
   it("removes the temporary CSV when certified evidence generation fails", async () => {
     const tempDirsBefore = await roomTypeExportTempDirs();
+    const secondPageRequested = deferred<void>();
+    const secondPage = deferred<{
+      records: Array<{ id: string; label: string }>;
+      hasMore: boolean;
+    }>();
     mockStorage.getRoomTypeReferenceExportPage
       .mockResolvedValueOnce({
         records: [{ id: "room-1", label: "101" }],
         hasMore: true,
       })
-      .mockRejectedValueOnce(new Error("storage unavailable"));
+      .mockImplementationOnce(() => {
+        secondPageRequested.resolve(undefined);
+        return secondPage.promise;
+      });
     const app = await startApp();
 
     try {
-      const response = await fetch(
+      const responsePromise = fetch(
         `${app.baseUrl}/api/room-types/integrity/export?roomTypeId=deleted-type&source=rooms`,
       );
+      await secondPageRequested.promise;
+      const tempDirsDuringExport = await roomTypeExportTempDirs();
+      const createdTempDirs = tempDirsDuringExport.filter((entry) => !tempDirsBefore.includes(entry));
+      expect(createdTempDirs).toHaveLength(1);
+      const tempDirRemoval = waitForTempDirRemoval(createdTempDirs[0]);
+
+      secondPage.reject(new Error("storage unavailable"));
+      const response = await responsePromise;
       expect(response.status).toBe(500);
       expect(await response.json()).toEqual({ error: "Error exportando las referencias" });
-      expect(await roomTypeExportTempDirs()).toEqual(tempDirsBefore);
+      await tempDirRemoval;
     } finally {
+      secondPage.reject(new Error("test cleanup"));
       app.close();
     }
   });

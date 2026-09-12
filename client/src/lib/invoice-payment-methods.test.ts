@@ -24,6 +24,19 @@ describe("invoice payment method detail", () => {
     });
   });
 
+  it("keeps a Cuenta Corriente row inside a split payment without classifying the whole invoice as Cuenta Corriente", () => {
+    expect(buildInvoicePaymentMethods([
+      { method: "efectivo", amount: "50000" },
+      { method: "cuenta_corriente", amount: "75000" },
+    ], 0)).toEqual({
+      cashFormaPago: "pago_dividido",
+      cashFormaPagoDetalle: [
+        { method: "efectivo", amount: 50000 },
+        { method: "cuenta_corriente", amount: 75000 },
+      ],
+    });
+  });
+
   it("includes applied advances and retentions in the documented split", () => {
     expect(buildInvoicePaymentMethods([
       {
