@@ -605,16 +605,45 @@ riesgo.**
 en `server/index.ts` antes de `registerRoutes()`, fuera del alcance de
 `requireAuth` y de `authorizePilotExternalRole`.
 
-**Corrección aplicada:** se extrajeron a un módulo propio
-(`server/debug-assets-routes.ts`, función `registerDebugAssetRoutes(app)`),
-registrado con `requireAuth` explícito en ambas rutas. Deja de haber
-código que registre rutas de `/api` antes de que exista control de sesión.
-Sigue siendo alcanzable por cualquier usuario autenticado (no se restringió
-por rol — ninguno de los dos hallazgos pedía eso, y el contenido expuesto
-es de bajo riesgo una vez que se exige sesión).
+**Corrección aplicada — ronda 1 (incompleta):** se extrajeron a un módulo
+propio (`server/debug-assets-routes.ts`) con `requireAuth` explícito en
+ambas. Esto bloqueaba a cualquiera sin sesión, pero **no por rol** — un
+usuario logueado como `piloto_externo` (la cuenta que se le da a un
+tercero externo) todavía podía acceder a las dos, porque ninguna pasaba
+por `authorizePilotExternalRole` (Fase 6).
 
-Tests: `server/tests/debug-assets-routes.test.ts` — 401 sin sesión, 200/lo
-que corresponda con sesión, para ambas rutas.
+**Corrección aplicada — ronda 2 (la vigente):** las dos rutas necesitan
+soluciones distintas, porque el motivo de fondo es distinto en cada una:
+
+- `GET /api/debug/assets` sí vive bajo `/api`. El problema real no era
+  solo el orden de registro — era que se registraba en
+  `server/index.ts`, es decir por completo fuera de `registerRoutes()`
+  (donde vive `app.use("/api", authorizePilotExternalRole)`, Fase 6). Se
+  movió su registro (`registerDebugAssetsApiRoute(app)`) a **dentro** de
+  `registerRoutes()`, después de montar ese middleware. Con eso alcanza:
+  `piloto_externo` no está en su allowlist, así que cae en el deny por
+  defecto (`403`), sin necesidad de ningún chequeo adicional en la ruta.
+- `GET /descargar-colobig-pdf` **no** vive bajo `/api` —
+  `authorizePilotExternalRole` está montado únicamente con ese prefijo,
+  así que estructuralmente nunca la iba a cubrir, sin importar dónde se
+  registrara. Se le agregó un chequeo de rol explícito e inline
+  (`denyPilotExternalRole` en `server/debug-assets-routes.ts`), que
+  compara contra la constante `PILOT_EXTERNAL_ROLE` importada de
+  `server/pilot-external-role.ts` (nunca un string hardcodeado) y
+  responde `403` antes de servir el archivo.
+
+Ambas siguen alcanzables por cualquier otro usuario autenticado (no se
+restringió por rol más allá de `piloto_externo` — no fue lo que pidió
+ninguno de los dos hallazgos, y el contenido expuesto es de bajo riesgo
+una vez que se exige sesión).
+
+Tests (`server/tests/debug-assets-routes.test.ts`, sobre las rutas reales,
+replicando el orden de montaje real de cada una — no solo sobre las
+reglas de `pilot-external-role.ts`):
+- `GET /api/debug/assets`: sin sesión → `401`; rol interno (`reception`)
+  → `200`; rol `piloto_externo` → `403`.
+- `GET /descargar-colobig-pdf`: sin sesión → `401`; rol interno → ni
+  `401` ni `403`; rol `piloto_externo` → `403`.
 
 ### 23.2 Hallazgo 2 — contraseña de bootstrap hardcodeada (decisión: corregido)
 
@@ -676,7 +705,8 @@ fase — es la lista a seguir cuando se autorice el deployment real.
 - [ ] Una acción de comunicación externa real (ej. test de email) queda
       bloqueada, sin enviar nada real.
 - [ ] `GET /api/debug/assets` y `GET /descargar-colobig-pdf` devuelven
-      `401` sin sesión (Fase 9, sección 23.1).
+      `401` sin sesión y `403` con la cuenta `piloto_externo` (Fase 9,
+      sección 23.1).
 - [ ] `POST /api/auth/setup` devuelve `404` en este ambiente piloto (Fase
       9, sección 23.2) — confirma que el bootstrap por contraseña quedó
       inhabilitado ahí.

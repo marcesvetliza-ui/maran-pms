@@ -3,7 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStaticFiles, serveSpaFallback } from "./static";
 import { createServer } from "http";
 import { setupAuth } from "./auth";
-import { registerDebugAssetRoutes } from "./debug-assets-routes";
+import { registerDebugPdfDownloadRoute } from "./debug-assets-routes";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { logger } from "./logger";
@@ -119,10 +119,13 @@ app.use(express.urlencoded({ extended: false }));
 
 setupAuth(app);
 
-// Diagnóstico temporal de assets — requiere sesión autenticada (Fase 9 del
-// ambiente piloto: antes eran públicas, registradas aquí fuera del alcance
-// de requireAuth/authorizePilotExternalRole en server/routes.ts).
-registerDebugAssetRoutes(app);
+// Descarga temporal de PDF — requiere sesión autenticada y bloquea
+// explícitamente al rol piloto_externo (Fase 9, ronda 2): no vive bajo
+// /api, así que authorizePilotExternalRole (montado solo ahí, en
+// server/routes.ts) nunca la cubriría sin importar dónde se registre.
+// GET /api/debug/assets se registra aparte, dentro de registerRoutes()
+// (server/routes.ts), para quedar cubierta por ese middleware.
+registerDebugPdfDownloadRoute(app);
 
 app.use((req, res, next) => {
   const start = Date.now();

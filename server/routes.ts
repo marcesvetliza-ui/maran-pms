@@ -14,6 +14,7 @@ import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { getAppEnv, isPilotEnv } from "./app-env";
 import { authorizePilotExternalRole } from "./pilot-external-role";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
+import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -283,6 +284,12 @@ export async function registerRoutes(
   // excepción a todos los módulos registrados más abajo. No afecta a
   // ningún otro rol.
   app.use("/api", authorizePilotExternalRole);
+
+  // Fase 9 (ronda 2): registrada acá, después del middleware de arriba,
+  // para que piloto_externo caiga en su deny por defecto (403). Antes
+  // vivía en server/index.ts, antes de registerRoutes() — quedaba fuera
+  // del alcance de authorizePilotExternalRole por completo.
+  registerDebugAssetsApiRoute(app);
 
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));
