@@ -1039,6 +1039,12 @@ export function PrefacturaDialog({
   }
 
   async function doSubmit() {
+    const isCcPayment = saleCondition === "cuenta_corriente";
+    const invoicePaymentMethods = isCcPayment
+      ? { cashFormaPago: "cuenta_corriente" }
+      : buildInvoicePaymentMethods(paymentRows, selectedAlreadyPaid);
+    const usesCcEntity = isCcPayment || invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
+
     if (totalSelected <= 0.01 && !alreadyPaidAndInvoiced && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
@@ -1053,7 +1059,7 @@ export function PrefacturaDialog({
       setSubmitError("Factura A requiere CUIT válido (11 dígitos).");
       return;
     }
-    if (!alreadyPaidAndInvoiced && saleCondition === "cuenta_corriente" &&
+    if (!alreadyPaidAndInvoiced && usesCcEntity &&
       (!["guest", "company", "agency"].includes(billingTarget) || !billingEntityId)) {
       setSubmitError("Cuenta Corriente requiere un huésped, empresa o agencia seleccionada antes de emitir el comprobante.");
       return;
@@ -1157,14 +1163,6 @@ export function PrefacturaDialog({
         ? buildInvoiceItems(invoiceItemsToEmit, tipo)
         : [];
       if (invoiceItems.length > 0) {
-        // Si la condición es "cuenta_corriente" y hay una entidad seleccionada,
-        // incluir los campos CC para que el billing cree el cargo en la cuenta corriente.
-        const isCcPayment = saleCondition === "cuenta_corriente" &&
-          ["guest", "company", "agency"].includes(billingTarget) && !!billingEntityId;
-        const invoicePaymentMethods = isCcPayment
-          ? { cashFormaPago: "cuenta_corriente" }
-          : buildInvoicePaymentMethods(paymentRows, selectedAlreadyPaid);
-
         const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
           tipoComprobante: tipo,
           cliente: {
@@ -1186,13 +1184,13 @@ export function PrefacturaDialog({
             hasAccommodation: hasSelectedAccommodation,
           },
           ...invoicePaymentMethods,
-          ...(isCcPayment ? {
+          ...(usesCcEntity ? {
             ccEntityType: billingTarget,
             ccEntityId: billingEntityId,
           } : {}),
            observaciones: invoiceObservations.trim() || undefined,
            creditReapplications: applyReleasedCredit ? creditedAdvanceReapplications : [],
-           creditOperationId: (isCcPayment || (applyReleasedCredit && creditedAdvanceReapplications.length > 0))
+           creditOperationId: (usesCcEntity || (applyReleasedCredit && creditedAdvanceReapplications.length > 0))
              ? creditOperationId : undefined,
         });
         const invoiceBody = await invoiceRes.json();

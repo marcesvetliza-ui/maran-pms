@@ -211,7 +211,7 @@ describe("PrefacturaDialog recipient selection", () => {
     )).toBe(false);
   });
 
-  it("allows Cuenta Corriente as a payment method for the reservation guest", async () => {
+  it("includes the selected company when Contado uses a single Cuenta Corriente payment row", async () => {
     const fetchMock = buildFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -228,16 +228,30 @@ describe("PrefacturaDialog recipient selection", () => {
     );
 
     await screen.findByText(/Alojamiento Hab\. 101/);
+    await user.click(screen.getByTestId("select-billing-target"));
+    await user.click(await screen.findByRole("option", { name: /Empresa/ }));
+    await user.click(await screen.findByTestId("select-billing-company"));
+    await user.click(await screen.findByRole("option", { name: /Empresa de prueba SA/ }));
     await user.click(screen.getByTestId("select-payment-method-0"));
     await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
     await user.click(screen.getByTestId("button-registrar-emitir"));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url, options]) =>
-        String(url).includes("/api/payments") &&
+        String(url).includes("/api/billing/invoices") &&
         String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
       )).toBe(true);
     });
+
+    const invoiceCall = fetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/billing/invoices") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    const invoiceBody = JSON.parse(String((invoiceCall![1] as RequestInit).body));
+    expect(invoiceBody.cashFormaPago).toBe("cuenta_corriente");
+    expect(invoiceBody.ccEntityType).toBe("company");
+    expect(invoiceBody.ccEntityId).toBe("company-recipient-test");
+    expect(invoiceBody.creditOperationId).toEqual(expect.any(String));
 
     const paymentCall = fetchMock.mock.calls.find(([url, options]) =>
       String(url).includes("/api/payments") &&
@@ -245,9 +259,72 @@ describe("PrefacturaDialog recipient selection", () => {
     );
     const paymentBody = JSON.parse(String((paymentCall![1] as RequestInit).body));
     expect(paymentBody.method).toBe("cuenta_corriente");
-    expect(paymentBody.billingTarget).toBe("guest");
-    expect(paymentBody.companyId).toBeNull();
+    expect(paymentBody.billingTarget).toBe("company");
+    expect(paymentBody.companyId).toBe("company-recipient-test");
     expect(paymentBody.agencyId).toBeNull();
+  });
+
+  it("keeps Cuenta Corriente on its separate payment path when the invoice uses split payments", async () => {
+    const fetchMock = buildFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <PrefacturaDialog
+          open
+          onClose={vi.fn()}
+          reservationId={reservation.id}
+          reservation={reservation}
+          mode="billing"
+        />
+      </Wrapper>,
+    );
+
+    await screen.findByText(/Alojamiento Hab\. 101/);
+    await user.click(screen.getByTestId("select-billing-target"));
+    await user.click(await screen.findByRole("option", { name: /Empresa/ }));
+    await user.click(await screen.findByTestId("select-billing-company"));
+    await user.click(await screen.findByRole("option", { name: /Empresa de prueba SA/ }));
+    await user.click(screen.getByRole("button", { name: /Agregar forma de pago/ }));
+
+    const firstAmount = screen.getByTestId("input-payment-amount-0");
+    await user.clear(firstAmount);
+    await user.type(firstAmount, "100");
+    const secondAmount = screen.getByTestId("input-payment-amount-1");
+    await user.type(secondAmount, "180");
+    await user.click(screen.getByTestId("select-payment-method-1"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(screen.getByTestId("button-registrar-emitir"));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url, options]) =>
+        String(url).includes("/api/payments") &&
+        String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+      )).toHaveLength(2);
+    });
+
+    const invoiceCall = fetchMock.mock.calls.find(([url, options]) =>
+      String(url).includes("/api/billing/invoices") &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    const invoiceBody = JSON.parse(String((invoiceCall![1] as RequestInit).body));
+    expect(invoiceBody.cashFormaPago).toBe("pago_dividido");
+    expect(invoiceBody.ccEntityType).toBeUndefined();
+    expect(invoiceBody.ccEntityId).toBeUndefined();
+
+    const paymentBodies = fetchMock.mock.calls
+      .filter(([url, options]) =>
+        String(url).includes("/api/payments") &&
+        String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+      )
+      .map(([, options]) => JSON.parse(String((options as RequestInit).body)));
+    expect(paymentBodies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "cuenta_corriente",
+        billingTarget: "company",
+        companyId: "company-recipient-test",
+      }),
+    ]));
   });
 
   it("emits only the covered accommodation amount and links one payment to it", async () => {
