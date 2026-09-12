@@ -1835,7 +1835,11 @@ export type MaintenanceBlock = typeof maintenanceBlocks.$inferSelect;
 // ============== ADMINISTRATION MODULE ==============
 
 // System User Roles (extends existing UserRole with admin roles)
-export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "jefe_recepcion" | "comercial";
+// "piloto_externo" (Fase 6 del ambiente piloto): rol de acceso limitado para
+// usuarios externos (ej. vendedor de Channel Manager en una demo). Ver
+// server/pilot-external-role.ts para el alcance exacto — solo tiene sentido
+// en el ambiente piloto (APP_ENV=pilot), con datos 100% ficticios.
+export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "jefe_recepcion" | "comercial" | "piloto_externo";
 
 // System Users (Usuarios del Sistema)
 export const systemUsers = pgTable("system_users", {

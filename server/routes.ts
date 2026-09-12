@@ -12,6 +12,7 @@ import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { getAppEnv, isPilotEnv } from "./app-env";
+import { authorizePilotExternalRole } from "./pilot-external-role";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -312,6 +313,13 @@ export async function registerRoutes(
 
     requireAuth(req, res, next);
   });
+
+  // Fase 6 del ambiente piloto: autorización limitada para el rol
+  // piloto_externo. Corre después de requireAuth (req.user ya poblado por
+  // Passport) y antes de cualquier ruta de negocio, para que aplique sin
+  // excepción a todos los módulos registrados más abajo. No afecta a
+  // ningún otro rol.
+  app.use("/api", authorizePilotExternalRole);
 
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));
