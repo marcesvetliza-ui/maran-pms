@@ -1044,6 +1044,7 @@ export function PrefacturaDialog({
       ? { cashFormaPago: "cuenta_corriente" }
       : buildInvoicePaymentMethods(paymentRows, selectedAlreadyPaid);
     const usesCcEntity = isCcPayment || invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
+    const invoiceSettlesCcPayment = invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
 
     if (totalSelected <= 0.01 && !alreadyPaidAndInvoiced && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
@@ -1230,7 +1231,14 @@ export function PrefacturaDialog({
         total: invoiceData.montoTotal ?? invoiceData.monto_total,
       } : undefined;
       let paymentCount = 0;
-      for (const row of saleCondition === "contado" && selectedBalance > 0.01 ? paymentRows : []) {
+      // A single CC method is settled atomically by POST /api/billing/invoices
+      // using creditOperationId. Posting that same row here would duplicate the
+      // account movement. Split payments remain row-based because the invoice
+      // is classified as pago_dividido and does not settle their CC row.
+      const paymentRowsToRegister = saleCondition === "contado" && selectedBalance > 0.01
+        ? paymentRows.filter(row => !(invoiceSettlesCcPayment && row.method === "cuenta_corriente"))
+        : [];
+      for (const row of paymentRowsToRegister) {
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
         if (netAmount <= 0 && retMonto <= 0) continue;

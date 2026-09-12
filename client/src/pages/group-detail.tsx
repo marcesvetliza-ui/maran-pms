@@ -898,7 +898,6 @@ export default function GroupDetailPage() {
   const [groupPaymentDni, setGroupPaymentDni] = useState("");
   const [groupPaymentCondicionIva, setGroupPaymentCondicionIva] = useState("Consumidor Final");
   const [groupPaymentDomicilio, setGroupPaymentDomicilio] = useState("");
-  const [groupPaymentPvNum, setGroupPaymentPvNum] = useState("");
   const [groupPaymentItems, setGroupPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
   const [pendingGroupPaymentDraft, setPendingGroupPaymentDraft] = useState<{ endpoint: string; body: Record<string, any> } | null>(null);
@@ -933,7 +932,6 @@ export default function GroupDetailPage() {
     setGroupPaymentDni("");
     setGroupPaymentCondicionIva("Consumidor Final");
     setGroupPaymentDomicilio("");
-    setGroupPaymentPvNum("");
     setGroupPaymentItems([gNewItem()]);
   };
 
@@ -4065,8 +4063,6 @@ export default function GroupDetailPage() {
               setGroupPaymentReceptorLocked(false);
             };
 
-            const posElectronicos = (posConfigsData as any[]).filter((p: any) => p.activo && p.tipo === "electronico");
-
             return (
               <div className="space-y-5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -4356,22 +4352,19 @@ export default function GroupDetailPage() {
                 )}
 
                 {/* 4. PUNTO DE VENTA (solo fiscal) */}
-                {isFiscal && posElectronicos.length > 0 && (
+                {isFiscal && (
                   <>
                     <div className="border-t" />
                     <div className="space-y-1">
                       <Label className="text-sm font-semibold">4. Punto de Venta (ARCA)</Label>
-                      <Select value={groupPaymentPvNum} onValueChange={setGroupPaymentPvNum}>
-                        <SelectTrigger><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
-                        <SelectContent>
-                          {posElectronicos.map((p: any) => (
-                            <SelectItem key={p.id} value={String(p.numero)}>
-                              PV {String(p.numero).padStart(4, "0")} — {p.nombre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+                      <p className="text-sm text-muted-foreground">
+                        Se emitirá con el punto de venta configurado en Facturación:{" "}
+                        <span className="font-medium text-foreground">
+                          {billingConfig?.puntoVenta != null
+                            ? `PV ${String(billingConfig.puntoVenta).padStart(4, "0")}`
+                            : "cargando…"}
+                        </span>
+                      </p>
                     </div>
                   </>
                 )}
@@ -4824,8 +4817,15 @@ export default function GroupDetailPage() {
                   <div className="text-sm space-y-1">
                     <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Receptor</span><span className="font-medium text-right">{groupPaymentRazonSocial || "—"}</span></div>
                     <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Comprobante</span><span className="font-medium text-right">{isFiscal ? (receiptTypeLabels[groupPaymentReceiptType] || groupPaymentReceiptType) : "Anticipo"}</span></div>
-                    {isFiscal && posElectronicos.length > 0 && (
-                      <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Punto de Venta</span><span className="font-medium">{groupPaymentPvNum ? `PV ${groupPaymentPvNum.padStart(4, "0")}` : "Por defecto"}</span></div>
+                    {isFiscal && (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground shrink-0">Punto de Venta</span>
+                        <span className="font-medium">
+                          {billingConfig?.puntoVenta != null
+                            ? `PV ${String(billingConfig.puntoVenta).padStart(4, "0")}`
+                            : "Cargando…"}
+                        </span>
+                      </div>
                     )}
                     {masterAvailable && (
                         <div className="flex justify-between gap-2"><span className="text-muted-foreground shrink-0">Aplicación</span><span className="font-medium">{isMaster ? "Dirigida al Folio Maestro" : "Automática entre habitaciones"}</span></div>
