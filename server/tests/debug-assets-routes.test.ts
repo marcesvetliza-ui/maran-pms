@@ -1,7 +1,12 @@
 import express from "express";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerDebugAssetRoutes } from "../debug-assets-routes";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // A propósito NO se mockea "../auth": este test tiene que confirmar que
 // requireAuth (real) efectivamente protege estas dos rutas — antes estaban
@@ -11,9 +16,6 @@ import { registerDebugAssetRoutes } from "../debug-assets-routes";
 vi.mock("../db", () => ({
   db: {},
   pool: { query: vi.fn(), connect: vi.fn() },
-}));
-vi.mock("../utils/assetPath", () => ({
-  assetPathDiagnostic: () => ({ ok: true }),
 }));
 
 async function withServer<T>(authenticated: boolean, run: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -51,11 +53,12 @@ describe("registerDebugAssetRoutes — ya no son públicas", () => {
     });
   });
 
-  it("GET /api/debug/assets responde 200 autenticado", async () => {
+  it("GET /api/debug/assets responde 200 autenticado, con el diagnóstico real (sin mockear assetPath)", async () => {
     await withServer(true, async (baseUrl) => {
       const res = await fetch(`${baseUrl}/api/debug/assets`);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+      const body = await res.json();
+      expect(body).toMatchObject({ cwd: expect.any(String), NODE_ENV: expect.anything() });
     });
   });
 
@@ -66,12 +69,26 @@ describe("registerDebugAssetRoutes — ya no son públicas", () => {
     });
   });
 
-  it("GET /descargar-colobig-pdf autenticado intenta servir el archivo (no 401)", async () => {
+  it("GET /descargar-colobig-pdf autenticado sirve el PDF real (200, no un resultado ambiguo)", async () => {
+    // El archivo vive en attached_assets/ dentro del repo (confirmado antes
+    // de escribir esta aserción) — un resultado autenticado siempre debe
+    // ser 200 en este checkout, no "cualquier cosa que no sea 401".
     await withServer(true, async (baseUrl) => {
       const res = await fetch(`${baseUrl}/descargar-colobig-pdf`);
-      // El archivo puede no existir en este entorno de test (404 de
-      // sendFile), pero nunca debe ser 401 una vez autenticado.
-      expect(res.status).not.toBe(401);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
     });
+  });
+
+  it("server/index.ts registra registerDebugAssetRoutes después de setupAuth, en el orden real de arranque", () => {
+    const source = readFileSync(join(__dirname, "..", "index.ts"), "utf8");
+    const setupAuthIndex = source.indexOf("setupAuth(app)");
+    const registerIndex = source.indexOf("registerDebugAssetRoutes(app)");
+    expect(setupAuthIndex).toBeGreaterThan(-1);
+    expect(registerIndex).toBeGreaterThan(setupAuthIndex);
+    // Ninguna de las dos rutas debe volver a quedar definida inline, sin
+    // pasar por requireAuth, directamente en server/index.ts.
+    expect(source).not.toMatch(/app\.get\(\s*["']\/descargar-colobig-pdf["']\s*,\s*\(_req/);
+    expect(source).not.toMatch(/app\.get\(\s*["']\/api\/debug\/assets["']\s*,\s*\(_req/);
   });
 });

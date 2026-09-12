@@ -117,8 +117,12 @@ export function registerAuthBootstrapRoute(app: Express): void {
       }
 
       res.json({ message: "Usuario admin configurado" });
-    } catch (err) {
-      logger.error("Error en bootstrap de administrador", err);
+    } catch {
+      // Deliberadamente no se loguea el error crudo: un fallo acá viene de
+      // la escritura sobre systemUsers, y su mensaje/stack podría incluir
+      // texto de la consulta, nombres de columnas/constraints o el hash
+      // recién calculado. Se registra solo un evento fijo, sin detalle.
+      logger.error("Error en bootstrap de administrador — ver logs de la base para diagnóstico manual si hace falta");
       res.status(500).json({ message: "Error interno al configurar el administrador" });
     }
   });

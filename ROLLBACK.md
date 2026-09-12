@@ -65,7 +65,7 @@ psql "$DATABASE_URL" -f backup-FECHA.sql
 
 ## Checklist post-rollback
 
-- [ ] Verificar login con admin / maran2026
+- [ ] Verificar login con la cuenta admin configurada
 - [ ] Verificar que el Planning muestra habitaciones
 - [ ] Verificar que las reservas cargan
 - [ ] Notificar al equipo del cambio temporal

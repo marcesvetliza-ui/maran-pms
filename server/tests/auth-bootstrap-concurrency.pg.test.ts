@@ -7,7 +7,26 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // auth-bootstrap.test.ts no puede demostrar que el advisory lock realmente
 // serializa dos solicitudes simultáneas — eso solo se puede probar contra
 // una base real, con dos conexiones concurrentes de verdad.
-const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
+//
+// A diferencia de los demás *.pg.test.ts de esta suite (que crean/borran
+// fixtures con IDs sufijados por randomUUID(), sin riesgo de colisión),
+// esta prueba ejercita el endpoint real, que opera siempre sobre el
+// username literal "admin" — no es parametrizable. Por eso lleva guardas
+// extra, deliberadamente más estrictas que el resto de la suite:
+//
+// 1. Requiere ALLOW_DESTRUCTIVE_PG_TESTS=true configurado explícitamente
+//    (ver .github/workflows/test.yml — solo se setea ahí, contra el
+//    Postgres descartable que levanta el propio job de CI; nunca en un
+//    entorno real). Sin esa variable, el archivo entero se saltea.
+// 2. NUNCA pisa NODE_ENV — si por error corriera con NODE_ENV=production,
+//    falla fuerte en vez de forzar el valor para poder continuar.
+// 3. Antes de tocar nada, confirma que el username "admin" NO existe
+//    todavía en la base — si ya existe (con o sin contraseña), aborta sin
+//    tocarlo. Solo borra al final la fila si esa comprobación previa
+//    demostró que no preexistía, así que solo puede ser la fila que creó
+//    esta misma corrida.
+const explicitlyAllowed = process.env.ALLOW_DESTRUCTIVE_PG_TESTS === "true";
+const runIfDatabaseIsConfigured = process.env.DATABASE_URL && explicitlyAllowed ? describe : describe.skip;
 const testPool = process.env.DATABASE_URL
   ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
   : null;
@@ -26,9 +45,14 @@ function postSetup(newPassword: string) {
 
 runIfDatabaseIsConfigured("PostgreSQL real: bootstrap de admin bajo concurrencia", () => {
   beforeAll(async () => {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "auth-bootstrap-concurrency.pg.test.ts se niega a correr con NODE_ENV=production — " +
+        "este test ejercita un endpoint destructivo sobre el username 'admin' real.",
+      );
+    }
     process.env.ADMIN_BOOTSTRAP_ENABLED = "true";
     process.env.ADMIN_BOOTSTRAP_SECRET = BOOTSTRAP_SECRET;
-    if (process.env.NODE_ENV === "production") process.env.NODE_ENV = "test";
 
     const { registerRoutes } = await import("../routes");
     const app = express();
@@ -56,18 +80,26 @@ runIfDatabaseIsConfigured("PostgreSQL real: bootstrap de admin bajo concurrencia
   it("dos solicitudes de bootstrap simultáneas: solo una resulta exitosa, la contraseña no queda pisada a medias", async () => {
     if (!testPool) throw new Error("DATABASE_URL no configurada");
 
-    // Precondición: este endpoint se deshabilita para siempre en cuanto
-    // CUALQUIER usuario del sistema tiene contraseña (no solo "admin"). Si
-    // algún otro fixture de la suite de PostgreSQL llegara a insertar un
-    // usuario con contraseña, este test dejaría de poder probar nada real
-    // — fallar acá con un mensaje claro es mejor que una aserción confusa
-    // más abajo.
-    const existing = await testPool.query("SELECT username FROM system_users WHERE password IS NOT NULL");
-    if (existing.rows.length > 0) {
+    // Precondición doble, deliberadamente más estricta que un simple
+    // "ningún usuario tiene contraseña": confirma que el propio username
+    // "admin" no existe todavía bajo ninguna forma. Si existiera (por
+    // ejemplo un admin real preexistente sin contraseña, o cualquier otro
+    // estado inesperado), este test no lo toca — aborta con un mensaje
+    // claro en vez de mutarlo o, peor, borrarlo al final.
+    const existingAdmin = await testPool.query("SELECT 1 FROM system_users WHERE username = 'admin'");
+    if (existingAdmin.rows.length > 0) {
+      throw new Error(
+        "Precondición violada: ya existe un usuario 'admin' en esta base — este test no continúa " +
+        "para no arriesgarse a modificarlo o borrarlo. Verificá que DATABASE_URL apunte a una base " +
+        "de prueba descartable, no a una base real.",
+      );
+    }
+    const anyPasswordSet = await testPool.query("SELECT username FROM system_users WHERE password IS NOT NULL");
+    if (anyPasswordSet.rows.length > 0) {
       throw new Error(
         `Precondición violada: ya hay usuario(s) con contraseña en la base de prueba ` +
-        `(${existing.rows.map((r: any) => r.username).join(", ")}) — este test necesita una base ` +
-        `sin ningún usuario bootstrapeado para poder probar la concurrencia real.`,
+        `(${anyPasswordSet.rows.map((r: any) => r.username).join(", ")}) — el endpoint de bootstrap ` +
+        `ya se consideraría "de un solo uso" consumido, así que este test no podría probar nada real.`,
       );
     }
 
@@ -80,18 +112,17 @@ runIfDatabaseIsConfigured("PostgreSQL real: bootstrap de admin bajo concurrencia
 
       // Exactamente una debe haber creado el admin (200) y la otra debe
       // haber encontrado el "ya fue completado" (400) — nunca las dos en
-      // 200 (eso sería la carrera que se quiere evitar) ni las dos en 400
-      // (eso significaría que ninguna llegó a bootstrapear nada).
+      // 200 (eso sería la carrera que se quiere evitar) ni las dos en 400.
       expect(statuses).toEqual([200, 400]);
 
       const row = await testPool.query("SELECT password FROM system_users WHERE username = 'admin'");
       expect(row.rows).toHaveLength(1);
-      // La contraseña final tiene que ser exactamente la de UNA de las dos
-      // solicitudes — nunca null, vacía, ni el resultado de una escritura
-      // parcial/corrupta por la carrera.
       expect(row.rows[0].password).toEqual(expect.any(String));
       expect(row.rows[0].password.length).toBeGreaterThan(0);
     } finally {
+      // Seguro: la precondición de arriba ya demostró que "admin" no
+      // existía antes de esta corrida, así que la única fila que puede
+      // haber con ese username acá es la que creó esta misma prueba.
       await testPool.query("DELETE FROM system_users WHERE username = 'admin'");
     }
   });
