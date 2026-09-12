@@ -434,6 +434,7 @@ una auditoría de código y de resultados de tests, exclusivamente.
   `attached_assets/` sin autenticación. Se documenta para que el equipo
   decida si amerita corrección independiente — no se tocó en esta fase por
   ser código de producción ajeno al alcance del piloto.
+  **Actualización (Fase 9): corregido — ver sección 23.1.**
 
 ### 21.2 Bloqueo de comunicaciones externas (Fase 3)
 
@@ -495,6 +496,7 @@ una auditoría de código y de resultados de tests, exclusivamente.
   trabajo (`"maran2026"`, bootstrap del usuario admin en
   `POST /api/auth/setup`, deshabilitado fuera de `NODE_ENV=development`) —
   ya vivía en `main` antes de la Fase 1 y queda fuera de alcance.
+  **Actualización (Fase 9): corregido — ver sección 23.2.**
 
 ### 21.5 Suites completas — comparación final contra el baseline
 
@@ -532,6 +534,11 @@ sección 18).
    - Sin credenciales reales de email/ARCA configuradas (el bloqueo de la
      Fase 3 ya lo exige fail-closed fuera de `APP_ENV=production`, pero no
      configurarlas es una capa adicional).
+   - `ADMIN_BOOTSTRAP_SECRET`: no hace falta configurarla para el piloto —
+     `POST /api/auth/setup` está deshabilitado en `APP_ENV=pilot` de
+     todos modos (Fase 9, sección 23.2). La cuenta de demo `piloto_externo`
+     y el resto de usuarios ficticios se crean vía `seedDatabase()`
+     (Fase 7), no por este endpoint.
 3. Primer arranque: las migraciones corren automáticamente
    (`runMigrations()`, comportamiento existente) — verificar que terminan
    sin error contra la base vacía.
@@ -582,3 +589,114 @@ sección 18).
 Para la prueba de aislamiento completa entre piloto y producción (que no
 depende de este procedimiento y puede repetirse independientemente), ver
 sección 15.
+
+---
+
+## 23. Fase 9 — corrección de los dos hallazgos previos al acceso externo
+
+La Fase 8 (sección 21) dejó dos hallazgos preexistentes documentados pero
+sin corregir. Antes de habilitar cualquier acceso externo al piloto, el
+equipo decidió expresamente: **ambos quedan corregidos, no aceptados como
+riesgo.**
+
+### 23.1 Hallazgo 1 — rutas públicas sin autenticación (decisión: corregido)
+
+`GET /api/debug/assets` y `GET /descargar-colobig-pdf` estaban registradas
+en `server/index.ts` antes de `registerRoutes()`, fuera del alcance de
+`requireAuth` y de `authorizePilotExternalRole`.
+
+**Corrección aplicada:** se extrajeron a un módulo propio
+(`server/debug-assets-routes.ts`, función `registerDebugAssetRoutes(app)`),
+registrado con `requireAuth` explícito en ambas rutas. Deja de haber
+código que registre rutas de `/api` antes de que exista control de sesión.
+Sigue siendo alcanzable por cualquier usuario autenticado (no se restringió
+por rol — ninguno de los dos hallazgos pedía eso, y el contenido expuesto
+es de bajo riesgo una vez que se exige sesión).
+
+Tests: `server/tests/debug-assets-routes.test.ts` — 401 sin sesión, 200/lo
+que corresponda con sesión, para ambas rutas.
+
+### 23.2 Hallazgo 2 — contraseña de bootstrap hardcodeada (decisión: corregido)
+
+`POST /api/auth/setup` fijaba la contraseña del admin a un valor constante
+en el código (`"maran2026"`) y se deshabilitaba comparando `NODE_ENV`
+directamente en vez de usar `APP_ENV`.
+
+**Corrección aplicada** (`server/auth-bootstrap.ts`,
+`registerAuthBootstrapRoute(app)`):
+- Ya no existe ninguna contraseña fija en el código. Quien hace el
+  bootstrap debe enviar `bootstrapSecret` (comparado en tiempo constante
+  contra la variable de entorno `ADMIN_BOOTSTRAP_SECRET`, que nunca vive
+  en el código) y `newPassword` (la contraseña real que va a tener el
+  admin, elegida por quien bootstrapea, no por el código).
+- Si `ADMIN_BOOTSTRAP_SECRET` no está configurada, el endpoint responde
+  `503` — no hay manera de bootstrapear sin haber configurado el secreto
+  explícitamente por variable de entorno.
+- El gate de ambiente pasó de `NODE_ENV==="production"` a
+  `isProductionDataEnv() || isPilotEnv()` (ambas de `server/app-env.ts`):
+  el endpoint queda **deshabilitado tanto en producción como en el
+  ambiente piloto** — no solo en producción como antes. La justificación
+  de incluir también `pilot`: es el ambiente que se va a exponer a un
+  tercero externo, y no necesita este endpoint — sus cuentas (incluida
+  `piloto_externo`) se crean vía `seedDatabase()` (Fase 7). Solo queda
+  activo en `development`/`test`.
+- Sigue siendo de un solo uso (se niega si ya existe algún usuario con
+  contraseña seteada), igual que antes.
+- Ni el secreto ni la contraseña nueva se loguean ni se devuelven en la
+  respuesta en ningún punto del código.
+
+Tests: `server/tests/auth-bootstrap.test.ts` — falla sin
+`ADMIN_BOOTSTRAP_SECRET` configurado (503), falla con secreto incorrecto
+(401), falla con contraseña débil (400), **404 en producción**, **404 en
+piloto** (aunque el secreto sea correcto — confirma que no funciona ahí),
+crea el admin correctamente en development con secreto y contraseña
+válidos sin exponerlos en la respuesta, y no permite reutilización si ya
+hay un usuario con contraseña.
+
+### 23.3 Checklist de deployment inicial del piloto
+
+Consolida en un único lugar los pasos de las secciones 22.1–22.3, más las
+dos correcciones de esta fase. Ninguno de estos pasos se ejecutó en esta
+fase — es la lista a seguir cuando se autorice el deployment real.
+
+- [ ] Servicio y base PostgreSQL propios del piloto, separados de producción.
+- [ ] `APP_ENV=pilot` + `NODE_ENV=production` configurados.
+- [ ] `DATABASE_URL` apunta a la base nueva del piloto (nunca a producción).
+- [ ] `SESSION_SECRET` y `CHATBOT_WEBHOOK_SECRET` propios del piloto.
+- [ ] Sin credenciales reales de email/ARCA configuradas.
+- [ ] Migraciones corren limpio contra la base vacía en el primer arranque.
+- [ ] `seedDatabase()` corrió y creó el dataset ficticio, incluida la
+      cuenta `piloto_externo` (confirmar que `isProductionDataEnv()`
+      evaluó `false`).
+- [ ] `script/mark-database-identity.ts` corrido en dry-run, revisado, y
+      luego con `--environment=pilot --confirm` (sin `--force`).
+- [ ] `GET /api/health` responde `appEnv: "pilot"`, `isPilot: true`.
+- [ ] Banner de piloto visible en login y en el layout autenticado.
+- [ ] Marca de agua visible en un PDF de prueba (factura o folio).
+- [ ] Una acción de comunicación externa real (ej. test de email) queda
+      bloqueada, sin enviar nada real.
+- [ ] `GET /api/debug/assets` y `GET /descargar-colobig-pdf` devuelven
+      `401` sin sesión (Fase 9, sección 23.1).
+- [ ] `POST /api/auth/setup` devuelve `404` en este ambiente piloto (Fase
+      9, sección 23.2) — confirma que el bootstrap por contraseña quedó
+      inhabilitado ahí.
+- [ ] Login con la cuenta `piloto_externo` funciona (credencial entregada
+      por separado, nunca en este documento).
+- [ ] Con esa sesión: acceso normal a Reservas/Huéspedes/Check-in-out/
+      Folios/Caja, y `403` real del backend al intentar una acción
+      bloqueada (ej. anular una reserva).
+- [ ] Fila de `database_identity` confirmada en modo lectura (nunca
+      imprimir `DATABASE_URL`).
+
+### 23.4 Punto de decisión explícito
+
+**Antes de habilitar acceso externo al piloto, ambos hallazgos de la Fase
+8 debían quedar corregidos o aceptados expresamente. Decisión tomada: los
+dos quedan corregidos** (secciones 23.1 y 23.2), no aceptados como riesgo
+residual. No queda ningún hallazgo de la auditoría Fase 8 pendiente de
+decisión para este umbral.
+
+Esto no reemplaza la autorización específica, separada, que sigue haciendo
+falta para: ejecutar el deployment real, marcar la identidad de la base, o
+abrir el acceso externo — ninguna de las tres se ejecutó como parte de
+esta fase.
