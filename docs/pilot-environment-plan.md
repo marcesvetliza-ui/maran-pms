@@ -399,3 +399,186 @@ Estas estimaciones son comparativas y pueden cambiar al revisar detalles especí
 5. El resto de las fases (5, 7–12) pueden reordenarse según prioridad de negocio, ya que dependen de las anteriores pero no bloquean la seguridad básica entre sí.
 
 No se encontró ningún hallazgo que sugiera que el piloto sea inviable o que el código no soporte esta separación — el sistema ya tiene varios de los mecanismos base necesarios (modo ficticio de ARCA, flag de email, tablas de auditoría, sesiones en base separable). El trabajo pendiente es de **conectar esos mecanismos a un ambiente explícito** y de **cerrar la autorización por rol donde hoy no existe**, no de construir desde cero.
+
+---
+
+## 21. Auditoría final (Fase 8)
+
+Con las Fases 2 a 7 implementadas y fusionadas en `feature/pilot-environment`
+(incluyendo dos fixes de producción traídos de `main` sin conflicto:
+`82b5b7e` y `bcfc57a`), esta fase revisa el conjunto completo antes de
+continuar. No se ejecutó ningún deployment ni se marcó ninguna base — es
+una auditoría de código y de resultados de tests, exclusivamente.
+
+### 21.1 Middleware `piloto_externo` (Fase 6)
+
+- Se confirmó que ningún archivo de rutas (`reservations.ts`, `guests.ts`,
+  `folios.ts`, `adminCash.ts`, `billing/routes.ts`, `routes.ts`) cambió
+  desde el commit de la Fase 6 — el relevamiento de endpoints que sustenta
+  las reglas de `server/pilot-external-role.ts` sigue siendo exacto.
+- El middleware está registrado una única vez, en el punto correcto (después
+  de `requireAuth`, antes de todas las rutas de negocio).
+- Se repitió la batería exhaustiva: 118/118 tests (reglas puras + HTTP
+  end-to-end contra `registerRoutes` real) siguen pasando sin cambios.
+- **Hallazgo (preexistente, fuera del alcance de este trabajo):**
+  `GET /api/debug/assets` y `GET /descargar-colobig-pdf`
+  (`server/index.ts`) se registran directamente sobre `app` **antes** de
+  que se invoque `registerRoutes()`. Como Express despacha en orden de
+  registro, ambas rutas responden antes de llegar tanto a `requireAuth`
+  como al middleware `piloto_externo` — quedan accesibles sin
+  autenticación para cualquiera, independientemente del rol. Esto es
+  anterior a todo el trabajo del piloto (ya vivía en `main`/producción) y
+  no fue introducido por ninguna fase de este plan. `/api/debug/assets`
+  solo expone booleanos de existencia de archivos y `cwd`/`NODE_ENV` (bajo
+  riesgo); `/descargar-colobig-pdf` sirve un PDF real de
+  `attached_assets/` sin autenticación. Se documenta para que el equipo
+  decida si amerita corrección independiente — no se tocó en esta fase por
+  ser código de producción ajeno al alcance del piloto.
+
+### 21.2 Bloqueo de comunicaciones externas (Fase 3)
+
+- Se confirmaron los 8 puntos de bloqueo (`email` ×2, `email-backup`,
+  `arca` ×6 distribuidos en `wsaaClient`, `wsfevClient`, `invoiceService`,
+  `wsaaDebug`, `billing/routes`, `mara-inbound`, `mara-outbound`) presentes
+  y sin cambios desde su commit original.
+- 46/46 tests de bloqueo (`external-comms-policy`, `arca-comms-block`,
+  `email-service-comms-block`, `backup-comms-block`,
+  `email-test-route-comms-block`, `mara-comms-block`,
+  `wsaa-debug-comms-block`) siguen pasando.
+- Las dos excepciones documentadas (OpenAI en `/api/help/chat`, descarga de
+  `logoUrl` en `loadLogoBuffer()`) siguen intactas, tal como se decidieron
+  explícitamente en la Fase 3 (Opción B). El riesgo de SSRF de `logoUrl`
+  sigue documentado y sin corregir — es una decisión pendiente, no un
+  olvido.
+
+### 21.3 Separación piloto/producción
+
+- `server/app-env.ts` y `server/database-identity.ts` sin cambios desde
+  sus fases; 49/49 tests (`app-env.test.ts`, `database-identity.test.ts`)
+  pasando.
+- `isPilotEnv()`/`isProductionDataEnv()` son mutuamente excluyentes por
+  construcción (comparan contra un único valor de `AppEnv`), sin
+  superposición posible.
+- Los indicadores visuales (banner + marca de agua en PDF, Fase 5) leen
+  `APP_ENV` del servidor vía `/api/health`, nunca una variable de
+  build-time del cliente — confirmado sin cambios.
+- La cuenta de demo `piloto_externo` (Fase 7) solo se crea cuando
+  `!isProductionDataEnv()`; confirmado con test que nunca se crea en
+  producción aunque la base esté vacía.
+- **Observación (comportamiento preexistente, no introducido por el
+  piloto):** el resto de `seedDatabase()` (habitaciones, huéspedes,
+  reservas, etc.) no está condicionado por `APP_ENV` — se ejecuta en
+  cualquier ambiente si la tabla `room_types` está vacía. En la práctica,
+  una base de producción real nunca debería estar vacía después del
+  arranque inicial, pero queda documentado como una dependencia implícita
+  de que nadie apunte `APP_ENV=production` a una base recién creada sin
+  datos.
+- La identidad de base sigue en Etapa A (advierte, no bloquea) — la Etapa
+  B (bloqueo obligatorio) sigue explícitamente diferida a una fase futura,
+  como se decidió en la Fase 4.
+
+### 21.4 Credenciales
+
+- La contraseña de demo de la cuenta `piloto_externo` (definida en
+  `server/seed.ts`) solo aparece ahí y en su test unitario — no se filtró a
+  documentación, mensajes de commit ni logs (`console.log` solo imprime
+  que se está creando la cuenta, nunca el valor). **No se reproduce en
+  este documento**, según lo pedido.
+- Se revisó el diff completo de todos los commits del piloto
+  (`c3832d6..HEAD`) buscando patrones de secretos/API keys/tokens: los
+  únicos hallazgos son valores de prueba evidentemente ficticios ya
+  existentes en los tests de la Fase 3 (`"test-secret"`, `"re_test_key"`,
+  etc.), usados para mockear, no credenciales reales.
+- `attached_assets/` no fue tocado por ningún commit de este trabajo
+  (`git diff --stat` vacío entre el inicio del piloto y este punto).
+- Se detectó una contraseña hardcodeada preexistente y ajena a este
+  trabajo (`"maran2026"`, bootstrap del usuario admin en
+  `POST /api/auth/setup`, deshabilitado fuera de `NODE_ENV=development`) —
+  ya vivía en `main` antes de la Fase 1 y queda fuera de alcance.
+
+### 21.5 Suites completas — comparación final contra el baseline
+
+| Suite | Resultado | Comparación |
+|---|---|---|
+| `npm run check` (typecheck) | 0 errores | Igual que en cada fase anterior |
+| Cliente (`vitest.config.ts`) | 43/43 archivos, 219/219 tests | Sin cambios desde la Fase 5 |
+| Servidor (`vitest.server.config.ts`) | 53/61 archivos, 471/471 tests | Los 8 archivos que fallan son exactamente los mismos de siempre (`Error: DATABASE_URL must be set` — el sandbox no tiene esa variable configurada, no es una regresión de código) |
+| PostgreSQL (`vitest.server.pg.config.ts`) | 14 failed / 5 skipped, 15 tests skipped | Idéntico al baseline conocido en todas las fases anteriores |
+| `git diff --check` | limpio | — |
+
+No se encontró ninguna regresión atribuible al trabajo del piloto en
+ninguna de las 7 fases implementadas.
+
+---
+
+## 22. Procedimiento de despliegue inicial, marcado de identidad y verificación
+
+Procedimiento concreto para cuando se decida desplegar el piloto (no
+ejecutado en esta fase — sección puramente documental, según lo pedido).
+Reemplaza en detalle a la sección 16 (que seguía siendo un diseño de la
+Fase 1); la elección de infraestructura sigue pendiente (decisión 2 de la
+sección 18).
+
+### 22.1 Despliegue inicial
+
+1. Nuevo servicio, separado del de producción, con su propia base
+   PostgreSQL (nunca la de producción, nunca una copia de ella).
+2. Variables de entorno propias del servicio piloto:
+   - `APP_ENV=pilot` y `NODE_ENV=production` (la única combinación válida
+     para `pilot` — ver Fase 2, `server/app-env.ts`).
+   - `DATABASE_URL` de la base nueva del piloto.
+   - `SESSION_SECRET` y `CHATBOT_WEBHOOK_SECRET` propios, distintos de los
+     de producción.
+   - Sin credenciales reales de email/ARCA configuradas (el bloqueo de la
+     Fase 3 ya lo exige fail-closed fuera de `APP_ENV=production`, pero no
+     configurarlas es una capa adicional).
+3. Primer arranque: las migraciones corren automáticamente
+   (`runMigrations()`, comportamiento existente) — verificar que terminan
+   sin error contra la base vacía.
+4. En el mismo primer arranque, `seedDatabase()` puebla la base con el
+   dataset ficticio completo, incluida la cuenta `piloto_externo` (Fase 7,
+   gateada por `!isProductionDataEnv()`).
+
+### 22.2 Marcado de identidad de base (Fase 4, Etapa A)
+
+5. Correr `script/mark-database-identity.ts` **en modo dry-run primero**
+   (comportamiento por defecto, sin `--confirm`) contra la base del
+   piloto, y revisar la salida.
+6. Si es correcta, volver a correrlo con
+   `--environment=pilot --confirm`. Nunca usar `--force` salvo que se
+   quiera remarcar deliberadamente una base ya marcada.
+7. Esto es aditivo y no bloqueante (Etapa A): el arranque del servidor
+   seguirá funcionando igual con o sin esta fila — es una guarda manual,
+   no automática, por lo que no debe omitirse aunque nada la exija
+   técnicamente.
+
+### 22.3 Verificación posterior
+
+8. `GET /api/health` responde `appEnv: "pilot"` e `isPilot: true`.
+9. La pantalla de login muestra el banner "Ambiente piloto — datos de
+   prueba" (ícono + texto, no solo color).
+10. Cualquier página autenticada muestra la misma banda persistente.
+11. Un PDF generado (factura o folio) muestra la marca de agua diagonal.
+12. Confirmar que una acción de comunicación externa real queda bloqueada
+    (por ejemplo, un intento de envío de email de prueba) — sin enviar
+    nada real.
+13. Iniciar sesión con la cuenta `piloto_externo` (la contraseña se
+    entrega por separado, no vive en este documento) y confirmar:
+    - Acceso normal a Reservas, Huéspedes, Check-in/out, Folios (lectura)
+      y Caja operativa.
+    - Un 403 real del backend al intentar una acción bloqueada (por
+      ejemplo, anular una reserva) — no alcanza con que la opción esté
+      oculta en la interfaz.
+14. Confirmar la fila de `database_identity` con el CLI del paso 5/6 (modo
+    lectura) — nunca imprimir `DATABASE_URL`.
+15. Recién después de que todo lo anterior pase, compartir la URL y las
+    credenciales con el tercero externo (vendedor de Channel Manager).
+16. Al finalizar la demo o certificación: revocar o desactivar la cuenta
+    `piloto_externo` (cambiar su contraseña o marcar `isActive=false`).
+    Tener en cuenta la limitación ya documentada (R7, sección 19): la
+    revocación por `isActive` no invalida una sesión ya iniciada de forma
+    inmediata.
+
+Para la prueba de aislamiento completa entre piloto y producción (que no
+depende de este procedimiento y puede repetirse independientemente), ver
+sección 15.
