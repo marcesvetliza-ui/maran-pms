@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 /**
  * Maran PMS — Smoke Test
- * Uso: node scripts/smoke-test.js [URL]
- * Ejemplo: node scripts/smoke-test.js https://maranpms.com.ar
- * Sin argumentos, usa http://localhost:5000
+ * Uso: node scripts/smoke-test.js [URL] [usuario] [password]
+ * Ejemplo: node scripts/smoke-test.js https://maranpms.com.ar admin ********
+ * Sin argumentos de URL, usa http://localhost:5000.
+ * El usuario y la contraseña son obligatorios — nunca tienen un valor por
+ * defecto acá; pasalos como argumentos o via las variables de entorno
+ * SMOKE_TEST_USER / SMOKE_TEST_PASSWORD.
  */
 
 const BASE_URL = process.argv[2] || "http://localhost:5000";
-const ADMIN_USER = process.argv[3] || "admin";
-const ADMIN_PASS = process.argv[4] || "maran2026";
+const ADMIN_USER = process.argv[3] || process.env.SMOKE_TEST_USER;
+const ADMIN_PASS = process.argv[4] || process.env.SMOKE_TEST_PASSWORD;
+
+if (!ADMIN_USER || !ADMIN_PASS) {
+  console.error(
+    "Falta usuario y/o contraseña. Uso: node scripts/smoke-test.js [URL] <usuario> <password>\n" +
+    "o configurá SMOKE_TEST_USER / SMOKE_TEST_PASSWORD como variables de entorno.",
+  );
+  process.exit(1);
+}
 
 const RESET = "\x1b[0m";
 const GREEN = "\x1b[32m";

@@ -62,7 +62,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Setup ya fue completado. Este endpoint está deshabilitado." });
       }
 
-      const hashedPassword = await hashPassword("maran2026");
+      const hashedPassword = await hashPassword("[REDACTADO — ver server/auth-bootstrap.ts, ya no hay password fija]");
       
       const adminUser = allUsers.find(u => u.username === "admin");
       if (adminUser) {

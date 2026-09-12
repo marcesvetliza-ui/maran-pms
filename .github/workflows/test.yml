@@ -30,6 +30,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/maran_test
       NPM_CONFIG_UPDATE_NOTIFIER: "false"
+      # Habilita server/tests/auth-bootstrap-concurrency.pg.test.ts — un test
+      # que ejercita un endpoint destructivo (POST /api/auth/setup) sobre el
+      # Postgres descartable que este mismo job levanta arriba. Nunca debe
+      # configurarse en un entorno real.
+      ALLOW_DESTRUCTIVE_PG_TESTS: "true"
 
     steps:
       - name: Checkout código
