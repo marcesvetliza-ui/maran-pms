@@ -254,14 +254,17 @@ npx drizzle-kit push
 - Sesiones almacenadas en PostgreSQL (tabla `sessions`) via `connect-pg-simple`
 - Cookie de sesión: `maran.sid`, HttpOnly, SameSite=Strict, Secure en producción
 
-### Credenciales del administrador por defecto
+### Credenciales del administrador
 
-```
-Usuario: admin
-Contraseña: maran2026
-```
+El bootstrap del primer usuario `admin` ya no usa una contraseña fija en el
+código (ver `server/auth-bootstrap.ts`): requiere `ADMIN_BOOTSTRAP_ENABLED=true`
+y `ADMIN_BOOTSTRAP_SECRET` configurados por variable de entorno, y la
+contraseña real se elige en el momento del bootstrap — nunca vive en este
+documento ni en el repositorio.
 
-**⚠️ Cambiar esta contraseña antes de pasar a producción real con datos del hotel.**
+**⚠️ Si esta cuenta llegó a usar la contraseña por defecto que tenía el
+código antes de esa migración, considerala comprometida (quedó en el
+historial de Git) y rotala.**
 
 ### Roles del sistema (8 roles)
 

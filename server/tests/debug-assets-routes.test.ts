@@ -1,22 +1,26 @@
 import express from "express";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerDebugAssetsApiRoute, registerDebugPdfDownloadRoute } from "../debug-assets-routes";
 import { authorizePilotExternalRole, PILOT_EXTERNAL_ROLE } from "../pilot-external-role";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 // A propósito NO se mockea "../auth" ni "../pilot-external-role": este test
 // tiene que confirmar que requireAuth y authorizePilotExternalRole (reales)
 // efectivamente protegen estas dos rutas — antes de la Fase 9 (ronda 1)
 // estaban registradas sin ningún guard, y la ronda 1 dejó pasar al rol
-// piloto_externo igual (hallazgo de esta ronda 2).
+// piloto_externo igual (hallazgo de esta ronda 2). Tampoco se mockea
+// "../utils/assetPath": /api/debug/assets se verifica con su diagnóstico
+// real, no con un doble.
 // "../db" sí se mockea: solo hace falta para que "../auth" pueda importarse
 // en este sandbox sin DATABASE_URL — requireAuth no lo usa.
 vi.mock("../db", () => ({
   db: {},
   pool: { query: vi.fn(), connect: vi.fn() },
-}));
-vi.mock("../utils/assetPath", () => ({
-  assetPathDiagnostic: () => ({ ok: true }),
 }));
 
 function fakeSession(role: string | null) {
@@ -65,11 +69,12 @@ describe("GET /api/debug/assets — Fase 9 (ronda 2): cubierta por authorizePilo
     });
   });
 
-  it("con rol interno normal (reception) → 200, conserva el comportamiento actual", async () => {
+  it("con rol interno normal (reception) → 200, con el diagnóstico real (sin mockear assetPath)", async () => {
     await withServer(buildApp("reception"), async (baseUrl) => {
       const res = await fetch(`${baseUrl}/api/debug/assets`);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ok: true });
+      const body = await res.json();
+      expect(body).toMatchObject({ cwd: expect.any(String), NODE_ENV: expect.anything() });
     });
   });
 
@@ -103,13 +108,15 @@ describe("GET /descargar-colobig-pdf — Fase 9 (ronda 2): chequeo de rol inline
     });
   });
 
-  it("con rol interno normal (reception) → ni 401 ni 403", async () => {
+  it("con rol interno normal (reception) sirve el PDF real (200, no un resultado ambiguo)", async () => {
+    // El archivo vive en attached_assets/ dentro del repo (confirmado antes
+    // de escribir esta aserción) — un resultado autenticado con rol normal
+    // siempre debe ser 200 en este checkout, no "cualquier cosa que no sea
+    // 401/403".
     await withServer(buildApp("reception"), async (baseUrl) => {
       const res = await fetch(`${baseUrl}/descargar-colobig-pdf`);
-      // El archivo puede no existir en este entorno de test (404 de
-      // sendFile), pero nunca debe ser 401 ni 403 con un rol normal.
-      expect(res.status).not.toBe(401);
-      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
     });
   });
 
@@ -118,5 +125,27 @@ describe("GET /descargar-colobig-pdf — Fase 9 (ronda 2): chequeo de rol inline
       const res = await fetch(`${baseUrl}/descargar-colobig-pdf`);
       expect(res.status).toBe(403);
     });
+  });
+});
+
+describe("server/index.ts y server/routes.ts registran las rutas en el orden real de arranque", () => {
+  it("registerDebugPdfDownloadRoute se registra en index.ts después de setupAuth, y ninguna ruta queda inline sin guard", () => {
+    const source = readFileSync(join(__dirname, "..", "index.ts"), "utf8");
+    const setupAuthIndex = source.indexOf("setupAuth(app)");
+    const registerIndex = source.indexOf("registerDebugPdfDownloadRoute(app)");
+    expect(setupAuthIndex).toBeGreaterThan(-1);
+    expect(registerIndex).toBeGreaterThan(setupAuthIndex);
+    // Ninguna de las dos rutas debe volver a quedar definida inline, sin
+    // pasar por requireAuth, directamente en server/index.ts.
+    expect(source).not.toMatch(/app\.get\(\s*["']\/descargar-colobig-pdf["']\s*,\s*\(_req/);
+    expect(source).not.toMatch(/app\.get\(\s*["']\/api\/debug\/assets["']\s*,\s*\(_req/);
+  });
+
+  it("registerDebugAssetsApiRoute se registra en routes.ts después de authorizePilotExternalRole", () => {
+    const source = readFileSync(join(__dirname, "..", "routes.ts"), "utf8");
+    const middlewareIndex = source.indexOf('app.use("/api", authorizePilotExternalRole)');
+    const registerIndex = source.indexOf("registerDebugAssetsApiRoute(app)");
+    expect(middlewareIndex).toBeGreaterThan(-1);
+    expect(registerIndex).toBeGreaterThan(middlewareIndex);
   });
 });
