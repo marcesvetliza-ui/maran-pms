@@ -252,16 +252,10 @@ describe("PrefacturaDialog recipient selection", () => {
     expect(invoiceBody.ccEntityType).toBe("company");
     expect(invoiceBody.ccEntityId).toBe("company-recipient-test");
     expect(invoiceBody.creditOperationId).toEqual(expect.any(String));
-
-    const paymentCall = fetchMock.mock.calls.find(([url, options]) =>
+    expect(fetchMock.mock.calls.some(([url, options]) =>
       String(url).includes("/api/payments") &&
       String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
-    );
-    const paymentBody = JSON.parse(String((paymentCall![1] as RequestInit).body));
-    expect(paymentBody.method).toBe("cuenta_corriente");
-    expect(paymentBody.billingTarget).toBe("company");
-    expect(paymentBody.companyId).toBe("company-recipient-test");
-    expect(paymentBody.agencyId).toBeNull();
+    )).toBe(false);
   });
 
   it("keeps Cuenta Corriente on its separate payment path when the invoice uses split payments", async () => {
