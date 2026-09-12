@@ -219,6 +219,9 @@ app.use((req, res, next) => {
       return;
     }
 
+    const { warnIfDatabaseIdentityMissing } = await import("./database-identity");
+    await mig("database-identity check", warnIfDatabaseIdentityMissing);
+
     const { seedDatabase, refreshRealData } = await import("./seed");
     await mig("seedDatabase", seedDatabase);
     await mig("refreshRealData", refreshRealData);
