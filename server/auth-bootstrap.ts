@@ -1,28 +1,45 @@
 import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import type { Express } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "./db";
 import { systemUsers } from "@shared/schema";
 import { hashPassword } from "./auth";
+import { logger } from "./logger";
 
 /**
  * Reemplaza el bootstrap anterior de `POST /api/auth/setup`, que fijaba una
- * contraseña de admin hardcodeada ("maran2026") en el código.
+ * contraseña de admin hardcodeada en el código.
  *
- * Cambios:
  * - Ya no hay ninguna contraseña fija en el código: quien hace el bootstrap
  *   debe proveer tanto el secreto de bootstrap (`ADMIN_BOOTSTRAP_SECRET`,
  *   configurado por variable de entorno, nunca en código) como la
  *   contraseña real que va a tener el admin.
- * - Sigue deshabilitado en producción (NODE_ENV=production → 404), igual
- *   que antes.
- * - Sigue siendo de un solo uso: se niega si ya existe algún usuario con
- *   contraseña seteada (igual que antes).
- * - Nunca loguea ni devuelve el secreto ni la contraseña en la respuesta.
+ * - Habilitación explícita, no por exclusión: requiere NODE_ENV distinto de
+ *   "production" (veto absoluto, nunca se levanta) Y
+ *   ADMIN_BOOTSTRAP_ENABLED=true configurado aparte. Un NODE_ENV vacío, mal
+ *   escrito o inesperado (staging, preview, etc.) ya no deja el endpoint
+ *   habilitado por accidente — hace falta encender explícitamente las dos
+ *   condiciones.
+ * - ADMIN_BOOTSTRAP_SECRET también debe tener una longitud mínima razonable;
+ *   si no está configurada o es demasiado corta, se trata como "bootstrap no
+ *   configurado" (503), no como "secreto inválido".
+ * - Serializado dentro de una transacción con un advisory lock (mismo patrón
+ *   que ya usa el resto del código para evitar carreras — ver
+ *   server/db-storage.ts, server/billing/routes.ts): dos solicitudes
+ *   concurrentes ya no pueden pasar ambas la verificación de "un solo uso"
+ *   antes de que la primera escriba.
+ * - Nunca loguea ni devuelve el secreto ni la contraseña. Los errores
+ *   internos se registran con detalle en el logger del servidor, pero la
+ *   respuesta al cliente es siempre un mensaje fijo — nunca el error crudo
+ *   de la base de datos.
  */
 
+const MIN_SECRET_LENGTH = 20;
+const MIN_PASSWORD_LENGTH = 8;
+
 function isBootstrapEnabled(): boolean {
-  return process.env.NODE_ENV !== "production";
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.ADMIN_BOOTSTRAP_ENABLED === "true";
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -38,7 +55,7 @@ export function registerAuthBootstrapRoute(app: Express): void {
     }
 
     const configuredSecret = process.env.ADMIN_BOOTSTRAP_SECRET;
-    if (!configuredSecret) {
+    if (!configuredSecret || configuredSecret.length < MIN_SECRET_LENGTH) {
       return res.status(503).json({ message: "Bootstrap no configurado" });
     }
 
@@ -48,43 +65,61 @@ export function registerAuthBootstrapRoute(app: Express): void {
     }
 
     const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: "newPassword debe tener al menos 8 caracteres" });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ message: `newPassword debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres` });
     }
 
     try {
-      const allUsers = await db.select().from(systemUsers);
-      const anyUserWithPassword = allUsers.some((u) => u.password !== null);
-      if (anyUserWithPassword) {
+      // Hashear antes de entrar a la transacción: bcrypt es intencionalmente
+      // lento, y no hace falta tener la transacción/el advisory lock
+      // abiertos mientras corre.
+      const hashedPassword = await hashPassword(newPassword);
+
+      const bootstrapped = await db.transaction(async (tx) => {
+        // Advisory lock con alcance de transacción: serializa cualquier
+        // solicitud de bootstrap concurrente. Se libera solo al terminar la
+        // transacción (commit o rollback), así que la verificación de abajo
+        // y la escritura quedan atómicas entre sí para todas las
+        // solicitudes que compitan.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('admin-bootstrap'))`);
+
+        const allUsers = await tx.select().from(systemUsers);
+        const anyUserWithPassword = allUsers.some((u) => u.password !== null);
+        if (anyUserWithPassword) {
+          return false;
+        }
+
+        const adminUser = allUsers.find((u) => u.username === "admin");
+        if (adminUser) {
+          await tx
+            .update(systemUsers)
+            .set({ password: hashedPassword })
+            .where(and(eq(systemUsers.id, adminUser.id), isNull(systemUsers.password)));
+        } else {
+          await tx.insert(systemUsers).values({
+            id: randomUUID(),
+            username: "admin",
+            password: hashedPassword,
+            email: "admin@maransuites.com",
+            fullName: "Administrador Sistema",
+            role: "admin",
+            department: "Sistemas",
+            phone: "+54 343 400-0001",
+            isActive: "true",
+            createdAt: new Date(),
+          });
+        }
+        return true;
+      });
+
+      if (!bootstrapped) {
         return res.status(400).json({ message: "Setup ya fue completado. Este endpoint está deshabilitado." });
       }
 
-      const hashedPassword = await hashPassword(newPassword);
-
-      const adminUser = allUsers.find((u) => u.username === "admin");
-      if (adminUser) {
-        await db
-          .update(systemUsers)
-          .set({ password: hashedPassword })
-          .where(eq(systemUsers.id, adminUser.id));
-      } else {
-        await db.insert(systemUsers).values({
-          id: randomUUID(),
-          username: "admin",
-          password: hashedPassword,
-          email: "admin@maransuites.com",
-          fullName: "Administrador Sistema",
-          role: "admin",
-          department: "Sistemas",
-          phone: "+54 343 400-0001",
-          isActive: "true",
-          createdAt: new Date(),
-        });
-      }
-
       res.json({ message: "Usuario admin configurado" });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
+    } catch (err) {
+      logger.error("Error en bootstrap de administrador", err);
+      res.status(500).json({ message: "Error interno al configurar el administrador" });
     }
   });
 }
