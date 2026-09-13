@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import type { SpaAppointmentWithDetails, SpaAccountWithItems, SpaProfessional } from "@shared/schema";
 import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 
 export interface SpaReceiptData {
   accountId: string;
@@ -37,6 +38,7 @@ const receiptTypeLabels: Record<string, string> = {
 export async function generateSpaAccountReceiptPdf(data: SpaReceiptData): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -227,6 +229,7 @@ export async function generateConfirmacionTurnoSpaPdf(
 ): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

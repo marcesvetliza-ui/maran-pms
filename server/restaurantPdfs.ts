@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
 import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -42,6 +43,7 @@ export interface RestaurantReceiptData {
 export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptData): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

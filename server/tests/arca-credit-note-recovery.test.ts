@@ -1,14 +1,27 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { feCompConsultar } from "../billing/wsfevClient";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 const originalFetch = global.fetch;
 
-afterEach(() => {
-  global.fetch = originalFetch;
-  vi.restoreAllMocks();
-});
-
 describe("ARCA pending credit-note lookup", () => {
+  // Este archivo ejercita el camino real de feCompConsultar (con fetch
+  // mockeado a nivel de red) para probar la lógica de reconciliación de
+  // notas de crédito pendientes — no la política de bloqueo por ambiente
+  // (ver server/tests/arca-comms-block.test.ts para eso). El default
+  // global de test es APP_ENV=test (fail-closed), así que acá se simula
+  // production explícitamente para llegar al fetch mockeado.
+  beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+    resetAppEnvForTests();
+  });
+
   it("recovers an authorized CAE by the persisted voucher number", async () => {
     global.fetch = vi.fn(async () => new Response(
       `<soap:Envelope><Resultado>A</Resultado><CAE>12345678901234</CAE><CAEFchVto>20260831</CAEFchVto></soap:Envelope>`,

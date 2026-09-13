@@ -1,6 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 const state = vi.hoisted(() => ({
   users: [] as Array<{ id: string; username: string; password: string | null }>,
@@ -74,18 +75,24 @@ function postSetup(baseUrl: string, body: Record<string, unknown>) {
 const ORIGINAL_ENV = { ...process.env };
 const VALID_SECRET = "correct-secret-with-20-plus-chars";
 
-describe("registerAuthBootstrapRoute — sin contraseña hardcodeada", () => {
+describe("registerAuthBootstrapRoute — sin contraseña hardcodeada (Fase 9)", () => {
   beforeEach(() => {
     state.users = [];
     state.failInsert = false;
     process.env.NODE_ENV = "development";
     process.env.ADMIN_BOOTSTRAP_ENABLED = "true";
     process.env.ADMIN_BOOTSTRAP_SECRET = VALID_SECRET;
+    // isBootstrapEnabled() también consulta isProductionDataEnv()/isPilotEnv()
+    // (APP_ENV, independiente de NODE_ENV) — hace falta inicializarlo en cada
+    // test, salvo en los que verifican el veto por NODE_ENV=production, que
+    // corta antes de llegar a consultarlo.
+    initAppEnv({ APP_ENV: "development", NODE_ENV: "development" });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
     process.env = { ...ORIGINAL_ENV };
+    resetAppEnvForTests();
   });
 
   it("responde 404 si ADMIN_BOOTSTRAP_ENABLED no está en 'true', aunque NODE_ENV no sea production", async () => {
@@ -134,8 +141,29 @@ describe("registerAuthBootstrapRoute — sin contraseña hardcodeada", () => {
     });
   });
 
-  it("404 en producción, aunque el flag y el secreto sean correctos", async () => {
+  it("404 en producción (NODE_ENV=production), aunque el flag y el secreto sean correctos", async () => {
     process.env.NODE_ENV = "production";
+    await withServer(async (baseUrl) => {
+      const res = await postSetup(baseUrl, { bootstrapSecret: VALID_SECRET, newPassword: "longenough1" });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("404 en producción (APP_ENV=production), aunque el flag y el secreto sean correctos", async () => {
+    // APP_ENV=production exige NODE_ENV=production (ver resolveAppEnv) — acá
+    // ambos coinciden con producción real, a diferencia del test de arriba
+    // que verifica el veto por NODE_ENV solo.
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+    await withServer(async (baseUrl) => {
+      const res = await postSetup(baseUrl, { bootstrapSecret: VALID_SECRET, newPassword: "longenough1" });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("404 en el ambiente piloto (APP_ENV=pilot), aunque el flag y el secreto sean correctos — no funciona en piloto", async () => {
+    // APP_ENV=pilot también exige NODE_ENV=production (el piloto corre con
+    // las mismas protecciones que producción real).
+    initAppEnv({ APP_ENV: "pilot", NODE_ENV: "production" });
     await withServer(async (baseUrl) => {
       const res = await postSetup(baseUrl, { bootstrapSecret: VALID_SECRET, newPassword: "longenough1" });
       expect(res.status).toBe(404);

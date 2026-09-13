@@ -88,6 +88,7 @@ const roleLabels: Record<string, string> = {
   resp_administracion: "Resp. Administración",
   jefe_recepcion: "Jefe de Recepción",
   comercial: "Comercial",
+  piloto_externo: "Piloto Externo (acceso limitado)",
 };
 
 const actionLabels: Record<string, string> = {

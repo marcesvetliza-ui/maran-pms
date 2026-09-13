@@ -5,6 +5,7 @@ import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { emailConfig, backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
+import { shouldBlockExternalComm } from "./external-comms-policy";
 
 async function logBackup(entry: {
   type: string; status: string; destination?: string;
@@ -181,6 +182,18 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 // ─── Send backup by email ─────────────────────────────────────────────────────
 export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
   const start = Date.now();
+
+  if (shouldBlockExternalComm({ integration: "email-backup", action: type })) {
+    await logBackup({
+      type,
+      status: "error",
+      destination: targetEmail,
+      durationMs: Date.now() - start,
+      errorMessage: "Bloqueado por ambiente (APP_ENV≠production)",
+    });
+    throw new Error("El envío de backups por email está bloqueado en este ambiente (piloto/desarrollo/test).");
+  }
+
   const cfgRows = await db.select().from(emailConfig).limit(1);
   const cfg = cfgRows[0];
   if (!cfg || !cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass) {

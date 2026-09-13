@@ -6,6 +6,7 @@ import { generateFakeCAE } from "./fakeArca";
 import { callARCA } from "./arcaClient";
 import { getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 
 export interface InvoiceItem {
   descripcion: string;
@@ -177,6 +178,16 @@ async function getNextInvoiceNumberFromAfip(
   cuit: string,
   wsfeUrl: string
 ): Promise<number> {
+  // Defensa en profundidad: este punto ya queda cubierto porque
+  // getTokenAuth() (llamado por el único caller, antes de esta función)
+  // lanza primero, pero se repite el chequeo acá para que una futura
+  // refactorización que reordene o reutilice esta función internamente no
+  // pueda saltarse el bloqueo por accidente.
+  assertExternalCommAllowed({
+    integration: "arca",
+    action: `fecomp-ultimo-autorizado-${wsfeUrl.includes("servicios1.afip.gov.ar") ? "produccion" : "homologacion"}`,
+  });
+
   const cbteTipo = TIPOS_CBT_WSFE[tipo] ?? 6;
   const cuitLimpio = cuit.replace(/-/g, "");
 

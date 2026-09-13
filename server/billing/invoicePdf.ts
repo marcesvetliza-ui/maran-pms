@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import type { GroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 
 const $n = (v: any) => parseFloat(String(v ?? 0)) || 0;
@@ -207,6 +208,7 @@ export async function generarFacturaPDF(
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
+    applyPilotPdfWatermark(doc);
 
     // ── Field aliases ──────────────────────────────────────────────────────
     const tipoKey    = factura.tipo_comprobante  ?? factura.tipoComprobante  ?? "";
@@ -861,6 +863,7 @@ export async function generarVoucherHabitacionPDF(
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
+    applyPilotPdfWatermark(doc);
 
     const W  = 535;
     const x0 = 30;

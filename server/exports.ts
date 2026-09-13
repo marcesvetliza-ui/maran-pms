@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { requireAuth } from "./auth";
 import { calcNeto, calcIva21 } from "./lib/pricing";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 import { formatArgentinaDate, formatArgentinaDateTime, formatArgentinaFilenameTimestamp } from "./utils/argentinaDateTime";
 
 // ─── Hotel Constants ──────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ function pad(v: any, len: number, char = " ", right = false): string {
 async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

@@ -6,6 +6,7 @@ import PDFDocument from "pdfkit";
 import { requireAuth } from "./auth";
 import { getArgentinaToday } from "./db-storage";
 import { isValidCentroCosto } from "./routes/cost-centers";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ function fDate(d: string | Date | null | undefined): string {
 async function genPDF(fn: (doc: InstanceType<typeof PDFDocument>) => void): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 40, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
