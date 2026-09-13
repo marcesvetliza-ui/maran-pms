@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 
 export interface GroupPaymentReceiptData {
   receiptNumber: number | null;
@@ -37,6 +38,7 @@ const json = (value: unknown) => {
 export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptData): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 42, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
