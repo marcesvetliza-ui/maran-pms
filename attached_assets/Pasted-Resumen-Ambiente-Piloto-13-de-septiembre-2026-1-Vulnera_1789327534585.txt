@@ -1,0 +1,50 @@
+Resumen — Ambiente Piloto (13 de septiembre 2026)
+
+1. Vulnerabilidades de seguridad en producción (main)
+
+Antes de tocar el piloto, encontré y corregí tres fallas en el sistema real:
+
+	•	GET /api/debug/assets y GET /descargar-colobig-pdf estaban públicas, sin login.
+	•	POST /api/auth/setup tenía la contraseña de admin hardcodeada (maran2026) en el código.
+	•	Se corrigió con un bootstrap seguro por variables de entorno, atomicidad ante condiciones de carrera, y logging sin exponer datos sensibles. Pasó dos rondas de revisión de seguridad externa. PR #2 mergeado a main, desplegado, y verificado.
+	•	Acción tuya ya confirmada: rotaste la contraseña real del admin.
+
+2. Creación del esquema en la base del piloto
+
+Railway/Nixpacks no lograba correr las migraciones de Drizzle contra la base nueva (problema de NODE_ENV=production que las salta). Se resolvió corriendo el SQL de las 108 tablas manualmente vía la consola de Postgres de Railway.
+
+3. Integración main → feature/pilot-environment
+
+Se mergeó main (con los fixes de seguridad) dentro de la rama del piloto, resolviendo conflictos reales entre ambas ramas.
+
+4. Corrección de permisos de piloto_externo
+
+	•	El menú lateral no mostraba ningún ítem para este rol (aunque el backend ya permitía varios módulos) — corregido.
+	•	Se amplió el acceso, a tu pedido, a: PMS-Recepción completo (Planning, Habitaciones, Reportes salvo INDEC, Tarifas), Comercial salvo Paquetes/Presupuestos (Motor de Reservas, OTAs, Grupos, Empresas, Agencias), y Servicios completo (Restaurant, Spa, Clientes Spa, Eventos, Vouchers).
+	•	En el backend (server/pilot-external-role.ts) se agregaron los permisos correspondientes, con ~45 acciones destructivas bloqueadas explícitamente una por una (borrados, cierres, anulaciones) para que nadie rompa el ambiente de demo.
+
+5. Marca de agua en PDF
+
+Estaba conectada solo en facturas. Se encontró que faltaba en 15 generadores más (folios, confirmaciones de reserva, comprobantes de spa/restaurant/eventos, presupuestos, reportes) y se agregó a los 16 puntos del sistema.
+
+6. Login de usuarios internos
+
+Ningún usuario interno del seed (ni admin) tenía contraseña utilizable — el flujo de bootstrap está deshabilitado a propósito en piloto. Se les asignó una contraseña de demo fija:
+
+	•	Usuarios: admin, gerencia, recepcion1, housekeeping1, restaurante1, spa1
+	•	Contraseña: PilotoStaff2026!
+	•	Usuario externo: piloto_externo / PilotoDemo2026!
+
+7. Verificación completa del checklist
+
+Banner de piloto, bloqueo real de emails/ARCA, 401/403 en rutas protegidas, 403 real al anular una reserva — todo confirmado funcionando.
+
+8. Identidad de la base marcada
+
+database_identity marcada como pilot (paso irreversible, hecho al final a propósito).
+
+9. Dominio
+
+https://demo.maranpms.com.ar configurado y funcionando (Railway + Cloudflare, HTTPS activo).
+
+Estado final: ambiente piloto completo, aislado de producción, con datos ficticios, listo para mostrar a proveedores u otros hoteles.
