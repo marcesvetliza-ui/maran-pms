@@ -12,6 +12,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getReservationFinancialSummary } from "@shared/reservationFolio";
 import { loadReservationOperationalSummaries } from "../reservation-operational-balances";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -96,6 +97,7 @@ function genFolioPDF(
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 0, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

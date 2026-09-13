@@ -13,6 +13,7 @@ import { assertFinancialSchemaReady } from "../migrate";
 import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
 import { allocateBalanceCappedGroupRooms } from "@shared/groupRoomAllocation";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
@@ -2714,6 +2715,7 @@ export function registerGroupsRoutes(app: Express) {
 
       // Generate PDF
       const doc = new PDFDocument({ margin: 40, size: "A4" });
+      applyPilotPdfWatermark(doc);
       const chunks: Buffer[] = [];
       doc.on("data", (chunk: Buffer) => chunks.push(chunk));
       doc.on("end", () => {
