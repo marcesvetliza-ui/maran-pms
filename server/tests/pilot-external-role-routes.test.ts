@@ -74,8 +74,6 @@ const BLOCKED_CASES: Array<[string, string]> = [
   ["POST", "/api/cash/shifts/shift-1/close"],
   ["POST", "/api/admin-cash/movimientos"],
   ["GET", "/api/guests/guest-1/account"],
-  ["GET", "/api/companies"],
-  ["GET", "/api/agencies/agency-1"],
   ["GET", "/api/account-summary"],
   ["POST", "/api/night-audit/run"],
   ["GET", "/api/admin/users"],
@@ -88,6 +86,12 @@ const ALLOWED_CASES: Array<[string, string]> = [
   ["GET", "/api/cash/summary"],
   ["GET", "/api/cash/shifts/current?area=recepcion"],
   ["GET", "/api/folios/guest/guest-1"],
+  // Ampliación a pedido del dueño del producto (ver pilot-external-role.ts) —
+  // sanity check contra el registro real de rutas, no exhaustivo (el detalle
+  // módulo por módulo vive en pilot-external-role.test.ts).
+  ["GET", "/api/companies"],
+  ["GET", "/api/agencies"],
+  ["GET", "/api/groups"],
 ];
 
 describe("Fase 6 — rol piloto_externo: middleware real de autorización", () => {

@@ -82,6 +82,58 @@ const DENY_RULES: PathRule[] = [
   exact("GET", "/api/folios/stats/by-entity-type", "estadísticas agregadas de folios"),
   exact("GET", "/api/folios/stats/summary", "estadísticas agregadas de folios"),
   exact("GET", "/api/folios/movements/by-date", "movimientos agregados de folios por fecha"),
+
+  // Ampliación de módulos (a pedido explícito del dueño del producto, no de
+  // la Fase 6 original): PMS-Recepción completo, Comercial salvo Paquetes/
+  // Presupuestos, y Servicios. Los ALLOW_RULES de abajo usan prefix("*", ...)
+  // por módulo, igual que Reservas/Huéspedes — así que cada borrado físico y
+  // cada acción de cierre/anulación real de esos módulos se bloquea acá,
+  // explícitamente, una por una (mismo criterio que ya se usaba arriba).
+  exact("DELETE", "/api/room-types/:id", "borrado físico de tipo de habitación"),
+  exact("DELETE", "/api/rate-plans/:id", "borrado físico de plan de tarifa"),
+  exact("DELETE", "/api/rooms/:id", "borrado físico de habitación"),
+  exact("DELETE", "/api/ota-channels/:id", "borrado físico de canal OTA"),
+  exact("DELETE", "/api/groups/:id", "borrado físico de grupo"),
+  exact("DELETE", "/api/group-blocks/:id", "borrado físico de bloqueo de grupo"),
+  exact("DELETE", "/api/groups/:groupId/charges/:chargeId", "borrado físico de cargo de grupo"),
+  exact("DELETE", "/api/groups/:groupId/master-payments/:paymentId", "borrado físico de pago maestro de grupo"),
+  exact("DELETE", "/api/groups/:groupId/reservations/:reservationId", "quitar reserva de grupo"),
+  exact("DELETE", "/api/companies/:id", "borrado físico de empresa"),
+  exact("DELETE", "/api/agencies/:id", "borrado físico de agencia"),
+  exact("DELETE", "/api/restaurant/areas/:id", "borrado físico de área de restaurant"),
+  exact("DELETE", "/api/restaurant/tables/:id", "borrado físico de mesa"),
+  exact("DELETE", "/api/restaurant/menu/categories/:id", "borrado físico de categoría de menú"),
+  exact("DELETE", "/api/restaurant/menu/items/:id", "borrado físico de ítem de menú"),
+  exact("POST", "/api/restaurant/orders/:id/close", "cerrar pedido de restaurant"),
+  exact("DELETE", "/api/restaurant/orders/:orderId/items/:itemId", "borrado físico de ítem de pedido"),
+  exact("DELETE", "/api/restaurant/table-reservations/:id", "borrado físico de reserva de mesa"),
+  exact("DELETE", "/api/restaurant/time-slots/:id", "borrado físico de franja horaria"),
+  exact("DELETE", "/api/restaurant/orders/:id/split", "deshacer división de cuenta"),
+  exact("POST", "/api/restaurant/orders/:id/cancel", "anular pedido de restaurant"),
+  exact("DELETE", "/api/restaurant/recipes/:id", "borrado físico de receta"),
+  exact("DELETE", "/api/restaurant/recipe-ingredients/:id", "borrado físico de ingrediente de receta"),
+  exact("DELETE", "/api/restaurant/reservation-advances/:id", "borrado físico de seña de reserva de mesa"),
+  exact("DELETE", "/api/spa/cabins/:id", "borrado físico de cabina de spa"),
+  exact("DELETE", "/api/spa/treatment-categories/:id", "borrado físico de categoría de tratamiento"),
+  exact("DELETE", "/api/spa/treatments/:id", "borrado físico de tratamiento"),
+  exact("DELETE", "/api/spa/appointments/:id", "borrado físico de turno de spa"),
+  exact("POST", "/api/spa/accounts/:id/close", "cerrar cuenta de spa"),
+  exact("PATCH", "/api/spa/payments/:id/anular", "anular pago de spa"),
+  exact("DELETE", "/api/spa/payments/:id", "borrado físico de pago de spa"),
+  exact("DELETE", "/api/spa/account-items/:id", "borrado físico de ítem de cuenta de spa"),
+  exact("DELETE", "/api/spa/clients/:id", "borrado físico de cliente de spa"),
+  exact("DELETE", "/api/spa/treatments/supplies/:supplyId", "borrado físico de insumo de tratamiento"),
+  exact("DELETE", "/api/events/rooms/:id", "borrado físico de salón de eventos"),
+  exact("DELETE", "/api/events/charge-types/:id", "borrado físico de tipo de cargo de evento"),
+  exact("DELETE", "/api/events/:id", "borrado físico de evento"),
+  exact("DELETE", "/api/events/charges/:id", "borrado físico de cargo de evento"),
+  exact("PATCH", "/api/events/:eventId/payments/:payId/anular", "anular pago de evento"),
+  exact("DELETE", "/api/events/:eventId/payments/:payId", "borrado físico de pago de evento"),
+  exact("POST", "/api/events/:eventId/close", "cerrar evento"),
+  exact("DELETE", "/api/events/:eventId/tables/:tableId", "borrado físico de mesa de evento"),
+  exact("DELETE", "/api/events/:eventId/tables/:tableId/charges/:chargeId", "borrado físico de cargo de mesa de evento"),
+  exact("POST", "/api/events/:eventId/tables/:tableId/close", "cerrar mesa de evento"),
+  exact("DELETE", "/api/gift-vouchers/:id", "borrado físico de voucher de regalo"),
 ];
 
 // Módulos permitidos (Fase 6): Reservas, Huéspedes, Check-in/out, Folios y
@@ -120,6 +172,44 @@ const ALLOW_RULES: PathRule[] = [
   // sin esta regla, piloto_externo recibía 403 acá y la pantalla rompía
   // intentando leer .movimientos de un cuerpo de error.
   exact("GET", "/api/reports/caja-unificada", "resumen consolidado de caja del día"),
+
+  // ── Ampliación a pedido explícito del dueño del producto ─────────────────
+  // PMS-Recepción completo, Comercial (salvo Paquetes y Presupuestos, que
+  // quedan fuera a propósito) y Servicios. Cada prefix("*", ...) de acá
+  // abajo tiene su contraparte de borrados/cierres/anulaciones bloqueada en
+  // DENY_RULES arriba — mismo criterio que Reservas/Huéspedes/Caja.
+
+  // PMS-Recepción: Planning, Habitaciones, Reportes, Tarifas
+  prefix(["GET", "POST", "PATCH", "PUT", "DELETE"], "/api/planning", "planning"),
+  exact("GET", "/api/maintenance/work-orders", "indicador de habitaciones en mantenimiento (solo lectura)"),
+  prefix("*", "/api/room-types", "tipos de habitación"),
+  prefix("*", "/api/rooms", "habitaciones"),
+  exact("GET", "/api/daily-report", "planilla diaria (solo lectura)"),
+  prefix("*", "/api/rate-plans", "planes de tarifa"),
+
+  // Comercial: Motor de Reservas, Canales OTAs, Grupos, Empresas, Agencias
+  // (Paquetes y Presupuestos NO se agregan — fuera de este pedido)
+  exact("GET", "/api/admin/booking-engine/available-rooms", "disponibilidad del motor de reservas (solo lectura)"),
+  exact("GET", "/api/admin/booking-engine/reservations", "reservas del motor de reservas (solo lectura)"),
+  prefix("*", "/api/ota-channels", "canales OTA"),
+  prefix(["GET", "POST"], "/api/ota-reservations", "reservas de canales OTA"),
+  prefix("*", "/api/groups", "grupos"),
+  prefix("*", "/api/companies", "empresas"),
+  prefix("*", "/api/agencies", "agencias"),
+
+  // Servicios: Restaurant, Spa, Clientes Spa, Eventos, Vouchers Regalo
+  prefix("*", "/api/restaurant", "módulo restaurant"),
+  prefix("*", "/api/spa", "módulo spa (incluye clientes)"),
+  exact("GET", "/api/reports/spa/por-profesional", "reporte de spa por profesional (solo lectura)"),
+  prefix("*", "/api/events", "módulo eventos"),
+  prefix(["GET", "POST", "PATCH"], "/api/gift-vouchers", "vouchers de regalo"),
+
+  // Referencias de solo lectura que usan las pantallas de arriba, sin ser
+  // módulos propios (bed-types, puntos de venta, insumos de inventario para
+  // tratamientos de spa) — de escritura quedan fuera de este pedido.
+  exact("GET", "/api/bed-types", "catálogo de tipos de cama (solo lectura)"),
+  exact("GET", "/api/pos-configs", "catálogo de puntos de venta (solo lectura)"),
+  exact("GET", "/api/inventory/items", "catálogo de insumos (solo lectura)"),
 ];
 
 function matches(rules: PathRule[], method: string, path: string): PathRule | null {
