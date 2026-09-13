@@ -1,0 +1,52 @@
+Encontré la causa raíz real, y no es lo que parecía. Miré el código fuente de `runMigrations()` (`server/migrate.ts`) y confirmé algo clave:
+
+## La causa real (no es drizzle-kit faltante)
+
+`server/migrate.ts` tiene esto, textual:
+
+```js
+if (process.env.NODE_ENV !== "production") {
+  // acá corre migrate() — el paso que crea companies, reservations,
+  // system_users, sales_invoices, etc. desde migrations/0000_unique_dragon_lord.sql
+} else {
+  logger.info("Producción: migrate() omitido (conexión pooled). Usando migraciones incrementales.");
+}
+```
+
+Confirmé que `migrations/0000_unique_dragon_lord.sql` (1626 líneas, 108 `CREATE TABLE`) sí contiene las tablas centrales que faltan — `companies`, `reservations`, `system_users`, `sales_invoices` están ahí. Pero **ese paso se salta automáticamente cada vez que `NODE_ENV=production`**, por diseño: en Railway la conexión a Postgres va pooled (PgBouncer), y los comandos DDL de `migrate()` no son compatibles con eso. Las "migraciones incrementales" que corren después solo agregan columnas/tablas puntuales sobre un esquema que asumen ya existe.
+
+Como el piloto está configurado (correctamente, según su propio checklist) con `NODE_ENV=production`, esa app **nunca va a poder crear su propio esquema al arrancar**. No importa cuánto ajustemos Build/Start Command — el problema no es que falte `drizzle-kit` en la imagen (aunque eso también es cierto), es que `runMigrations()` ni siquiera lo intenta ahí.
+
+**Además**, esto probablemente explica por qué los intentos 2 y 3 "se vieron verdes" pero no crearon nada: el repo tiene tanto un `Dockerfile` como un `nixpacks.toml`. Si Railway está usando el `Dockerfile` (bastante probable, Railway lo prioriza si existe), el "Custom Build Command" / "Pre-deploy Command" que configuraron en la UI de Railway puede no aplicarse en absoluto — esos campos son conceptos de Nixpacks, no del builder Docker. Vale la pena revisar en Railway → servicio `maran-pms` → Settings → Build, qué builder está activo.
+
+## Cómo seguimos — el camino correcto
+
+No conviene forzar `drizzle-kit push --force` dentro del pipeline de Railway (ni en Build, ni en Start): es fragil, quedaría corriendo en cada deploy si se olvida sacar, y no ataca el problema real.
+
+**Lo que hay que hacer es crear el esquema una sola vez, desde afuera de Railway**, con una copia local del código (que sí tiene `drizzle-kit` como dependencia de desarrollo) apuntando a la base del piloto. Yo mismo ya validé este comando exacto hoy, contra una base Postgres completamente vacía en mi propio entorno, y creó las 108 tablas y pasó todas las verificaciones:
+
+```
+npm run db:migrate:ci
+```
+
+Pasos concretos (esto lo tenés que correr vos, no yo — nunca voy a pedirte que pegues la cadena de conexión acá en el chat, siguiendo la misma disciplina que ya venimos aplicando con las variables de Railway):
+
+1. En Railway → proyecto `observant-possibility` → servicio **Postgres** (no `maran-pms`) → pestaña **Connect** → buscá la sección **Public Network** (no la interna `.railway.internal`) y copiá esa cadena de conexión pública.
+2. En tu máquina (con Node.js instalado), cloná el repo y pará en el commit del piloto:
+   ```
+   git clone https://github.com/marcesvetliza-ui/maran-pms.git
+   cd maran-pms
+   git checkout feature/pilot-environment
+   npm install
+   ```
+3. Corré, pegando la URL pública solo en tu propia terminal:
+   ```
+   DATABASE_URL="<la url pública que copiaste>" npm run db:migrate:ci
+   ```
+4. Si termina con `[ci-migrate] Esquema listo para correr la suite de PostgreSQL.` → el esquema quedó completo.
+
+**Después de eso:**
+- Sacá cualquier Pre-deploy/Custom Build/Custom Start Command temporal que hayas dejado en Railway — volvé al build/start normales.
+- Seguí con tu propio checklist desde el punto 2 en adelante (confirmar seed, `piloto_externo`, luego `mark-database-identity.ts` en dry-run).
+
+¿Tenés Node.js instalable en alguna máquina para correr esos 4 pasos, o preferís que exploremos otra vía?
