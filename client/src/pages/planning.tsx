@@ -607,6 +607,22 @@ export default function PlanningPage() {
     });
   };
 
+  // El filtro "Libres"/"Ocupadas" evalúa el estado de cada habitación en
+  // filters.referenceDate contra data.occupancy, que solo trae datos del
+  // rango de fechas actualmente cargado (dateRange). Si la fecha de
+  // referencia elegida por el usuario queda fuera de ese rango, la
+  // habitación no tiene estado para ese día y el filtro se salteaba en
+  // silencio (mostraba todas las habitaciones, sin filtrar nada). Para que
+  // el filtro siempre funcione, navegamos la grilla hasta esa fecha.
+  useEffect(() => {
+    if (!filters.referenceDate) return;
+    if (dayIndexMap[filters.referenceDate] !== undefined) return;
+    const [y, m, d] = filters.referenceDate.split("-").map(Number);
+    if (!y || !m || !d) return;
+    goToDate(new Date(y, m - 1, d));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.referenceDate, dayIndexMap]);
+
   const findReservationForRoomAndDay = (roomId: string, day: string): string | null => {
     if (!data?.reservations || !data?.cellReservations?.[roomId]) return null;
     const roomCells = data.cellReservations[roomId];
