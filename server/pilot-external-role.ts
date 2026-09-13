@@ -115,6 +115,11 @@ const ALLOW_RULES: PathRule[] = [
   exact("POST", "/api/cash/shifts/open", "abrir turno de caja"),
   exact("GET", "/api/cash/movements", "ver movimientos de caja"),
   exact("GET", "/api/cash/summary", "ver resumen de caja"),
+  // La pestaña "Resumen del Día" de la pantalla de Caja llama a este
+  // reporte consolidado (solo lectura, GET) en vez de /api/cash/summary —
+  // sin esta regla, piloto_externo recibía 403 acá y la pantalla rompía
+  // intentando leer .movimientos de un cuerpo de error.
+  exact("GET", "/api/reports/caja-unificada", "resumen consolidado de caja del día"),
 ];
 
 function matches(rules: PathRule[], method: string, path: string): PathRule | null {

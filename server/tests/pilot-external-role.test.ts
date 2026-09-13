@@ -86,6 +86,7 @@ describe("authorizePilotExternalRole — reglas exhaustivas (Fase 6)", () => {
     ["POST", "/api/cash/shifts/open"],
     ["GET", "/api/cash/movements"],
     ["GET", "/api/cash/summary"],
+    ["GET", "/api/reports/caja-unificada"],
   ];
 
   it.each(ALLOWED)("permite %s %s", (method, path) => {
