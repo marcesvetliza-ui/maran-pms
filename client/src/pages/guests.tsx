@@ -162,7 +162,7 @@ function NationalityCombobox({
             </div>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-full p-0" align="start">
+        <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
           <Command shouldFilter={false}>
             <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
             <CommandList>
@@ -515,7 +515,7 @@ export function GuestFormDialog({
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-full p-0" align="start">
+                  <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
                     <Command>
                       <CommandInput placeholder="Buscar empresa..." />
                       <CommandList>
@@ -744,7 +744,7 @@ export function GuestFormDialog({
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-full p-0" align="start">
+                  <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
                     <Command>
                       <CommandInput placeholder="Buscar empresa..." />
                       <CommandList>
