@@ -3667,14 +3667,21 @@ async function handleConfirmationPdf(req: any, res: any) {
         .text(termLine, margin + 14, ty, { width: termTextWidth });
       ty += doc.heightOfString(termLine, { width: termTextWidth }) + 6;
     });
-    y = ty + 14;
+    // Deja un renglón de aire entre el borde inferior del recuadro de
+    // Términos y el saludo — sin esto ambos quedan pegados (ver reporte de
+    // usuario: el texto "choca" contra el recuadro de arriba).
+    y = ty + 14 + 14;
 
     // ── GREETING ─────────────────────────────────────────────────────────
     if (y < pageH - 88) {
+      const greetingText = `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`;
       doc.fillColor("#666666").fontSize(9).font("Helvetica")
+        .text(greetingText, margin, y, { width: contentW, align: "center" });
+      const greetingH = doc.heightOfString(greetingText, { width: contentW });
+      doc.fillColor("#8a8a8a").fontSize(7.5).font("Helvetica-Oblique")
         .text(
-          `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`,
-          margin, y, { width: contentW, align: "center" }
+          "Recomendamos no imprimir esta información por políticas de sustentabilidad.",
+          margin, y + greetingH + 6, { width: contentW, align: "center" }
         );
     }
     const _confTs = formatArgentinaDate(new Date());
