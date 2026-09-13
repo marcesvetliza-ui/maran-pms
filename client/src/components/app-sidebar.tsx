@@ -80,13 +80,18 @@ import type { SystemNotification } from "@shared/schema";
 // Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
 //   events, reception, resp_deposito, resp_administracion, jefe_recepcion, comercial
 
-const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
+const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial","piloto_externo"];
 const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const CORE_RECEPCION    = ["admin","reception","jefe_recepcion","comercial"];
-const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","jefe_recepcion","comercial"];
+// Fase 6 del ambiente piloto: authorizePilotExternalRole (server/pilot-external-role.ts)
+// ya permite a piloto_externo pegarle a /api/reservations, /api/check-in y
+// /api/check-out — se agrega el rol acá para que el menú refleje ese acceso
+// (antes no aparecía ningún ítem del menú para este rol, aunque el backend
+// ya lo permitía).
+const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","jefe_recepcion","comercial","piloto_externo"];
 const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
 const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","jefe_recepcion","comercial"];
-const HUESPEDES_ROLES   = ["admin","events","reception","jefe_recepcion","comercial"];
+const HUESPEDES_ROLES   = ["admin","events","reception","jefe_recepcion","comercial","piloto_externo"];
 const PAQUETES_ROLES    = ["admin","spa","reception","jefe_recepcion","comercial"];
 const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
@@ -101,7 +106,7 @@ const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping
 const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","jefe_recepcion","comercial"];
 const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
 const CC_ROLES          = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
-const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
+const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial","piloto_externo"];
 const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,8 +120,12 @@ const menuSections = [
     items: [
       { label: "Dashboard",      icon: LayoutDashboard, href: "/",                roles: DASHBOARD_ROLES },
       { label: "Planning",       icon: CalendarDays,    href: "/planning",        roles: PLANNING_ROLES },
-      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: CORE_RECEPCION },
-      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: CORE_RECEPCION },
+      // Reservas y Reserva rápida: piloto_externo se agrega inline, sin tocar
+      // CORE_RECEPCION — esa constante también la usan Motor de Reservas,
+      // Canales OTAs, Grupos, Empresas, Agencias y MARA Chatbot, que quedan
+      // fuera de ALLOW_RULES (server/pilot-external-role.ts) a propósito.
+      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: [...CORE_RECEPCION, "piloto_externo"] },
+      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: [...CORE_RECEPCION, "piloto_externo"] },
       { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
       { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
       { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
