@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft, Loader2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -409,7 +409,7 @@ export default function PlanningPage() {
     });
   };
 
-  const { data, isLoading } = useQuery<PlanningData>({
+  const { data, isLoading, isFetching } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
     queryFn: async () => {
       const res = await fetch(`/api/planning?start=${dateRange.start}&end=${dateRange.end}`);
@@ -417,6 +417,12 @@ export default function PlanningPage() {
       return res.json();
     },
     refetchInterval: 30000,
+    // Cada navegación de fecha cambia el queryKey, así que sin esto React
+    // Query trata cada rango como una consulta nueva: la grilla entera
+    // desaparece y muestra el esqueleto de carga mientras espera la
+    // respuesta, en vez de seguir mostrando los datos anteriores hasta que
+    // lleguen los nuevos. Eso es lo que se sentía como demora al navegar.
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -896,6 +902,9 @@ export default function PlanningPage() {
                   return `${filteredRooms.length} habitaciones${filteredRooms.length !== totalReal ? ` (de ${totalReal})` : ""}`;
                 })() : "Cargando..."}
               </span>
+              {isFetching && !isLoading && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" data-testid="planning-fetching-indicator" />
+              )}
             </div>
             {/* Navegación de fechas — pegada a la grilla para acceso rápido */}
             <div className="flex items-center gap-1">
