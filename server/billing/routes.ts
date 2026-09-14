@@ -5,7 +5,7 @@ import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
-import { calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -351,6 +351,7 @@ async function resumeReservationCreditNote(
       },
       items,
       facturaOriginalId: Number(invoiceValue(original, "id", "id")),
+      comprobanteAsociado: buildComprobanteAsociado(original),
       operador: user?.fullName || user?.username,
       puntoVentaOverride: Number(invoiceValue(nc, "punto_venta", "puntoVenta")),
       reservaId: String(invoiceValue(original, "reserva_id", "reservaId")),
@@ -2565,6 +2566,7 @@ export function registerBillingRoutes(app: Express) {
         },
         items: persistedNcItems,
         facturaOriginalId: original.id,
+        comprobanteAsociado: buildComprobanteAsociado(original),
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
         reservaId: original.reserva_id || undefined,
@@ -2981,6 +2983,7 @@ export function registerBillingRoutes(app: Express) {
                 items: parseJson(pendingDebit.items),
                 reservaId: pendingDebit.reserva_id,
                 facturaOriginalId: nc.id,
+                comprobanteAsociado: buildComprobanteAsociado(nc),
                 operador: pendingDebit.operador,
                 puntoVentaOverride: pendingDebit.punto_venta,
                 cashFormaPago: pendingDebit.cash_forma_pago,
@@ -3065,6 +3068,7 @@ export function registerBillingRoutes(app: Express) {
             items: ndItems,
             reservaId: sourceInvoice.reserva_id,
             facturaOriginalId: nc.id,
+            comprobanteAsociado: buildComprobanteAsociado(nc),
             operador: user?.fullName || user?.username,
             puntoVentaOverride: sourceInvoice.punto_venta,
             cashFormaPago: sourceInvoice.cash_forma_pago,
@@ -3155,6 +3159,7 @@ export function registerBillingRoutes(app: Express) {
         groupId: groupId || undefined,
         folioId: original.folio_id || undefined,
         facturaOriginalId: original.id,
+        comprobanteAsociado: buildComprobanteAsociado(original),
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
         sourceChargeIds: groupDebitSourceId ? [groupDebitSourceId] : undefined,

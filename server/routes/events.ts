@@ -5,7 +5,7 @@ import { eventPayments, salesInvoices } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
-import { emitirFactura } from "../billing/invoiceService";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { assertFinancialSchemaReady } from "../migrate";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
@@ -882,6 +882,7 @@ export function registerEventsRoutes(app: Express) {
         },
         items: ncItems,
         facturaOriginalId: originalInvoice.id,
+        comprobanteAsociado: buildComprobanteAsociado(originalInvoice),
         operador: (req as any).user?.fullName || (req as any).user?.username,
       });
 
@@ -991,6 +992,7 @@ export function registerEventsRoutes(app: Express) {
         },
         items: ncItems,
         facturaOriginalId: originalInvoice.id,
+        comprobanteAsociado: buildComprobanteAsociado(originalInvoice),
         operador: (req as any).user?.fullName || (req as any).user?.username,
       });
 

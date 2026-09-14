@@ -45,6 +45,20 @@ export interface NewInvoiceData {
   restaurantOrderId?: string;
   folioId?: number;
   facturaOriginalId?: number; // para NC
+  /**
+   * The original document this NC/ND corrects, exactly as ARCA needs to
+   * identify it (RG 4540/19's CbtesAsoc — mandatory for every NC/ND since
+   * 2021-04-01, or ARCA rejects the request with error 10197). Required
+   * whenever facturaOriginalId is set and this is a real ARCA call
+   * (ficticio mode never talks to ARCA, so it doesn't need this).
+   */
+  comprobanteAsociado?: {
+    tipo: string;
+    puntoVenta: number;
+    numero: number;
+    /** AAAAMMDD, no dashes. */
+    fecha: string;
+  };
   operador?: string;
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
@@ -73,6 +87,25 @@ export const TIPOS_CBT_WSFE: Record<string, number> = {
   NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
   NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
 };
+
+function invoiceRowValue(doc: any, snakeCase: string, camelCase: string) {
+  return doc?.[snakeCase] ?? doc?.[camelCase];
+}
+
+/**
+ * Builds the `comprobanteAsociado` every NC/ND must pass to emitirFactura —
+ * ARCA's CbtesAsoc (RG 4540/19, mandatory since 2021-04-01: without it ARCA
+ * rejects the request with error 10197). `doc` is the sales_invoices row
+ * (snake_case from a raw query, or camelCase) this NC/ND corrects.
+ */
+export function buildComprobanteAsociado(doc: any): NewInvoiceData["comprobanteAsociado"] {
+  return {
+    tipo: String(invoiceRowValue(doc, "tipo_comprobante", "tipoComprobante")),
+    puntoVenta: Number(invoiceRowValue(doc, "punto_venta", "puntoVenta")),
+    numero: Number(invoiceRowValue(doc, "numero", "numero")),
+    fecha: String(invoiceRowValue(doc, "fecha_emision", "fechaEmision") || "").replace(/-/g, ""),
+  };
+}
 
 const UNSUPPORTED_SALE_TYPES = new Set(["FC", "FT", "NCC", "NCT", "NDC", "NDT"]);
 
@@ -377,6 +410,22 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
 
     try {
       const { feCAESolicitar, feCompConsultar } = await import("./wsfevClient");
+      // Since RG 4540/19 (2021-04-01), ARCA rejects every NC/ND with error
+      // 10197 ("Si el comprobante es Débito o Crédito, enviar estructura
+      // CbteAsoc o PeriodoAsoc") unless it can identify the original document
+      // it corrects. The caller already has that row loaded (it had to, to
+      // build facturaOriginalId in the first place), so it passes the fields
+      // directly rather than this doing a second lookup.
+      const cbteAsoc = data.comprobanteAsociado
+        ? [{
+            tipo: data.comprobanteAsociado.tipo,
+            puntoVenta: data.comprobanteAsociado.puntoVenta,
+            numero: data.comprobanteAsociado.numero,
+            cuit: cuitAuth,
+            fecha: data.comprobanteAsociado.fecha,
+          }]
+        : undefined;
+
       // A pending draft may have been authorized just before a network/process
       // failure. Query ARCA by its already persisted number first; only an
       // explicit "not found" allows a new authorization request.
@@ -399,6 +448,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
             clienteDni: data.cliente.dni,
             clienteCondicionIva: data.cliente.condicionIva,
             fecha,
+            cbteAsoc,
           },
           ambiente as "homologacion" | "produccion"
         );

@@ -35,6 +35,12 @@ vi.mock("@shared/schema", () => ({
 }));
 
 vi.mock("../billing/invoiceService", () => ({
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
   emitirFactura: vi.fn(async (data: any) => {
     state.emittedCalls.push(data);
     if (state.emitirError) throw new Error(state.emitirError);
