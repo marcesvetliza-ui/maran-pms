@@ -33,6 +33,41 @@ function escapeSqlLiteral(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+/**
+ * PostgreSQL's native DROP ... IF EXISTS always emits a NOTICE when the
+ * object is absent — unlike CREATE ... IF NOT EXISTS, this has no "quiet"
+ * native form. A retired legacy object (e.g. a constraint replaced by a
+ * partial index) stays absent on every future startup, so the native form
+ * would log a misleading "does not exist, skipping" notice on every run
+ * forever, not just once.
+ */
+export function dropConstraintWithoutRerunNotice(tableName: string, constraintName: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = '${escapeSqlLiteral(constraintName)}'
+          AND conrelid = '${escapeSqlLiteral(tableName)}'::regclass
+      ) THEN
+        EXECUTE 'ALTER TABLE ${escapeSqlLiteral(tableName)} DROP CONSTRAINT ${escapeSqlLiteral(constraintName)}';
+      END IF;
+    END $$
+  `);
+}
+
+export function dropIndexWithoutRerunNotice(indexName: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF to_regclass('${escapeSqlLiteral(indexName)}') IS NOT NULL THEN
+        EXECUTE 'DROP INDEX ${escapeSqlLiteral(indexName)}';
+      END IF;
+    END $$
+  `);
+}
+
 export function createTableWithoutRerunNotice(tableName: string, createTableSql: string): string {
   return serializeIncrementalDdl(`
     DO $$
@@ -2270,11 +2305,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN group_payment_id varchar,
         ADD COLUMN group_payment_intent jsonb;
     `)));
+    // The constraint/index below are retired, superseded by the partial
+    // index that follows (salesInvoicesGroupPaymentId). Both stay absent on
+    // every startup from here on, so the native DROP ... IF EXISTS form
+    // would log a "does not exist, skipping" notice on every single run —
+    // not just once — on any database that already completed this migration.
     return db.execute(sql`
       ${sql.raw(incrementalIndexSql("salesInvoicesGroupId"))};
-      ALTER TABLE sales_invoices
-        DROP CONSTRAINT IF EXISTS sales_invoices_group_payment_id_unique;
-      DROP INDEX IF EXISTS sales_invoices_group_payment_id_unique;
+      ${sql.raw(dropConstraintWithoutRerunNotice("sales_invoices", "sales_invoices_group_payment_id_unique"))};
+      ${sql.raw(dropIndexWithoutRerunNotice("sales_invoices_group_payment_id_unique"))};
       ${sql.raw(incrementalIndexSql("salesInvoicesGroupPaymentId"))};
     `);
   });

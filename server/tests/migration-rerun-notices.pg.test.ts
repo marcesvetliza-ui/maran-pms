@@ -10,6 +10,8 @@ import {
   SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL,
   incrementalDdlWithoutRerunNotice,
   createIndexWithoutRerunNotice,
+  dropConstraintWithoutRerunNotice,
+  dropIndexWithoutRerunNotice,
   serializeIncrementalDdl,
 } from "../migrate";
 
@@ -44,10 +46,14 @@ async function expectSilentSecondRun(client: pg.Client, migrationSql: string) {
     client.off("notice", captureNotice);
   }
 
+  // Covers both directions of a healthy rerun: creating something that's
+  // already there ("already exists"/"duplicate") and dropping something
+  // that's already gone ("does not exist ... skipping", from the native
+  // DROP ... IF EXISTS form, which has no silent native equivalent).
   const misleadingNotices = secondRunNotices.filter(
     (notice) =>
       ["NOTICE", "WARNING"].includes(notice.severity) &&
-      /already exists|ya existe|duplicate/i.test(notice.message),
+      /already exists|ya existe|duplicate|does not exist|no existe|skipping/i.test(notice.message),
   );
 
   expect(misleadingNotices).toEqual([]);
@@ -220,6 +226,58 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
       await expect(client.query(
         "INSERT INTO cash_movements VALUES ('r3', 'reservation', 'reservation-payment')",
       )).rejects.toMatchObject({ code: "23505" });
+    });
+  });
+
+  it("drops a constraint that still exists, then silences the retired-object notice on every later run", async () => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, "drop_constraint", async () => {
+      await client.query(`
+        CREATE TABLE migration_retired_constraint (
+          id varchar PRIMARY KEY,
+          group_payment_id varchar
+        );
+        ALTER TABLE migration_retired_constraint
+          ADD CONSTRAINT migration_retired_constraint_unique UNIQUE (group_payment_id);
+      `);
+      const dropSql = dropConstraintWithoutRerunNotice(
+        "migration_retired_constraint",
+        "migration_retired_constraint_unique",
+      );
+
+      // First run: the constraint is really there — it must actually drop.
+      await client.query(dropSql);
+      const { rows } = await client.query(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'migration_retired_constraint_unique'",
+      );
+      expect(rows).toEqual([]);
+
+      // From here on the constraint is permanently absent — exactly the
+      // state of every database after this migration has run once. A
+      // healthy startup must stay silent on every later run, not just the
+      // second one.
+      await expectSilentSecondRun(client, dropSql);
+      await expectSilentSecondRun(client, dropSql);
+    });
+  });
+
+  it("drops an index that still exists, then silences the retired-object notice on every later run", async () => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, "drop_index", async () => {
+      await client.query(`
+        CREATE TABLE migration_retired_index (id varchar PRIMARY KEY, group_payment_id varchar);
+        CREATE INDEX migration_retired_index_idx ON migration_retired_index (group_payment_id);
+      `);
+      const dropSql = dropIndexWithoutRerunNotice("migration_retired_index_idx");
+
+      await client.query(dropSql);
+      const { rows } = await client.query(
+        "SELECT to_regclass('migration_retired_index_idx') AS name",
+      );
+      expect(rows[0].name).toBeNull();
+
+      await expectSilentSecondRun(client, dropSql);
+      await expectSilentSecondRun(client, dropSql);
     });
   });
 
