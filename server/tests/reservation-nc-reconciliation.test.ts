@@ -186,7 +186,10 @@ describe("reservation credit-note reconciliation recovery", () => {
     });
 
     expect(state.emittedCalls).toHaveLength(0);
-    expect(state.transactionExecutions).toBe(3);
+    // +1 vs. the invoice-update/charge-insert/reconciliation-status writes:
+    // reconcileReservationCreditNote also checks for a cuenta-corriente cargo
+    // to credit back, even though none exists in this fixture.
+    expect(state.transactionExecutions).toBe(4);
   });
 
   it("reuses the persisted NC id and number when authorization itself must be retried", async () => {
@@ -211,7 +214,7 @@ describe("reservation credit-note reconciliation recovery", () => {
       recoverableCreditNote: true,
       puntoVentaOverride: 1,
     });
-    expect(state.transactionExecutions).toBe(3);
+    expect(state.transactionExecutions).toBe(4);
   });
 
   it("lets finance staff resolve the same pending NC from the reconciliation queue", async () => {
@@ -236,7 +239,7 @@ describe("reservation credit-note reconciliation recovery", () => {
     });
 
     expect(state.emittedCalls).toHaveLength(0);
-    expect(state.transactionExecutions).toBe(3);
+    expect(state.transactionExecutions).toBe(4);
   });
 
   it("returns the persisted reconciliation error in the pending queue", async () => {
