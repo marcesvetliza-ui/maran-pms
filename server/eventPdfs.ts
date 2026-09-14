@@ -27,6 +27,23 @@ function pdfBrandedHeader(doc: InstanceType<typeof PDFDocument>, pageW: number, 
   return headerH + 5;
 }
 
+// Cabecera liviana para documentos de uso interno impresos con frecuencia
+// (Hoja de Función): sin franjas de color a pantalla completa, solo el
+// isologo sobre fondo blanco, para no gastar tinta en cada impresión.
+function pdfLightHeader(doc: InstanceType<typeof PDFDocument>, pageW: number, margin: number) {
+  const logoPath = assetPath("hotel-logo.png");
+  const logoH = 42;
+  const logoTop = 16;
+  if (fs.existsSync(logoPath)) {
+    doc.image(logoPath, margin, logoTop, { height: logoH });
+  } else {
+    doc.fillColor(NAVY).fontSize(15).font("Helvetica-Bold").text(HOTEL_NAME, margin, logoTop + 12);
+  }
+  const headerH = logoTop + logoH + 10;
+  doc.moveTo(0, headerH).lineTo(pageW, headerH).strokeColor(ORANGE).lineWidth(2).stroke();
+  return headerH + 2;
+}
+
 function pdfBrandedFooter(doc: InstanceType<typeof PDFDocument>, pageW: number, pageH: number, margin: number, contentW: number) {
   const footerY = pageH - 60;
   // Orange top stripe
@@ -555,11 +572,10 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
 
     // ── Helper: compact header for continuation pages ─────────────────────
     const drawContinuationHeader = () => {
-      doc.rect(0, 0, pageW, 28).fill(NAVY);
-      doc.rect(0, 28, pageW, 3).fill(ORANGE);
-      doc.fillColor("#ffffff").fontSize(8).font("Helvetica-Bold")
-        .text(`HOJA DE FUNCIÓN — ${event.name} (${event.eventCode}) — continuación`, margin, 9, { width: contentW });
-      return 31 + 8; // returns y after header
+      doc.fillColor("#555555").fontSize(8).font("Helvetica-Bold")
+        .text(`HOJA DE FUNCIÓN — ${event.name} (${event.eventCode}) — continuación`, margin, 12, { width: contentW });
+      doc.moveTo(0, 26).lineTo(pageW, 26).strokeColor(ORANGE).lineWidth(1).stroke();
+      return 26 + 8; // returns y after header
     };
 
     // ── Helper: check overflow and add page if needed ─────────────────────
@@ -572,7 +588,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
     };
 
     // ── PAGE 1 HEADER ────────────────────────────────────────────────────
-    const stripeEnd = pdfBrandedHeader(doc, pageW, "HOJA DE FUNCIÓN");
+    const stripeEnd = pdfLightHeader(doc, pageW, margin);
     const titleY = stripeEnd + 10;
     doc.fillColor("#888888").fontSize(6.5).font("Helvetica")
       .text("HOJA DE FUNCIÓN — USO INTERNO", margin, titleY, { characterSpacing: 2 });

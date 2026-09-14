@@ -378,9 +378,8 @@ export default function CompaniesPage() {
               <TableRow>
                 <TableHead>Razón Social</TableHead>
                 <TableHead>Nombre Fantasía</TableHead>
-                <TableHead>CUIT</TableHead>
-                <TableHead>Cond. IVA</TableHead>
                 <TableHead>Contacto</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead>Teléfono</TableHead>
                 <TableHead className="w-[140px]">Acciones</TableHead>
               </TableRow>
@@ -388,7 +387,7 @@ export default function CompaniesPage() {
             <TableBody>
               {filteredCompanies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-16">
+                  <TableCell colSpan={6} className="py-16">
                     <div className="flex flex-col items-center gap-3 text-center">
                       <Building2 className="h-10 w-10 text-muted-foreground/40" />
                       <div>
@@ -417,16 +416,8 @@ export default function CompaniesPage() {
                       </div>
                     </TableCell>
                     <TableCell>{company.nombreFantasia || "-"}</TableCell>
-                    <TableCell>{company.cuilCuit || "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {company.condicionIva === "responsable_inscripto" ? "Resp. Inscripto" :
-                         company.condicionIva === "monotributo" ? "Monotributo" :
-                         company.condicionIva === "exento" ? "Exento" :
-                         company.condicionIva || "-"}
-                      </Badge>
-                    </TableCell>
                     <TableCell>{company.contactName || "-"}</TableCell>
+                    <TableCell>{company.contactEmail || "-"}</TableCell>
                     <TableCell>{company.telefono || "-"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
