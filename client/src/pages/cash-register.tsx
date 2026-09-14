@@ -60,10 +60,12 @@ import {
   ChevronDown,
   ChevronUp,
   FileWarning,
+  Copy,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { parseNightAuditDetail } from "@shared/nightAudit";
+import type { DuplicateCashPaymentLinkGroup } from "@shared/schema";
 
 type CashConfig = {
   area: string;
@@ -2699,6 +2701,176 @@ function MissingReservationPaymentsTab() {
   );
 }
 
+function DuplicatePaymentLinksTab() {
+  const { toast } = useToast();
+  const [resolveTarget, setResolveTarget] = useState<{ movementId: string; label: string } | null>(null);
+  const [motivo, setMotivo] = useState("");
+
+  const { data: groups = [], isLoading } = useQuery<DuplicateCashPaymentLinkGroup[]>({
+    queryKey: ["/api/admin/cash/duplicate-payment-links"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/cash/duplicate-payment-links", { credentials: "include" });
+      if (!res.ok) throw new Error("Error al cargar vínculos duplicados de Caja");
+      return res.json();
+    },
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: async ({ movementId, motivo }: { movementId: string; motivo: string }) =>
+      apiRequest("PATCH", `/api/admin/cash/movements/${movementId}/resolve-duplicate-link`, { motivo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cash/duplicate-payment-links"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+      setResolveTarget(null);
+      setMotivo("");
+      toast({ title: "Movimiento desvinculado", description: "Quedó anulado y trazable; el pago de la reserva no se modificó." });
+    },
+    onError: (error: any) => toast({ title: "No se pudo desvincular", description: error.message, variant: "destructive" }),
+  });
+
+  const formatGroupDate = (value: string | null) => {
+    if (!value) return "—";
+    const [year, month, day] = value.slice(0, 10).split("-");
+    return year && month && day ? `${day}/${month}/${year}` : value;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Copy className="h-5 w-5 text-amber-500" />
+          Vínculos duplicados de Caja
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Casos donde más de un movimiento de Caja quedó apuntando al mismo pago de una reserva (por lo general, una
+          carga doble por error). Elegí cuál de los movimientos desvincular: se anula ese movimiento puntual, con
+          motivo y trazabilidad, sin tocar el pago real ni el folio de la reserva. Mientras existan estos casos, el
+          sistema no puede crear la restricción que previene que vuelvan a ocurrir.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? <Skeleton className="h-32 w-full" /> : groups.length === 0 ? (
+          <div className="py-8 text-center text-sm text-muted-foreground" data-testid="text-no-duplicate-links">
+            No hay vínculos duplicados pendientes de revisión.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((group) => {
+              const activeMovements = group.movements.filter((m) => !m.anulado);
+              const canResolve = activeMovements.length > 1;
+              return (
+                <div key={group.paymentId} className="rounded-lg border p-3" data-testid={`duplicate-group-${group.paymentId}`}>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-sm">
+                    <span className="font-medium">{group.reservationCode || "Reserva sin código"}</span>
+                    {group.guestName && <span className="text-muted-foreground">{group.guestName}</span>}
+                    {group.paymentAmount && (
+                      <span className="text-muted-foreground">
+                        Pago original: {formatCurrency(Number(group.paymentAmount))} · {formatGroupDate(group.paymentDate)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Operador</TableHead>
+                          <TableHead>Área</TableHead>
+                          <TableHead>Método</TableHead>
+                          <TableHead className="text-right">Importe</TableHead>
+                          <TableHead>Estado</TableHead>
+                          <TableHead className="text-right">Acción</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {group.movements.map((m) => (
+                          <TableRow key={m.movementId} data-testid={`duplicate-movement-${m.movementId}`}>
+                            <TableCell className="whitespace-nowrap">{m.createdAt ? formatDateTime(String(m.createdAt)) : "—"}</TableCell>
+                            <TableCell>{m.registeredBy || "—"}</TableCell>
+                            <TableCell>{m.area}</TableCell>
+                            <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
+                            <TableCell className="text-right font-medium">{formatCurrency(Number(m.amount))}</TableCell>
+                            <TableCell>
+                              {m.anulado ? (
+                                <Badge variant="outline" className="text-muted-foreground">
+                                  Anulado{m.motivoAnulacion ? ` — ${m.motivoAnulacion}` : ""}
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary">Activo</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {!m.anulado && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!canResolve}
+                                  title={canResolve ? undefined : "Ya no hay otro movimiento activo con este pago"}
+                                  onClick={() => { setResolveTarget({ movementId: m.movementId, label: `${group.reservationCode || "Reserva"} · ${formatCurrency(Number(m.amount))}` }); setMotivo(""); }}
+                                  data-testid={`button-resolve-duplicate-${m.movementId}`}
+                                >
+                                  <Ban className="mr-1 h-3.5 w-3.5" />
+                                  Desvincular
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+
+      <Dialog open={resolveTarget !== null} onOpenChange={(open) => { if (!open) { setResolveTarget(null); setMotivo(""); } }}>
+        <DialogContent className="w-[95vw] max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Desvincular movimiento duplicado
+            </DialogTitle>
+            <DialogDescription>
+              {resolveTarget?.label} quedará anulado y trazable en el historial. El pago real de la reserva y su
+              folio no se modifican — solo se corrige que había quedado anotado dos veces en Caja.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="motivo-resolve-duplicate">Motivo (obligatorio)</Label>
+            <Textarea
+              id="motivo-resolve-duplicate"
+              placeholder="Ej: Carga doble por error de recepción, se conserva el otro movimiento"
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              rows={3}
+              data-testid="input-motivo-resolve-duplicate"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setResolveTarget(null); setMotivo(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!motivo.trim() || resolveMutation.isPending}
+              onClick={() => {
+                if (!resolveTarget) return;
+                resolveMutation.mutate({ movementId: resolveTarget.movementId, motivo: motivo.trim() });
+              }}
+              data-testid="button-confirm-resolve-duplicate"
+            >
+              {resolveMutation.isPending ? "Desvinculando..." : "Desvincular"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
 export default function CashRegister() {
   const { user } = useAuth();
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
@@ -2869,6 +3041,12 @@ export default function CashRegister() {
                 Recuperar cobros
               </TabsTrigger>
             )}
+            {canRepairReservationPayments && (
+              <TabsTrigger value="duplicate-links" data-testid="tab-duplicate-links">
+                <Copy className="h-4 w-4 mr-1" />
+                Vínculos duplicados
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {visibleConfigs.length === 0 && !isAdminOrManager && (
@@ -2902,6 +3080,11 @@ export default function CashRegister() {
           {canRepairReservationPayments && (
             <TabsContent value="payment-recovery">
               <MissingReservationPaymentsTab />
+            </TabsContent>
+          )}
+          {canRepairReservationPayments && (
+            <TabsContent value="duplicate-links">
+              <DuplicatePaymentLinksTab />
             </TabsContent>
           )}
         </Tabs>

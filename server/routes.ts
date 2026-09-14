@@ -2220,6 +2220,33 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/cash/duplicate-payment-links", requireRole(["admin", "manager"]), async (_req, res) => {
+    try {
+      res.json(await storage.getDuplicateCashPaymentLinks());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error al auditar vínculos duplicados de Caja" });
+    }
+  });
+
+  // Desvincula puntualmente un movimiento de caja duplicado (ver
+  // resolveDuplicateCashPaymentLink en db-storage.ts) — a propósito no
+  // reutiliza PATCH /api/cash/movements/:id/anular: esa ruta reversa el pago
+  // real de la reserva, y acá el pago es válido; lo único a corregir es que
+  // quedó anotado dos veces en la caja.
+  app.patch("/api/admin/cash/movements/:id/resolve-duplicate-link", requireRole(["admin", "manager"]), async (req, res) => {
+    try {
+      const { motivo } = req.body;
+      if (!motivo?.trim()) return res.status(400).json({ error: "Motivo requerido" });
+      const user = req.user as any;
+      const operator = user?.username || "sistema";
+      const updated = await storage.resolveDuplicateCashPaymentLink(req.params.id, motivo.trim(), operator);
+      res.json(updated);
+    } catch (error: any) {
+      const notFound = error.message === "Movimiento no encontrado";
+      res.status(notFound ? 404 : 400).json({ error: error.message || "Error al desvincular el movimiento duplicado" });
+    }
+  });
+
   // Historical reservation payments that were committed before their cash
   // movement. This is deliberately restricted to a financial supervisor:
   // repairing a closed shift changes its historical report.

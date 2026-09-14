@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft, Loader2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -409,7 +409,7 @@ export default function PlanningPage() {
     });
   };
 
-  const { data, isLoading } = useQuery<PlanningData>({
+  const { data, isLoading, isFetching } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
     queryFn: async () => {
       const res = await fetch(`/api/planning?start=${dateRange.start}&end=${dateRange.end}`);
@@ -417,6 +417,12 @@ export default function PlanningPage() {
       return res.json();
     },
     refetchInterval: 30000,
+    // Cada navegación de fecha cambia el queryKey, así que sin esto React
+    // Query trata cada rango como una consulta nueva: la grilla entera
+    // desaparece y muestra el esqueleto de carga mientras espera la
+    // respuesta, en vez de seguir mostrando los datos anteriores hasta que
+    // lleguen los nuevos. Eso es lo que se sentía como demora al navegar.
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -613,14 +619,23 @@ export default function PlanningPage() {
   // referencia elegida por el usuario queda fuera de ese rango, la
   // habitación no tiene estado para ese día y el filtro se salteaba en
   // silencio (mostraba todas las habitaciones, sin filtrar nada). Para que
-  // el filtro siempre funcione, navegamos la grilla hasta esa fecha.
+  // el filtro siempre funcione, navegamos la grilla hasta esa fecha —
+  // pero SOLO cuando el usuario efectivamente cambia esa fecha de
+  // referencia, nunca simplemente porque dayIndexMap cambió (eso pasa en
+  // cada navegación manual del calendario, y por defecto referenceDate
+  // sigue siendo "hoy" aunque el usuario nunca haya tocado el filtro). Sin
+  // este resguardo, navegar el calendario lejos de "hoy" quedaba imposible:
+  // el efecto lo revertía en cada render, haciendo que "siguiente semana"
+  // no hiciera nada.
+  const lastAutoNavigatedReferenceDate = useRef(filters.referenceDate);
   useEffect(() => {
+    if (filters.referenceDate === lastAutoNavigatedReferenceDate.current) return;
+    lastAutoNavigatedReferenceDate.current = filters.referenceDate;
     if (!filters.referenceDate) return;
     if (dayIndexMap[filters.referenceDate] !== undefined) return;
     const [y, m, d] = filters.referenceDate.split("-").map(Number);
     if (!y || !m || !d) return;
     goToDate(new Date(y, m - 1, d));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.referenceDate, dayIndexMap]);
 
   const findReservationForRoomAndDay = (roomId: string, day: string): string | null => {
@@ -887,6 +902,9 @@ export default function PlanningPage() {
                   return `${filteredRooms.length} habitaciones${filteredRooms.length !== totalReal ? ` (de ${totalReal})` : ""}`;
                 })() : "Cargando..."}
               </span>
+              {isFetching && !isLoading && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" data-testid="planning-fetching-indicator" />
+              )}
             </div>
             {/* Navegación de fechas — pegada a la grilla para acceso rápido */}
             <div className="flex items-center gap-1">
@@ -1004,7 +1022,7 @@ export default function PlanningPage() {
                               <div
                                 onClick={() => { setEditingNoteDate(day); setEditingNoteValue(note); }}
                                 title={note || "Clic para agregar nota"}
-                                className="text-[10px] text-center text-amber-700 dark:text-amber-400 truncate cursor-pointer px-1 py-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[18px]"
+                                className="text-[10px] text-center text-amber-700 dark:text-amber-400 truncate cursor-pointer px-1 py-0.5 rounded border border-dashed border-amber-300/60 dark:border-amber-700/50 hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[18px]"
                                 data-testid={`cell-day-note-${day}`}
                               >
                                 {note || <span className="text-amber-300 dark:text-amber-700">·</span>}

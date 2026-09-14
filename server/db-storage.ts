@@ -121,6 +121,7 @@ import {
   type CashRegisterConfig, type InsertCashRegisterConfig,
   type CashShift, type InsertCashShift,
   type CashMovement, type InsertCashMovement, type OrphanedCashPaymentLink,
+  type DuplicateCashPaymentLinkGroup, type DuplicateCashPaymentLinkMovement,
   type CashClosingSummary, type InsertCashClosingSummary,
   type AccountMovement, type InsertAccountMovement, type AccountEntityType,
   type OrderStatus,
@@ -7417,6 +7418,119 @@ export class DatabaseStorage implements IStorage {
       ORDER BY cm.created_at ASC NULLS FIRST, cm.id ASC
     `);
     return result.rows as OrphanedCashPaymentLink[];
+  }
+
+  // Mismo criterio de duplicado que CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL
+  // (server/migrate.ts): más de un cash_movements con source_type='reservation'
+  // apuntando al mismo payment_id. La migración se limita a saltear la creación
+  // del índice único mientras esto exista; esta consulta es lo que le permite a
+  // un admin encontrar y revisar esos casos en vez de necesitar acceso directo
+  // a la base.
+  async getDuplicateCashPaymentLinks(): Promise<DuplicateCashPaymentLinkGroup[]> {
+    const result = await db.execute(sql`
+      WITH duplicated_payment_ids AS (
+        SELECT payment_id
+        FROM cash_movements
+        WHERE payment_id IS NOT NULL AND source_type = 'reservation'
+        GROUP BY payment_id
+        HAVING COUNT(*) > 1
+      )
+      SELECT
+        cm.payment_id AS "paymentId",
+        cm.id AS "movementId",
+        cm.area,
+        cm.amount,
+        cm.payment_method AS "paymentMethod",
+        cm.movement_type AS "movementType",
+        cm.shift_id AS "shiftId",
+        cm.registered_by AS "registeredBy",
+        cm.anulado,
+        cm.motivo_anulacion AS "motivoAnulacion",
+        cm.anulado_por AS "anuladoPor",
+        cm.created_at AS "createdAt",
+        p.amount AS "paymentAmount",
+        p.date AS "paymentDate",
+        r.reservation_code AS "reservationCode",
+        g.first_name AS "guestFirstName",
+        g.last_name AS "guestLastName"
+      FROM cash_movements cm
+      JOIN duplicated_payment_ids dpi ON dpi.payment_id = cm.payment_id
+      LEFT JOIN payments p ON p.id = cm.payment_id
+      LEFT JOIN reservations r ON r.id = p.reservation_id
+      LEFT JOIN guests g ON g.id = r.guest_id
+      WHERE cm.payment_id IS NOT NULL AND cm.source_type = 'reservation'
+      ORDER BY cm.payment_id, cm.created_at ASC NULLS FIRST, cm.id ASC
+    `);
+
+    const groups = new Map<string, DuplicateCashPaymentLinkGroup>();
+    for (const row of result.rows as any[]) {
+      let group = groups.get(row.paymentId);
+      if (!group) {
+        const guestName = row.guestFirstName || row.guestLastName
+          ? `${row.guestLastName || ""} ${row.guestFirstName || ""}`.trim()
+          : null;
+        group = {
+          paymentId: row.paymentId,
+          reservationCode: row.reservationCode ?? null,
+          guestName,
+          paymentAmount: row.paymentAmount ?? null,
+          paymentDate: row.paymentDate ?? null,
+          movements: [],
+        };
+        groups.set(row.paymentId, group);
+      }
+      const movement: DuplicateCashPaymentLinkMovement = {
+        movementId: row.movementId,
+        area: row.area,
+        amount: row.amount,
+        paymentMethod: row.paymentMethod,
+        movementType: row.movementType,
+        shiftId: row.shiftId ?? null,
+        registeredBy: row.registeredBy ?? null,
+        anulado: row.anulado,
+        motivoAnulacion: row.motivoAnulacion ?? null,
+        anuladoPor: row.anuladoPor ?? null,
+        createdAt: row.createdAt ?? null,
+      };
+      group.movements.push(movement);
+    }
+    return Array.from(groups.values());
+  }
+
+  // Desvincula puntualmente UN movimiento de caja duplicado: lo marca anulado
+  // (con motivo/operador/fecha, igual que el resto del sistema) y borra su
+  // payment_id para que deje de contar como duplicado ante la migración que
+  // crea el índice único. Deliberadamente NO usa la misma ruta que
+  // PATCH /api/cash/movements/:id/anular — esa además reversa el pago real de
+  // la reserva (folio, saldo del huésped), que acá sería incorrecto: el pago
+  // es válido, lo único erróneo es que quedó anotado dos veces en la caja.
+  async resolveDuplicateCashPaymentLink(movementId: string, motivo: string, operator: string): Promise<CashMovement> {
+    const [mov] = await db.select().from(cashMovements).where(eq(cashMovements.id, movementId));
+    if (!mov) throw new Error("Movimiento no encontrado");
+    if (mov.anulado) throw new Error("Ya está anulado");
+    if (!mov.paymentId || mov.sourceType !== "reservation") {
+      throw new Error("Este movimiento no tiene un vínculo de pago de reserva para desvincular");
+    }
+
+    const dupCheck = await db.execute(sql`
+      SELECT COUNT(*)::int AS count FROM cash_movements
+      WHERE payment_id = ${mov.paymentId} AND source_type = 'reservation'
+    `);
+    if (((dupCheck.rows[0] as any)?.count ?? 0) < 2) {
+      throw new Error("Este pago ya no tiene vínculos duplicados");
+    }
+
+    const [updated] = await db.update(cashMovements)
+      .set({
+        anulado: true,
+        motivoAnulacion: motivo,
+        anuladoPor: operator,
+        anuladoAt: new Date(),
+        paymentId: null,
+      })
+      .where(eq(cashMovements.id, movementId))
+      .returning();
+    return updated;
   }
 
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
