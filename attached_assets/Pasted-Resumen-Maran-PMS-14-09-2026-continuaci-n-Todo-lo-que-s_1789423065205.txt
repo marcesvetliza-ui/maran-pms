@@ -1,0 +1,27 @@
+Resumen — Maran PMS (14/09/2026, continuación)
+
+Todo lo que sigue ya está mergeado a main (PR #6). Rama de trabajo: claude/hotel-system-replit-ke42ze.
+
+1. Nota de Crédito ahora acredita la cuenta corriente correctamente
+
+Cuando se hace una Nota de Crédito sobre una factura de reserva que estaba cargada a cuenta corriente (empresa/agencia/huésped), antes el cargo original en la cuenta quedaba intacto para siempre — la cuenta seguía mostrando la deuda completa aunque el comprobante fiscal ya no la respaldara. Ahora se agrega un movimiento de crédito por el monto exacto de la NC. Ejemplo: factura de $200.000 con NC de $50.000 deja la cuenta en $150.000. Se probó también que NCs parciales sucesivas nunca hacen que la cuenta quede en negativo.
+
+2. Cumplimiento fiscal con ARCA en Notas de Crédito/Débito
+
+Se detectó que el sistema nunca le informaba a ARCA cuál es el comprobante original que corrige una Nota de Crédito o Débito (el campo "comprobante asociado"). Desde 2021 (RG 4540/19), ARCA rechaza automáticamente cualquier NC/ND que no incluya ese dato, con el error 10197. Esto no se había detectado porque hasta ahora todo se probó en modo Ficticio (que nunca llama a ARCA de verdad) — pero el día que se facture de verdad contra ARCA (homologación o producción), cualquier NC o ND real hubiera fallado siempre. Se corrigió informando ese dato en los 9 lugares del sistema donde se emite una NC/ND (reservas, grupos, spa, eventos, mesas de eventos).
+
+3. Prueba de regresión: el "Camaje" no se pierde al reabrir el formulario de habitaciones
+
+Sugerencia de Replit implementada: una prueba automática que abre el formulario de edición de una habitación, cambia el tipo de cama (Camaje), guarda, y confirma que al reabrir el formulario se ve el valor guardado — no uno viejo. El código ya funcionaba bien; esto es una prueba de regresión para que nadie lo rompa sin darse cuenta a futuro.
+
+4. La reconciliación de "saldos pendientes" al checkout ya no cuenta mal los ajustes de NC
+
+El botón "Revisar saldos pendientes" (Administración → Cuentas Corrientes) calculaba el saldo de reservas con checkout usando su propia fórmula, que por error sumaba los ajustes negativos que deja una Nota de Crédito — pudiendo darle a una reserva un saldo distinto al que muestra el resto del sistema. Se corrigió para que use exactamente la misma regla financiera que ya usa el resto de las pantallas, sin tocar esa lógica compartida ni la de cuenta corriente en sí — solo esta herramienta puntual.
+
+5. Limpieza de código: reportes operativos separados del archivo monolítico de rutas
+
+Sugerencia de Replit implementada: los reportes de llegadas/salidas, saldos pendientes y deuda por huésped vivían mezclados con todo el resto de las rutas del sistema (un archivo enorme). Se movieron tal cual — mismo código, mismo comportamiento — a un módulo propio, más chico y enfocado. Esto no cambia nada para el usuario; el beneficio es que las pruebas automáticas de estos reportes ahora corren más rápido y aisladas del resto del sistema, sin arrastrar dependencias que no les corresponden.
+
+Verificación técnica
+
+Cada cambio pasó: tsc --noEmit, suite completa de tests de cliente, suite de servidor (con y sin Postgres real) — incluyendo tests nuevos que reproducen cada escenario contra una base de datos real, no simulada. Todo el CI de GitHub quedó en verde antes de mergear a main.
