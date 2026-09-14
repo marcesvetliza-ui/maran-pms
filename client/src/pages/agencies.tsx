@@ -420,9 +420,9 @@ export default function AgenciesPage() {
                   <TableRow>
                     <TableHead>Razón Social</TableHead>
                     <TableHead>Nombre Fantasía</TableHead>
-                    <TableHead>CUIT</TableHead>
                     <TableHead>Comisión %</TableHead>
                     <TableHead>Contacto</TableHead>
+                    <TableHead>Email</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead className="w-[120px]">Acciones</TableHead>
                   </TableRow>
@@ -459,18 +459,11 @@ export default function AgenciesPage() {
                           </div>
                         </TableCell>
                         <TableCell>{agency.nombreFantasia || "-"}</TableCell>
-                        <TableCell>{agency.cuilCuit || "-"}</TableCell>
                         <TableCell>
                           <Badge variant="secondary">{agency.commissionRate}%</Badge>
                         </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm">{agency.contactName || "-"}</p>
-                            {agency.contactEmail && (
-                              <p className="text-xs text-muted-foreground">{agency.contactEmail}</p>
-                            )}
-                          </div>
-                        </TableCell>
+                        <TableCell>{agency.contactName || "-"}</TableCell>
+                        <TableCell>{agency.contactEmail || "-"}</TableCell>
                         <TableCell>
                           <Badge variant={agency.isActive === "true" ? "default" : "outline"}>
                             {agency.isActive === "true" ? "Activa" : "Inactiva"}
