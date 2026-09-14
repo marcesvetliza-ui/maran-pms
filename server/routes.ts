@@ -15,6 +15,7 @@ import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
+import { getOperationalReservationCharges } from "@shared/reservationFolio";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -965,7 +966,6 @@ export async function registerRoutes(
                r.total_room_amount, r.final_rate_per_night, r.nights,
                r.room_id, ro.room_number,
                g.first_name, g.last_name,
-               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND (c.status IS NULL OR c.status = 'active')), 0) AS charges_total,
                COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS payments_total
         FROM reservations r
         LEFT JOIN rooms ro ON r.room_id = ro.id
@@ -973,6 +973,35 @@ export async function registerRoutes(
         WHERE r.status = 'checked_out'
           AND (r.company_id IS NOT NULL OR r.agency_id IS NOT NULL OR r.guest_id IS NOT NULL)
       `);
+
+      // Los cargos se traen aparte (en un solo query por lote, agrupados por
+      // reserva) para poder filtrarlos con la MISMA regla que usa el resto
+      // del sistema (getOperationalReservationCharges, shared/reservationFolio.ts):
+      // un cargo de ajuste creado por una Nota de Crédito ([nc:...] en la
+      // descripción) nunca cuenta como servicio pendiente de cobro — la NC
+      // corrige el comprobante fiscal, no borra la estadía. Antes esta
+      // reconciliación sumaba esos ajustes junto con los cargos reales,
+      // pudiendo calcular un saldo distinto al que ve el resto del sistema
+      // para la misma reserva.
+      const candidateReservationIds = (checkedOutRows.rows as any[]).map(row => row.id);
+      const chargesByReservation = new Map<string, { amount: string; category: string | null; description: string | null; status: string | null }[]>();
+      if (candidateReservationIds.length > 0) {
+        const chargeRows = await db.select({
+          reservationId: charges.reservationId,
+          amount: charges.amount,
+          category: charges.category,
+          description: charges.description,
+          status: charges.status,
+        }).from(charges).where(and(
+          inArray(charges.reservationId, candidateReservationIds),
+          or(eq(charges.status, "active"), sql`${charges.status} IS NULL`),
+        ));
+        for (const chargeRow of chargeRows) {
+          const list = chargesByReservation.get(chargeRow.reservationId) ?? [];
+          list.push({ ...chargeRow, amount: String(chargeRow.amount) });
+          chargesByReservation.set(chargeRow.reservationId, list);
+        }
+      }
 
       let created = 0;
       let skipped = 0;
@@ -984,7 +1013,8 @@ export async function registerRoutes(
           const roomTotal = savedRoomTotal > 0
             ? savedRoomTotal
             : parseFloat(row.final_rate_per_night || "0") * (parseInt(row.nights) || 0);
-          const chargesTotal = parseFloat(row.charges_total || "0");
+          const operationalCharges = getOperationalReservationCharges(chargesByReservation.get(row.id) ?? []);
+          const chargesTotal = operationalCharges.reduce((sum, charge) => sum + (parseFloat(charge.amount) || 0), 0);
           const paymentsTotal = parseFloat(row.payments_total || "0");
           const balance = roomTotal + chargesTotal - paymentsTotal;
 
