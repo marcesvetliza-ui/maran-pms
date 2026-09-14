@@ -1,5 +1,4 @@
 import pg from "pg";
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL,
@@ -15,23 +14,18 @@ import {
   serializeIncrementalDdl,
 } from "../migrate";
 
+// Las validaciones puramente estructurales del registro (nombres duplicados,
+// createSql/indexName desalineados, DDL en forma nativa ruidosa) viven en
+// migration-index-registry.test.ts, sin conexión a Postgres — así se
+// detectan también en entornos sin DATABASE_URL. Este archivo solo prueba
+// lo que necesita una base real: que las guardas por catálogo efectivamente
+// silencian los avisos en una segunda corrida.
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const client = process.env.DATABASE_URL
   ? new pg.Client({ connectionString: process.env.DATABASE_URL })
   : null;
 
 const schemaName = `migration_rerun_${process.pid}_${Date.now()}`;
-const migrateSource = readFileSync(new URL("../migrate.ts", import.meta.url), "utf8");
-const productionMigrationSource = migrateSource.replace(
-  /^\s*fixtureSql:\s*"[^"]*",\s*$/gm,
-  "",
-);
-
-function declaredIndexName(createSql: string): string | null {
-  return createSql.match(
-    /^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+([^\s]+)\s+ON\b/i,
-  )?.[1] ?? null;
-}
 
 async function expectSilentSecondRun(client: pg.Client, migrationSql: string) {
   await expect(client.query(migrationSql)).resolves.toBeDefined();
@@ -76,52 +70,6 @@ async function inIsolatedSchema(
 }
 
 runIfDatabaseIsConfigured("incremental migration reruns", () => {
-  it("uses a unique indexName for every incremental index definition", () => {
-    const indexNames = Object.values(INCREMENTAL_INDEX_DEFINITIONS).map(
-      ({ indexName }) => indexName,
-    );
-    const duplicateIndexNames = indexNames.filter(
-      (indexName, position) => indexNames.indexOf(indexName) !== position,
-    );
-
-    expect(
-      duplicateIndexNames,
-      `INCREMENTAL_INDEX_DEFINITIONS has duplicate indexName values: ${duplicateIndexNames.join(", ")}`,
-    ).toEqual([]);
-  });
-
-  it("keeps each indexName aligned with the name declared in createSql", () => {
-    const mismatches = Object.entries(INCREMENTAL_INDEX_DEFINITIONS).flatMap(
-      ([definitionName, { indexName, createSql }]) => {
-        const declaredName = declaredIndexName(createSql);
-        return declaredName === indexName
-          ? []
-          : [`${definitionName}: indexName="${indexName}", createSql declares "${declaredName ?? "<missing>"}"`];
-      },
-    );
-
-    expect(
-      mismatches,
-      `INCREMENTAL_INDEX_DEFINITIONS has createSql/indexName mismatches:\n${mismatches.join("\n")}`,
-    ).toEqual([]);
-  });
-
-  it("keeps every incremental index on the silent catalog-guard path", () => {
-    expect(migrateSource).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS/i);
-  });
-
-  it("keeps the inventoried non-index DDL on catalog-guard paths", () => {
-    expect(INCREMENTAL_NON_INDEX_DDL.chargeTypesTable).toContain("to_regclass");
-    expect(INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn).toContain("pg_attribute");
-    expect(INCREMENTAL_NON_INDEX_DDL.groupPaymentsReceiptNumberSequence).toContain("to_regclass");
-  });
-
-  it("does not leave notice-producing non-index DDL in production migrations", () => {
-    expect(productionMigrationSource).not.toMatch(
-      /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS|ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS|CREATE\s+SEQUENCE\s+IF\s+NOT\s+EXISTS/i,
-    );
-  });
-
   beforeAll(async () => {
     if (!client) throw new Error("DATABASE_URL no está configurado");
 
