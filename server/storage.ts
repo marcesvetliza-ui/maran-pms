@@ -212,6 +212,7 @@ import {
   type AccountRetention,
   type AccountMovementAllocation,
   type OrphanedCashPaymentLink,
+  type DuplicateCashPaymentLinkGroup,
   type GiftVoucher,
   type InsertGiftVoucher,
 } from "@shared/schema";
@@ -846,6 +847,8 @@ export interface IStorage {
   getShiftDetail(shiftId: string): Promise<any>;
   getCashMovements(shiftId: string): Promise<any[]>;
   getOrphanedCashPaymentLinks(): Promise<OrphanedCashPaymentLink[]>;
+  getDuplicateCashPaymentLinks(): Promise<DuplicateCashPaymentLinkGroup[]>;
+  resolveDuplicateCashPaymentLink(movementId: string, motivo: string, operator: string): Promise<any>;
   createCashMovement(data: any): Promise<any>;
   registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<any>;
   getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;

@@ -2188,6 +2188,35 @@ export type OrphanedCashPaymentLink = {
   createdAt: Date | null;
 };
 
+// Legacy Caja data may have more than one cash_movements row linked to the
+// same reservation payment (the bug CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL
+// guards against — it simply skips creating the unique index while this
+// exists, rather than failing startup). Grouped by the shared paymentId so
+// an admin can compare the movements side by side and choose which one to
+// unlink — never automatic, never touches the underlying payment/folio.
+export type DuplicateCashPaymentLinkMovement = {
+  movementId: string;
+  area: string;
+  amount: string;
+  paymentMethod: string;
+  movementType: string;
+  shiftId: string | null;
+  registeredBy: string | null;
+  anulado: boolean;
+  motivoAnulacion: string | null;
+  anuladoPor: string | null;
+  createdAt: Date | null;
+};
+
+export type DuplicateCashPaymentLinkGroup = {
+  paymentId: string;
+  reservationCode: string | null;
+  guestName: string | null;
+  paymentAmount: string | null;
+  paymentDate: string | null;
+  movements: DuplicateCashPaymentLinkMovement[];
+};
+
 export const cashClosingSummaries = pgTable("cash_closing_summaries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   shiftId: varchar("shift_id").notNull(),
