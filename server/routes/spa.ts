@@ -25,7 +25,7 @@ import { requireAuth, requireRole } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
-import { emitirFactura } from "../billing/invoiceService";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { visibleGuestCondition } from "../guest-visibility";
@@ -2133,6 +2133,7 @@ export function registerSpaRoutes(app: Express) {
         },
         items: ncItems,
         facturaOriginalId: originalInvoice.id,
+        comprobanteAsociado: buildComprobanteAsociado(originalInvoice),
         operador: (req as any).user?.fullName || (req as any).user?.username,
       });
 

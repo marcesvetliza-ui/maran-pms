@@ -28,6 +28,21 @@ export interface FECAERequest {
   clienteDni?: string;
   clienteCondicionIva: string;
   fecha: string;
+  /**
+   * Original document(s) this Nota de Crédito/Débito corrects. Mandatory for
+   * every NC/ND since RG 4540/19 (in force since 2021-04-01): ARCA rejects
+   * the request with error 10197 ("Si el comprobante es Débito o Crédito,
+   * enviar estructura CbteAsoc o PeriodoAsoc") when neither is present.
+   */
+  cbteAsoc?: Array<{
+    tipo: string;
+    puntoVenta: number;
+    numero: number;
+    /** CUIT of whoever issued the associated document (usually the same emisor). */
+    cuit?: string;
+    /** Associated document's own issuance date, AAAAMMDD. */
+    fecha?: string;
+  }>;
 }
 
 export interface FECAEResult {
@@ -76,6 +91,25 @@ export function buildIvaBlock(neto21: number, iva21: number, neto105: number, iv
   }
   if (!parts.length) return "";
   return `<ar:Iva>${parts.join("")}</ar:Iva>`;
+}
+
+function buildCbtesAsocBlock(cbteAsoc: FECAERequest["cbteAsoc"]): string {
+  if (!cbteAsoc || cbteAsoc.length === 0) return "";
+  const entries = cbteAsoc.map((asoc) => {
+    const tipo = TIPOS_CBT[asoc.tipo] ?? asoc.tipo;
+    const cuit = asoc.cuit ? `<ar:Cuit>${asoc.cuit.replace(/-/g, "")}</ar:Cuit>` : "";
+    const fecha = asoc.fecha ? `<ar:CbteFch>${asoc.fecha}</ar:CbteFch>` : "";
+    return (
+      `<ar:CbteAsoc>` +
+      `<ar:Tipo>${tipo}</ar:Tipo>` +
+      `<ar:PtoVta>${asoc.puntoVenta}</ar:PtoVta>` +
+      `<ar:Nro>${asoc.numero}</ar:Nro>` +
+      cuit +
+      fecha +
+      `</ar:CbteAsoc>`
+    );
+  }).join("");
+  return `<ar:CbtesAsoc>${entries}</ar:CbtesAsoc>`;
 }
 
 function parseCaeResult(response: string): FECAEResult | null {
@@ -142,6 +176,7 @@ export async function feCAESolicitar(
   const ivaBlock = buildIvaBlock(req.montoNeto21, req.montoIva21, req.montoNeto105, req.montoIva105);
   const impIva   = (req.montoIva21 + req.montoIva105).toFixed(2);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
+  const cbtesAsocBlock = buildCbtesAsocBlock(req.cbteAsoc);
 
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?>` +
@@ -173,6 +208,7 @@ export async function feCAESolicitar(
     `<ar:ImpTrib>0.00</ar:ImpTrib>` +
     `<ar:MonId>PES</ar:MonId>` +
     `<ar:MonCotiz>1</ar:MonCotiz>` +
+    `${cbtesAsocBlock}` +
     `${ivaBlock}` +
     `</ar:FECAEDetRequest></ar:FeDetReq>` +
     `</ar:FeCAEReq>` +

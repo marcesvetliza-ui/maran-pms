@@ -9,7 +9,7 @@ import { db, pool } from "../db";
 import type { PoolClient } from "pg";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
-import { emitirFactura } from "../billing/invoiceService";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth } from "../auth";
@@ -2806,6 +2806,7 @@ export function registerReservationsRoutes(app: Express) {
                 },
                 items: invoice.items ?? [],
                 facturaOriginalId: invoice.id,
+                comprobanteAsociado: buildComprobanteAsociado(invoice),
                 operador: user?.fullName || user?.username,
               } as any);
               await db.execute(sql`
