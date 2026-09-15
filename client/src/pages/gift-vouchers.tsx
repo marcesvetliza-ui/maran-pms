@@ -527,6 +527,7 @@ function printVoucher(v: GiftVoucher) {
           top: 50%; left: 50%;
           transform: translate(-50%,-50%);
           width: 44mm;
+          height: auto;
           opacity: 0.06;
           pointer-events: none;
         }
