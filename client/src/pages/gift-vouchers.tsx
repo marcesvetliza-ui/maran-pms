@@ -589,10 +589,10 @@ function printVoucher(v: GiftVoucher) {
     </head>
     <body>
       <div class="card">
-        <img class="watermark" src="${origin}/isologo-circulo.png" alt="" />
+        <img class="watermark" src="${origin}/isologo-circulo.png" alt="" width="648" height="662" />
         <div class="header">
           <div>
-            <img class="hotel-logo" src="${origin}/logo-maran.png" alt="Maran Suites &amp; Towers" />
+            <img class="hotel-logo" src="${origin}/logo-maran.png" alt="Maran Suites &amp; Towers" width="166" height="84" />
             <div class="hotel-sub">Hotel Boutique · Buenos Aires</div>
           </div>
           <div class="gift-label">Voucher regalo</div>
@@ -632,6 +632,24 @@ function printVoucher(v: GiftVoucher) {
         <div class="code-block">${v.voucherCode}</div>
         <div class="footer">Este voucher es personal e intransferible · Para canjearlo presentarlo en recepción</div>
       </div>
+      <script>
+        (function () {
+          function printWhenReady() {
+            var imgs = Array.prototype.slice.call(document.images);
+            Promise.all(imgs.map(function (img) {
+              if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+              return new Promise(function (resolve) {
+                img.addEventListener("load", resolve);
+                img.addEventListener("error", resolve);
+              });
+            })).then(function () {
+              setTimeout(function () { window.print(); }, 50);
+            });
+          }
+          if (document.readyState === "complete") printWhenReady();
+          else window.addEventListener("load", printWhenReady);
+        })();
+      </script>
     </body>
     </html>
   `;
@@ -640,7 +658,6 @@ function printVoucher(v: GiftVoucher) {
   if (!w) return;
   w.document.write(html);
   w.document.close();
-  w.onload = () => { w.print(); };
 }
 
 // ── Detail Dialog ──────────────────────────────────────────────────────────────
