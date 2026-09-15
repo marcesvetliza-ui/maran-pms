@@ -467,95 +467,135 @@ function printVoucher(v: GiftVoucher) {
     ? format(new Date(v.expiresAt + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: es })
     : "Sin vencimiento";
 
+  const origin = window.location.origin;
+
   const html = `
     <!DOCTYPE html>
     <html lang="es">
     <head>
       <meta charset="UTF-8" />
       <title>Voucher ${v.voucherCode}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+          /* marca */
+          --maran-bordo:       #791127;   /* borde, nombre, cápsula, código   */
+          --maran-bordo-deep:  #4F0A19;   /* cierre del degradé               */
+          --maran-ocre:        #D26829;   /* filete superior, detalles        */
+          --maran-ocre-text:   #B8551C;   /* ocre legible sobre claro         */
+          --maran-ocre-soft:   #FBF0E8;   /* fondo cápsula de área            */
+
+          /* neutros */
+          --maran-tinta:       #241B1E;   /* texto principal, valores         */
+          --maran-gris:        #5C5153;   /* descripción, subtítulo           */
+          --maran-gris-soft:   #8C807C;   /* etiquetas, pie legal              */
+          --maran-linea:       #DED7D3;   /* divisores de la grilla           */
+          --maran-hueso:       #F7F5F3;   /* franja del código                */
+          --maran-blanco:      #FFFFFF;
+
+          /* tipografía */
+          --maran-font:        'Montserrat', system-ui, sans-serif;
+          --maran-font-mono:   'JetBrains Mono', ui-monospace, monospace;
+
+          /* bloque de valor */
+          --maran-valor-bg:    linear-gradient(135deg, #791127 0%, #4F0A19 100%);
+        }
+
         @page { size: A5 landscape; margin: 10mm; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #222; }
+        body { font-family: var(--maran-font); background: #fff; color: var(--maran-tinta); }
         .card {
-          border: 3px solid #1a1a2e;
+          border: 3px solid var(--maran-bordo);
           border-radius: 16px;
           padding: 24px 32px;
           max-width: 180mm;
           position: relative;
           overflow: hidden;
         }
+        .card::before {
+          content: "";
+          position: absolute;
+          top: 0; left: 0; right: 0;
+          height: 3px;
+          background: var(--maran-ocre);
+        }
         .watermark {
           position: absolute;
           top: 50%; left: 50%;
-          transform: translate(-50%,-50%) rotate(-20deg);
-          font-size: 96px;
-          opacity: 0.04;
-          font-weight: 900;
+          transform: translate(-50%,-50%);
+          width: 44mm;
+          opacity: 0.06;
           pointer-events: none;
-          white-space: nowrap;
         }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-        .hotel-name { font-size: 22px; font-weight: 800; color: #1a1a2e; line-height: 1.2; }
-        .hotel-sub { font-size: 11px; color: #666; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; position: relative; }
+        .hotel-logo { height: 84px; width: auto; display: block; }
+        .hotel-sub { font-size: 11px; font-weight: 500; color: var(--maran-gris); letter-spacing: 0.06em; margin-top: 4px; }
         .gift-label {
-          background: #1a1a2e;
-          color: white;
+          background: var(--maran-bordo);
+          color: var(--maran-blanco);
           padding: 6px 14px;
           border-radius: 20px;
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 600;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          white-space: nowrap;
         }
         .value-block {
           text-align: center;
           margin: 16px 0;
           padding: 14px;
-          background: linear-gradient(135deg, #1a1a2e 0%, #2d3561 100%);
+          background: var(--maran-valor-bg);
           border-radius: 12px;
-          color: white;
+          color: var(--maran-blanco);
+          position: relative;
         }
-        .value-num { font-size: 42px; font-weight: 900; }
-        .value-desc { font-size: 15px; opacity: 0.85; margin-top: 2px; }
+        .value-num { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+        .value-desc { font-size: 14px; font-weight: 500; opacity: 1; margin-top: 2px; }
+        .area-row { margin-bottom: 12px; position: relative; }
         .area-badge {
           display: inline-block;
-          background: #f0f4ff;
-          color: #2d3561;
+          background: var(--maran-ocre-soft);
+          color: var(--maran-ocre-text);
           padding: 3px 10px;
           border-radius: 8px;
-          font-size: 12px;
-          font-weight: 600;
-          margin-bottom: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
         }
-        .desc-text { font-size: 14px; color: #444; margin-bottom: 12px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; position: relative; }
         .info-item { font-size: 12px; }
-        .info-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .info-value { font-weight: 600; color: #222; }
+        .info-label { color: var(--maran-gris-soft); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; }
+        .info-value { font-size: 13px; font-weight: 600; color: var(--maran-tinta); margin-top: 2px; }
         .code-block {
           margin-top: 18px;
           padding: 10px;
-          background: #f5f5f5;
+          background: var(--maran-hueso);
           border-radius: 8px;
           text-align: center;
-          font-family: monospace;
-          font-size: 18px;
-          font-weight: 800;
+          font-family: var(--maran-font-mono);
+          font-size: 17px;
+          font-weight: 700;
           letter-spacing: 0.12em;
-          color: #1a1a2e;
+          color: var(--maran-bordo);
+          position: relative;
         }
-        .footer { margin-top: 16px; font-size: 10px; color: #aaa; text-align: center; }
+        .footer { margin-top: 16px; font-size: 9.5px; font-weight: 500; color: var(--maran-gris-soft); text-align: center; position: relative; }
       </style>
     </head>
     <body>
       <div class="card">
-        <div class="watermark">REGALO</div>
+        <img class="watermark" src="${origin}/isologo-circulo.png" alt="" />
         <div class="header">
           <div>
-            <div class="hotel-name">Maran Suites &amp; Towers</div>
+            <img class="hotel-logo" src="${origin}/logo-maran.png" alt="Maran Suites &amp; Towers" />
             <div class="hotel-sub">Hotel Boutique · Buenos Aires</div>
           </div>
-          <div class="gift-label">🎁 VOUCHER REGALO</div>
+          <div class="gift-label">Voucher regalo</div>
         </div>
 
         <div class="value-block">
@@ -566,9 +606,8 @@ function printVoucher(v: GiftVoucher) {
           ${v.valueType === "monetario" ? `<div class="value-desc">${v.description}</div>` : ""}
         </div>
 
-        <div>
+        <div class="area-row">
           <span class="area-badge">${(AREA_LABELS as any)[v.area] ?? v.area}</span>
-          <div class="desc-text"></div>
         </div>
 
         <div class="info-grid">
