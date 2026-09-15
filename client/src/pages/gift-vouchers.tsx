@@ -533,7 +533,6 @@ function printVoucher(v: GiftVoucher) {
         }
         .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; position: relative; }
         .hotel-logo { height: 84px; width: auto; display: block; }
-        .hotel-sub { font-size: 11px; font-weight: 500; color: var(--maran-gris); letter-spacing: 0.06em; margin-top: 4px; }
         .gift-label {
           background: var(--maran-bordo);
           color: var(--maran-blanco);
@@ -594,7 +593,6 @@ function printVoucher(v: GiftVoucher) {
         <div class="header">
           <div>
             <img class="hotel-logo" src="${origin}/logo-maran.png" alt="Maran Suites &amp; Towers" width="166" height="84" />
-            <div class="hotel-sub">Hotel Boutique · Buenos Aires</div>
           </div>
           <div class="gift-label">Voucher regalo</div>
         </div>
