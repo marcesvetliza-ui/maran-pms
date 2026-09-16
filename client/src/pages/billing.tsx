@@ -604,7 +604,39 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
+/**
+ * Renders EmitirFacturaDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `children` is touched.
+ */
+function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="emitir-factura-embedded">
+        <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -663,6 +695,16 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   skipReview?: boolean;
   /** Explicit identity for a mounted dialog that can switch between operations. */
   operationKey?: string;
+  /**
+   * When true, render the form content inline (no <Dialog>/<DialogContent> chrome)
+   * so it can be embedded directly inside a host page's own layout — e.g. the
+   * unified Centro de Comprobantes. Same content, same handlers, same fiscal
+   * logic as the modal version; only the outer wrapper changes. The three
+   * secondary confirmation dialogs (showCloseWarning/showRecipientChangeWarning/
+   * showEntityChangeWarning) and the duplicate-amount AlertDialog still render
+   * as real overlays in both modes.
+   */
+  embedded?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -1415,9 +1457,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
   return (
     <>
-    <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+    <FacturaFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={o => { if (!o) handleClose(); }}
+      title={linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}
+    >
 
         {linkPending ? (
           <div className="space-y-4 py-2">
@@ -1932,8 +1977,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         </DialogFooter>
         </>
         )}
-      </DialogContent>
-    </Dialog>
+      </FacturaFormShell>
 
     <Dialog open={showCloseWarning} onOpenChange={o => { if (!o) setShowCloseWarning(false); }}>
       <DialogContent className="max-w-sm">

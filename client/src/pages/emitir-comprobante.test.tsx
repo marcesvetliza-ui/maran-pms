@@ -49,7 +49,10 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.queryByRole("option", { name: "Voucher SPA" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "Factura B" }));
 
-    expect(screen.getByText(/todavía no está construido/i)).toBeInTheDocument();
+    // El motor de Venta reutiliza EmitirFacturaDialog embebido (sin chrome de
+    // Dialog) — el tipo ya elegido en el paso anterior queda como única opción.
+    const embedded = screen.getByTestId("emitir-factura-embedded");
+    expect(within(embedded).getByTestId("select-tipo-factura")).toHaveTextContent("Factura B");
   });
 
   it("un rol de un área única (spa) arranca con esa área precargada y bloqueada", async () => {
@@ -79,6 +82,10 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     await user.click(screen.getByRole("option", { name: "Compra" }));
     await user.click(screen.getByTestId("select-tipo"));
     expect(screen.getByRole("option", { name: "Factura C" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Factura C" }));
+
+    // El motor de Compra reutiliza InvoiceDialog embebido (sin chrome de Dialog).
+    expect(screen.getByTestId("invoice-form-embedded")).toBeInTheDocument();
   });
 
   it("un rol sin ningún área habilitada ve el mensaje de acceso, no el selector", () => {
