@@ -69,6 +69,7 @@ const TIPOS_COMPRA: { value: string; label: string }[] = [
   { value: "NC-A", label: "Nota de Crédito A" },
   { value: "NC-B", label: "Nota de Crédito B" },
   { value: "NC-C", label: "Nota de Crédito C" },
+  { value: "REMITO", label: "Remito" },
 ];
 
 const TIPOS_MOVIMIENTO: { value: string; label: string }[] = [
