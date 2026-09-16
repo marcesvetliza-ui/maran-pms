@@ -918,7 +918,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     pvAutoSelectedForRef.current = dialogOperationKey;
     const pvArea = CASH_AREA_TO_PV_AREA[cashArea] ?? cashArea;
     const matches = posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico" && p.area === pvArea);
-    if (matches.length === 1) setPuntoVentaNum(String(matches[0].numero));
+    if (matches.length > 0) {
+      // Varios hoteles tienen más de un PV activo para la misma área (uno
+      // "principal" y otros para casos puntuales, p. ej. Factura T). Ante
+      // esa ambigüedad, siempre se elige el mismo de forma predecible: el de
+      // menor número, en vez de dejarlo sin elegir.
+      const preferred = [...matches].sort((a: any, b: any) => Number(a.numero) - Number(b.numero))[0];
+      setPuntoVentaNum(String(preferred.numero));
+    }
   }, [open, cashArea, posConfigsData, dialogOperationKey]);
 
   function applyEntity(entity: any) {
