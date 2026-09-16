@@ -243,6 +243,7 @@ export default function EmitirComprobantePage() {
               {operacion === "compra" && (
                 <InvoiceDialog
                   embedded
+                  unifiedLayout
                   open
                   onClose={resetSeleccion}
                   suppliers={suppliers}
