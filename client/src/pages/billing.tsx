@@ -749,7 +749,6 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
-  const [retencionEnabled, setRetencionEnabled] = useState(false);
   const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
   const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
@@ -1324,7 +1323,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
-    setRetencionEnabled(false); setRetencionTipo("iibb"); setRetencionMonto("");
+    setRetencionTipo("iibb"); setRetencionMonto("");
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1545,7 +1544,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             cashFormaPago,
               ...(cashArea ? {
               cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}${
-                retencionEnabled && parseFloat(retencionMonto) > 0
+                parseFloat(retencionMonto) > 0
                   ? ` — Ret. ${retencionTipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(retencionMonto)}`
                   : ""
               }`,
@@ -1557,7 +1556,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               // ser dinero recibido). cashFormaPagoDetalle ya existe en el
               // comprobante como metadata informativa; no altera el registro
               // de caja, que sigue usando cashFormaPago/cashArea tal cual.
-              ...(retencionEnabled && parseFloat(retencionMonto) > 0
+              ...(parseFloat(retencionMonto) > 0
                 ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
                 : {}),
           }
@@ -1926,55 +1925,46 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
         {(cashArea || showPaymentMethod) && cashFormaPago !== "cuenta_corriente" && (
           <div className="space-y-1">
-            {!retencionEnabled ? (
-              <Button
-                type="button" variant="ghost" size="sm"
-                className="h-6 px-2 text-xs text-muted-foreground"
-                onClick={() => setRetencionEnabled(true)}
-                data-testid="btn-add-retencion"
-              >
-                Agregar retención impositiva
-              </Button>
-            ) : (
-              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+            <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                {parseFloat(retencionMonto) > 0 && (
                   <Button
                     type="button" variant="ghost" size="sm" className="h-5 w-5 p-0 text-amber-700"
-                    onClick={() => { setRetencionEnabled(false); setRetencionMonto(""); }}
+                    onClick={() => setRetencionMonto("")}
                     data-testid="btn-remove-retencion"
                   >
                     <XCircle className="h-3.5 w-3.5" />
                   </Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-xs mb-1 block">Tipo</Label>
-                    <Select value={retencionTipo} onValueChange={v => setRetencionTipo(v as "iibb" | "ganancias")}>
-                      <SelectTrigger className="h-7 text-xs" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
-                        <SelectItem value="ganancias">Ganancias</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs mb-1 block">Monto retenido</Label>
-                    <Input
-                      type="number" step="0.01" min="0" value={retencionMonto}
-                      onChange={e => setRetencionMonto(e.target.value)}
-                      placeholder="0.00" className="h-7 text-xs"
-                      data-testid="input-retencion-monto"
-                    />
-                  </div>
-                </div>
-                {parseFloat(retencionMonto) > 0 && (
-                  <p className="text-xs text-amber-800 dark:text-amber-300">
-                    Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"} ${fPeso(retencionMonto)} — se registra como referencia junto al cobro, no cambia el total facturado.
-                  </p>
                 )}
               </div>
-            )}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs mb-1 block">Tipo</Label>
+                  <Select value={retencionTipo} onValueChange={v => setRetencionTipo(v as "iibb" | "ganancias")}>
+                    <SelectTrigger className="h-7 text-xs" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Monto retenido</Label>
+                  <Input
+                    type="number" step="0.01" min="0" value={retencionMonto}
+                    onChange={e => setRetencionMonto(e.target.value)}
+                    placeholder="0.00" className="h-7 text-xs"
+                    data-testid="input-retencion-monto"
+                  />
+                </div>
+              </div>
+              {parseFloat(retencionMonto) > 0 && (
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"} ${fPeso(retencionMonto)} — se registra como referencia junto al cobro, no cambia el total facturado.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
