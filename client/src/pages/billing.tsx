@@ -93,6 +93,26 @@ function isRiOrExento(condicionIva: string): boolean {
   return normalized === "responsable_inscripto" || normalized === "exento";
 }
 
+// companies.condicionIva / agencies.condicionIva store the machine IvaCondition
+// code (shared/schema.ts, e.g. "responsable_inscripto"), while the Select here
+// uses CONDICION_IVA_OPTIONS' Title Case labels as both value and display text.
+// Setting the raw DB value straight into state left the Select matching no
+// SelectItem — blank, same failure mode as the tipo-select bug above.
+const CONDICION_IVA_DB_TO_LABEL: Record<string, string> = {
+  responsable_inscripto: "Responsable Inscripto",
+  consumidor_final: "Consumidor Final",
+  monotributo: "Monotributista",
+  monotributista: "Monotributista",
+  exento: "Exento",
+  no_responsable: "Consumidor Final",
+};
+function normalizeCondicionIvaLabel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (CONDICION_IVA_OPTIONS.includes(raw)) return raw;
+  const key = String(raw).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CONDICION_IVA_DB_TO_LABEL[key] ?? null;
+}
+
 const AREA_LABELS: Record<string, { label: string; color: string }> = {
   recepcion: { label: "Recepción", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   restaurant: { label: "Restaurant", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
@@ -729,6 +749,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [retencionEnabled, setRetencionEnabled] = useState(false);
+  const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
+  const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
   const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
   const originalDomicilioRef = useRef<string>("");
@@ -758,29 +781,36 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
 
-  // Catálogo de ítems por área — solo se pide lo que aplica a cashArea, para
-  // no disparar estas queries en flujos que no las necesitan (Compras, un
-  // billingEntityType de grupos, etc.).
+  // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
+  // fuentes siempre, sin importar cashArea: una factura de recepción a
+  // menudo también lleva un consumo de restaurant o un tratamiento de spa
+  // (y viceversa), así que restringir por área solo obligaba a cargarlos a
+  // mano. Agrupado por origen para que quede claro de dónde sale cada ítem.
   const { data: menuItemsData = [] } = useQuery<any[]>({
     queryKey: ["/api/restaurant/menu/items"],
-    enabled: open && cashArea === "restaurant",
+    enabled: open,
   });
   const { data: spaTreatmentsData = [] } = useQuery<any[]>({
     queryKey: ["/api/spa/treatments"],
-    enabled: open && cashArea === "spa",
+    enabled: open,
   });
-  const catalogOptions: { id: string; descripcion: string; precioUnitario: number }[] =
-    cashArea === "recepcion"
-      ? [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }]
-      : cashArea === "restaurant"
-        ? menuItemsData
-            .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
-            .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0 }))
-        : cashArea === "spa"
-          ? spaTreatmentsData
-              .filter((t: any) => t.isActive !== "false")
-              .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0 }))
-          : [];
+  type CatalogItem = { id: string; descripcion: string; precioUnitario: number };
+  const catalogGroups: { label: string; options: CatalogItem[] }[] = [
+    { label: "Alojamiento", options: [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
+    {
+      label: "Restaurant (Café Justo)",
+      options: menuItemsData
+        .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
+        .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0 })),
+    },
+    {
+      label: "Spa",
+      options: spaTreatmentsData
+        .filter((t: any) => t.isActive !== "false")
+        .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0 })),
+    },
+  ].filter(g => g.options.length > 0);
+  const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
 
   const entityResults: any[] = entitySearch.length >= 2
     ? [
@@ -895,7 +925,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
-    const condVal = entity.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    const condVal = normalizeCondicionIvaLabel(entity.condicionIva) || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
     const domVal = entity.domicilio || entity.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
@@ -1294,6 +1324,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
+    setRetencionEnabled(false); setRetencionTipo("iibb"); setRetencionMonto("");
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1513,9 +1544,22 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             ...(cashArea ? { cashArea } : {}),
             cashFormaPago,
               ...(cashArea ? {
-              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
+              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}${
+                retencionEnabled && parseFloat(retencionMonto) > 0
+                  ? ` — Ret. ${retencionTipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(retencionMonto)}`
+                  : ""
+              }`,
             } : {}),
               ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              // La retención impositiva no cambia el total facturado ni el
+              // monto de caja — es referencia (mismo criterio que ya usa
+              // PrefacturaDialog: la parte retenida se considera cubierta sin
+              // ser dinero recibido). cashFormaPagoDetalle ya existe en el
+              // comprobante como metadata informativa; no altera el registro
+              // de caja, que sigue usando cashFormaPago/cashArea tal cual.
+              ...(retencionEnabled && parseFloat(retencionMonto) > 0
+                ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
+                : {}),
           }
         : {}),
     });
@@ -1773,6 +1817,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         ) : (
         <>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
           <Select value={tipo} onValueChange={v => {
@@ -1875,6 +1920,61 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+          </div>
+        )}
+        </div>
+
+        {(cashArea || showPaymentMethod) && cashFormaPago !== "cuenta_corriente" && (
+          <div className="space-y-1">
+            {!retencionEnabled ? (
+              <Button
+                type="button" variant="ghost" size="sm"
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={() => setRetencionEnabled(true)}
+                data-testid="btn-add-retencion"
+              >
+                Agregar retención impositiva
+              </Button>
+            ) : (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-5 w-5 p-0 text-amber-700"
+                    onClick={() => { setRetencionEnabled(false); setRetencionMonto(""); }}
+                    data-testid="btn-remove-retencion"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs mb-1 block">Tipo</Label>
+                    <Select value={retencionTipo} onValueChange={v => setRetencionTipo(v as "iibb" | "ganancias")}>
+                      <SelectTrigger className="h-7 text-xs" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                        <SelectItem value="ganancias">Ganancias</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs mb-1 block">Monto retenido</Label>
+                    <Input
+                      type="number" step="0.01" min="0" value={retencionMonto}
+                      onChange={e => setRetencionMonto(e.target.value)}
+                      placeholder="0.00" className="h-7 text-xs"
+                      data-testid="input-retencion-monto"
+                    />
+                  </div>
+                </div>
+                {parseFloat(retencionMonto) > 0 && (
+                  <p className="text-xs text-amber-800 dark:text-amber-300">
+                    Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"} ${fPeso(retencionMonto)} — se registra como referencia junto al cobro, no cambia el total facturado.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2006,29 +2106,35 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                       />
                       <CommandList>
                         <CommandEmpty>Sin resultados.</CommandEmpty>
-                        <CommandGroup>
-                          {catalogOptions
-                            .filter(o => o.descripcion.toLowerCase().includes(catalogSearch.trim().toLowerCase()))
-                            .slice(0, 50)
-                            .map(o => (
-                              <CommandItem
-                                key={o.id}
-                                value={o.id}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onSelect={() => {
-                                  addCatalogItem(o.descripcion, o.precioUnitario);
-                                  setCatalogPickerOpen(false);
-                                  setCatalogSearch("");
-                                }}
-                                data-testid={`catalog-item-${o.id}`}
-                              >
-                                <span className="flex-1">{o.descripcion}</span>
-                                {o.precioUnitario > 0 && (
-                                  <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
-                                )}
-                              </CommandItem>
-                            ))}
-                        </CommandGroup>
+                        {catalogGroups.map(group => {
+                          const term = catalogSearch.trim().toLowerCase();
+                          const matches = term
+                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term))
+                            : group.options;
+                          if (matches.length === 0) return null;
+                          return (
+                            <CommandGroup key={group.label} heading={group.label}>
+                              {matches.slice(0, 50).map(o => (
+                                <CommandItem
+                                  key={o.id}
+                                  value={o.id}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onSelect={() => {
+                                    addCatalogItem(o.descripcion, o.precioUnitario);
+                                    setCatalogPickerOpen(false);
+                                    setCatalogSearch("");
+                                  }}
+                                  data-testid={`catalog-item-${o.id}`}
+                                >
+                                  <span className="flex-1">{o.descripcion}</span>
+                                  {o.precioUnitario > 0 && (
+                                    <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                  )}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          );
+                        })}
                       </CommandList>
                     </Command>
                   </PopoverContent>
