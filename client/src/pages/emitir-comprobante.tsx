@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Receipt, ArrowLeft } from "lucide-react";
+import { EmitirFacturaDialog } from "@/pages/billing";
+import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 
 // ── Áreas ──────────────────────────────────────────────────────────────────────
 // Mismos identificadores de área que ya usa EmitirComprobanteButton
@@ -88,6 +91,25 @@ function tiposParaSeleccion(operacion: Operacion, area: AreaId | ""): { value: s
 export default function EmitirComprobantePage() {
   const { user } = useAuth();
   const role = user?.role || "";
+
+  // Mismas queries que ya usan EmitirComprobanteButton (config de venta) y
+  // PurchaseInvoicesPage (proveedores/cuentas contables para compra) — no se
+  // duplica lógica de negocio, solo se reutiliza el mismo contrato de datos.
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
+
+  const { data: rawSuppliers = [] } = useQuery<any[]>({ queryKey: ["/api/accounting-suppliers"] });
+  const suppliers: Supplier[] = useMemo(() => rawSuppliers.map((r: any) => ({
+    id: r.id, razonSocial: r.razon_social, cuit: r.cuit, condicionIva: r.condicion_iva,
+    alicuotaIibb: parseFloat(r.alicuota_iibb || "0"),
+    alicuotaGanancias: parseFloat(r.alicuota_ganancias || "0"),
+    alicuotaIva: parseFloat(r.alicuota_iva || "0"),
+    cuentaContableId: r.cuenta_contable_id ? parseInt(r.cuenta_contable_id) : undefined,
+  })), [rawSuppliers]);
+
+  const { data: rawAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/accounting-accounts"] });
+  const accounts: AccountingAccount[] = useMemo(() => rawAccounts.map((r: any) => ({
+    id: r.id, codigo: r.codigo, nombre: r.nombre, tipo: r.tipo,
+  })), [rawAccounts]);
 
   const areasPermitidas = useMemo(
     () => AREAS.filter((a) => a.roles.includes(role)),
@@ -203,10 +225,37 @@ export default function EmitirComprobantePage() {
                 <Badge variant="secondary">{OPERACIONES.find((o) => o.id === operacion)?.label}</Badge>
                 <Badge>{tipos.find((t) => t.value === tipo)?.label}</Badge>
               </div>
-              <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                El formulario de carga para este tipo de comprobante todavía no está construido en esta primera
-                etapa — por ahora esta pantalla solo resuelve la selección de Área, Operación y Tipo.
-              </div>
+
+              {operacion === "venta" && (
+                <EmitirFacturaDialog
+                  embedded
+                  open
+                  onClose={resetSeleccion}
+                  config={billingConfig}
+                  allowedTipos={[tipo]}
+                  cashArea={area}
+                  showPaymentMethod
+                  operationKey={`centro-comprobantes-venta-${area}-${tipo}`}
+                />
+              )}
+
+              {operacion === "compra" && (
+                <InvoiceDialog
+                  embedded
+                  open
+                  onClose={resetSeleccion}
+                  suppliers={suppliers}
+                  accounts={accounts}
+                />
+              )}
+
+              {operacion === "movimiento" && (
+                <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  El motor de Movimiento Interno todavía no está conectado acá — a diferencia de Venta y Compra,
+                  el formulario actual de Inventario vive embebido dentro de esa página y no como un componente
+                  aparte, así que extraerlo con seguridad es un paso propio, pendiente de una próxima entrega.
+                </div>
+              )}
             </div>
           )}
         </CardContent>

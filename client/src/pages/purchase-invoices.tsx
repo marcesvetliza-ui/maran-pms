@@ -85,7 +85,7 @@ interface Invoice {
   subtipoRetencion?: string;
 }
 
-interface Supplier {
+export interface Supplier {
   id: number;
   razonSocial: string;
   cuit: string;
@@ -96,7 +96,7 @@ interface Supplier {
   cuentaContableId?: number;
 }
 
-interface AccountingAccount {
+export interface AccountingAccount {
   id: number;
   codigo: string;
   nombre: string;
@@ -272,18 +272,65 @@ function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
 }
 
-function InvoiceDialog({
+/**
+ * Renders InvoiceDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `header`/`children` is touched.
+ */
+function InvoiceFormShell({ embedded, open, onOpenChange, title, headerExtra, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Plain text/node — rendered as a real Radix DialogTitle in modal mode, or a plain heading when embedded (DialogTitle requires a real <Dialog> ancestor and throws otherwise). */
+  title: React.ReactNode;
+  /** Non-title header content (e.g. the step indicator) — rendered the same way in both modes. */
+  headerExtra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="invoice-form-embedded">
+        <div>
+          <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+          {headerExtra}
+        </div>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-2xl max-h-[92vh] overflow-y-auto"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {headerExtra}
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function InvoiceDialog({
   open,
   onClose,
   suppliers,
   accounts,
   editingInvoice,
+  embedded,
 }: {
   open: boolean;
   onClose: () => void;
   suppliers: Supplier[];
   accounts: AccountingAccount[];
   editingInvoice?: Invoice | null;
+  embedded?: boolean;
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm());
@@ -617,30 +664,27 @@ function InvoiceDialog({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
-      <DialogContent
-        className="max-w-2xl max-h-[92vh] overflow-y-auto"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>{isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}</DialogTitle>
-          {/* Step indicator */}
-          <div className="flex gap-1 mt-2">
-            {steps.map((s, i) => (
-              <div key={i} className="flex items-center">
-                <button
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
-                  onClick={() => i < step && setStep(i)}
-                >
-                  {i + 1}. {s}
-                </button>
-                {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
-              </div>
-            ))}
-          </div>
-        </DialogHeader>
-
+    <InvoiceFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={(v) => { if (!v) resetDialog(); }}
+      title={isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
+      headerExtra={
+        <div className="flex gap-1 mt-2">
+          {steps.map((s, i) => (
+            <div key={i} className="flex items-center">
+              <button
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+                onClick={() => i < step && setStep(i)}
+              >
+                {i + 1}. {s}
+              </button>
+              {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
+            </div>
+          ))}
+        </div>
+      }
+    >
         <div className="py-2 space-y-4">
           {/* STEP 0: Encabezado */}
           {step === 0 && (
@@ -1269,9 +1313,7 @@ function InvoiceDialog({
           </div>
         </DialogFooter>
         </div>
-      </DialogContent>
-
-    </Dialog>
+    </InvoiceFormShell>
 
     {/* Quick-create supplier dialog — rendered OUTSIDE main Dialog to avoid Radix nesting issues */}
     <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
