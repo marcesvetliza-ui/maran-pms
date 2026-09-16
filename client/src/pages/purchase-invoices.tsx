@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { buildInventorySupplierUpdate } from "@/lib/inventory-supplier-association";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -532,7 +533,8 @@ export function InvoiceDialog({
           const itemRes = await apiRequest("POST", "/api/inventory/items", {
             name: row.name.trim(),
             categoryId: row.categoryId || undefined,
-            supplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
+            accountingSupplierIds: form.supplierId ? [parseInt(form.supplierId)] : [],
+            preferredAccountingSupplierId: form.supplierId ? parseInt(form.supplierId) : null,
             unit: row.unit,
             costPrice: row.costPrice,
             currentStock: row.quantity,
@@ -578,12 +580,16 @@ export function InvoiceDialog({
               sourceType: "purchase_invoice",
               sourceId: String(invoice.id),
             });
-            // Update cost price on the item if provided
-            if (parseFloat(row.costPrice) > 0) {
-              await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
-                costPrice: row.costPrice,
-              });
-            }
+          }
+
+          const existingItem = existingInvItems.find((item) => item.id === row.existingItemId);
+          const supplierUpdate = buildInventorySupplierUpdate(
+            existingItem?.suppliers ?? [],
+            form.supplierId ? parseInt(form.supplierId) : null,
+            row.costPrice,
+          );
+          if (Object.keys(supplierUpdate).length > 0) {
+            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, supplierUpdate);
           }
           inventoryCount++;
         } catch (e) {

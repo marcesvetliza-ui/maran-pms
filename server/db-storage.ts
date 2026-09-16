@@ -84,7 +84,7 @@ import {
   type Recipe, type InsertRecipe,
   type RecipeIngredient, type InsertRecipeIngredient, type RecipeWithIngredients,
   type ItemCategory, type InsertItemCategory,
-  type Supplier, type InsertSupplier,
+  type AccountingSupplier,
   type InventoryItem, type InsertInventoryItem, type InventoryItemWithDetails,
   type StockMovement, type InsertStockMovement, type StockMovementWithItem,
   type SpaCabin, type InsertSpaCabin,
@@ -138,7 +138,7 @@ import {
   restaurantReservationAdvances,
   type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
-  itemCategories, suppliers, inventoryItems, stockMovements, warehouseStock,
+  itemCategories, inventoryItems, inventoryItemSuppliers, accountingSuppliers, stockMovements, warehouseStock,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
   spaTreatmentResources, spaAppointmentResources,
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
@@ -4726,40 +4726,30 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getSuppliers(): Promise<Supplier[]> {
-    return db.select().from(suppliers);
-  }
-
-  async getSupplier(id: string): Promise<Supplier | undefined> {
-    const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, id));
-    return supplier;
-  }
-
-  async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
-    const [created] = await db.insert(suppliers).values(supplier as any).returning();
-    return created;
-  }
-
-  async updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined> {
-    const [updated] = await db.update(suppliers).set(supplier as any).where(eq(suppliers.id, id)).returning();
-    return updated;
-  }
-
-  async deleteSupplier(id: string): Promise<boolean> {
-    const result = await db.delete(suppliers).where(eq(suppliers.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-
   async getInventoryItems(): Promise<InventoryItemWithDetails[]> {
     const items = await db.select().from(inventoryItems);
     const cats = await db.select().from(itemCategories);
-    const sups = await db.select().from(suppliers);
+    const links = await db.select().from(inventoryItemSuppliers);
+    const supplierIds = [...new Set(links.map(link => link.accountingSupplierId))];
+    const sups = supplierIds.length
+      ? await db.select().from(accountingSuppliers).where(inArray(accountingSuppliers.id, supplierIds))
+      : [];
     const catsMap = new Map(cats.map(c => [c.id, c]));
     const supsMap = new Map(sups.map(s => [s.id, s]));
+    const linksMap = new Map<string, typeof links>();
+    for (const link of links) linksMap.set(link.itemId, [...(linksMap.get(link.itemId) ?? []), link]);
     return items.map(i => ({
       ...i,
       category: i.categoryId ? catsMap.get(i.categoryId) : undefined,
-      supplier: i.supplierId ? supsMap.get(i.supplierId) : undefined,
+      suppliers: (linksMap.get(i.id) ?? []).flatMap(link => {
+        const supplier = supsMap.get(link.accountingSupplierId);
+        return supplier ? [{
+          id: supplier.id,
+          razonSocial: supplier.razonSocial,
+          cuit: supplier.cuit,
+          isPreferred: link.isPreferred,
+        }] : [];
+      }),
     }));
   }
 
@@ -4767,8 +4757,25 @@ export class DatabaseStorage implements IStorage {
     const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
     if (!item) return undefined;
     const category = item.categoryId ? (await db.select().from(itemCategories).where(eq(itemCategories.id, item.categoryId)))[0] : undefined;
-    const supplier = item.supplierId ? (await db.select().from(suppliers).where(eq(suppliers.id, item.supplierId)))[0] : undefined;
-    return { ...item, category, supplier };
+    const links = await db.select().from(inventoryItemSuppliers).where(eq(inventoryItemSuppliers.itemId, id));
+    const supplierIds = links.map(link => link.accountingSupplierId);
+    const sups = supplierIds.length
+      ? await db.select().from(accountingSuppliers).where(inArray(accountingSuppliers.id, supplierIds))
+      : [];
+    const supsMap = new Map(sups.map(s => [s.id, s]));
+    return {
+      ...item,
+      category,
+      suppliers: links.flatMap(link => {
+        const supplier = supsMap.get(link.accountingSupplierId);
+        return supplier ? [{
+          id: supplier.id,
+          razonSocial: supplier.razonSocial,
+          cuit: supplier.cuit,
+          isPreferred: link.isPreferred,
+        }] : [];
+      }),
+    };
   }
 
   async getInventoryItemsBelowMinStock(): Promise<InventoryItem[]> {
@@ -4777,13 +4784,64 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem> {
-    const [created] = await db.insert(inventoryItems).values(item as any).returning();
+  async createInventoryItem(item: InsertInventoryItem & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem> {
+    const { accountingSupplierIds = [], preferredAccountingSupplierId = null, ...itemValues } = item;
+    if (!Array.isArray(accountingSupplierIds)) throw new Error("La lista de proveedores contables es inválida");
+    const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
+    if (preferredAccountingSupplierId !== null && !uniqueIds.includes(Number(preferredAccountingSupplierId))) {
+      throw new Error("El proveedor preferido debe estar asociado al artículo");
+    }
+    const [created] = await db.transaction(async (tx) => {
+      if (uniqueIds.length) {
+        const existingSuppliers = await tx
+          .select({ id: accountingSuppliers.id })
+          .from(accountingSuppliers)
+          .where(inArray(accountingSuppliers.id, uniqueIds));
+        if (uniqueIds.length !== existingSuppliers.length) {
+          throw new Error("Uno o más proveedores contables no existen");
+        }
+      }
+      const [newItem] = await tx.insert(inventoryItems).values(itemValues as any).returning();
+      if (uniqueIds.length) {
+        await tx.insert(inventoryItemSuppliers).values(uniqueIds.map(accountingSupplierId => ({
+          itemId: newItem.id,
+          accountingSupplierId,
+          isPreferred: accountingSupplierId === Number(preferredAccountingSupplierId),
+        })));
+      }
+      return [newItem];
+    });
     return created;
   }
 
-  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined> {
-    const [updated] = await db.update(inventoryItems).set(item as any).where(eq(inventoryItems.id, id)).returning();
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined> {
+    const { accountingSupplierIds, preferredAccountingSupplierId, ...itemValues } = item;
+    if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
+      throw new Error("La lista de proveedores contables es inválida");
+    }
+    const [updated] = await db.transaction(async (tx) => {
+      const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
+      if (!result) return [];
+      if (accountingSupplierIds !== undefined) {
+        const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
+        if (preferredAccountingSupplierId !== null && preferredAccountingSupplierId !== undefined && !uniqueIds.includes(Number(preferredAccountingSupplierId))) {
+          throw new Error("El proveedor preferido debe estar asociado al artículo");
+        }
+        const existing = uniqueIds.length
+          ? await tx.select({ id: accountingSuppliers.id }).from(accountingSuppliers).where(inArray(accountingSuppliers.id, uniqueIds))
+          : [];
+        if (existing.length !== uniqueIds.length) throw new Error("Uno o más proveedores contables no existen");
+        await tx.delete(inventoryItemSuppliers).where(eq(inventoryItemSuppliers.itemId, id));
+        if (uniqueIds.length) {
+          await tx.insert(inventoryItemSuppliers).values(uniqueIds.map(accountingSupplierId => ({
+            itemId: id,
+            accountingSupplierId,
+            isPreferred: accountingSupplierId === Number(preferredAccountingSupplierId),
+          })));
+        }
+      }
+      return [result];
+    });
     return updated;
   }
 

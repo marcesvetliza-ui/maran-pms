@@ -2656,6 +2656,109 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Unify inventory suppliers with the accounting supplier master. This one
+  // must fail startup instead of being swallowed: application code requires
+  // the junction table as soon as the process begins serving requests.
+  await db.execute(sql.raw(serializeIncrementalDdl(`
+    DO $migration$
+    DECLARE
+      unexpected_legacy_ids text;
+      purchase_supplier_type text;
+      purchase_orders_have_rows boolean;
+    BEGIN
+      IF to_regclass('public.suppliers') IS NOT NULL THEN
+        EXECUTE $query$
+          SELECT string_agg(id::text, ', ' ORDER BY id::text)
+          FROM suppliers
+          WHERE id::text NOT IN ('sup1', 'sup2', 'sup3')
+        $query$ INTO unexpected_legacy_ids;
+        IF unexpected_legacy_ids IS NOT NULL THEN
+          RAISE EXCEPTION
+            'Migración detenida: suppliers contiene IDs no reconocidos: %',
+            unexpected_legacy_ids;
+        END IF;
+      END IF;
+
+      IF to_regclass('public.purchase_orders') IS NOT NULL THEN
+        SELECT data_type INTO purchase_supplier_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'purchase_orders'
+          AND column_name = 'supplier_id';
+
+        IF purchase_supplier_type IS NOT NULL
+          AND purchase_supplier_type <> 'integer' THEN
+          EXECUTE 'SELECT EXISTS (SELECT 1 FROM purchase_orders)'
+            INTO purchase_orders_have_rows;
+          IF purchase_orders_have_rows THEN
+            RAISE EXCEPTION
+              'Migración detenida: purchase_orders contiene órdenes con proveedor legacy';
+          END IF;
+          EXECUTE 'ALTER TABLE purchase_orders DROP COLUMN supplier_id';
+          purchase_supplier_type := NULL;
+        END IF;
+
+        IF purchase_supplier_type IS NULL THEN
+          EXECUTE 'ALTER TABLE purchase_orders ADD COLUMN supplier_id integer';
+        END IF;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'inventory_items'
+          AND column_name = 'supplier_id'
+      ) THEN
+        EXECUTE 'ALTER TABLE inventory_items DROP COLUMN supplier_id';
+      END IF;
+
+      IF to_regclass('public.suppliers') IS NOT NULL THEN
+        EXECUTE 'DROP TABLE suppliers';
+      END IF;
+
+      IF to_regclass('public.inventory_item_suppliers') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE TABLE inventory_item_suppliers (
+            item_id varchar NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            accounting_supplier_id integer NOT NULL REFERENCES accounting_suppliers(id) ON DELETE RESTRICT,
+            is_preferred boolean NOT NULL DEFAULT false,
+            PRIMARY KEY (item_id, accounting_supplier_id)
+          )
+        $ddl$;
+      END IF;
+
+      IF to_regclass('public.inventory_item_suppliers_supplier_idx') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE INDEX inventory_item_suppliers_supplier_idx
+          ON inventory_item_suppliers (accounting_supplier_id)
+        $ddl$;
+      END IF;
+
+      IF to_regclass('public.inventory_item_suppliers_preferred_idx') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE UNIQUE INDEX inventory_item_suppliers_preferred_idx
+          ON inventory_item_suppliers (item_id) WHERE is_preferred = true
+        $ddl$;
+      END IF;
+    END
+    $migration$;
+
+    DO $migration$
+    BEGIN
+      IF to_regclass('public.purchase_orders') IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'purchase_orders_supplier_id_accounting_suppliers_fk'
+            AND conrelid = 'public.purchase_orders'::regclass
+        ) THEN
+        ALTER TABLE purchase_orders
+          ADD CONSTRAINT purchase_orders_supplier_id_accounting_suppliers_fk
+          FOREIGN KEY (supplier_id) REFERENCES accounting_suppliers(id);
+      END IF;
+    END
+    $migration$;
+  `)));
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

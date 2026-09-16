@@ -108,8 +108,7 @@ import {
   // Inventory
   type ItemCategory,
   type InsertItemCategory,
-  type Supplier,
-  type InsertSupplier,
+  type AccountingSupplier,
   type InventoryItem,
   type InsertInventoryItem,
   type InventoryItemWithDetails,
@@ -588,19 +587,12 @@ export interface IStorage {
   updateItemCategory(id: string, category: Partial<InsertItemCategory>): Promise<ItemCategory | undefined>;
   deleteItemCategory(id: string): Promise<boolean>;
 
-  // Suppliers
-  getSuppliers(): Promise<Supplier[]>;
-  getSupplier(id: string): Promise<Supplier | undefined>;
-  createSupplier(supplier: InsertSupplier): Promise<Supplier>;
-  updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined>;
-  deleteSupplier(id: string): Promise<boolean>;
-
   // Inventory Items
   getInventoryItems(): Promise<InventoryItemWithDetails[]>;
   getInventoryItem(id: string): Promise<InventoryItemWithDetails | undefined>;
   getInventoryItemsBelowMinStock(): Promise<InventoryItem[]>;
-  createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
-  updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined>;
+  createInventoryItem(item: InsertInventoryItem & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem>;
+  updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined>;
   deleteInventoryItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }>;
 
   // Stock Movements

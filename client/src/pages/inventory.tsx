@@ -24,7 +24,6 @@ import {
   Plus, 
   Package, 
   AlertTriangle, 
-  Building2,
   Loader2,
   Search,
   TrendingDown,
@@ -67,17 +66,11 @@ type ItemCategory = {
   isGroup: boolean;
 };
 
-type Supplier = {
-  id: string;
-  name: string;
-  contactName: string | null;
-  phone: string | null;
-  email: string | null;
-  address: string | null;
-  cuit: string | null;
-  paymentTermDays: number | null;
-  notes: string | null;
-  isActive: string | null;
+type AccountingSupplier = {
+  id: number;
+  razon_social: string;
+  cuit: string;
+  activo: boolean | null;
 };
 
 type InventoryItem = {
@@ -86,7 +79,6 @@ type InventoryItem = {
   name: string;
   description: string | null;
   categoryId: string | null;
-  supplierId: string | null;
   unit: "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
   costPrice: string;
   minStock: number;
@@ -96,7 +88,7 @@ type InventoryItem = {
   isActive: string | null;
   itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
   category?: ItemCategory;
-  supplier?: Supplier;
+  suppliers?: Array<{ id: number; razonSocial: string; cuit: string; isPreferred: boolean }>;
 };
 
 type StockMovement = {
@@ -744,8 +736,8 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/categories"],
   });
 
-  const { data: suppliers = [] } = useQuery<Supplier[]>({
-    queryKey: ["/api/inventory/suppliers"],
+  const { data: accountingSuppliers = [] } = useQuery<AccountingSupplier[]>({
+    queryKey: ["/api/accounting-suppliers"],
   });
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<InventoryItem[]>({
@@ -1049,7 +1041,7 @@ export default function InventoryPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Inventario</h1>
-          <p className="text-muted-foreground">Gestiona stock, proveedores y movimientos</p>
+          <p className="text-muted-foreground">Gestiona stock, artículos y movimientos</p>
         </div>
         <div className="flex gap-2">
           <Link href="/purchase-invoices">
@@ -1090,15 +1082,6 @@ export default function InventoryPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
-            <CardTitle className="text-sm font-medium">Proveedores</CardTitle>
-            <Building2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{suppliers.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
             <CardTitle className="text-sm font-medium">Valor Total</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -1123,10 +1106,6 @@ export default function InventoryPage() {
           <TabsTrigger value="movements" data-testid="tab-movements">
             <History className="h-4 w-4 mr-2" />
             Movimientos
-          </TabsTrigger>
-          <TabsTrigger value="suppliers" data-testid="tab-suppliers">
-            <Building2 className="h-4 w-4 mr-2" />
-            Proveedores
           </TabsTrigger>
           <TabsTrigger value="categorias" data-testid="tab-categorias">
             <Tag className="h-4 w-4 mr-2" />
@@ -1470,60 +1449,6 @@ export default function InventoryPage() {
               </div>
             );
           })()}
-        </TabsContent>
-
-        <TabsContent value="suppliers" className="space-y-4">
-          <div className="flex items-center justify-end">
-            <Button data-testid="button-add-supplier">
-              <Plus className="h-4 w-4 mr-2" />
-              Nuevo Proveedor
-            </Button>
-          </div>
-          {suppliers.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <Building2 className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Sin proveedores</h3>
-                <p className="text-muted-foreground mb-4">Agrega proveedores para gestionar compras</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {suppliers.map((supplier) => (
-                <Card key={supplier.id} data-testid={`supplier-${supplier.id}`}>
-                  <CardHeader>
-                    <CardTitle className="text-base">{supplier.name}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    {supplier.contactName && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Contacto:</span>
-                        <span>{supplier.contactName}</span>
-                      </div>
-                    )}
-                    {supplier.phone && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Telefono:</span>
-                        <span>{supplier.phone}</span>
-                      </div>
-                    )}
-                    {supplier.email && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Email:</span>
-                        <span className="truncate ml-2">{supplier.email}</span>
-                      </div>
-                    )}
-                    {supplier.cuit && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">CUIT:</span>
-                        <span>{supplier.cuit}</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
         </TabsContent>
 
         <TabsContent value="categorias" className="space-y-6">
@@ -2411,7 +2336,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </DialogHeader>
           <NewItemForm
             categories={categories}
-            suppliers={suppliers}
+            suppliers={accountingSuppliers}
             existingItems={items}
             onSubmit={(data) => createItemMutation.mutate(data)}
             isPending={createItemMutation.isPending}
@@ -2582,7 +2507,7 @@ function NewItemForm({
   onCancel,
 }: {
   categories: ItemCategory[];
-  suppliers: Supplier[];
+  suppliers: AccountingSupplier[];
   existingItems: InventoryItem[];
   onSubmit: (data: Partial<InventoryItem>) => void;
   isPending: boolean;
@@ -2590,7 +2515,9 @@ function NewItemForm({
 }) {
   const [name, setName] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierIds, setSupplierIds] = useState<number[]>([]);
+  const [preferredSupplierId, setPreferredSupplierId] = useState("");
+  const [supplierSearch, setSupplierSearch] = useState("");
   const [unit, setUnit] = useState<string>("unidad");
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState(0);
@@ -2660,19 +2587,48 @@ function NewItemForm({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Proveedor</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger data-testid="select-supplier">
-              <SelectValue placeholder="Seleccionar proveedor" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.filter(sup => sup.id).map((sup) => (
-                <SelectItem key={sup.id} value={sup.id}>
-                  {sup.name}
-                </SelectItem>
+          <Label>Proveedores contables</Label>
+          <Input
+            value={supplierSearch}
+            onChange={(event) => setSupplierSearch(event.target.value)}
+            placeholder="Buscar por razón social o CUIT..."
+            data-testid="input-accounting-supplier-search"
+          />
+          <div className="max-h-32 overflow-y-auto rounded-md border p-2 space-y-1" data-testid="select-accounting-suppliers">
+            {suppliers
+              .filter(sup => sup.activo !== false)
+              .filter((sup) => {
+                const query = supplierSearch.trim().toLowerCase();
+                return !query
+                  || sup.razon_social.toLowerCase().includes(query)
+                  || sup.cuit.toLowerCase().includes(query);
+              })
+              .map((sup) => (
+              <label key={sup.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={supplierIds.includes(sup.id)}
+                  onChange={(event) => {
+                    setSupplierIds(current => event.target.checked ? [...current, sup.id] : current.filter(id => id !== sup.id));
+                    if (!event.target.checked && preferredSupplierId === String(sup.id)) setPreferredSupplierId("");
+                  }}
+                />
+                <span>{sup.razon_social} ({sup.cuit})</span>
+              </label>
               ))}
-            </SelectContent>
-          </Select>
+          </div>
+          {supplierIds.length > 0 && (
+            <Select value={preferredSupplierId} onValueChange={setPreferredSupplierId}>
+              <SelectTrigger data-testid="select-preferred-supplier">
+                <SelectValue placeholder="Proveedor preferido (opcional)" />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliers.filter(sup => supplierIds.includes(sup.id)).map(sup => (
+                  <SelectItem key={sup.id} value={String(sup.id)}>{sup.razon_social}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
       <div className="space-y-2">
@@ -2735,7 +2691,8 @@ function NewItemForm({
             onSubmit({
               name,
               categoryId: categoryId || undefined,
-              supplierId: supplierId || undefined,
+              accountingSupplierIds: supplierIds,
+              preferredAccountingSupplierId: preferredSupplierId ? Number(preferredSupplierId) : null,
               unit: unit as any,
               costPrice,
               minStock,
