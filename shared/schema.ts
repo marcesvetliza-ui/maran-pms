@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1365,24 +1365,6 @@ export const insertItemCategorySchema = createInsertSchema(itemCategories).omit(
 export type InsertItemCategory = z.infer<typeof insertItemCategorySchema>;
 export type ItemCategory = typeof itemCategories.$inferSelect;
 
-// Suppliers (Proveedores)
-export const suppliers = pgTable("suppliers", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  contactName: text("contact_name"),
-  phone: text("phone"),
-  email: text("email"),
-  address: text("address"),
-  cuit: text("cuit"),
-  paymentTermDays: integer("payment_term_days").default(30),
-  notes: text("notes"),
-  isActive: text("is_active").default("true"),
-});
-
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true });
-export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
-export type Supplier = typeof suppliers.$inferSelect;
-
 // Inventory Items (Articulos)
 export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
 
@@ -1397,7 +1379,6 @@ export const inventoryItems = pgTable("inventory_items", {
   name: text("name").notNull(),
   description: text("description"),
   categoryId: varchar("category_id"),
-  supplierId: varchar("supplier_id"),
   unit: text("unit").$type<UnitType>().notNull().default("unidad"),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).default("0"),
   minStock: decimal("min_stock", { precision: 10, scale: 3 }).default("0"),
@@ -1414,7 +1395,7 @@ export type InventoryItem = typeof inventoryItems.$inferSelect;
 
 export type InventoryItemWithDetails = InventoryItem & {
   category?: ItemCategory;
-  supplier?: Supplier;
+  suppliers?: Array<Pick<AccountingSupplier, "id" | "razonSocial" | "cuit"> & { isPreferred: boolean }>;
 };
 
 // Stock Movements (Movimientos de Stock)
@@ -1499,7 +1480,7 @@ export type PurchaseOrderStatus = "draft" | "sent" | "partial" | "received" | "c
 export const purchaseOrders = pgTable("purchase_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull(),
-  supplierId: varchar("supplier_id").notNull(),
+  supplierId: integer("supplier_id").references(() => accountingSuppliers.id),
   status: text("status").$type<PurchaseOrderStatus>().notNull().default("draft"),
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).default("0"),
   tax: decimal("tax", { precision: 12, scale: 2 }).default("0"),
@@ -1530,7 +1511,7 @@ export type InsertPurchaseOrderItem = z.infer<typeof insertPurchaseOrderItemSche
 export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
 
 export type PurchaseOrderWithDetails = PurchaseOrder & {
-  supplier: Supplier;
+  supplier: AccountingSupplier;
   items: (PurchaseOrderItem & { item: InventoryItem })[];
 };
 
@@ -2288,7 +2269,7 @@ export type AccountMovementAllocation = typeof accountMovementAllocations.$infer
 // MÓDULO CONTABLE / ADMINISTRATIVO
 // ============================================================
 
-// Proveedores contables (separado de suppliers del inventario)
+// Maestro único de proveedores para Contabilidad, Compras e Inventario
 export const accountingSuppliers = pgTable("accounting_suppliers", {
   id: serial("id").primaryKey(),
   razonSocial: text("razon_social").notNull(),
@@ -2311,6 +2292,21 @@ export const accountingSuppliers = pgTable("accounting_suppliers", {
 export const insertAccountingSupplierSchema = createInsertSchema(accountingSuppliers).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertAccountingSupplier = z.infer<typeof insertAccountingSupplierSchema>;
 export type AccountingSupplier = typeof accountingSuppliers.$inferSelect;
+
+export const inventoryItemSuppliers = pgTable("inventory_item_suppliers", {
+  itemId: varchar("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
+  accountingSupplierId: integer("accounting_supplier_id").notNull().references(() => accountingSuppliers.id, { onDelete: "restrict" }),
+  isPreferred: boolean("is_preferred").notNull().default(false),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.itemId, table.accountingSupplierId] }),
+  preferredItemIdx: uniqueIndex("inventory_item_suppliers_preferred_idx")
+    .on(table.itemId)
+    .where(sql`${table.isPreferred} = true`),
+  supplierIdx: index("inventory_item_suppliers_supplier_idx").on(table.accountingSupplierId),
+}));
+
+export type InventoryItemSupplier = typeof inventoryItemSuppliers.$inferSelect;
+export type InsertInventoryItemSupplier = typeof inventoryItemSuppliers.$inferInsert;
 
 // Plan de Cuentas Contables
 export const accountingAccounts = pgTable("accounting_accounts", {

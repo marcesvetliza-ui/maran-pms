@@ -49,46 +49,8 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  // Suppliers
-  app.get("/api/inventory/suppliers", async (req, res) => {
-    try {
-      const suppliers = await storage.getSuppliers();
-      res.json(suppliers);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching suppliers" });
-    }
-  });
-
-  app.post("/api/inventory/suppliers", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      const supplier = await storage.createSupplier(req.body);
-      res.status(201).json(supplier);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating supplier" });
-    }
-  });
-
-  app.patch("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      const supplier = await storage.updateSupplier(req.params.id, req.body);
-      if (!supplier) return res.status(404).json({ error: "Supplier not found" });
-      res.json(supplier);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating supplier" });
-    }
-  });
-
-  app.delete("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      await storage.deleteSupplier(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting supplier" });
-    }
-  });
-
   // Inventory Items
-  app.get("/api/inventory/items", async (req, res) => {
+  app.get("/api/inventory/items", requireAuth, async (req, res) => {
     try {
       let items = await storage.getInventoryItems();
       const area = req.query.area as string | undefined;
@@ -108,7 +70,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.get("/api/inventory/items/low-stock", async (req, res) => {
+  app.get("/api/inventory/items/low-stock", requireAuth, async (req, res) => {
     try {
       const items = await storage.getInventoryItemsBelowMinStock();
       res.json(items);
@@ -171,8 +133,9 @@ export function registerInventoryRoutes(app: Express) {
       }
 
       res.status(201).json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating inventory item" });
+    } catch (error: any) {
+      const status = error?.message?.includes("proveedor") ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Error creating inventory item" });
     }
   });
 
@@ -181,8 +144,9 @@ export function registerInventoryRoutes(app: Express) {
       const item = await storage.updateInventoryItem(req.params.id, req.body);
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating inventory item" });
+    } catch (error: any) {
+      const status = error?.message?.includes("proveedor") ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Error updating inventory item" });
     }
   });
 
