@@ -1,0 +1,46 @@
+Acá va el prompt actualizado con todo lo corregido:
+
+---
+
+**Unificación de emisión de comprobantes — Centro de Comprobantes único**
+
+Hoy la emisión de comprobantes está dispersa en varios botones con distinta lógica y distinto ancho de pantalla. La idea es construir **una sola pantalla física, un solo componente**, que sirva para emitir cualquier tipo de comprobante del hotel — venta, compra o movimiento interno de mercadería — y agregarla como un **punto de entrada nuevo, sin reemplazar ni borrar nada todavía**.
+
+**Etapa 1 — no se toca ningún botón existente.** Se agrega un ítem nuevo "Emitir Comprobante" en el sidebar izquierdo, dentro del módulo "Operaciones" (donde ya están Housekeeping, Mantenimiento, Inventario, Recetas y Costos — mismo patrón de la lista de menú). Todos los botones actuales (Reservas, Eventos, Compras, Inventario) siguen funcionando exactamente igual que hoy, en paralelo, hasta que la pantalla nueva esté probada y aprobada. Recién ahí se decide, caso por caso, si alguno se retira.
+
+**Los 5 puntos de entrada que en algún momento futuro podrían apuntar a esta pantalla (no ahora, es la referencia de qué cubre):**
+1. Módulo Reservas → botón general "Emitir Comprobante" del encabezado del módulo (el que está junto a "Lista de Espera" / "Nueva Reserva" — **no** el que se usa al facturar una reserva puntual ya abierta, ese sigue intacto)
+2. Eventos → "Nuevo Comprobante"
+3. Comprobantes de Compra → "Nuevo Comprobante"
+4. Inventario → "Nuevo Artículo"
+5. Inventario → "Movimiento Interno"
+
+**Lo que nunca se toca:** la facturación de una reserva específica ya abierta (su folio, su checkout), y todo lo de Restaurant, Spa y Grupos (ligados a un pedido o cuenta puntual) — siguen con su flujo actual para siempre, no están en este proyecto.
+
+**El modelo de referencia:** el sistema de escritorio anterior del hotel tenía un único menú "Emisión de Comprobantes" — elegís terminal/punto de venta, después un tipo de comprobante de una lista, y sin importar cuál elijas (venta, compra, traspaso de depósito) te abre **la misma ventana**: cliente/proveedor arriba, cabecera del comprobante, grilla de ítems (cuenta contable, centro de costo, detalle, cantidad, precio, impuesto), totales, Grabar/Cancelar. No es un enrutador a pantallas distintas — es una sola pantalla que muestra/oculta secciones según lo elegido.
+
+**Flujo de selección (con un filtro previo, a diferencia del sistema viejo que tenía una lista plana sin agrupar):**
+1. Área
+2. Operación: Venta / Compra / Movimiento Interno
+3. Tipo específico:
+   - Venta: Factura A, B, MiPyME A, Ticket, NC A/B/MiPyME, ND A/B/MiPyME, Comprobante T (solo desde Alojamiento), Voucher (documento comercial, no fiscal)
+   - Compra: Factura A/B/C, NC A/B/C
+   - Movimiento Interno: Desayuno, Evento, Desperdicio, Transferencia entre depósitos, Otro
+
+**Permisos por rol.** El sistema ya tiene roles granulares (`reception`, `restaurant`, `spa`, `events`, `admin`, `manager`, `resp_administracion`, etc.) y ya los usa para filtrar qué ve cada quien (cada ítem del sidebar tiene su lista de roles permitidos; `EmitirComprobanteButton` ya filtra qué tipos de comprobante puede emitir cada área). Hay que extender ese mismo mecanismo acá: un mozo de Restaurant con rol `restaurant` solo debería ver las opciones de Restaurant al entrar a esta pantalla (o entrar directo con esa área fija, sin poder cambiarla), un recepcionista ve las de Alojamiento, y `admin`/`manager` ven todo. Validar en las dos capas, como ya se hace en el resto del sistema: ocultar en el frontend lo que el rol no puede usar, pero además el servidor debe rechazar cualquier intento de forzar un tipo no permitido — no alcanza con ocultarlo en la pantalla.
+
+**Ancho y formato:** igual al de "Nuevo Presupuesto" en Presupuestos — ancho, no el diálogo angosto de hoy.
+
+**La grilla de ítems no busca siempre en el mismo catálogo** — cambia según la operación:
+- Venta: catálogo de lo que se vende por área (tarifas, menú, paquetes), a precio de venta.
+- Compra y Movimiento Interno: catálogo de artículos de nuestro inventario, a precio de costo.
+
+**No se pierde ningún campo actual** — se fusionan en la pantalla única:
+- Venta: tipo de comprobante, condición de IVA, cuenta corriente, forma de pago (separada del tipo de comprobante), emisión con CAE real de ARCA.
+- Compra: proveedor con CUIT autocompletado, punto de venta y número del proveedor, fecha de emisión, período, condición de pago, neto por alícuota (varias alícuotas por comprobante), IVA automático, exento, no gravado, impuestos internos, Ley 25.413, percepciones, retenciones, cuenta contable, centro de costo, observaciones.
+
+**Receptor/proveedor:** usar los buscadores de huéspedes/empresas/agencias ya cargadas en la base que ya existen en el sistema — no reconstruirlos de cero.
+
+**"Nuevo Artículo" no es un tipo de comprobante** — es un alta de catálogo. Dentro del selector de ítems de la pantalla debe poder crearse un artículo nuevo al vuelo ("+ Crear artículo"), pero la pantalla única también debe poder abrirse directamente en modo "alta de artículo" para cuando se retire ese botón puntual de Inventario.
+
+Confirmanos si esto quedó claro, si ves algún problema con el enfoque, y cómo lo plantearías técnicamente para construirlo en esta primera etapa (solo agregar, sin tocar nada existente).
