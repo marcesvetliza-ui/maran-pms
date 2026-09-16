@@ -118,6 +118,11 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
 const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+
+// cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
+// and the Centro de Comprobantes) uses "events" while pos_configs.area (see
+// pos-configs.tsx) uses the Spanish "eventos" — everything else matches as-is.
+const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
@@ -744,6 +749,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const originalRecipientRef = useRef<Record<string, string>>({});
   const saveRecipientOnEmitRef = useRef(false);
   const initializedOperationRef = useRef<string | null>(null);
+  const pvAutoSelectedForRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
@@ -839,6 +845,24 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dialogOperationKey]);
+
+  // Pre-select the Punto de Venta for the operation's área (e.g. Recepción)
+  // when there's exactly one active electronic PV configured for it, instead
+  // of always leaving it on the generic "PV por defecto" placeholder. Waits
+  // for posConfigsData to load and never overrides a value already set
+  // (auto or manual) for this same operation.
+  useEffect(() => {
+    if (!open || !cashArea) return;
+    if (pvAutoSelectedForRef.current === dialogOperationKey) return;
+    if (posConfigsData.length === 0) return; // wait for the PV list to load, retry next render
+    // Decide once per operation — resetForm() above always clears
+    // puntoVentaNum first, so this never fights a value it hasn't set itself;
+    // reading puntoVentaNum here would race that same-commit reset.
+    pvAutoSelectedForRef.current = dialogOperationKey;
+    const pvArea = CASH_AREA_TO_PV_AREA[cashArea] ?? cashArea;
+    const matches = posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico" && p.area === pvArea);
+    if (matches.length === 1) setPuntoVentaNum(String(matches[0].numero));
+  }, [open, cashArea, posConfigsData, dialogOperationKey]);
 
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
@@ -1200,7 +1224,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   });
 
   function resetForm() {
-    setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
+    // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
+    // locking a single tipo already chosen in its selector) instead of always
+    // forcing FB — FB may not even be an allowed option, which left the
+    // Select with a tipo value that matched no SelectItem (blank dropdown).
+    setTipo(tipos.includes("FB") ? "FB" : tipos[0]); setRazonSocial(""); setCuit(""); setDni("");
     setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
