@@ -32,6 +32,7 @@ const ReviewsPage = lazy(() => import("@/pages/reviews"));
 const HousekeepingPage = lazy(() => import("@/pages/housekeeping"));
 const RestaurantPage = lazy(() => import("@/pages/restaurant"));
 const InventoryPage = lazy(() => import("@/pages/inventory"));
+const EmitirComprobantePage = lazy(() => import("@/pages/emitir-comprobante"));
 const SpaPage = lazy(() => import("@/pages/spa"));
 const EventsPage = lazy(() => import("@/pages/events"));
 const MaintenancePage = lazy(() => import("@/pages/maintenance"));
@@ -226,6 +227,9 @@ function Router() {
         <Route path="/restaurant" component={RestaurantPage} />
         <Route path="/restaurant/recetas" component={RecetasCostosPage} />
         <Route path="/inventory" component={InventoryPage} />
+        <Route path="/operaciones/emitir-comprobante">
+          {() => <RoleRoute component={EmitirComprobantePage} roles={["admin", "manager", "reception", "restaurant", "spa", "events", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"]} />}
+        </Route>
         <Route path="/spa" component={SpaPage} />
         <Route path="/spa-clients" component={SpaClientsPage} />
         <Route path="/gift-vouchers" component={GiftVouchersPage} />

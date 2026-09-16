@@ -52,6 +52,7 @@ import {
   Gift,
   CreditCard,
   FileWarning,
+  Receipt,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -103,6 +104,7 @@ const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracio
 const CC_ROLES          = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
 const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
 const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
+const EMITIR_COMPROBANTE_ROLES = ["admin","manager","reception","restaurant","spa","events","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
@@ -169,6 +171,7 @@ const menuSections = [
       { label: "Mantenimiento", icon: Wrench,  href: "/maintenance",  roles: MANT_MODULE_ROLES },
       { label: "Inventario",    icon: Package, href: "/inventory",    roles: INVENTARIO_ROLES },
       { label: "Recetas y Costos", icon: ChefHat, href: "/restaurant/recetas", roles: RECETAS_ROLES },
+      { label: "Emitir Comprobante", icon: Receipt, href: "/operaciones/emitir-comprobante", roles: EMITIR_COMPROBANTE_ROLES },
     ],
   },
 
