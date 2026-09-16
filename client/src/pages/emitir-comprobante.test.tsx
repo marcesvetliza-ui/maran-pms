@@ -88,6 +88,38 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.getByTestId("invoice-form-embedded")).toBeInTheDocument();
   });
 
+  it("movimiento interno reutiliza InternalMovementForm embebido, con el motivo ya elegido", async () => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Inventario" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Movimiento Interno" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: "Desperdicio" }));
+
+    const embedded = screen.getByTestId("internal-movement-embedded");
+    expect(within(embedded).getByTestId("select-im-motivo")).toHaveTextContent("Desperdicio");
+  });
+
+  it("transferencia entre depósitos todavía no tiene motor conectado acá", async () => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Inventario" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Movimiento Interno" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: "Transferencia entre depósitos" }));
+
+    expect(screen.queryByTestId("internal-movement-embedded")).not.toBeInTheDocument();
+    expect(screen.getByText(/todavía no está conectada acá/i)).toBeInTheDocument();
+  });
+
   it("un rol sin ningún área habilitada ve el mensaje de acceso, no el selector", () => {
     mockRole = "housekeeping";
     renderPage();

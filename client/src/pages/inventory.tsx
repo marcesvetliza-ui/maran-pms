@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { Link } from "wouter";
@@ -191,6 +191,53 @@ const motivoLabels: Record<string, string> = {
   otro: "Otro",
 };
 
+function printInternalVoucher(movement: InternalMovement & { items: InternalMovementItem[] }) {
+  const motLabel = motivoLabels[movement.motivo] || movement.motivo;
+  const totalCost = (movement.items || []).reduce((s, i) =>
+    s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
+  const html = `<!DOCTYPE html><html><head><title>Movimiento Interno — ${motLabel}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:24px;max-width:700px;margin:0 auto;font-size:13px}
+  h1{font-size:18px;margin:0 0 4px}
+  .meta{color:#555;margin-bottom:16px;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th,td{border:1px solid #ccc;padding:7px 10px;text-align:left}
+  th{background:#f0f0f0;font-weight:600}
+  td.num{text-align:right}
+  .total{font-weight:bold;background:#e8e8e8}
+  .footer{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #ccc;padding-top:10px}
+</style>
+</head><body>
+<h1>Comprobante de Movimiento Interno</h1>
+<div class="meta">
+  Fecha: ${new Date(movement.date + "T12:00:00").toLocaleDateString("es-AR")} &nbsp;|&nbsp;
+  Motivo: <strong>${motLabel}</strong> &nbsp;|&nbsp;
+  ${movement.descripcion ? `Descripción: <strong>${movement.descripcion}</strong>` : ""}
+  ${movement.notes ? `<br>Observaciones: ${movement.notes}` : ""}
+</div>
+<table>
+  <thead><tr><th>Artículo</th><th>Unidad</th><th class="num">Cantidad</th><th class="num">Costo Unit.</th><th class="num">Costo Total</th></tr></thead>
+  <tbody>
+${(movement.items || []).map(i => `    <tr>
+      <td>${i.item_name}</td>
+      <td>${i.unit}</td>
+      <td class="num">${parseFloat(i.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
+      <td class="num">$${parseFloat(i.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+    </tr>`).join("\n")}
+    <tr class="total">
+      <td colspan="4" style="text-align:right">COSTO TOTAL</td>
+      <td class="num">$${totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+    </tr>
+  </tbody>
+</table>
+<div class="footer">Generado: ${formatHotelDateTime(new Date())} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
+<script>window.onload=function(){window.print()}<\/script>
+</body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 const motivoColors: Record<string, string> = {
   desayuno: "bg-amber-100 text-amber-800",
   evento: "bg-blue-100 text-blue-800",
@@ -216,6 +263,350 @@ const movementTypeLabels: Record<string, string> = {
   transferencia: "Transferencia",
   consumo: "Consumo",
 };
+
+/**
+ * Formulario de "Nuevo Movimiento Interno", extraído de InventoryPage para
+ * poder reutilizarse embebido en el Centro de Comprobantes, con el mismo
+ * patrón de shell (Dialog vs <div> plano) que ya usan EmitirFacturaDialog e
+ * InvoiceDialog. A diferencia de esos dos, este formulario no era un
+ * componente aparte — vivía dentro de InventoryPage compartiendo su estado
+ * por clausura — así que acá se volvió autosuficiente: trae sus propios
+ * datos (artículos, recetas) y maneja su propio estado, en vez de recibirlos
+ * como props. La lógica de negocio (cálculo de cantidades desde receta,
+ * merma, mutación de alta) es exactamente la misma que tenía antes.
+ */
+export function InternalMovementForm({ embedded, open, onClose, initialMotivo }: {
+  embedded?: boolean;
+  open: boolean;
+  onClose: () => void;
+  /** Motivo preseleccionado (ej. cuando ya se eligió "Desperdicio" en un paso anterior). Por defecto "desayuno", igual que antes. */
+  initialMotivo?: string;
+}) {
+  const { toast } = useToast();
+  const today = getArgentinaToday();
+
+  const [imDate, setImDate] = useState(today);
+  const [imMotivo, setImMotivo] = useState(initialMotivo || "desayuno");
+  const [imDescripcion, setImDescripcion] = useState("");
+  const [imNotes, setImNotes] = useState("");
+  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([]);
+  const [showRecipeLoader, setShowRecipeLoader] = useState(false);
+  const [imRecipeId, setImRecipeId] = useState("");
+  const [imPorciones, setImPorciones] = useState("1");
+  const [imRecipeLoading, setImRecipeLoading] = useState(false);
+
+  const resetInternalMov = () => {
+    setImDate(today);
+    setImMotivo(initialMotivo || "desayuno");
+    setImDescripcion("");
+    setImNotes("");
+    setImItems([]);
+    setShowRecipeLoader(false);
+    setImRecipeId("");
+    setImPorciones("1");
+  };
+
+  // Resetea el formulario cada vez que se vuelve a abrir, tal como hacía
+  // openInternalMov() en InventoryPage antes de setIsInternalMovOpen(true).
+  useEffect(() => {
+    if (open) resetInternalMov();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const { data: items = [] } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/inventory/items"],
+  });
+
+  const { data: allRecipes = [] } = useQuery<RecipeForIM[]>({
+    queryKey: ["/api/restaurant/recipes"],
+    enabled: open,
+  });
+
+  const addImItem = () => setImItems(prev => [...prev, { itemId: "", quantity: "1", notes: "" }]);
+  const removeImItem = (idx: number) => setImItems(prev => prev.filter((_, i) => i !== idx));
+  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes", value: string) =>
+    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+
+  const loadFromRecipe = async () => {
+    if (!imRecipeId) return;
+    setImRecipeLoading(true);
+    try {
+      const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
+      const porciones = parseFloat(imPorciones) || 1;
+      const newRows: Array<{ itemId: string; quantity: string; notes: string }> = [];
+      for (const ing of ingredients) {
+        if (!ing.inventoryItemId) continue;
+        const merma = parseFloat(ing.merma || "0");
+        const baseQty = parseFloat(ing.quantity || "0");
+        const grossQty = merma > 0 ? baseQty / (1 - merma / 100) : baseQty;
+        const totalQty = (grossQty * porciones).toFixed(3);
+        // merge with existing row if same item
+        const existing = newRows.find(r => r.itemId === ing.inventoryItemId);
+        if (existing) {
+          existing.quantity = (parseFloat(existing.quantity) + parseFloat(totalQty)).toFixed(3);
+        } else {
+          newRows.push({ itemId: ing.inventoryItemId, quantity: totalQty, notes: "" });
+        }
+      }
+      // merge into imItems (append, dedup)
+      setImItems(prev => {
+        const merged = [...prev];
+        for (const row of newRows) {
+          const ex = merged.find(r => r.itemId === row.itemId);
+          if (ex) {
+            ex.quantity = (parseFloat(ex.quantity) + parseFloat(row.quantity)).toFixed(3);
+          } else {
+            merged.push(row);
+          }
+        }
+        return merged;
+      });
+      setShowRecipeLoader(false);
+      setImRecipeId("");
+      setImPorciones("1");
+      toast({ title: `${newRows.length} ingrediente(s) cargados desde la receta` });
+    } catch {
+      toast({ title: "Error al cargar receta", variant: "destructive" });
+    } finally {
+      setImRecipeLoading(false);
+    }
+  };
+
+  const createInternalMovMutation = useMutation({
+    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string }> }) => {
+      const res = await apiRequest("POST", "/api/inventory/internal-movements", data);
+      return res.json();
+    },
+    onSuccess: (movement) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-movements"] });
+      onClose();
+      printInternalVoucher(movement);
+      toast({ title: "Movimiento registrado", description: `${movement.items?.length || 0} artículo(s) descontados del stock.` });
+    },
+    onError: (e: any) => toast({ title: "Error al registrar", description: e?.message, variant: "destructive" }),
+  });
+
+  const confirmInternalMov = () => {
+    const validItems = imItems.filter(it => it.itemId && parseFloat(it.quantity) > 0);
+    if (validItems.length === 0) {
+      toast({ title: "Agregá al menos un artículo con cantidad", variant: "destructive" });
+      return;
+    }
+    createInternalMovMutation.mutate({
+      date: imDate,
+      motivo: imMotivo,
+      descripcion: imDescripcion || undefined,
+      notes: imNotes || undefined,
+      items: validItems.map(it => ({ itemId: it.itemId, quantity: parseFloat(it.quantity), notes: it.notes || undefined })),
+    });
+  };
+
+  const formBody = (
+    <div className="space-y-4 py-2">
+      {/* Cabecera */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label>Fecha *</Label>
+          <Input type="date" value={imDate} onChange={e => setImDate(e.target.value)} data-testid="input-im-date" />
+        </div>
+        <div className="space-y-1">
+          <Label>Motivo *</Label>
+          <Select value={imMotivo} onValueChange={setImMotivo}>
+            <SelectTrigger data-testid="select-im-motivo"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desayuno">🍳 Desayuno</SelectItem>
+              <SelectItem value="evento">🎉 Evento</SelectItem>
+              <SelectItem value="desperdicio">🗑️ Desperdicio</SelectItem>
+              <SelectItem value="otro">📋 Otro</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Descripción <span className="text-muted-foreground font-normal">(opcional — ej: "Evento casamiento 50 pax")</span></Label>
+        <Input value={imDescripcion} onChange={e => setImDescripcion(e.target.value)} placeholder="Descripción del movimiento..." data-testid="input-im-desc" />
+      </div>
+
+      {/* Carga desde receta */}
+      <div className="border rounded-lg p-3 bg-muted/30">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            Cargar desde receta
+          </p>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowRecipeLoader(v => !v)}>
+            {showRecipeLoader ? "Ocultar" : "Expandir"}
+          </Button>
+        </div>
+        {showRecipeLoader && (
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="flex-1 min-w-48 space-y-1">
+              <Label className="text-xs">Receta / Plato</Label>
+              <Select value={imRecipeId || "__none__"} onValueChange={v => setImRecipeId(v === "__none__" ? "" : v)}>
+                <SelectTrigger data-testid="select-im-recipe"><SelectValue placeholder="Seleccionar receta..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Elegir receta —</SelectItem>
+                  {allRecipes.filter(r => r.id).sort((a, b) => (a.name || a.menuItem?.name || "").localeCompare(b.name || b.menuItem?.name || "", "es")).map(r => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name || r.menuItem?.name || `Receta ${r.id.slice(0, 6)}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-28 space-y-1">
+              <Label className="text-xs">Porciones</Label>
+              <Input type="number" min={0.1} step="0.5" value={imPorciones} onChange={e => setImPorciones(e.target.value)} data-testid="input-im-porciones" />
+            </div>
+            <Button size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
+              {imRecipeLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Utensils className="h-4 w-4 mr-1" />}
+              Cargar ingredientes
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Tabla de ítems */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>Artículos a descargar</Label>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
+            <Plus className="h-3 w-3 mr-1" />Agregar ítem
+          </Button>
+        </div>
+
+        {imItems.length === 0 ? (
+          <div className="border rounded-lg p-6 text-center text-muted-foreground text-sm">
+            <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            Usá "Cargar desde receta" o "Agregar ítem" para agregar artículos
+          </div>
+        ) : (
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="p-2 text-left font-medium">Artículo</th>
+                  <th className="p-2 text-right font-medium w-28">Cantidad</th>
+                  <th className="p-2 text-left font-medium">Nota (opcional)</th>
+                  <th className="p-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {imItems.map((row, idx) => {
+                  const item = items.find(i => i.id === row.itemId);
+                  return (
+                    <tr key={idx} className="border-t">
+                      <td className="p-1.5">
+                        <Select value={row.itemId || "__none__"} onValueChange={v => updateImItem(idx, "itemId", v === "__none__" ? "" : v)}>
+                          <SelectTrigger className="h-8 text-xs" data-testid={`select-im-item-${idx}`}>
+                            <SelectValue placeholder="Artículo..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">— Seleccionar —</SelectItem>
+                            {items.filter(i => i.id && i.isActive !== "false").map(i => (
+                              <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="p-1.5">
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number" min={0.001} step="0.001"
+                            value={row.quantity}
+                            onChange={e => updateImItem(idx, "quantity", e.target.value)}
+                            className="h-8 text-xs text-right w-20"
+                            data-testid={`input-im-qty-${idx}`}
+                          />
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">{item?.unit || ""}</span>
+                        </div>
+                      </td>
+                      <td className="p-1.5">
+                        <Input
+                          value={row.notes}
+                          onChange={e => updateImItem(idx, "notes", e.target.value)}
+                          placeholder="Nota..."
+                          className="h-8 text-xs"
+                          data-testid={`input-im-note-${idx}`}
+                        />
+                      </td>
+                      <td className="p-1.5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeImItem(idx)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Costo estimado */}
+        {imItems.length > 0 && (() => {
+          const total = imItems.reduce((s, row) => {
+            const item = items.find(i => i.id === row.itemId);
+            if (!item) return s;
+            return s + parseFloat(row.quantity || "0") * parseFloat(item.costPrice || "0");
+          }, 0);
+          return (
+            <div className="flex justify-end">
+              <p className="text-sm text-muted-foreground">
+                Costo estimado: <span className="font-semibold text-foreground">${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+              </p>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+
+  const footer = (
+    <>
+      <Button variant="outline" onClick={onClose}>Cancelar</Button>
+      <Button
+        onClick={confirmInternalMov}
+        disabled={createInternalMovMutation.isPending || imItems.filter(it => it.itemId).length === 0}
+        data-testid="btn-confirm-internal-mov"
+      >
+        {createInternalMovMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+        <ArrowDownToLine className="h-4 w-4 mr-2" />
+        Confirmar y descargar stock
+      </Button>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="internal-movement-embedded">
+        <h2 className="text-lg font-semibold leading-none tracking-tight flex items-center gap-2">
+          <ArrowDownToLine className="h-5 w-5" />
+          Nuevo Movimiento Interno
+        </h2>
+        {formBody}
+        <div className="flex justify-end gap-2 pt-4">{footer}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowDownToLine className="h-5 w-5" />
+            Nuevo Movimiento Interno
+          </DialogTitle>
+        </DialogHeader>
+        {formBody}
+        <DialogFooter>{footer}</DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function InventoryPage() {
   const { toast } = useToast();
@@ -263,17 +654,10 @@ export default function InventoryPage() {
   const [whDescription, setWhDescription] = useState("");
   const [whArea, setWhArea] = useState("general");
 
-  // Movimiento Interno state
+  // Movimiento Interno state — el formulario en sí (fecha, motivo, ítems,
+  // etc.) vive en InternalMovementForm; acá solo se controla si el diálogo
+  // está abierto.
   const [isInternalMovOpen, setIsInternalMovOpen] = useState(false);
-  const [imDate, setImDate] = useState(today);
-  const [imMotivo, setImMotivo] = useState("desayuno");
-  const [imDescripcion, setImDescripcion] = useState("");
-  const [imNotes, setImNotes] = useState("");
-  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([]);
-  const [showRecipeLoader, setShowRecipeLoader] = useState(false);
-  const [imRecipeId, setImRecipeId] = useState("");
-  const [imPorciones, setImPorciones] = useState("1");
-  const [imRecipeLoading, setImRecipeLoading] = useState(false);
   const [internosFrom, setInternosFrom] = useState(today);
   const [internosTo, setInternosTo] = useState(today);
   const [expandedMovId, setExpandedMovId] = useState<string | null>(null);
@@ -333,12 +717,6 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/items", priceHistoryItemId, "price-history"],
     queryFn: () => fetch(`/api/inventory/items/${priceHistoryItemId}/price-history`, { credentials: "include" }).then(r => r.json()),
     enabled: !!priceHistoryItemId && isPriceHistoryOpen,
-  });
-
-  // Recipes (para carga desde receta en Movimiento Interno)
-  const { data: allRecipes = [] } = useQuery<RecipeForIM[]>({
-    queryKey: ["/api/restaurant/recipes"],
-    enabled: isInternalMovOpen,
   });
 
   // Movimientos Internos
@@ -490,151 +868,10 @@ export default function InventoryPage() {
     onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
   });
 
-  // ---- Movimiento Interno helpers ----
-  const resetInternalMov = () => {
-    setImDate(today);
-    setImMotivo("desayuno");
-    setImDescripcion("");
-    setImNotes("");
-    setImItems([]);
-    setShowRecipeLoader(false);
-    setImRecipeId("");
-    setImPorciones("1");
-  };
-
-  const addImItem = () => setImItems(prev => [...prev, { itemId: "", quantity: "1", notes: "" }]);
-  const removeImItem = (idx: number) => setImItems(prev => prev.filter((_, i) => i !== idx));
-  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes", value: string) =>
-    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
-
-  const loadFromRecipe = async () => {
-    if (!imRecipeId) return;
-    setImRecipeLoading(true);
-    try {
-      const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
-      const porciones = parseFloat(imPorciones) || 1;
-      const newRows: Array<{ itemId: string; quantity: string; notes: string }> = [];
-      for (const ing of ingredients) {
-        if (!ing.inventoryItemId) continue;
-        const merma = parseFloat(ing.merma || "0");
-        const baseQty = parseFloat(ing.quantity || "0");
-        const grossQty = merma > 0 ? baseQty / (1 - merma / 100) : baseQty;
-        const totalQty = (grossQty * porciones).toFixed(3);
-        // merge with existing row if same item
-        const existing = newRows.find(r => r.itemId === ing.inventoryItemId);
-        if (existing) {
-          existing.quantity = (parseFloat(existing.quantity) + parseFloat(totalQty)).toFixed(3);
-        } else {
-          newRows.push({ itemId: ing.inventoryItemId, quantity: totalQty, notes: "" });
-        }
-      }
-      // merge into imItems (append, dedup)
-      setImItems(prev => {
-        const merged = [...prev];
-        for (const row of newRows) {
-          const ex = merged.find(r => r.itemId === row.itemId);
-          if (ex) {
-            ex.quantity = (parseFloat(ex.quantity) + parseFloat(row.quantity)).toFixed(3);
-          } else {
-            merged.push(row);
-          }
-        }
-        return merged;
-      });
-      setShowRecipeLoader(false);
-      setImRecipeId("");
-      setImPorciones("1");
-      toast({ title: `${newRows.length} ingrediente(s) cargados desde la receta` });
-    } catch {
-      toast({ title: "Error al cargar receta", variant: "destructive" });
-    } finally {
-      setImRecipeLoading(false);
-    }
-  };
-
-  const printInternalVoucher = (movement: InternalMovement & { items: InternalMovementItem[] }) => {
-    const motLabel = motivoLabels[movement.motivo] || movement.motivo;
-    const totalCost = (movement.items || []).reduce((s, i) =>
-      s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
-    const html = `<!DOCTYPE html><html><head><title>Movimiento Interno — ${motLabel}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:24px;max-width:700px;margin:0 auto;font-size:13px}
-  h1{font-size:18px;margin:0 0 4px}
-  .meta{color:#555;margin-bottom:16px;font-size:12px}
-  table{width:100%;border-collapse:collapse;margin:12px 0}
-  th,td{border:1px solid #ccc;padding:7px 10px;text-align:left}
-  th{background:#f0f0f0;font-weight:600}
-  td.num{text-align:right}
-  .total{font-weight:bold;background:#e8e8e8}
-  .footer{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #ccc;padding-top:10px}
-</style>
-</head><body>
-<h1>Comprobante de Movimiento Interno</h1>
-<div class="meta">
-  Fecha: ${new Date(movement.date + "T12:00:00").toLocaleDateString("es-AR")} &nbsp;|&nbsp;
-  Motivo: <strong>${motLabel}</strong> &nbsp;|&nbsp;
-  ${movement.descripcion ? `Descripción: <strong>${movement.descripcion}</strong>` : ""}
-  ${movement.notes ? `<br>Observaciones: ${movement.notes}` : ""}
-</div>
-<table>
-  <thead><tr><th>Artículo</th><th>Unidad</th><th class="num">Cantidad</th><th class="num">Costo Unit.</th><th class="num">Costo Total</th></tr></thead>
-  <tbody>
-${(movement.items || []).map(i => `    <tr>
-      <td>${i.item_name}</td>
-      <td>${i.unit}</td>
-      <td class="num">${parseFloat(i.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
-      <td class="num">$${parseFloat(i.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-    </tr>`).join("\n")}
-    <tr class="total">
-      <td colspan="4" style="text-align:right">COSTO TOTAL</td>
-      <td class="num">$${totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-    </tr>
-  </tbody>
-</table>
-<div class="footer">Generado: ${formatHotelDateTime(new Date())} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
-<script>window.onload=function(){window.print()}<\/script>
-</body></html>`;
-    const w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); }
-  };
-
-  const createInternalMovMutation = useMutation({
-    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string }> }) => {
-      const res = await apiRequest("POST", "/api/inventory/internal-movements", data);
-      return res.json();
-    },
-    onSuccess: (movement) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-movements"] });
-      setIsInternalMovOpen(false);
-      resetInternalMov();
-      printInternalVoucher(movement);
-      toast({ title: "Movimiento registrado", description: `${movement.items?.length || 0} artículo(s) descontados del stock.` });
-    },
-    onError: (e: any) => toast({ title: "Error al registrar", description: e?.message, variant: "destructive" }),
-  });
-
-  const openInternalMov = () => {
-    resetInternalMov();
-    setIsInternalMovOpen(true);
-  };
-
-  const confirmInternalMov = () => {
-    const validItems = imItems.filter(it => it.itemId && parseFloat(it.quantity) > 0);
-    if (validItems.length === 0) {
-      toast({ title: "Agregá al menos un artículo con cantidad", variant: "destructive" });
-      return;
-    }
-    createInternalMovMutation.mutate({
-      date: imDate,
-      motivo: imMotivo,
-      descripcion: imDescripcion || undefined,
-      notes: imNotes || undefined,
-      items: validItems.map(it => ({ itemId: it.itemId, quantity: parseFloat(it.quantity), notes: it.notes || undefined })),
-    });
-  };
+  // El resto de la lógica de Movimiento Interno (reset, ítems, receta,
+  // mutación de alta) vive ahora en InternalMovementForm — acá solo hace
+  // falta abrir el diálogo.
+  const openInternalMov = () => setIsInternalMovOpen(true);
 
   const openCategoryDialog = (cat?: ItemCategory) => {
     setEditingCategory(cat || null);
@@ -2034,188 +2271,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       </Dialog>
 
       {/* ==================== MOVIMIENTO INTERNO DIALOG ==================== */}
-      <Dialog open={isInternalMovOpen} onOpenChange={(open) => { setIsInternalMovOpen(open); if (!open) resetInternalMov(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ArrowDownToLine className="h-5 w-5" />
-              Nuevo Movimiento Interno
-            </DialogTitle>
-          </DialogHeader>
+      <InternalMovementForm open={isInternalMovOpen} onClose={() => setIsInternalMovOpen(false)} />
 
-          <div className="space-y-4 py-2">
-            {/* Cabecera */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Fecha *</Label>
-                <Input type="date" value={imDate} onChange={e => setImDate(e.target.value)} data-testid="input-im-date" />
-              </div>
-              <div className="space-y-1">
-                <Label>Motivo *</Label>
-                <Select value={imMotivo} onValueChange={setImMotivo}>
-                  <SelectTrigger data-testid="select-im-motivo"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="desayuno">🍳 Desayuno</SelectItem>
-                    <SelectItem value="evento">🎉 Evento</SelectItem>
-                    <SelectItem value="desperdicio">🗑️ Desperdicio</SelectItem>
-                    <SelectItem value="otro">📋 Otro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Descripción <span className="text-muted-foreground font-normal">(opcional — ej: "Evento casamiento 50 pax")</span></Label>
-              <Input value={imDescripcion} onChange={e => setImDescripcion(e.target.value)} placeholder="Descripción del movimiento..." data-testid="input-im-desc" />
-            </div>
-
-            {/* Carga desde receta */}
-            <div className="border rounded-lg p-3 bg-muted/30">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  Cargar desde receta
-                </p>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowRecipeLoader(v => !v)}>
-                  {showRecipeLoader ? "Ocultar" : "Expandir"}
-                </Button>
-              </div>
-              {showRecipeLoader && (
-                <div className="flex items-end gap-3 flex-wrap">
-                  <div className="flex-1 min-w-48 space-y-1">
-                    <Label className="text-xs">Receta / Plato</Label>
-                    <Select value={imRecipeId || "__none__"} onValueChange={v => setImRecipeId(v === "__none__" ? "" : v)}>
-                      <SelectTrigger data-testid="select-im-recipe"><SelectValue placeholder="Seleccionar receta..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">— Elegir receta —</SelectItem>
-                        {allRecipes.filter(r => r.id).sort((a, b) => (a.name || a.menuItem?.name || "").localeCompare(b.name || b.menuItem?.name || "", "es")).map(r => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.name || r.menuItem?.name || `Receta ${r.id.slice(0, 6)}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-28 space-y-1">
-                    <Label className="text-xs">Porciones</Label>
-                    <Input type="number" min={0.1} step="0.5" value={imPorciones} onChange={e => setImPorciones(e.target.value)} data-testid="input-im-porciones" />
-                  </div>
-                  <Button size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
-                    {imRecipeLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Utensils className="h-4 w-4 mr-1" />}
-                    Cargar ingredientes
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* Tabla de ítems */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Artículos a descargar</Label>
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
-                  <Plus className="h-3 w-3 mr-1" />Agregar ítem
-                </Button>
-              </div>
-
-              {imItems.length === 0 ? (
-                <div className="border rounded-lg p-6 text-center text-muted-foreground text-sm">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                  Usá "Cargar desde receta" o "Agregar ítem" para agregar artículos
-                </div>
-              ) : (
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50">
-                      <tr>
-                        <th className="p-2 text-left font-medium">Artículo</th>
-                        <th className="p-2 text-right font-medium w-28">Cantidad</th>
-                        <th className="p-2 text-left font-medium">Nota (opcional)</th>
-                        <th className="p-2 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {imItems.map((row, idx) => {
-                        const item = items.find(i => i.id === row.itemId);
-                        return (
-                          <tr key={idx} className="border-t">
-                            <td className="p-1.5">
-                              <Select value={row.itemId || "__none__"} onValueChange={v => updateImItem(idx, "itemId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-im-item-${idx}`}>
-                                  <SelectValue placeholder="Artículo..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">— Seleccionar —</SelectItem>
-                                  {items.filter(i => i.id && i.isActive !== "false").map(i => (
-                                    <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="p-1.5">
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="number" min={0.001} step="0.001"
-                                  value={row.quantity}
-                                  onChange={e => updateImItem(idx, "quantity", e.target.value)}
-                                  className="h-8 text-xs text-right w-20"
-                                  data-testid={`input-im-qty-${idx}`}
-                                />
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">{item?.unit || ""}</span>
-                              </div>
-                            </td>
-                            <td className="p-1.5">
-                              <Input
-                                value={row.notes}
-                                onChange={e => updateImItem(idx, "notes", e.target.value)}
-                                placeholder="Nota..."
-                                className="h-8 text-xs"
-                                data-testid={`input-im-note-${idx}`}
-                              />
-                            </td>
-                            <td className="p-1.5">
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeImItem(idx)}>
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Costo estimado */}
-              {imItems.length > 0 && (() => {
-                const total = imItems.reduce((s, row) => {
-                  const item = items.find(i => i.id === row.itemId);
-                  if (!item) return s;
-                  return s + parseFloat(row.quantity || "0") * parseFloat(item.costPrice || "0");
-                }, 0);
-                return (
-                  <div className="flex justify-end">
-                    <p className="text-sm text-muted-foreground">
-                      Costo estimado: <span className="font-semibold text-foreground">${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                    </p>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsInternalMovOpen(false); resetInternalMov(); }}>Cancelar</Button>
-            <Button
-              onClick={confirmInternalMov}
-              disabled={createInternalMovMutation.isPending || imItems.filter(it => it.itemId).length === 0}
-              data-testid="btn-confirm-internal-mov"
-            >
-              {createInternalMovMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              <ArrowDownToLine className="h-4 w-4 mr-2" />
-              Confirmar y descargar stock
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Price History Dialog */}
       <Dialog open={isPriceHistoryOpen} onOpenChange={setIsPriceHistoryOpen}>

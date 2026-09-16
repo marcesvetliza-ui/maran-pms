@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Receipt, ArrowLeft } from "lucide-react";
 import { EmitirFacturaDialog } from "@/pages/billing";
 import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
+import { InternalMovementForm } from "@/pages/inventory";
 
 // ── Áreas ──────────────────────────────────────────────────────────────────────
 // Mismos identificadores de área que ya usa EmitirComprobanteButton
@@ -249,12 +250,21 @@ export default function EmitirComprobantePage() {
                 />
               )}
 
-              {operacion === "movimiento" && (
+              {operacion === "movimiento" && tipo === "transferencia" && (
                 <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  El motor de Movimiento Interno todavía no está conectado acá — a diferencia de Venta y Compra,
-                  el formulario actual de Inventario vive embebido dentro de esa página y no como un componente
-                  aparte, así que extraerlo con seguridad es un paso propio, pendiente de una próxima entrega.
+                  Transferencia entre depósitos todavía no está conectada acá — hoy es un mecanismo aparte
+                  (no un motivo más del formulario de Movimiento Interno), con su propia pantalla en Inventario.
+                  Conectarla es un paso propio, pendiente de una próxima entrega.
                 </div>
+              )}
+
+              {operacion === "movimiento" && tipo !== "transferencia" && (
+                <InternalMovementForm
+                  embedded
+                  open
+                  onClose={resetSeleccion}
+                  initialMotivo={tipo}
+                />
               )}
             </div>
           )}
