@@ -104,7 +104,7 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(within(embedded).getByTestId("select-im-motivo")).toHaveTextContent("Desperdicio");
   });
 
-  it("transferencia entre depósitos todavía no tiene motor conectado acá", async () => {
+  it("transferencia entre depósitos reutiliza TransferStockForm embebido", async () => {
     mockRole = "resp_deposito";
     const user = userEvent.setup();
     renderPage();
@@ -117,7 +117,9 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     await user.click(screen.getByRole("option", { name: "Transferencia entre depósitos" }));
 
     expect(screen.queryByTestId("internal-movement-embedded")).not.toBeInTheDocument();
-    expect(screen.getByText(/todavía no está conectada acá/i)).toBeInTheDocument();
+    const embedded = screen.getByTestId("transfer-stock-embedded");
+    expect(within(embedded).getByTestId("select-from-warehouse")).toBeInTheDocument();
+    expect(within(embedded).getByTestId("select-to-warehouse")).toBeInTheDocument();
   });
 
   it("un rol sin ningún área habilitada ve el mensaje de acceso, no el selector", () => {

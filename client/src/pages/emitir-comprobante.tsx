@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Receipt, ArrowLeft } from "lucide-react";
 import { EmitirFacturaDialog } from "@/pages/billing";
 import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
-import { InternalMovementForm } from "@/pages/inventory";
+import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 
 // ── Áreas ──────────────────────────────────────────────────────────────────────
 // Mismos identificadores de área que ya usa EmitirComprobanteButton
@@ -251,11 +251,11 @@ export default function EmitirComprobantePage() {
               )}
 
               {operacion === "movimiento" && tipo === "transferencia" && (
-                <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  Transferencia entre depósitos todavía no está conectada acá — hoy es un mecanismo aparte
-                  (no un motivo más del formulario de Movimiento Interno), con su propia pantalla en Inventario.
-                  Conectarla es un paso propio, pendiente de una próxima entrega.
-                </div>
+                <TransferStockForm
+                  embedded
+                  open
+                  onClose={resetSeleccion}
+                />
               )}
 
               {operacion === "movimiento" && tipo !== "transferencia" && (

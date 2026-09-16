@@ -2704,6 +2704,15 @@ function TransferForm({
   const [quantity, setQuantity] = useState<number>(1);
   const [notes, setNotes] = useState("");
 
+  const { data: itemWarehouseStock = [] } = useQuery<{ warehouse_id: string; current_stock: string }[]>({
+    queryKey: ["/api/inventory/items", itemId, "warehouses"],
+    enabled: !!itemId,
+  });
+  const stockDisponible = fromWarehouseId
+    ? parseFloat(itemWarehouseStock.find(r => r.warehouse_id === fromWarehouseId)?.current_stock || "0")
+    : null;
+  const excedeStock = stockDisponible !== null && quantity > stockDisponible;
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -2728,6 +2737,11 @@ function TransferForm({
               ))}
             </SelectContent>
           </Select>
+          {itemId && fromWarehouseId && (
+            <p className={`text-xs ${excedeStock ? "text-destructive" : "text-muted-foreground"}`} data-testid="text-stock-disponible">
+              Disponible: {stockDisponible ?? 0}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label>Hacia *</Label>
@@ -2744,6 +2758,9 @@ function TransferForm({
       <div className="space-y-1">
         <Label>Cantidad *</Label>
         <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-transfer-qty" />
+        {excedeStock && (
+          <p className="text-xs text-destructive">La cantidad supera el stock disponible en el depósito origen.</p>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Notas (opcional)</Label>
@@ -2753,7 +2770,7 @@ function TransferForm({
         <Button variant="outline" onClick={onCancel}>Cancelar</Button>
         <Button
           onClick={() => onSubmit({ itemId, fromWarehouseId, toWarehouseId, quantity, notes: notes || undefined })}
-          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0}
+          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0 || excedeStock}
           data-testid="btn-confirm-transfer"
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -2762,6 +2779,81 @@ function TransferForm({
         </Button>
       </DialogFooter>
     </div>
+  );
+}
+
+/**
+ * Envoltorio autosuficiente de TransferForm (propio query de depósitos/ítems
+ * y propia mutation) para usarlo fuera de la pestaña Depósitos — el motor de
+ * Transferencia entre depósitos del Centro de Comprobantes. Mismo endpoint
+ * (/api/inventory/transfer) y misma validación que ya usa el diálogo de
+ * Depósitos, solo cambia el envoltorio (Dialog vs. div embebido).
+ */
+export function TransferStockForm({ embedded, open, onClose }: {
+  embedded?: boolean;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const { data: warehouses = [] } = useQuery<InventoryWarehouse[]>({
+    queryKey: ["/api/inventory/warehouses"],
+    enabled: open,
+  });
+  const { data: items = [] } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/inventory/items"],
+    enabled: open,
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: async (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => {
+      const res = await apiRequest("POST", "/api/inventory/transfer", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      toast({ title: "Transferencia registrada correctamente" });
+      onClose();
+    },
+    onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
+  });
+
+  const form = (
+    <TransferForm
+      warehouses={warehouses}
+      items={items}
+      preselectedItem={null}
+      preselectedFromWarehouse={null}
+      onSubmit={(data) => transferMutation.mutate(data)}
+      isPending={transferMutation.isPending}
+      onCancel={onClose}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="transfer-stock-embedded">
+        <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+          <ArrowLeftRight className="h-5 w-5" />
+          Transferir Stock entre Depósitos
+        </h2>
+        {form}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowLeftRight className="h-5 w-5" />
+            Transferir Stock entre Depósitos
+          </DialogTitle>
+        </DialogHeader>
+        {form}
+      </DialogContent>
+    </Dialog>
   );
 }
 
