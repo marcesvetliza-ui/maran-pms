@@ -132,6 +132,10 @@ const TIPOS = [
   { value: "RECIBO-B", label: "Recibo B" },
   { value: "RECIBO-C", label: "Recibo C" },
 ];
+
+// Solo para el layout unificado del Centro de Comprobantes — el asistente
+// original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
+const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }];
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },
@@ -658,6 +662,10 @@ export function InvoiceDialog({
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
+  // Remito: solo existe en el layout unificado — llega mercadería sin datos de
+  // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
+  // los datos del emisor y los artículos recibidos.
+  const isRemito = form.tipoComprobante === "REMITO";
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
   const isImporteUnico = isFacturaC || isRetencion;
@@ -714,6 +722,28 @@ export function InvoiceDialog({
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
                         ...ALL_IVA_FIELDS,
                       }));
+                    } else if (v === "REMITO") {
+                      // Remito: no lleva impuestos ni totales — limpiar cualquier importe
+                      // cargado antes de cambiar de tipo para no enviarlo oculto.
+                      setForm((p) => ({
+                        ...p,
+                        tipoComprobante: v,
+                        montoNeto: "",
+                        montoExento: "",
+                        montoNoGravado: "",
+                        impuestosInternos: "",
+                        ley25413: "",
+                        percepcionIibb: "",
+                        percepcionIva: "",
+                        percepcionGanancias: "",
+                        retencionIibb: "",
+                        retencionGanancias: "",
+                        retencionIva: "",
+                        retencionSuss: "",
+                        subtipoRetencion: "",
+                        ...ALL_IVA_FIELDS,
+                      }));
+                      setNetoLines([emptyNetoLine()]);
                     } else {
                       f("tipoComprobante", v);
                     }
@@ -722,7 +752,7 @@ export function InvoiceDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {TIPOS_UNIFIED.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1111,6 +1141,14 @@ export function InvoiceDialog({
             </div>
           )}
 
+          {isRemito && (
+            <p className="text-xs text-muted-foreground text-center py-2" data-testid="text-remito-sin-impuestos">
+              Remito — no lleva impuestos ni total, solo suma los artículos al inventario.
+            </p>
+          )}
+
+          {!isRemito && (
+          <>
           <Separator />
 
           <div className="space-y-4">
@@ -1297,6 +1335,8 @@ export function InvoiceDialog({
               </Card>
           </div>
           </>
+          )}
+          </>
           ) : (
           <>
           {/* STEP 0: Encabezado */}
@@ -1325,6 +1365,12 @@ export function InvoiceDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {/* Un Remito solo se crea desde el Centro de Comprobantes (layout
+                          unificado) — esta opción no se ofrece acá, solo se muestra si
+                          se está editando uno ya existente para no dejar el select en blanco. */}
+                      {isEditing && form.tipoComprobante === "REMITO" && (
+                        <SelectItem value="REMITO">Remito</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1914,7 +1960,7 @@ export function InvoiceDialog({
             data-testid="btn-submit-invoice"
           >
             {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-            {isEditing ? "Guardar cambios" : "Factura completa"}
+            {isEditing ? "Guardar cambios" : isRemito ? "Registrar remito" : "Factura completa"}
           </Button>
         </DialogFooter>
           ) : (

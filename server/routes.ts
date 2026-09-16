@@ -3198,13 +3198,16 @@ export async function registerRoutes(
         updatedAt: rawInvoice.updated_at,
       };
 
-      // Generar asiento automático
-      try {
-        const entryId = await generarAsiento(invoice);
-        await db.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
-        invoice.asientoId = entryId;
-      } catch (ae) {
-        console.error("Error generando asiento:", ae);
+      // Generar asiento automático — el Remito no tiene datos de facturación
+      // (sin IVA ni total), así que no genera asiento contable.
+      if (invoice.tipoComprobante !== "REMITO") {
+        try {
+          const entryId = await generarAsiento(invoice);
+          await db.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
+          invoice.asientoId = entryId;
+        } catch (ae) {
+          console.error("Error generando asiento:", ae);
+        }
       }
 
       // Si tiene retención IIBB → insertar en iibb_retentions
@@ -3313,11 +3316,16 @@ export async function registerRoutes(
           subtipoRetencion: raw.subtipo_retencion,
         };
 
-        const entryId = await generarAsiento(invoiceForEntry, tx);
-        await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
-        if (previousEntryId && previousEntryId !== entryId) {
-          await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
-          await tx.execute(sql`DELETE FROM accounting_entries WHERE id = ${previousEntryId}`);
+        // El Remito no tiene datos de facturación (sin IVA ni total), así que
+        // nunca genera asiento contable — ni al crearlo ni al editarlo.
+        let entryId = previousEntryId ?? null;
+        if (tipoComprobante !== "REMITO") {
+          entryId = await generarAsiento(invoiceForEntry, tx);
+          await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
+          if (previousEntryId && previousEntryId !== entryId) {
+            await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
+            await tx.execute(sql`DELETE FROM accounting_entries WHERE id = ${previousEntryId}`);
+          }
         }
 
         if (!shouldRegisterPracticedIibbRetention(tipoComprobante)) {
