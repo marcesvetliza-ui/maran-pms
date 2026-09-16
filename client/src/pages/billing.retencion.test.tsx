@@ -1,13 +1,14 @@
 /**
  * Tests for EmitirFacturaDialog — Retención impositiva
  *
- * Ports the "Agregar retención impositiva" box PrefacturaDialog already has
- * (collapsed by default, Tipo IIBB/Ganancias + Monto retenido) into the
- * Centro de Comprobantes Venta engine, which never had it. It's informational
- * — it doesn't change the invoice total or the cash amount registered — but
- * it does get sent so it's recorded on the comprobante (cashFormaPagoDetalle,
- * the same already-persisted, informational-only field the invoice uses for
- * a payment-method breakdown) and shows up in the Caja/folio label.
+ * Ports the "Retención impositiva" box PrefacturaDialog already has (Tipo
+ * IIBB/Ganancias + Monto retenido) into the Centro de Comprobantes Venta
+ * engine, which never had it. Always visible (not behind a toggle) — the
+ * cajero fills it in only when it applies. It's informational — it doesn't
+ * change the invoice total or the cash amount registered — but it does get
+ * sent so it's recorded on the comprobante (cashFormaPagoDetalle, the same
+ * already-persisted, informational-only field the invoice uses for a
+ * payment-method breakdown) and shows up in the Caja/folio label.
  */
 
 import { render, screen, waitFor } from "@testing-library/react";
@@ -95,18 +96,19 @@ describe("EmitirFacturaDialog — Retención impositiva", () => {
     vi.stubGlobal("open", vi.fn());
   });
 
-  it("está colapsada por defecto, detrás de un botón", async () => {
+  it("está siempre visible, sin necesidad de expandirla", async () => {
     renderDialog();
-    expect(screen.getByTestId("btn-add-retencion")).toBeInTheDocument();
-    expect(screen.queryByTestId("select-retencion-tipo")).not.toBeInTheDocument();
+    expect(screen.getByText("Retención impositiva")).toBeInTheDocument();
+    expect(screen.getByTestId("select-retencion-tipo")).toBeInTheDocument();
+    expect(screen.getByTestId("input-retencion-monto")).toBeInTheDocument();
+    // Sin monto cargado no hay botón para "quitar" — no hay nada que quitar.
+    expect(screen.queryByTestId("btn-remove-retencion")).not.toBeInTheDocument();
   });
 
-  it("al expandirla y cargar un monto, se envía en cashFormaPagoDetalle sin tocar el total facturado", async () => {
+  it("cargar un monto se envía en cashFormaPagoDetalle sin tocar el total facturado", async () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.click(screen.getByTestId("btn-add-retencion"));
-    expect(screen.getByTestId("select-retencion-tipo")).toBeInTheDocument();
     await user.type(screen.getByTestId("input-retencion-monto"), "150");
 
     await fillAndSubmit(user);
@@ -122,7 +124,6 @@ describe("EmitirFacturaDialog — Retención impositiva", () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.click(screen.getByTestId("btn-add-retencion"));
     await user.click(screen.getByTestId("select-retencion-tipo"));
     await user.click(await screen.findByRole("option", { name: "Ganancias" }));
     await user.type(screen.getByTestId("input-retencion-monto"), "80");
@@ -133,14 +134,23 @@ describe("EmitirFacturaDialog — Retención impositiva", () => {
     expect(capture.body.cashFormaPagoDetalle).toEqual([{ method: "retencion_ganancias", amount: 80 }]);
   });
 
-  it("quitarla antes de emitir no manda cashFormaPagoDetalle", async () => {
+  it("quitarla (botón X) antes de emitir no manda cashFormaPagoDetalle", async () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.click(screen.getByTestId("btn-add-retencion"));
     await user.type(screen.getByTestId("input-retencion-monto"), "150");
     await user.click(screen.getByTestId("btn-remove-retencion"));
-    expect(screen.getByTestId("btn-add-retencion")).toBeInTheDocument();
+    expect(screen.getByTestId("input-retencion-monto")).toHaveValue(null);
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(capture.body).toBeTruthy());
+    expect(capture.body.cashFormaPagoDetalle).toBeUndefined();
+  });
+
+  it("dejarla vacía y emitir tampoco manda cashFormaPagoDetalle", async () => {
+    const user = userEvent.setup();
+    renderDialog();
 
     await fillAndSubmit(user);
 
@@ -155,6 +165,6 @@ describe("EmitirFacturaDialog — Retención impositiva", () => {
     await user.click(screen.getByTestId("select-cash-forma-pago"));
     await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
 
-    expect(screen.queryByTestId("btn-add-retencion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Retención impositiva")).not.toBeInTheDocument();
   });
 });
