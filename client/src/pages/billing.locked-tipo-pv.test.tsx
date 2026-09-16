@@ -96,12 +96,28 @@ describe("EmitirFacturaDialog — tipo bloqueado y Punto de Venta por área", ()
     );
   });
 
-  it("deja el Punto de Venta sin elegir cuando el área tiene más de un PV activo", async () => {
+  it("cuando el área tiene más de un PV activo, elige siempre el de menor número (nunca lo deja sin elegir)", async () => {
     vi.stubGlobal("fetch", buildFetchMock(POS_CONFIGS_AMBIGUOUS));
     renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion", showPaymentMethod: true });
 
-    await waitFor(() => expect(screen.getByTestId("select-punto-venta")).toBeInTheDocument());
-    expect(screen.getByTestId("select-punto-venta")).toHaveTextContent("PV por defecto (configuración)");
+    // POS_CONFIGS_AMBIGUOUS tiene PV 0021 y 0023 para "recepcion" — siempre gana el 0021.
+    await waitFor(() =>
+      expect(screen.getByTestId("select-punto-venta")).toHaveTextContent("PV 0021"),
+    );
+  });
+
+  it("con tres PV activos para la misma área, elige el de menor número aunque no sea el primero de la lista", async () => {
+    const posConfigs = [
+      { id: 1, nombre: "Factura T", numero: 26, area: "recepcion", tipo: "electronico", activo: true },
+      { id: 2, nombre: "Recepción", numero: 21, area: "recepcion", tipo: "electronico", activo: true },
+      { id: 3, nombre: "Recepción 2", numero: 22, area: "recepcion", tipo: "electronico", activo: true },
+    ];
+    vi.stubGlobal("fetch", buildFetchMock(posConfigs));
+    renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion", showPaymentMethod: true });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("select-punto-venta")).toHaveTextContent("PV 0021"),
+    );
   });
 
   it('mapea el área "events" del Centro de Comprobantes al "eventos" de pos_configs', async () => {
