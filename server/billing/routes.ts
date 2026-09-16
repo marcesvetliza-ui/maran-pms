@@ -1693,38 +1693,60 @@ export function registerBillingRoutes(app: Express) {
           const reservationForSettlement = reservationId
             ? await storage.getReservation(reservationId)
             : null;
-          if (!reservationForSettlement) {
+          if (reservationId && !reservationForSettlement) {
             throw new FolioInvoiceValidationError("No se encontró la reserva para registrar la liquidación CC", 409);
           }
-          await storage.createReservationPaymentWithLedger({
-            payment: {
-              reservationId,
-              amount: total.toFixed(2),
-              method: "cuenta_corriente",
-              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-              reference: nroFac,
-              notes: cashLabelBody || nroFac,
-              invoiceRef: JSON.stringify({
-                id: factura.id,
-                tipoComprobante: factura.tipoComprobante,
-                puntoVenta: factura.puntoVenta,
-                numero: factura.numero,
-                cae: factura.cae,
-                total: factura.montoTotal,
-              }),
-            } as any,
-            sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${nroFac}`,
-            registeredBy: user?.username,
-            receiptType: factura.tipoComprobante,
-            accountSettlement: {
-              entityType: ccEntityType,
-              entityId: ccEntityId,
-              description: cashLabelBody || nroFac,
-              reference: nroFac,
-              createdBy: user?.id || null,
-              invoiceId: Number(factura.id),
-            },
-          });
+          if (reservationForSettlement) {
+            await storage.createReservationPaymentWithLedger({
+              payment: {
+                reservationId,
+                amount: total.toFixed(2),
+                method: "cuenta_corriente",
+                date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+                reference: nroFac,
+                notes: cashLabelBody || nroFac,
+                invoiceRef: JSON.stringify({
+                  id: factura.id,
+                  tipoComprobante: factura.tipoComprobante,
+                  puntoVenta: factura.puntoVenta,
+                  numero: factura.numero,
+                  cae: factura.cae,
+                  total: factura.montoTotal,
+                }),
+              } as any,
+              sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${nroFac}`,
+              registeredBy: user?.username,
+              receiptType: factura.tipoComprobante,
+              accountSettlement: {
+                entityType: ccEntityType,
+                entityId: ccEntityId,
+                description: cashLabelBody || nroFac,
+                reference: nroFac,
+                createdBy: user?.id || null,
+                invoiceId: Number(factura.id),
+              },
+            });
+          } else {
+            // Liquidación CC sin reserva vinculada (p. ej. una empresa o agencia
+            // facturada directamente desde el Centro de Comprobantes): el cargo
+            // va directo contra la cuenta corriente de la entidad, sin folio ni
+            // pago de reserva — el mismo mecanismo que ya usa el cobro CC de
+            // comandas de restaurante sin reserva (server/routes/restaurant.ts).
+            const existingCargos = await storage.getAccountMovements(ccEntityType, ccEntityId);
+            const alreadyCharged = existingCargos.some((m) => m.type === "cargo" && m.reference === nroFac);
+            if (!alreadyCharged) {
+              await storage.createAccountMovement({
+                entityType: ccEntityType,
+                entityId: ccEntityId,
+                date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+                type: "cargo",
+                description: cashLabelBody || nroFac,
+                amount: total.toFixed(2),
+                reference: nroFac,
+                createdBy: user?.id || null,
+              } as any);
+            }
+          }
         }
       } else if (!reusedExistingClaim && !groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área
