@@ -105,6 +105,17 @@ describe("EmitirFacturaDialog — Retención impositiva", () => {
     expect(screen.queryByTestId("btn-remove-retencion")).not.toBeInTheDocument();
   });
 
+  it("va entre los ítems y el total, no arriba junto a Tipo/Forma de pago", async () => {
+    renderDialog();
+    const retencion = screen.getByText("Retención impositiva");
+    const itemRow = screen.getByTestId("item-row-0");
+    const total = screen.getByText("TOTAL:");
+
+    // DOCUMENT_POSITION_FOLLOWING (4): el nodo de la derecha viene después del de la izquierda.
+    expect(itemRow.compareDocumentPosition(retencion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(retencion.compareDocumentPosition(total) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("cargar un monto se envía en cashFormaPagoDetalle sin tocar el total facturado", async () => {
     const user = userEvent.setup();
     renderDialog();
