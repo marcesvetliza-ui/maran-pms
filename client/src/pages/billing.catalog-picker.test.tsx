@@ -1,13 +1,15 @@
 /**
  * Tests for EmitirFacturaDialog — "Agregar desde catálogo"
  *
- * Instead of only free-text item rows, Venta now offers an optional catalog
- * picker next to "Agregar ítem", scoped by cashArea: a fixed "Alojamiento en
- * Hotel Maran" entry for recepción, the restaurant menu (Café Justo) for
- * restaurant, and spa treatments for spa. Picking an entry fills the
+ * Instead of only free-text item rows, Venta offers an optional catalog
+ * picker next to "Agregar ítem" with all three sources always available —
+ * a fixed "Alojamiento en Hotel Maran" entry, the restaurant menu (Café
+ * Justo), and spa treatments — grouped by origin, regardless of cashArea.
+ * Billing often mixes departments on one invoice (a room charge with a spa
+ * treatment, a restaurant order billed from recepción, etc.), so the picker
+ * isn't restricted to the current area. Picking an entry fills the
  * description + price; it's additive — manual entry still works exactly as
- * before, and areas without a catalog (or no cashArea at all) don't show the
- * button.
+ * before.
  */
 
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -67,9 +69,36 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     vi.unstubAllGlobals();
   });
 
-  it("recepción ofrece el ítem fijo de Alojamiento y lo carga en la primera fila vacía", async () => {
+  it("ofrece las tres fuentes juntas (alojamiento, carta, spa) sin importar cashArea", async () => {
+    const user = userEvent.setup();
+    // Facturando desde recepción, pero igual puede agregar un ítem de spa o de restaurant.
+    renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion" });
+
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-item-alojamiento")).toBeInTheDocument();
+      expect(screen.getByTestId("catalog-item-mi-1")).toBeInTheDocument();
+      expect(screen.getByTestId("catalog-item-tr-2")).toBeInTheDocument();
+    });
+    // El ítem no disponible (isAvailable: "false") no aparece.
+    expect(screen.queryByTestId("catalog-item-mi-3")).not.toBeInTheDocument();
+  });
+
+  it("elegir un ítem de spa desde una factura de recepción precarga descripción y precio", async () => {
     const user = userEvent.setup();
     renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion" });
+
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(await screen.findByTestId("catalog-item-tr-2"));
+
+    const row = screen.getByTestId("item-row-0");
+    expect(within(row).getByTestId("item-description-0")).toHaveValue("Circuito Spa");
+    expect(within(row).getByTestId("item-price-0")).toHaveValue(22000);
+  });
+
+  it("el ítem fijo de Alojamiento carga en la primera fila vacía", async () => {
+    const user = userEvent.setup();
+    renderDialog({ allowedTipos: ["FA"], cashArea: "spa" });
 
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
     await user.click(await screen.findByTestId("catalog-item-alojamiento"));
@@ -78,34 +107,6 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     expect(within(row).getByTestId("item-description-0")).toHaveValue("Alojamiento en Hotel Maran");
     // Sigue habiendo una sola fila — se completó la que ya estaba, no se agregó otra.
     expect(screen.queryByTestId("item-row-1")).not.toBeInTheDocument();
-  });
-
-  it("restaurant ofrece la carta (Café Justo) y precarga descripción y precio", async () => {
-    const user = userEvent.setup();
-    renderDialog({ allowedTipos: ["FA"], cashArea: "restaurant" });
-
-    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
-    await waitFor(() => expect(screen.getByTestId("catalog-item-mi-1")).toBeInTheDocument());
-    // El ítem no disponible (isAvailable: "false") no aparece.
-    expect(screen.queryByTestId("catalog-item-mi-3")).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("catalog-item-mi-1"));
-
-    const row = screen.getByTestId("item-row-0");
-    expect(within(row).getByTestId("item-description-0")).toHaveValue("Café Justo");
-    expect(within(row).getByTestId("item-price-0")).toHaveValue(2500);
-  });
-
-  it("spa ofrece los tratamientos activos", async () => {
-    const user = userEvent.setup();
-    renderDialog({ allowedTipos: ["FA"], cashArea: "spa" });
-
-    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
-    await user.click(await screen.findByTestId("catalog-item-tr-2"));
-
-    const row = screen.getByTestId("item-row-0");
-    expect(within(row).getByTestId("item-description-0")).toHaveValue("Circuito Spa");
-    expect(within(row).getByTestId("item-price-0")).toHaveValue(22000);
   });
 
   it("elegir un segundo ítem del catálogo agrega una fila nueva en vez de pisar la ya cargada", async () => {
@@ -122,7 +123,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     expect(within(screen.getByTestId("item-row-1")).getByTestId("item-description-1")).toHaveValue("Medialunas (x3)");
   });
 
-  it("buscar filtra las opciones del catálogo por nombre", async () => {
+  it("buscar filtra las opciones del catálogo por nombre en todas las fuentes", async () => {
     const user = userEvent.setup();
     renderDialog({ allowedTipos: ["FA"], cashArea: "restaurant" });
 
@@ -134,19 +135,14 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     await waitFor(() => {
       expect(screen.getByTestId("catalog-item-mi-1")).toBeInTheDocument();
       expect(screen.queryByTestId("catalog-item-mi-2")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("catalog-item-tr-1")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("catalog-item-alojamiento")).not.toBeInTheDocument();
     });
   });
 
-  it("no muestra el botón de catálogo para un área sin catálogo definido (eventos)", async () => {
-    renderDialog({ allowedTipos: ["FA"], cashArea: "events" });
-    await waitFor(() => expect(screen.getByTestId("emitir-factura-embedded")).toBeInTheDocument());
-    expect(screen.queryByTestId("btn-add-item-from-catalog")).not.toBeInTheDocument();
-  });
-
-  it("no muestra el botón de catálogo cuando no hay cashArea (ítems libres, sin restricción de área)", async () => {
+  it("también aparece cuando no hay cashArea (ítems libres)", async () => {
     renderDialog({ allowedTipos: ["FA", "FB"] });
-    await waitFor(() => expect(screen.getByTestId("emitir-factura-embedded")).toBeInTheDocument());
-    expect(screen.queryByTestId("btn-add-item-from-catalog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("btn-add-item-from-catalog")).toBeInTheDocument());
   });
 
   it("el botón de agregar ítem manual sigue funcionando igual que antes", async () => {

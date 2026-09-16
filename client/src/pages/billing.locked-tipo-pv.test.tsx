@@ -115,4 +115,15 @@ describe("EmitirFacturaDialog — tipo bloqueado y Punto de Venta por área", ()
       expect(screen.getByTestId("select-punto-venta")).toHaveTextContent("PV 0024"),
     );
   });
+
+  it("Tipo de comprobante, Forma de pago y Punto de Venta comparten una sola fila en vez de apilarse", async () => {
+    vi.stubGlobal("fetch", buildFetchMock(POS_CONFIGS_SINGLE_MATCH));
+    renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion", showPaymentMethod: true });
+
+    await waitFor(() => expect(screen.getByTestId("select-punto-venta")).toBeInTheDocument());
+    const row = screen.getByTestId("select-tipo-factura").closest(".grid");
+    expect(row).not.toBeNull();
+    expect(row).toContainElement(screen.getByTestId("select-cash-forma-pago"));
+    expect(row).toContainElement(screen.getByTestId("select-punto-venta"));
+  });
 });
