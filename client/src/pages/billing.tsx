@@ -11,7 +11,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -118,6 +120,11 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
 const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+
+// cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
+// and the Centro de Comprobantes) uses "events" while pos_configs.area (see
+// pos-configs.tsx) uses the Spanish "eventos" — everything else matches as-is.
+const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
@@ -720,6 +727,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
   const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
   const originalDomicilioRef = useRef<string>("");
@@ -744,9 +753,34 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const originalRecipientRef = useRef<Record<string, string>>({});
   const saveRecipientOnEmitRef = useRef(false);
   const initializedOperationRef = useRef<string | null>(null);
+  const pvAutoSelectedForRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+
+  // Catálogo de ítems por área — solo se pide lo que aplica a cashArea, para
+  // no disparar estas queries en flujos que no las necesitan (Compras, un
+  // billingEntityType de grupos, etc.).
+  const { data: menuItemsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/restaurant/menu/items"],
+    enabled: open && cashArea === "restaurant",
+  });
+  const { data: spaTreatmentsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/spa/treatments"],
+    enabled: open && cashArea === "spa",
+  });
+  const catalogOptions: { id: string; descripcion: string; precioUnitario: number }[] =
+    cashArea === "recepcion"
+      ? [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }]
+      : cashArea === "restaurant"
+        ? menuItemsData
+            .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
+            .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0 }))
+        : cashArea === "spa"
+          ? spaTreatmentsData
+              .filter((t: any) => t.isActive !== "false")
+              .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0 }))
+          : [];
 
   const entityResults: any[] = entitySearch.length >= 2
     ? [
@@ -840,6 +874,24 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dialogOperationKey]);
 
+  // Pre-select the Punto de Venta for the operation's área (e.g. Recepción)
+  // when there's exactly one active electronic PV configured for it, instead
+  // of always leaving it on the generic "PV por defecto" placeholder. Waits
+  // for posConfigsData to load and never overrides a value already set
+  // (auto or manual) for this same operation.
+  useEffect(() => {
+    if (!open || !cashArea) return;
+    if (pvAutoSelectedForRef.current === dialogOperationKey) return;
+    if (posConfigsData.length === 0) return; // wait for the PV list to load, retry next render
+    // Decide once per operation — resetForm() above always clears
+    // puntoVentaNum first, so this never fights a value it hasn't set itself;
+    // reading puntoVentaNum here would race that same-commit reset.
+    pvAutoSelectedForRef.current = dialogOperationKey;
+    const pvArea = CASH_AREA_TO_PV_AREA[cashArea] ?? cashArea;
+    const matches = posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico" && p.area === pvArea);
+    if (matches.length === 1) setPuntoVentaNum(String(matches[0].numero));
+  }, [open, cashArea, posConfigsData, dialogOperationKey]);
+
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
@@ -928,29 +980,56 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }));
   }
 
+  // Shared by updateItem (one field at a time) and addCatalogItem (a whole
+  // item at once) so both stay in sync with the same FA/FC/FB rounding rules.
+  function computeItemTotals(item: Item): Item {
+    const base = item.cantidad * item.precioUnitario;
+    const fa = tipo === "FA";
+    const fc = tipo === "FC";
+    const next = { ...item };
+    if (fc) {
+      // Factura C no discrimina IVA: el importe ingresado es el total final.
+      next.alicuotaIva = "no_gravado";
+      next.subtotalNeto = base; next.subtotal = base;
+    } else if (!fa) {
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    } else {
+      // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    }
+    return next;
+  }
+
   function updateItem(idx: number, field: keyof Item, value: any) {
     setItems(prev => {
       const updated = [...prev];
-      const item = { ...updated[idx], [field]: value };
-      const base = item.cantidad * item.precioUnitario;
-      const fa = tipo === "FA";
-      const fc = tipo === "FC";
-      if (fc) {
-        // Factura C no discrimina IVA: el importe ingresado es el total final.
-        item.alicuotaIva = "no_gravado";
-        item.subtotalNeto = base; item.subtotal = base;
-      } else if (!fa) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      } else {
-        // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      }
-      updated[idx] = item;
+      updated[idx] = computeItemTotals({ ...updated[idx], [field]: value });
       return updated;
+    });
+  }
+
+  // Elegir un ítem del catálogo (alojamiento fijo / carta de restaurant / tratamientos
+  // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
+  // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
+  // elige del catálogo sin haber tocado nada todavía.
+  function addCatalogItem(descripcion: string, precioUnitario: number) {
+    const built = computeItemTotals({
+      descripcion, cantidad: 1, precioUnitario,
+      alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
+      subtotalNeto: 0, subtotal: 0,
+    });
+    setItems(prev => {
+      const emptyIdx = prev.findIndex(it => !it.descripcion.trim() && it.precioUnitario === 0);
+      if (emptyIdx >= 0) {
+        const updated = [...prev];
+        updated[emptyIdx] = built;
+        return updated;
+      }
+      return [...prev, built];
     });
   }
 
@@ -1200,7 +1279,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   });
 
   function resetForm() {
-    setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
+    // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
+    // locking a single tipo already chosen in its selector) instead of always
+    // forcing FB — FB may not even be an allowed option, which left the
+    // Select with a tipo value that matched no SelectItem (blank dropdown).
+    setTipo(tipos.includes("FB") ? "FB" : tipos[0]); setRazonSocial(""); setCuit(""); setDni("");
     setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
@@ -1905,7 +1988,54 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
-             {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            <div className="flex gap-2">
+              {!hideAddItems && !lockItems && catalogOptions.length > 0 && (
+                <Popover open={catalogPickerOpen} onOpenChange={(o) => { setCatalogPickerOpen(o); if (!o) setCatalogSearch(""); }}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" data-testid="btn-add-item-from-catalog">
+                      <BookOpen className="w-3.5 h-3.5 mr-1" /> Agregar desde catálogo
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="end">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Buscar en el catálogo..."
+                        value={catalogSearch}
+                        onValueChange={setCatalogSearch}
+                        data-testid="input-catalog-search"
+                      />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados.</CommandEmpty>
+                        <CommandGroup>
+                          {catalogOptions
+                            .filter(o => o.descripcion.toLowerCase().includes(catalogSearch.trim().toLowerCase()))
+                            .slice(0, 50)
+                            .map(o => (
+                              <CommandItem
+                                key={o.id}
+                                value={o.id}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onSelect={() => {
+                                  addCatalogItem(o.descripcion, o.precioUnitario);
+                                  setCatalogPickerOpen(false);
+                                  setCatalogSearch("");
+                                }}
+                                data-testid={`catalog-item-${o.id}`}
+                              >
+                                <span className="flex-1">{o.descripcion}</span>
+                                {o.precioUnitario > 0 && (
+                                  <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                )}
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              )}
+              {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            </div>
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">

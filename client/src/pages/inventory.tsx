@@ -14,6 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -51,6 +53,8 @@ import {
   X,
   Layers,
   FolderOpen,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -263,6 +267,78 @@ const movementTypeLabels: Record<string, string> = {
   transferencia: "Transferencia",
   consumo: "Consumo",
 };
+
+/**
+ * Selector de artículo con buscador (Popover + Command), en vez de un
+ * <Select> con todo el catálogo listado — para catálogos grandes escribir
+ * dos letras filtra por nombre o SKU en vez de tener que scrollear una
+ * lista larga. Usado por TransferForm y por cada fila de InternalMovementForm.
+ */
+function ItemCombobox({ items, value, onChange, placeholder = "Artículo...", testId, className = "h-9 text-sm" }: {
+  items: InventoryItem[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+  testId: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const activeItems = items.filter(i => i.id && i.isActive !== "false");
+  const term = search.trim().toLowerCase();
+  const filtered = term
+    ? activeItems.filter(i =>
+        i.name.toLowerCase().includes(term) || (i.sku || "").toLowerCase().includes(term))
+    : activeItems;
+  const selected = activeItems.find(i => i.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch(""); }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={`w-full justify-between font-normal px-2 ${className}`}
+          data-testid={testId}
+        >
+          <span className={`truncate text-left ${selected ? "" : "text-muted-foreground"}`}>
+            {selected ? `${selected.name}${selected.sku ? ` (${selected.sku})` : ""}` : placeholder}
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0 z-[100] pointer-events-auto" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Buscar por nombre o SKU..."
+            value={search}
+            onValueChange={setSearch}
+            data-testid={`${testId}-search`}
+          />
+          <CommandList>
+            <CommandEmpty>Sin resultados.</CommandEmpty>
+            <CommandGroup>
+              {filtered.slice(0, 50).map(i => (
+                <CommandItem
+                  key={i.id}
+                  value={i.id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onSelect={() => { onChange(i.id); setOpen(false); setSearch(""); }}
+                  data-testid={`${testId}-option-${i.id}`}
+                >
+                  <Check className={`mr-2 h-4 w-4 ${value === i.id ? "opacity-100" : "opacity-0"}`} />
+                  <span className="flex-1">{i.name}{i.sku ? ` (${i.sku})` : ""}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Formulario de "Nuevo Movimiento Interno", extraído de InventoryPage para
@@ -499,17 +575,13 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
                   return (
                     <tr key={idx} className="border-t">
                       <td className="p-1.5">
-                        <Select value={row.itemId || "__none__"} onValueChange={v => updateImItem(idx, "itemId", v === "__none__" ? "" : v)}>
-                          <SelectTrigger className="h-8 text-xs" data-testid={`select-im-item-${idx}`}>
-                            <SelectValue placeholder="Artículo..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">— Seleccionar —</SelectItem>
-                            {items.filter(i => i.id && i.isActive !== "false").map(i => (
-                              <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <ItemCombobox
+                          items={items}
+                          value={row.itemId}
+                          onChange={v => updateImItem(idx, "itemId", v)}
+                          testId={`select-im-item-${idx}`}
+                          className="h-8 text-xs"
+                        />
                       </td>
                       <td className="p-1.5">
                         <div className="flex items-center gap-1">
@@ -2717,14 +2789,13 @@ function TransferForm({
     <div className="space-y-4">
       <div className="space-y-1">
         <Label>Artículo *</Label>
-        <Select value={itemId} onValueChange={setItemId}>
-          <SelectTrigger data-testid="select-transfer-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
-          <SelectContent>
-            {items.filter(i => i.id && i.isActive !== "false").map(i => (
-              <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ItemCombobox
+          items={items}
+          value={itemId}
+          onChange={setItemId}
+          placeholder="Seleccionar artículo..."
+          testId="select-transfer-item"
+        />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
