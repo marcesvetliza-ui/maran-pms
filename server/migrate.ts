@@ -2759,6 +2759,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     $migration$;
   `)));
 
+  // Factura T (turismo): el receptor puede identificarse con pasaporte en vez
+  // de DNI/CUIT. Se persiste el tipo de documento para poder mandarle a ARCA
+  // el DocTipo correcto (94 = Pasaporte) y para que un reintento/recuperación
+  // de un comprobante pendiente lo recupere igual que cuit/dni.
+  await withTimeout("sales_invoices.cliente_document_type", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cliente_document_type text`)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

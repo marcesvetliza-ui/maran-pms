@@ -2552,6 +2552,10 @@ export const salesInvoices = pgTable("sales_invoices", {
   clienteRazonSocial: text("cliente_razon_social").notNull(),
   clienteCuit: text("cliente_cuit"),
   clienteDni: text("cliente_dni"),
+  // Tipo de documento del receptor (ej. "passport") — determina si clienteDni
+  // se manda a ARCA como DocTipo 94 (Pasaporte) en vez de 96 (DNI). Solo
+  // relevante hoy para Factura T (turismo), receptores extranjeros.
+  clienteDocumentType: text("cliente_document_type"),
   clienteCondicionIva: text("cliente_condicion_iva").notNull(),
   clienteDomicilio: text("cliente_domicilio"),
   montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull(),

@@ -308,6 +308,7 @@ const TIPO_OPTIONS = [
   { value: "FA",  label: "Factura A",           fiscal: true },
   { value: "FB",  label: "Factura B",           fiscal: true },
   { value: "FM",  label: "Factura MiPyme A",    fiscal: true },
+  { value: "FT",  label: "Factura T (Turismo)", fiscal: true },
   // NC/ND types are intentionally excluded here — use the dedicated Nota de Crédito/Débito
   // buttons in the folio view. Showing them in this selector caused accidental NC creation.
   // "ticket" is also excluded — it belongs to restaurant/spa flows, not folio billing.
@@ -988,10 +989,16 @@ export function PrefacturaDialog({
       : ["guest"];
   const billingTargetLocked = false;
   const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
-  // Comprobante availability is based on the recipient. Factura T remains
-  // disabled until its tourism-specific fiscal payload is fully implemented.
+  // Factura T solo corresponde a un huésped extranjero (nunca a una empresa o
+  // agencia) facturando alojamiento — la misma condición que ya exige el
+  // servidor en POST /api/billing/invoices.
+  const canOfferFacturaT = billingTarget === "guest"
+    && hasSelectedAccommodation
+    && !isArgentineNationality(nationality, nationalityCode);
+  // Comprobante availability is based on the recipient.
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
+    if (opt.value === "FT") return canOfferFacturaT;
     if (["Responsable Inscripto", "Exento"].includes(condicionIva)) return ["FA", "FM"].includes(opt.value);
     return opt.value === "FB";
   });
@@ -1170,6 +1177,7 @@ export function PrefacturaDialog({
             razonSocial: razonSocial || "Consumidor Final",
             cuit: cuit || undefined,
             dni: dni || undefined,
+            documentType: documentType || undefined,
             condicionIva,
             domicilio: domicilio || undefined,
           },

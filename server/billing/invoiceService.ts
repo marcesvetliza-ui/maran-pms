@@ -28,6 +28,8 @@ export interface NewInvoiceData {
     razonSocial: string;
     cuit?: string;
     dni?: string;
+    /** e.g. "passport" — Factura T (turismo) receptores extranjeros. */
+    documentType?: string;
     condicionIva: string;
     domicilio?: string;
   };
@@ -107,7 +109,11 @@ export function buildComprobanteAsociado(doc: any): NewInvoiceData["comprobanteA
   };
 }
 
-const UNSUPPORTED_SALE_TYPES = new Set(["FC", "FT", "NCC", "NCT", "NDC", "NDT"]);
+// FC/NCC/NDC (Factura C — monotributistas) siguen sin implementarse. FT y sus
+// notas T ya tienen el circuito completo: reglas de elegibilidad (solo
+// huésped extranjero con alojamiento), armado del pedido a ARCA con Pasaporte
+// como tipo de documento, y el PDF con el encabezado correspondiente.
+const UNSUPPORTED_SALE_TYPES = new Set(["FC", "NCC", "NDC"]);
 
 export function isUnsupportedSaleType(tipo: string): boolean {
   return UNSUPPORTED_SALE_TYPES.has(tipo);
@@ -297,6 +303,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       clienteRazonSocial: data.cliente.razonSocial,
       clienteCuit: data.cliente.cuit || null,
       clienteDni: data.cliente.dni || null,
+      clienteDocumentType: data.cliente.documentType || null,
       clienteCondicionIva: data.cliente.condicionIva,
       clienteDomicilio: data.cliente.domicilio || null,
       montoNeto: String(montos.montoNeto),
@@ -446,6 +453,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
             ...montos,
             clienteCuit: data.cliente.cuit,
             clienteDni: data.cliente.dni,
+            clienteDocumentType: data.cliente.documentType,
             clienteCondicionIva: data.cliente.condicionIva,
             fecha,
             cbteAsoc,
@@ -499,6 +507,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     clienteRazonSocial: data.cliente.razonSocial,
     clienteCuit: data.cliente.cuit || null,
     clienteDni: data.cliente.dni || null,
+    clienteDocumentType: data.cliente.documentType || null,
     clienteCondicionIva: data.cliente.condicionIva,
     clienteDomicilio: data.cliente.domicilio || null,
     montoNeto: String(montos.montoNeto),

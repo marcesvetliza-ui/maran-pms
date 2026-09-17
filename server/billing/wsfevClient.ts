@@ -26,6 +26,8 @@ export interface FECAERequest {
   montoNoGravado: number;
   clienteCuit?: string;
   clienteDni?: string;
+  /** e.g. "passport" — see resolveFiscalRecipientDocument for how this maps to DocTipo. */
+  clienteDocumentType?: string;
   clienteCondicionIva: string;
   fecha: string;
   /**
@@ -170,6 +172,7 @@ export async function feCAESolicitar(
   const recipientDocument = resolveFiscalRecipientDocument({
     cuit: req.clienteCuit,
     dni: req.clienteDni,
+    documentType: req.clienteDocumentType,
   });
   const docTipo = recipientDocument.tipo;
   const docNro = recipientDocument.numero;
