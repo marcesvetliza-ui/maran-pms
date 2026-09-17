@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSe
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, subWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
@@ -452,12 +453,31 @@ type SpaRoomChargeType = {
 };
 
 type ViewMode = "daily" | "weekly";
-type SpaTab = "agenda" | "tratamientos" | "insumos" | "configuracion";
+type SpaTab = "agenda" | "vendidos" | "tratamientos" | "insumos" | "configuracion";
+
+type SpaTreatmentSale = {
+  id: string;
+  salesInvoiceId: number;
+  treatmentId: string;
+  treatmentName: string | null;
+  buyerName: string;
+  quantityPurchased: number;
+  quantityScheduled: number;
+  quantityUsed: number;
+  unitPriceFrozen: string;
+  status: string;
+  createdAt: string;
+  invoiceTipoComprobante: string | null;
+  invoicePuntoVenta: number | null;
+  invoiceNumero: number | null;
+  invoiceEstado: string | null;
+};
 
 export default function SpaPage() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [activeTab, setActiveTab] = useState<SpaTab>("agenda");
+  const [showAllTreatmentSales, setShowAllTreatmentSales] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
@@ -529,6 +549,15 @@ export default function SpaPage() {
 
   const { data: treatments = [] } = useQuery<SpaTreatment[]>({
     queryKey: ["/api/spa/treatments"],
+  });
+
+  const { data: treatmentSales = [], isLoading: treatmentSalesLoading } = useQuery<SpaTreatmentSale[]>({
+    queryKey: ["/api/spa/treatment-sales", showAllTreatmentSales],
+    queryFn: async () => {
+      const response = await fetch(`/api/spa/treatment-sales?pending=${!showAllTreatmentSales}`);
+      return response.json();
+    },
+    enabled: activeTab === "vendidos",
   });
 
   // Los cargos adicionales del folio usan el mismo catálogo que
@@ -1761,6 +1790,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <CalendarDays className="h-4 w-4 mr-1" /> Agenda
           </Button>
           <Button
+            variant={activeTab === "vendidos" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("vendidos")}
+            data-testid="tab-vendidos"
+          >
+            <Receipt className="h-4 w-4 mr-1" /> Turnos vendidos
+          </Button>
+          <Button
             variant={activeTab === "tratamientos" ? "default" : "ghost"}
             size="sm"
             onClick={() => setActiveTab("tratamientos")}
@@ -2049,6 +2086,104 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </Card>
           )}
         </>
+      )}
+
+      {activeTab === "vendidos" && (
+        <Card className="flex-1">
+          <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Turnos vendidos</CardTitle>
+            <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+              <Button
+                variant={!showAllTreatmentSales ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setShowAllTreatmentSales(false)}
+                data-testid="button-sales-filter-pending"
+              >
+                Pendientes de agendar
+              </Button>
+              <Button
+                variant={showAllTreatmentSales ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setShowAllTreatmentSales(true)}
+                data-testid="button-sales-filter-all"
+              >
+                Todos
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {treatmentSalesLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
+              </div>
+            ) : treatmentSales.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Receipt className="h-12 w-12 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">
+                  {showAllTreatmentSales ? "No hay ventas de tratamientos registradas." : "No hay ventas pendientes de agendar."}
+                </p>
+                <p className="text-xs mt-1">Se registran automáticamente al elegir un tratamiento desde "Agregar desde catálogo" en Emitir Comprobante.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Tratamiento</TableHead>
+                    <TableHead>Comprador</TableHead>
+                    <TableHead>Comprobante</TableHead>
+                    <TableHead className="text-right">Comprado</TableHead>
+                    <TableHead className="text-right">Agendado</TableHead>
+                    <TableHead className="text-right">Usado</TableHead>
+                    <TableHead>Fecha</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {treatmentSales.map((sale) => {
+                    const statusLabel: Record<string, string> = {
+                      pendiente: "Pendiente",
+                      parcial: "Parcial",
+                      programado: "Programado",
+                      utilizado: "Utilizado",
+                      vencido: "Vencido",
+                      cancelado: "Cancelado",
+                    };
+                    const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+                      pendiente: "outline",
+                      parcial: "secondary",
+                      programado: "default",
+                      utilizado: "default",
+                      vencido: "destructive",
+                      cancelado: "destructive",
+                    };
+                    return (
+                      <TableRow key={sale.id} data-testid={`treatment-sale-row-${sale.id}`}>
+                        <TableCell>
+                          <Badge variant={statusVariant[sale.status] || "outline"}>
+                            {statusLabel[sale.status] || sale.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">{sale.treatmentName || "—"}</TableCell>
+                        <TableCell className="text-sm">{sale.buyerName}</TableCell>
+                        <TableCell className="text-sm">
+                          {sale.invoiceTipoComprobante
+                            ? `${sale.invoiceTipoComprobante} ${String(sale.invoicePuntoVenta ?? 1).padStart(4, "0")}-${String(sale.invoiceNumero ?? 0).padStart(8, "0")}`
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityPurchased}</TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityScheduled}</TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityUsed}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatHotelDateTime(sale.createdAt)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {activeTab === "tratamientos" && (

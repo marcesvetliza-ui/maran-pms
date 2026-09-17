@@ -24,7 +24,10 @@ let baseUrl = "";
 let httpServer: http.Server | null = null;
 
 async function startServer() {
-  const { registerBillingRoutes } = await import("../billing/routes");
+  const [{ registerBillingRoutes }, { registerSpaRoutes }] = await Promise.all([
+    import("../billing/routes"),
+    import("../routes/spa"),
+  ]);
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -38,6 +41,7 @@ async function startServer() {
     next();
   });
   registerBillingRoutes(app);
+  registerSpaRoutes(app);
   httpServer = await new Promise<http.Server>((resolve) => {
     const server = http.createServer(app);
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -53,7 +57,7 @@ async function stopServer() {
   httpServer = null;
 }
 
-async function request(method: "POST", path: string, body?: unknown) {
+async function request(method: "GET" | "POST", path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -69,7 +73,6 @@ runIfDatabaseIsConfigured("Turnos vendidos — registro al emitir comprobante", 
 
   afterAll(async () => {
     await stopServer();
-    await pool?.end();
   });
 
   it("un ítem elegido del catálogo de Spa queda como venta pendiente de agendar", async () => {
@@ -165,6 +168,83 @@ runIfDatabaseIsConfigured("Turnos vendidos — registro al emitir comprobante", 
       expect(sales.rows).toEqual([]);
     } finally {
       if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+    }
+  });
+});
+
+runIfDatabaseIsConfigured("GET /api/spa/treatment-sales", () => {
+  beforeAll(async () => {
+    if (pool) await startServer();
+  });
+
+  afterAll(async () => {
+    await stopServer();
+    await pool?.end();
+  });
+
+  it("enriquece con el nombre del tratamiento y el número del comprobante, y filtra por pendientes", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const treatmentId = `treatment-${suffix}`;
+    const invoiceIds: number[] = [];
+
+    try {
+      await pool.query(
+        `INSERT INTO spa_treatments (id, name, duration_minutes, price, is_active)
+         VALUES ($1, 'Circuito Spa', 90, '22000.00', 'true')`,
+        [treatmentId],
+      );
+
+      // Venta pendiente: nada agendado todavía.
+      const pendingSale = await request("POST", "/api/billing/invoices", {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Comprador Pendiente", condicionIva: "consumidor_final" },
+        items: [{
+          descripcion: "Circuito Spa", cantidad: 1, precioUnitario: 22000,
+          alicuotaIva: "21", subtotalNeto: 18181.82, subtotal: 22000, spaTreatmentId: treatmentId,
+        }],
+      });
+      invoiceIds.push(Number(pendingSale.body.id));
+
+      // Venta ya totalmente agendada: no debe aparecer en el filtro "pendientes".
+      const scheduledSale = await request("POST", "/api/billing/invoices", {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Comprador Agendado", condicionIva: "consumidor_final" },
+        items: [{
+          descripcion: "Circuito Spa", cantidad: 1, precioUnitario: 22000,
+          alicuotaIva: "21", subtotalNeto: 18181.82, subtotal: 22000, spaTreatmentId: treatmentId,
+        }],
+      });
+      const scheduledInvoiceId = Number(scheduledSale.body.id);
+      invoiceIds.push(scheduledInvoiceId);
+      await pool.query(
+        `UPDATE spa_treatment_sales SET quantity_scheduled = 1, status = 'programado' WHERE sales_invoice_id = $1`,
+        [scheduledInvoiceId],
+      );
+
+      const pendingList = await request("GET", "/api/spa/treatment-sales?pending=true");
+      expect(pendingList.status).toBe(200);
+      expect(pendingList.body).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          salesInvoiceId: invoiceIds[0],
+          treatmentName: "Circuito Spa",
+          buyerName: "Comprador Pendiente",
+          invoiceTipoComprobante: "FB",
+          invoiceNumero: expect.any(Number),
+          status: "pendiente",
+        }),
+      ]));
+      expect(pendingList.body.some((row: any) => row.salesInvoiceId === scheduledInvoiceId)).toBe(false);
+
+      const allList = await request("GET", "/api/spa/treatment-sales?pending=false");
+      expect(allList.status).toBe(200);
+      expect(allList.body.some((row: any) => row.salesInvoiceId === scheduledInvoiceId)).toBe(true);
+    } finally {
+      for (const id of invoiceIds) {
+        await pool.query("DELETE FROM spa_treatment_sales WHERE sales_invoice_id = $1", [id]);
+        await pool.query("DELETE FROM sales_invoices WHERE id = $1", [id]);
+      }
+      await pool.query("DELETE FROM spa_treatments WHERE id = $1", [treatmentId]);
     }
   });
 });

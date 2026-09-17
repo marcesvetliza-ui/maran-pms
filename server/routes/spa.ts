@@ -12,6 +12,7 @@ import {
   spaAccountItems,
   spaAppointments,
   spaTreatments,
+  spaTreatmentSales,
   spaTreatmentResources,
   spaAppointmentResources,
   spaCabins,
@@ -768,6 +769,45 @@ export function registerSpaRoutes(app: Express) {
       res.json(appointment);
     } catch (error) {
       res.status(500).json({ error: "Error fetching appointment" });
+    }
+  });
+
+  // "Turnos vendidos": tratamientos ya vendidos (comprobante emitido, cobrados)
+  // que todavía no tienen — o no agotaron — sus turnos agendados.
+  app.get("/api/spa/treatment-sales", requireAuth, async (req, res) => {
+    try {
+      const onlyPending = req.query.pending === "true";
+      const rows = await db
+        .select({
+          id: spaTreatmentSales.id,
+          salesInvoiceId: spaTreatmentSales.salesInvoiceId,
+          treatmentId: spaTreatmentSales.treatmentId,
+          treatmentName: spaTreatments.name,
+          buyerName: spaTreatmentSales.buyerName,
+          quantityPurchased: spaTreatmentSales.quantityPurchased,
+          quantityScheduled: spaTreatmentSales.quantityScheduled,
+          quantityUsed: spaTreatmentSales.quantityUsed,
+          unitPriceFrozen: spaTreatmentSales.unitPriceFrozen,
+          status: spaTreatmentSales.status,
+          createdAt: spaTreatmentSales.createdAt,
+          invoiceTipoComprobante: salesInvoices.tipoComprobante,
+          invoicePuntoVenta: salesInvoices.puntoVenta,
+          invoiceNumero: salesInvoices.numero,
+          invoiceEstado: salesInvoices.estado,
+        })
+        .from(spaTreatmentSales)
+        .leftJoin(spaTreatments, eq(spaTreatmentSales.treatmentId, spaTreatments.id))
+        .leftJoin(salesInvoices, eq(spaTreatmentSales.salesInvoiceId, salesInvoices.id))
+        .where(onlyPending
+          ? and(
+              sql`${spaTreatmentSales.quantityScheduled} < ${spaTreatmentSales.quantityPurchased}`,
+              sql`${spaTreatmentSales.status} != 'cancelado'`,
+            )
+          : undefined)
+        .orderBy(desc(spaTreatmentSales.createdAt));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa treatment sales" });
     }
   });
 
