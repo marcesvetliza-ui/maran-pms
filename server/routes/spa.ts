@@ -1886,7 +1886,7 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:accountId/items", requireAuth, async (req, res) => {
     try {
-      const { description, quantity, unitPrice, itemType, notes } = req.body;
+      const { description, quantity, unitPrice, itemType, inventoryItemId, notes } = req.body;
 
       if (!description || !unitPrice) {
         return res.status(400).json({ error: "description and unitPrice are required" });
@@ -1902,9 +1902,19 @@ export function registerSpaRoutes(app: Express) {
         unitPrice,
         subtotal,
         itemType: itemType || "treatment",
+        inventoryItemId: inventoryItemId || null,
         notes: notes || null,
         createdAt: new Date(),
       });
+
+      // Un producto (a diferencia de un concepto como cochera) sale del
+      // depósito del SPA en el momento en que se vende, no cuando se inicia
+      // el turno o se cierra la cuenta.
+      if (inventoryItemId) {
+        storage.deductStockForSoldSpaProduct(inventoryItemId, qty, item.id).catch((err: any) =>
+          console.warn("[SPA] Error deducting stock for sold product:", err)
+        );
+      }
 
       // Motor financiero: escribir cargo al folio de la cuenta SPA
       storage.addFolioCharge(

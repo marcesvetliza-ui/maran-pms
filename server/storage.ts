@@ -656,6 +656,7 @@ export interface IStorage {
   createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply>;
   deleteTreatmentSupply(id: string): Promise<boolean>;
   deductStockFromSpaAccount(accountId: string): Promise<void>;
+  deductStockForSoldSpaProduct(inventoryItemId: string, quantity: number, accountItemId: string): Promise<void>;
 
   // ==================== EVENTS ====================
   // Event Rooms

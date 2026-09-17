@@ -2795,6 +2795,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // "Agregar Cargo" en el folio SPA distingue conceptos del hotel (cochera,
+  // media pensión — sin stock) de productos que vende el SPA (cremas,
+  // bebidas). Un producto queda vinculado a su artículo de inventario para
+  // poder descontarle stock al venderse.
+  await withTimeout("spa_account_items.inventory_item_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_account_items ADD COLUMN inventory_item_id varchar`)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

@@ -277,6 +277,7 @@ type InventoryItemWithDetails = {
   currentStock: number;
   unit: string;
   costPrice: string;
+  isActive?: string | null;
   category?: { id: string; name: string; area: string };
 };
 
@@ -694,6 +695,18 @@ export default function SpaPage() {
 
   const allInventoryItems = spaInventoryItems;
 
+  // Productos que el SPA vende directamente (cremas, bebidas) — a diferencia
+  // de los conceptos del hotel (cochera, media pensión) que no llevan stock.
+  const { data: spaSellableProducts = [] } = useQuery<InventoryItemWithDetails[]>({
+    queryKey: ["/api/inventory/items", "spa", "venta_directa"],
+    queryFn: async () => {
+      const response = await fetch("/api/inventory/items?area=spa&itemKind=venta_directa", { credentials: "include" });
+      if (!response.ok) throw new Error("Error");
+      return response.json();
+    },
+    enabled: isAddChargeOpen,
+  });
+
   const activeCabins = cabins.filter((c) => c.isActive === "true");
 
   const [selectedSpaGuest, setSelectedSpaGuest] = useState<{ id: string; firstName: string; lastName: string | null } | null>(null);
@@ -987,15 +1000,18 @@ export default function SpaPage() {
   });
 
   const addChargeMutation = useMutation({
-    mutationFn: async ({ accountId, description, quantity, unitPrice, itemType }: {
-      accountId: string; description: string; quantity: number; unitPrice: string; itemType: string;
+    mutationFn: async ({ accountId, description, quantity, unitPrice, itemType, inventoryItemId }: {
+      accountId: string; description: string; quantity: number; unitPrice: string; itemType: string; inventoryItemId?: string;
     }) => {
       return apiRequest("POST", `/api/spa/accounts/${accountId}/items`, {
-        description, quantity, unitPrice, itemType,
+        description, quantity, unitPrice, itemType, inventoryItemId,
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      if (variables.inventoryItemId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      }
       refetchAccount();
       toast({ title: "Cargo agregado" });
       setIsAddChargeOpen(false);
@@ -3823,6 +3839,12 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     if (val === "cargo_editable") {
                       setChargeDescription("");
                       setChargePrice("");
+                    } else if (val.startsWith("product:")) {
+                      const product = spaSellableProducts.find(p => p.id === val.slice("product:".length));
+                      setChargeDescription(product?.name || "");
+                      // Los productos no tienen precio de venta en el catálogo
+                      // todavía — se carga a mano cada vez, igual que un cargo libre.
+                      setChargePrice("");
                     } else {
                       const roomCharge = roomChargeTypes.find(ct => ct.id === val);
                       if (roomCharge) {
@@ -3835,12 +3857,25 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <SelectValue placeholder="Seleccionar cargo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {roomChargeTypes.filter(ct => ct.id && ct.active).map(ct => (
-                        <SelectItem key={ct.id} value={ct.id}>
-                          {ct.label} — ${fmtMoney(String(ct.defaultAmount))}
-                          {ct.allowPriceEdit ? " (variable)" : ""}
-                        </SelectItem>
-                      ))}
+                      <SelectGroup>
+                        <SelectLabel>Conceptos</SelectLabel>
+                        {roomChargeTypes.filter(ct => ct.id && ct.active).map(ct => (
+                          <SelectItem key={ct.id} value={ct.id}>
+                            {ct.label} — ${fmtMoney(String(ct.defaultAmount))}
+                            {ct.allowPriceEdit ? " (variable)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      {spaSellableProducts.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>Productos SPA</SelectLabel>
+                          {spaSellableProducts.filter(p => p.id && p.isActive !== "false").map(p => (
+                            <SelectItem key={p.id} value={`product:${p.id}`}>
+                              {p.name} — stock: {p.currentStock}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
                       <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -3866,7 +3901,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       step="0.01"
                       value={chargePrice}
                       onChange={(e) => setChargePrice(e.target.value)}
-                      disabled={chargeType !== "cargo_editable" && !roomChargeTypes.find(ct => ct.id === chargeType)?.allowPriceEdit}
+                      disabled={chargeType !== "cargo_editable" && !chargeType.startsWith("product:") && !roomChargeTypes.find(ct => ct.id === chargeType)?.allowPriceEdit}
                       data-testid="input-charge-price"
                     />
                   </div>
@@ -3881,12 +3916,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     disabled={!chargeDescription || !chargePrice || addChargeMutation.isPending}
                     onClick={() => {
                       if (selectedAccount) {
+                        const isProduct = chargeType.startsWith("product:");
                         addChargeMutation.mutate({
                           accountId: selectedAccount.id,
                           description: chargeDescription,
                           quantity: parseInt(chargeQuantity) || 1,
                           unitPrice: chargePrice,
-                          itemType: "extra",
+                          itemType: isProduct ? "product" : "extra",
+                          inventoryItemId: isProduct ? chargeType.slice("product:".length) : undefined,
                         });
                       }
                     }}
