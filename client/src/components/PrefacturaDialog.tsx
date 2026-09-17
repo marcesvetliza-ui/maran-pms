@@ -1454,6 +1454,13 @@ export function PrefacturaDialog({
           {/* ── Prefactura (cargos + cobro en una sola pantalla) ──────────── */}
           {step < 3 && (
           <div className="space-y-4">
+            {/* Notas de la reserva — visibles al hacer el check-out (ej. quién abona) */}
+            {mode === "checkout" && reservationData?.notes && (
+              <div className="text-sm bg-muted/30 rounded-md p-3" data-testid="prefactura-reservation-notes">
+                <div className="text-muted-foreground mb-1">Notas de la reserva:</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{reservationData.notes}</div>
+              </div>
+            )}
             {/* Alerts for checkout mode */}
             {mode === "checkout" && reservation && (reservation as any).status !== "checked_in" && (
               <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
