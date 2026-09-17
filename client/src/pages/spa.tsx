@@ -255,7 +255,7 @@ type Company = {
   direccion?: string | null;
 };
 
-type NewAppointmentSettlement = "" | "room_charge" | "invoice" | "voucher";
+type NewAppointmentSettlement = "" | "room_charge" | "invoice" | "voucher" | "already_sold";
 
 type PendingSpaInvoice = {
   accountId: string;
@@ -481,6 +481,7 @@ export default function SpaPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [generatingFromSale, setGeneratingFromSale] = useState<SpaTreatmentSale | null>(null);
   const [newAppointmentSettlement, setNewAppointmentSettlement] = useState<NewAppointmentSettlement>("");
   const [newAppointmentRoomId, setNewAppointmentRoomId] = useState("");
   const [newAppointmentVoucherMethod, setNewAppointmentVoucherMethod] = useState("");
@@ -822,7 +823,9 @@ export default function SpaPage() {
             ? { settlement: { type: "room_charge", reservationId: newAppointmentRoomId } }
             : newAppointmentSettlement === "voucher"
               ? { settlement: { type: "voucher", paymentMethod: newAppointmentVoucherMethod } }
-              : {}),
+              : newAppointmentSettlement === "already_sold" && generatingFromSale
+                ? { settlement: { type: "already_sold", soldTreatmentSaleId: generatingFromSale.id } }
+                : {}),
         }),
       });
       
@@ -843,11 +846,15 @@ export default function SpaPage() {
         toast({ title: "Turno creado y cargado al folio de la habitación" });
       } else if (createdApt.settlementType === "voucher") {
         toast({ title: "Turno creado y Voucher SPA registrado" });
+      } else if (createdApt.settlementType === "already_sold") {
+        queryClient.invalidateQueries({ queryKey: ["/api/spa/treatment-sales"] });
+        toast({ title: "Turno agendado — ya estaba pagado, no se volvió a cobrar" });
       } else if (newAppointmentSettlement === "invoice") {
         toast({ title: "Turno creado", description: "Completá la factura y la forma de pago." });
       } else {
         toast({ title: "Turno creado — imprimiendo comanda..." });
       }
+      setGeneratingFromSale(null);
 
       if (newAppointmentSettlement === "invoice" && createdApt.accountId) {
         const linkedReservation = variables.reservationId
@@ -1475,6 +1482,25 @@ export default function SpaPage() {
       cabinId, treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
       guestPhone: "", guestEmail: "", appointmentDate: dateStr,
       startTime: time, reservationId: "", notes: "",
+    });
+    setIsNewDialogOpen(true);
+  };
+
+  const handleGenerateAppointmentFromSale = (sale: SpaTreatmentSale) => {
+    setIsEditMode(false);
+    setEditingAppointmentId(null);
+    setEditingAppointmentResources([]);
+    setCircuitBookings([]);
+    setCircuitDraftTreatmentId(null);
+    setGeneratingFromSale(sale);
+    setNewAppointmentSettlement("already_sold");
+    setNewAppointmentRoomId("");
+    setNewAppointmentVoucherMethod("");
+    form.reset({
+      cabinId: "", treatmentId: sale.treatmentId, professionalId: "",
+      guestName: sale.buyerName, guestLastName: "",
+      guestPhone: "", guestEmail: "", appointmentDate: dateStr,
+      startTime: "", reservationId: "", notes: "",
     });
     setIsNewDialogOpen(true);
   };
@@ -2136,6 +2162,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     <TableHead className="text-right">Agendado</TableHead>
                     <TableHead className="text-right">Usado</TableHead>
                     <TableHead>Fecha</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2175,6 +2202,18 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         <TableCell className="text-right text-sm">{sale.quantityUsed}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {formatHotelDateTime(sale.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          {sale.quantityScheduled < sale.quantityPurchased && sale.status !== "cancelado" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleGenerateAppointmentFromSale(sale)}
+                              data-testid={`button-generate-appointment-${sale.id}`}
+                            >
+                              Generar turno
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
@@ -2659,11 +2698,19 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); } }}>
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{isEditMode ? "Editar Turno" : "Nuevo Turno SPA"}</DialogTitle>
+            <DialogTitle>{isEditMode ? "Editar Turno" : generatingFromSale ? "Agendar turno vendido" : "Nuevo Turno SPA"}</DialogTitle>
           </DialogHeader>
+          {generatingFromSale && (
+            <div className="rounded-md border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300" data-testid="banner-generating-from-sale">
+              Ya vendido y cobrado
+              {generatingFromSale.invoiceTipoComprobante
+                ? ` — ${generatingFromSale.invoiceTipoComprobante} ${String(generatingFromSale.invoicePuntoVenta ?? 1).padStart(4, "0")}-${String(generatingFromSale.invoiceNumero ?? 0).padStart(8, "0")}`
+                : ""}. Solo falta elegir gabinete, fecha y horario — no se vuelve a pedir cobro.
+            </div>
+          )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField control={form.control} name="appointmentDate" render={({ field }) => (
@@ -2708,7 +2755,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               <FormField control={form.control} name="treatmentId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Servicio SPA</FormLabel>
-                  <Select onValueChange={(value) => {
+                  <Select disabled={!!generatingFromSale} onValueChange={(value) => {
                     field.onChange(value);
                     setCircuitBookings([]);
                     setCircuitDraftTreatmentId(null);
@@ -2872,7 +2919,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </FormItem>
               )} />
 
-              {!isEditMode && (
+              {!isEditMode && !generatingFromSale && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3" data-testid="appointment-settlement-section">
                   <div className="flex items-start justify-between gap-3">
                     <div>

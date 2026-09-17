@@ -179,7 +179,6 @@ runIfDatabaseIsConfigured("GET /api/spa/treatment-sales", () => {
 
   afterAll(async () => {
     await stopServer();
-    await pool?.end();
   });
 
   it("enriquece con el nombre del tratamiento y el número del comprobante, y filtra por pendientes", async () => {
@@ -245,6 +244,156 @@ runIfDatabaseIsConfigured("GET /api/spa/treatment-sales", () => {
         await pool.query("DELETE FROM sales_invoices WHERE id = $1", [id]);
       }
       await pool.query("DELETE FROM spa_treatments WHERE id = $1", [treatmentId]);
+    }
+  });
+});
+
+runIfDatabaseIsConfigured('"Generar turno" — settlement already_sold', () => {
+  beforeAll(async () => {
+    if (pool) await startServer();
+  });
+
+  afterAll(async () => {
+    await stopServer();
+    await pool?.end();
+  });
+
+  it("agenda el turno al precio congelado de la venta y no vuelve a cobrar", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const treatmentId = `treatment-${suffix}`;
+    const cabinId = `cabin-${suffix}`;
+    let invoiceId: number | null = null;
+    let saleId: string | null = null;
+    let appointmentId: string | null = null;
+
+    try {
+      // El precio del catálogo hoy (35000) subió desde que se vendió (30000)
+      // — el turno se tiene que liquidar al precio congelado, no al de hoy.
+      await pool.query(
+        `INSERT INTO spa_treatments (id, name, duration_minutes, price, is_active)
+         VALUES ($1, 'Masaje relajante', 60, '35000.00', 'true')`,
+        [treatmentId],
+      );
+      await pool.query(
+        `INSERT INTO spa_cabins (id, name, is_active) VALUES ($1, 'Cabina 1', 'true')`,
+        [cabinId],
+      );
+
+      const emitResponse = await request("POST", "/api/billing/invoices", {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Ana Torres", condicionIva: "consumidor_final" },
+        items: [{
+          descripcion: "Masaje relajante", cantidad: 1, precioUnitario: 30000,
+          alicuotaIva: "21", subtotalNeto: 24793.39, subtotal: 30000, spaTreatmentId: treatmentId,
+        }],
+      });
+      expect(emitResponse.status).toBe(201);
+      invoiceId = Number(emitResponse.body.id);
+
+      const saleRow = await pool.query(
+        `SELECT id FROM spa_treatment_sales WHERE sales_invoice_id = $1`, [invoiceId],
+      );
+      saleId = saleRow.rows[0].id;
+
+      const appointmentResponse = await request("POST", "/api/spa/appointments", {
+        cabinId, treatmentId, guestName: "Ana Torres",
+        appointmentDate: "2026-10-01", startTime: "10:00", endTime: "11:00",
+        settlement: { type: "already_sold", soldTreatmentSaleId: saleId },
+      });
+      expect(appointmentResponse.status).toBe(201);
+      expect(appointmentResponse.body.settlementType).toBe("already_sold");
+      appointmentId = appointmentResponse.body.id;
+
+      const account = await pool.query(
+        `SELECT status, total, total_paid FROM spa_accounts WHERE appointment_id = $1`, [appointmentId],
+      );
+      expect(account.rows).toEqual([{ status: "closed", total: "30000.00", total_paid: "30000.00" }]);
+
+      const payment = await pool.query(
+        `SELECT amount, method FROM spa_payments WHERE appointment_id = $1`, [appointmentId],
+      );
+      expect(payment.rows).toEqual([{ amount: "30000.00", method: "venta_previa" }]);
+
+      const sale = await pool.query(
+        `SELECT quantity_scheduled, quantity_purchased, status FROM spa_treatment_sales WHERE id = $1`, [saleId],
+      );
+      expect(sale.rows).toEqual([{ quantity_scheduled: 1, quantity_purchased: 1, status: "programado" }]);
+
+      // La venta ya agotó su única unidad: un segundo intento no puede
+      // reclamarla de nuevo, aunque llegue con datos válidos.
+      const secondAttempt = await request("POST", "/api/spa/appointments", {
+        cabinId, treatmentId, guestName: "Ana Torres",
+        appointmentDate: "2026-10-02", startTime: "10:00", endTime: "11:00",
+        settlement: { type: "already_sold", soldTreatmentSaleId: saleId },
+      });
+      expect(secondAttempt.status).toBe(409);
+    } finally {
+      if (appointmentId) {
+        await pool.query("DELETE FROM spa_payments WHERE appointment_id = $1", [appointmentId]);
+        await pool.query("DELETE FROM folio_movements WHERE folio_id IN (SELECT id FROM folios WHERE entity_id = (SELECT id::text FROM spa_accounts WHERE appointment_id = $1))", [appointmentId]);
+        await pool.query("DELETE FROM folios WHERE entity_id = (SELECT id::text FROM spa_accounts WHERE appointment_id = $1)", [appointmentId]);
+        await pool.query("DELETE FROM spa_account_items WHERE account_id = (SELECT id FROM spa_accounts WHERE appointment_id = $1)", [appointmentId]);
+        await pool.query("DELETE FROM spa_accounts WHERE appointment_id = $1", [appointmentId]);
+        await pool.query("DELETE FROM spa_appointments WHERE id = $1", [appointmentId]);
+      }
+      if (saleId) await pool.query("DELETE FROM spa_treatment_sales WHERE id = $1", [saleId]);
+      if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      await pool.query("DELETE FROM spa_cabins WHERE id = $1", [cabinId]);
+      await pool.query("DELETE FROM spa_treatments WHERE id = $1", [treatmentId]);
+    }
+  });
+
+  it("rechaza generar el turno si el tratamiento no coincide con el de la venta", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const soldTreatmentId = `treatment-sold-${suffix}`;
+    const otherTreatmentId = `treatment-other-${suffix}`;
+    const cabinId = `cabin-${suffix}`;
+    let invoiceId: number | null = null;
+    let saleId: string | null = null;
+
+    try {
+      await pool.query(
+        `INSERT INTO spa_treatments (id, name, duration_minutes, price, is_active)
+         VALUES ($1, 'Masaje relajante', 60, '30000.00', 'true'), ($2, 'Circuito Spa', 90, '22000.00', 'true')`,
+        [soldTreatmentId, otherTreatmentId],
+      );
+      await pool.query(
+        `INSERT INTO spa_cabins (id, name, is_active) VALUES ($1, 'Cabina 1', 'true')`,
+        [cabinId],
+      );
+
+      const emitResponse = await request("POST", "/api/billing/invoices", {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Luis Ruiz", condicionIva: "consumidor_final" },
+        items: [{
+          descripcion: "Masaje relajante", cantidad: 1, precioUnitario: 30000,
+          alicuotaIva: "21", subtotalNeto: 24793.39, subtotal: 30000, spaTreatmentId: soldTreatmentId,
+        }],
+      });
+      invoiceId = Number(emitResponse.body.id);
+      const saleRow = await pool.query(
+        `SELECT id FROM spa_treatment_sales WHERE sales_invoice_id = $1`, [invoiceId],
+      );
+      saleId = saleRow.rows[0].id;
+
+      const mismatchedAttempt = await request("POST", "/api/spa/appointments", {
+        cabinId, treatmentId: otherTreatmentId, guestName: "Luis Ruiz",
+        appointmentDate: "2026-10-01", startTime: "10:00", endTime: "11:30",
+        settlement: { type: "already_sold", soldTreatmentSaleId: saleId },
+      });
+      expect(mismatchedAttempt.status).toBe(409);
+
+      const sale = await pool.query(
+        `SELECT quantity_scheduled FROM spa_treatment_sales WHERE id = $1`, [saleId],
+      );
+      expect(sale.rows).toEqual([{ quantity_scheduled: 0 }]);
+    } finally {
+      if (saleId) await pool.query("DELETE FROM spa_treatment_sales WHERE id = $1", [saleId]);
+      if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      await pool.query("DELETE FROM spa_cabins WHERE id = $1", [cabinId]);
+      await pool.query("DELETE FROM spa_treatments WHERE id IN ($1, $2)", [soldTreatmentId, otherTreatmentId]);
     }
   });
 });

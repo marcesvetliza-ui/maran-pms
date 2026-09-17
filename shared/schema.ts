@@ -1743,7 +1743,9 @@ export const insertTreatmentSupplySchema = createInsertSchema(treatmentSupplies)
 export type InsertTreatmentSupply = z.infer<typeof insertTreatmentSupplySchema>;
 export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
 
-export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente";
+// "venta_previa": el tratamiento ya fue facturado y cobrado antes de existir
+// el turno (ver "Turnos vendidos"/spa_treatment_sales) — no es un cobro nuevo.
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente" | "venta_previa";
 
 export const spaPayments = pgTable("spa_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
