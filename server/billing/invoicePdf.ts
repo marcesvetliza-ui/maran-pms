@@ -56,6 +56,7 @@ export function getInvoiceRecipientDocument(factura: any) {
   const document = resolveFiscalRecipientDocument({
     cuit: factura.cliente_cuit ?? factura.clienteCuit,
     dni: factura.cliente_dni ?? factura.clienteDni,
+    documentType: factura.cliente_document_type ?? factura.clienteDocumentType,
   });
   return { tipoDocRec: document.tipo, nroDocRec: Number(document.numero) };
 }
@@ -228,6 +229,9 @@ export async function generarFacturaPDF(
     const clienteDomicilio    = factura.cliente_domicilio     ?? factura.clienteDomicilio     ?? "—";
     const clienteCuit         = factura.cliente_cuit          ?? factura.clienteCuit          ?? null;
     const clienteDni          = factura.cliente_dni           ?? factura.clienteDni           ?? null;
+    const clienteDocumentType = factura.cliente_document_type ?? factura.clienteDocumentType  ?? null;
+    const clienteDniLabel     = ["passport", "pasaporte"].includes(String(clienteDocumentType ?? "").toLowerCase())
+      ? "Pasaporte" : "D.N.I.";
     const clienteCondicionIva = factura.cliente_condicion_iva ?? factura.clienteCondicionIva  ?? "—";
 
     const montoNeto      = $n(factura.monto_neto       ?? factura.montoNeto       ?? 0);
@@ -371,7 +375,7 @@ export async function generarFacturaPDF(
     if (clienteCuit) {
       doc.text(`C.U.I.T.: ${clienteCuit}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
     } else if (clienteDni) {
-      doc.text(`D.N.I.: ${clienteDni}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
+      doc.text(`${clienteDniLabel}: ${clienteDni}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
     }
     doc.text(`I.V.A.: ${clienteCondicionIva}`, rvx, rvy, { width: x0 + W - rvx - 5 });
 
