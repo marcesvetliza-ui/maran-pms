@@ -148,6 +148,50 @@ describe("PrefacturaDialog — Factura T", () => {
     expect(screen.queryByRole("option", { name: /Factura T/i })).not.toBeInTheDocument();
   });
 
+  it('al elegir "Factura T", el importe a facturar/cobrar baja al neto sin el 21% (Decreto 1043/2016)', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(await screen.findByTestId("select-receipt-type"));
+    await user.click(await screen.findByRole("option", { name: /Factura T/i }));
+
+    // 50000 (tarifa con IVA, igual que le cobrarían a un huésped local) / 1.21 = 41322.31
+    await screen.findByTestId("text-factura-t-reintegro-note");
+    expect(screen.getByTestId("text-importe-a-facturar")).toHaveTextContent("$41.322,31");
+  });
+
+  it("factura y cobra el neto sin IVA, no la tarifa completa que paga un huésped local", async () => {
+    const capture: { body: any } = { body: undefined };
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      const strUrl = url.toString();
+      if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
+        return new Response(JSON.stringify(FAKE_FOLIO), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (strUrl.includes("/api/billing/config")) {
+        return new Response(JSON.stringify({ puntoVenta: 1, arcaAmbiente: "ficticio" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (strUrl.includes("/api/billing/invoices") && options?.method?.toUpperCase() === "POST") {
+        capture.body = JSON.parse(String(options?.body ?? "{}"));
+        return new Response(JSON.stringify({
+          id: 900, tipoComprobante: "FT", puntoVenta: 1, numero: 900, cae: "CAE-TEST-900", montoTotal: "41322.31",
+        }), { status: 201, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(await screen.findByTestId("select-receipt-type"));
+    await user.click(await screen.findByRole("option", { name: /Factura T/i }));
+
+    await user.click(await screen.findByTestId("button-registrar-emitir"));
+    await waitFor(() => expect(capture.body).toBeTruthy());
+
+    expect(capture.body.items).toHaveLength(1);
+    expect(capture.body.items[0].subtotal).toBe(41322.31);
+    expect(capture.body.sourceChargeAmounts.accommodation).toBe(41322.31);
+  });
+
   it("al emitirla, manda tipoComprobante FT y el documentType del huésped para que ARCA reciba el tipo de documento correcto", async () => {
     const capture: { body: any } = { body: undefined };
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
