@@ -254,6 +254,37 @@ async function reconcileReservationCreditNote(
       `);
     }
 
+    // Crediting a Factura T reverses its tourism VAT waiver too: the 21% that
+    // was subtracted from the Folio when the FT was emitted no longer applies
+    // to the credited portion — it must be owed again, since whatever
+    // replaces this invoice (if anything) will not carry the same Decreto
+    // 1043/2016 benefit.
+    if (String(invoiceValue(original, "tipo_comprobante", "tipoComprobante")) === "FT") {
+      for (const [sourceId, amount] of Object.entries(sourceChargeAmounts)) {
+        const reintegroReversal = Number((amount * 0.21).toFixed(2));
+        if (reintegroReversal <= 0.009) continue;
+        const reintegroMarker = `[ft-nc:${ncId}:${sourceId}]`;
+        await tx.execute(sql`
+          INSERT INTO charges (
+            reservation_id, description, amount, date, category, created_by, status
+          )
+          SELECT
+            ${originalReservationId},
+            ${`Reverso reintegro turismo — NC ${ncType} ${String(ncPoint).padStart(4, "0")}-${String(ncNumber).padStart(8, "0")} (Decreto 1043/2016) ${reintegroMarker}`},
+            ${String(reintegroReversal)},
+            ${today},
+            'adjustment',
+            ${operator},
+            'active'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM charges
+            WHERE reservation_id = ${originalReservationId}
+              AND description LIKE ${`%${reintegroMarker}%`}
+          )
+        `);
+      }
+    }
+
     // The uncovered settlement of this invoice may have been charged to a
     // company/agency/guest's cuenta corriente (a 'cargo' row in
     // account_movements, tagged with this invoice's own reference at
@@ -1635,6 +1666,38 @@ export function registerBillingRoutes(app: Express) {
               }
             : undefined,
         } as NewInvoiceData);
+        // Factura T (turismo, Decreto 1043/2016) ya cobra el neto de IVA — no la
+        // misma tarifa con el 21% incluido que paga un huésped local (ver el
+        // ÷1.21 aplicado en PrefacturaDialog). El cargo original del Folio
+        // (reservation.totalRoomAmount, otros cargos) sigue en el bruto, así
+        // que sin este ajuste el Folio arrastra para siempre un "saldo
+        // pendiente" fantasma igual al 21% reintegrado — que ya no se debe,
+        // fue condonado por ley, no es algo que falte cobrar o facturar.
+        if (reservationId && tipoComprobante === "FT") {
+          for (const [sourceId, amount] of Object.entries(sanitizedSourceChargeAmounts)) {
+            const reintegro = Number((Number(amount) * 0.21).toFixed(2));
+            if (reintegro <= 0.009) continue;
+            const marker = `[ft:${emitted.id}:${sourceId}]`;
+            await db.execute(sql`
+              INSERT INTO charges (
+                reservation_id, description, amount, date, category, created_by, status
+              )
+              SELECT
+                ${reservationId},
+                ${`Reintegro turismo — Factura T ${String(emitted.puntoVenta).padStart(4, "0")}-${String(emitted.numero).padStart(8, "0")} (Decreto 1043/2016) ${marker}`},
+                ${String(-reintegro)},
+                ${getArgentinaToday()},
+                'adjustment',
+                ${user?.fullName || user?.username || null},
+                'active'
+              WHERE NOT EXISTS (
+                SELECT 1 FROM charges
+                WHERE reservation_id = ${reservationId}
+                  AND description LIKE ${`%${marker}%`}
+              )
+            `);
+          }
+        }
         if (reservationId && creditIntent) {
           try {
             await reconcileReservationCreditInvoice(Number(emitted.id));
