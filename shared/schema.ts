@@ -1695,6 +1695,10 @@ export const spaAccountItems = pgTable("spa_account_items", {
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   itemType: text("item_type").notNull().default("treatment"),
+  // Solo presente cuando itemType es "product" (un artículo de venta_directa
+  // del inventario del SPA, como cremas o bebidas) — a diferencia de un
+  // concepto (cochera, media pensión), un producto descuenta stock al venderse.
+  inventoryItemId: varchar("inventory_item_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
 });

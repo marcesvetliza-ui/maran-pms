@@ -5525,6 +5525,14 @@ export class DatabaseStorage implements IStorage {
 
   async deductStockFromSpaAccount(accountId: string): Promise<void> {
     try {
+      // Se puede disparar tanto al iniciar el turno como al cerrar la
+      // cuenta (o vincular una factura) — idempotente por cuenta para no
+      // descontar dos veces el mismo consumo.
+      const [alreadyDeducted] = await db.select({ id: stockMovements.id }).from(stockMovements)
+        .where(and(eq(stockMovements.sourceType, "spa_account"), eq(stockMovements.sourceId, accountId)))
+        .limit(1);
+      if (alreadyDeducted) return;
+
       const accountData = await this.getSpaAccount(accountId);
       if (!accountData || !accountData.appointmentId) return;
 
@@ -5549,21 +5557,52 @@ export class DatabaseStorage implements IStorage {
 
           await db.insert(stockMovements).values({
             itemId: supply.inventoryItemId,
-            type: "salida",
+            movementType: "salida",
             quantity: String(qty),
             previousStock: String(prev),
             newStock: String(newStock),
-            reason: "Consumo SPA",
+            notes: "Consumo SPA",
             sourceType: "spa_account",
             sourceId: accountId,
             createdAt: new Date(),
-          } as any);
+          });
         } catch (err) {
           console.warn(`[SPA] Error descounting stock for item ${supply.inventoryItemId}:`, err);
         }
       }
     } catch (err) {
       console.warn(`[SPA] Error in deductStockFromSpaAccount:`, err);
+    }
+  }
+
+  // Un producto que el SPA vende directamente (crema, bebida — venta_directa,
+  // a diferencia de un concepto como cochera) descuenta stock al agregarse al
+  // folio, no al iniciar el turno: el artículo sale del estante en ese momento.
+  async deductStockForSoldSpaProduct(inventoryItemId: string, quantity: number, accountItemId: string): Promise<void> {
+    try {
+      const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, inventoryItemId));
+      if (!invItem) return;
+
+      const prev = parseFloat(invItem.currentStock ?? "0");
+      const newStock = Math.max(0, prev - quantity);
+
+      await db.update(inventoryItems)
+        .set({ currentStock: String(newStock) })
+        .where(eq(inventoryItems.id, inventoryItemId));
+
+      await db.insert(stockMovements).values({
+        itemId: inventoryItemId,
+        movementType: "salida",
+        quantity: String(quantity),
+        previousStock: String(prev),
+        newStock: String(newStock),
+        notes: "Venta SPA",
+        sourceType: "spa_account_item",
+        sourceId: accountItemId,
+        createdAt: new Date(),
+      });
+    } catch (err) {
+      console.warn(`[SPA] Error deducting stock for sold product ${inventoryItemId}:`, err);
     }
   }
 

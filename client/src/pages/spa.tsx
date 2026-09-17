@@ -62,8 +62,6 @@ import {
   Download,
   FileX,
   Ban,
-  Mail,
-  Send,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -279,6 +277,7 @@ type InventoryItemWithDetails = {
   currentStock: number;
   unit: string;
   costPrice: string;
+  isActive?: string | null;
   category?: { id: string; name: string; area: string };
 };
 
@@ -495,7 +494,6 @@ export default function SpaPage() {
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReservationId, setPaymentReservationId] = useState("");
-  const [isPaymentAdvance, setIsPaymentAdvance] = useState(false);
   const [chargeDescription, setChargeDescription] = useState("");
   const [chargePrice, setChargePrice] = useState("");
   const [chargeQuantity, setChargeQuantity] = useState("1");
@@ -524,9 +522,6 @@ export default function SpaPage() {
   const [professionalName, setProfessionalName] = useState("");
   const [professionalLastName, setProfessionalLastName] = useState("");
 
-  // Email receipt state
-  const [isSpaEmailReceiptOpen, setIsSpaEmailReceiptOpen] = useState(false);
-  const [spaEmailReceiptAddress, setSpaEmailReceiptAddress] = useState("");
 
   // Modal % por Profesional
   const today = new Date();
@@ -699,6 +694,18 @@ export default function SpaPage() {
   });
 
   const allInventoryItems = spaInventoryItems;
+
+  // Productos que el SPA vende directamente (cremas, bebidas) — a diferencia
+  // de los conceptos del hotel (cochera, media pensión) que no llevan stock.
+  const { data: spaSellableProducts = [] } = useQuery<InventoryItemWithDetails[]>({
+    queryKey: ["/api/inventory/items", "spa", "venta_directa"],
+    queryFn: async () => {
+      const response = await fetch("/api/inventory/items?area=spa&itemKind=venta_directa", { credentials: "include" });
+      if (!response.ok) throw new Error("Error");
+      return response.json();
+    },
+    enabled: isAddChargeOpen,
+  });
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
 
@@ -993,15 +1000,18 @@ export default function SpaPage() {
   });
 
   const addChargeMutation = useMutation({
-    mutationFn: async ({ accountId, description, quantity, unitPrice, itemType }: {
-      accountId: string; description: string; quantity: number; unitPrice: string; itemType: string;
+    mutationFn: async ({ accountId, description, quantity, unitPrice, itemType, inventoryItemId }: {
+      accountId: string; description: string; quantity: number; unitPrice: string; itemType: string; inventoryItemId?: string;
     }) => {
       return apiRequest("POST", `/api/spa/accounts/${accountId}/items`, {
-        description, quantity, unitPrice, itemType,
+        description, quantity, unitPrice, itemType, inventoryItemId,
       });
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
+      if (variables.inventoryItemId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      }
       refetchAccount();
       toast({ title: "Cargo agregado" });
       setIsAddChargeOpen(false);
@@ -1023,11 +1033,11 @@ export default function SpaPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async ({ accountId, amount, method, isAdvance, reservationId }: {
-      accountId: string; amount: string; method: string; isAdvance: boolean; reservationId?: string;
+    mutationFn: async ({ accountId, amount, method, reservationId }: {
+      accountId: string; amount: string; method: string; reservationId?: string;
     }) => {
       return apiRequest("POST", `/api/spa/accounts/${accountId}/payments`, {
-        amount, method, isAdvance, reservationId: reservationId || null,
+        amount, method, reservationId: reservationId || null,
       });
     },
     onSuccess: (_, variables) => {
@@ -1036,7 +1046,6 @@ export default function SpaPage() {
       setPaymentAmount("");
       setPaymentMethod("");
       setPaymentReservationId("");
-      setIsPaymentAdvance(false);
       toast({ title: "Pago registrado" });
 
       if (variables.method === "room_charge" && selectedAccount) {
@@ -1045,20 +1054,6 @@ export default function SpaPage() {
           receiptType: "cierre_spa",
         });
       }
-    },
-  });
-
-  const sendSpaReceiptEmailMutation = useMutation({
-    mutationFn: async ({ accountId, to }: { accountId: string; to: string }) => {
-      const res = await apiRequest("POST", `/api/spa/accounts/${accountId}/receipt-email`, { to });
-      return res.json();
-    },
-    onSuccess: () => {
-      setIsSpaEmailReceiptOpen(false);
-      toast({ title: "Comprobante enviado por email" });
-    },
-    onError: (error: any) => {
-      toast({ title: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -3201,23 +3196,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           <Printer className="h-4 w-4" />
                           Imprimir
                         </a>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 gap-2"
-                          data-testid="button-spa-receipt-email"
-                          onClick={() => {
-                            const emailFromAppt = selectedAppointment?.guestEmail || "";
-                            const emailFromProfile = !emailFromAppt && selectedAppointment?.guestId
-                              ? (spaClients.find(c => c.id === selectedAppointment.guestId)?.email || "")
-                              : "";
-                            setSpaEmailReceiptAddress(emailFromAppt || emailFromProfile);
-                            setIsSpaEmailReceiptOpen(true);
-                          }}
-                        >
-                          <Mail className="h-4 w-4" />
-                          Enviar por email
-                        </Button>
                       </div>
                       {spaInvoice && (() => {
                         const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(spaInvoice.tipo_comprobante);
@@ -3396,53 +3374,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
         </DialogContent>
       </Dialog>
 
-      {/* SPA Receipt Email Dialog */}
-      <Dialog open={isSpaEmailReceiptOpen} onOpenChange={(open) => { if (!open) setIsSpaEmailReceiptOpen(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5" />
-              Enviar comprobante por email
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1">
-              <Label htmlFor="spa-email-receipt-address">Dirección de email</Label>
-              <Input
-                id="spa-email-receipt-address"
-                type="email"
-                placeholder="ejemplo@dominio.com"
-                value={spaEmailReceiptAddress}
-                onChange={(e) => setSpaEmailReceiptAddress(e.target.value)}
-                data-testid="input-spa-email-receipt-address"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && spaEmailReceiptAddress.trim() && selectedAccount) {
-                    sendSpaReceiptEmailMutation.mutate({ accountId: selectedAccount.id, to: spaEmailReceiptAddress });
-                  }
-                }}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSpaEmailReceiptOpen(false)}>Cancelar</Button>
-            <Button
-              disabled={!spaEmailReceiptAddress.trim() || sendSpaReceiptEmailMutation.isPending}
-              data-testid="button-spa-send-receipt-email-confirm"
-              onClick={() => {
-                if (selectedAccount) {
-                  sendSpaReceiptEmailMutation.mutate({ accountId: selectedAccount.id, to: spaEmailReceiptAddress });
-                }
-              }}
-            >
-              {sendSpaReceiptEmailMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enviando...</>
-              ) : (
-                <><Send className="h-4 w-4 mr-2" />Enviar</>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Cancel Confirmation Dialog */}
       <Dialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
@@ -3843,7 +3774,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             accountId: selectedAccount.id,
                             amount: accountBalance.toString(),
                             method: "room_charge",
-                            isAdvance: false,
                             reservationId: folioRoomChargeId,
                           });
                         } else if (["factura_a", "factura_b"].includes(receiptType)) {
@@ -3909,6 +3839,12 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     if (val === "cargo_editable") {
                       setChargeDescription("");
                       setChargePrice("");
+                    } else if (val.startsWith("product:")) {
+                      const product = spaSellableProducts.find(p => p.id === val.slice("product:".length));
+                      setChargeDescription(product?.name || "");
+                      // Los productos no tienen precio de venta en el catálogo
+                      // todavía — se carga a mano cada vez, igual que un cargo libre.
+                      setChargePrice("");
                     } else {
                       const roomCharge = roomChargeTypes.find(ct => ct.id === val);
                       if (roomCharge) {
@@ -3921,12 +3857,25 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <SelectValue placeholder="Seleccionar cargo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {roomChargeTypes.filter(ct => ct.id && ct.active).map(ct => (
-                        <SelectItem key={ct.id} value={ct.id}>
-                          {ct.label} — ${fmtMoney(String(ct.defaultAmount))}
-                          {ct.allowPriceEdit ? " (variable)" : ""}
-                        </SelectItem>
-                      ))}
+                      <SelectGroup>
+                        <SelectLabel>Conceptos</SelectLabel>
+                        {roomChargeTypes.filter(ct => ct.id && ct.active).map(ct => (
+                          <SelectItem key={ct.id} value={ct.id}>
+                            {ct.label} — ${fmtMoney(String(ct.defaultAmount))}
+                            {ct.allowPriceEdit ? " (variable)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      {spaSellableProducts.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel>Productos SPA</SelectLabel>
+                          {spaSellableProducts.filter(p => p.id && p.isActive !== "false").map(p => (
+                            <SelectItem key={p.id} value={`product:${p.id}`}>
+                              {p.name} — stock: {p.currentStock}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
                       <SelectItem value="cargo_editable">Cargo editable (libre)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -3952,7 +3901,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       step="0.01"
                       value={chargePrice}
                       onChange={(e) => setChargePrice(e.target.value)}
-                      disabled={chargeType !== "cargo_editable" && !roomChargeTypes.find(ct => ct.id === chargeType)?.allowPriceEdit}
+                      disabled={chargeType !== "cargo_editable" && !chargeType.startsWith("product:") && !roomChargeTypes.find(ct => ct.id === chargeType)?.allowPriceEdit}
                       data-testid="input-charge-price"
                     />
                   </div>
@@ -3967,12 +3916,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     disabled={!chargeDescription || !chargePrice || addChargeMutation.isPending}
                     onClick={() => {
                       if (selectedAccount) {
+                        const isProduct = chargeType.startsWith("product:");
                         addChargeMutation.mutate({
                           accountId: selectedAccount.id,
                           description: chargeDescription,
                           quantity: parseInt(chargeQuantity) || 1,
                           unitPrice: chargePrice,
-                          itemType: "extra",
+                          itemType: isProduct ? "product" : "extra",
+                          inventoryItemId: isProduct ? chargeType.slice("product:".length) : undefined,
                         });
                       }
                     }}
@@ -4033,11 +3984,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <Input type="number" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder={accountBalance > 0 ? `Saldo: $${accountBalance.toLocaleString()}` : ""} data-testid="input-payment-amount" />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="is-advance" checked={isPaymentAdvance} onChange={(e) => setIsPaymentAdvance(e.target.checked)} className="rounded" />
-                  <label htmlFor="is-advance" className="text-sm">Es seña / anticipo</label>
-                </div>
-
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setIsAddPaymentOpen(false)}>Cancelar</Button>
                   <Button
@@ -4048,7 +3994,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           accountId: selectedAccount.id,
                           amount: paymentAmount,
                           method: paymentMethod,
-                          isAdvance: isPaymentAdvance,
                           reservationId: paymentMethod === "room_charge" ? paymentReservationId : undefined,
                         });
                       }
