@@ -153,4 +153,65 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     await user.click(screen.getByTestId("btn-add-item"));
     expect(screen.getByTestId("item-row-1")).toBeInTheDocument();
   });
+
+  describe("Turnos vendidos — el comprobante recuerda qué tratamiento fue", () => {
+    // Elegir un tratamiento del catálogo de Spa (a diferencia de alojamiento o
+    // restaurant) manda su id en el comprobante, para que el servidor pueda
+    // registrar la venta como pendiente de agendar.
+    function buildCaptureFetchMock(capture: { body: any }) {
+      return vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+        const strUrl = url.toString();
+        const method = options?.method?.toUpperCase() ?? "GET";
+        if (strUrl.endsWith("/api/restaurant/menu/items")) {
+          return new Response(JSON.stringify(MENU_ITEMS), { status: 200 });
+        }
+        if (strUrl.endsWith("/api/spa/treatments")) {
+          return new Response(JSON.stringify(SPA_TREATMENTS), { status: 200 });
+        }
+        if (strUrl.includes("/api/billing/invoices") && method === "POST") {
+          capture.body = JSON.parse(String(options?.body ?? "{}"));
+          return new Response(JSON.stringify({
+            id: 900, tipo_comprobante: "FB", punto_venta: 1, numero: 1,
+            cae: "12345678901234", estado: "emitida", monto_total: "22000.00",
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response(JSON.stringify([]), { status: 200 });
+      });
+    }
+
+    it("manda spaTreatmentId cuando el ítem viene del catálogo de Spa", async () => {
+      const capture: { body: any } = { body: undefined };
+      vi.stubGlobal("fetch", buildCaptureFetchMock(capture));
+      vi.stubGlobal("open", vi.fn());
+      const user = userEvent.setup();
+      renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+      await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+      await user.click(await screen.findByTestId("catalog-item-tr-2"));
+
+      await user.type(screen.getByTestId("input-razon-social"), "Cliente de Prueba");
+      await user.click(screen.getByTestId("btn-emitir-confirmar"));
+      await user.click(screen.getByTestId("btn-confirmar-emitir"));
+
+      await waitFor(() => expect(capture.body).toBeTruthy());
+      expect(capture.body.items[0]).toMatchObject({ descripcion: "Circuito Spa", spaTreatmentId: "tr-2" });
+    });
+
+    it("un ítem manual (no elegido del catálogo) no manda spaTreatmentId", async () => {
+      const capture: { body: any } = { body: undefined };
+      vi.stubGlobal("fetch", buildCaptureFetchMock(capture));
+      vi.stubGlobal("open", vi.fn());
+      const user = userEvent.setup();
+      renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+      await user.type(screen.getByTestId("input-razon-social"), "Cliente de Prueba");
+      await user.type(screen.getByTestId("item-description-0"), "Masaje a mano alzada");
+      await user.type(screen.getByTestId("item-price-0"), "10000");
+      await user.click(screen.getByTestId("btn-emitir-confirmar"));
+      await user.click(screen.getByTestId("btn-confirmar-emitir"));
+
+      await waitFor(() => expect(capture.body).toBeTruthy());
+      expect(capture.body.items[0].spaTreatmentId).toBeUndefined();
+    });
+  });
 });

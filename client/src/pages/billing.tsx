@@ -588,6 +588,9 @@ type Item = {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
+   * permite registrar la venta como turno vendido pendiente de agendar. */
+  spaTreatmentId?: string;
 };
 
 export type EmitirFacturaInitialValues = {
@@ -793,7 +796,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     queryKey: ["/api/spa/treatments"],
     enabled: open,
   });
-  type CatalogItem = { id: string; descripcion: string; precioUnitario: number };
+  type CatalogItem = { id: string; descripcion: string; precioUnitario: number; spaTreatmentId?: string };
   const catalogGroups: { label: string; options: CatalogItem[] }[] = [
     { label: "Alojamiento", options: [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
     {
@@ -804,9 +807,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     },
     {
       label: "Spa",
+      // spaTreatmentId (no solo id, que acá coincide) deja explícito que esta
+      // es la única fuente del catálogo que registra "turno vendido" al elegirse.
       options: spaTreatmentsData
         .filter((t: any) => t.isActive !== "false")
-        .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0 })),
+        .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
     },
   ].filter(g => g.options.length > 0);
   const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
@@ -1052,9 +1057,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
   // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
   // elige del catálogo sin haber tocado nada todavía.
-  function addCatalogItem(descripcion: string, precioUnitario: number) {
+  function addCatalogItem(descripcion: string, precioUnitario: number, spaTreatmentId?: string) {
     const built = computeItemTotals({
-      descripcion, cantidad: 1, precioUnitario,
+      descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
       alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
       subtotalNeto: 0, subtotal: 0,
     });
@@ -2072,7 +2077,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                                   value={o.id}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onSelect={() => {
-                                    addCatalogItem(o.descripcion, o.precioUnitario);
+                                    addCatalogItem(o.descripcion, o.precioUnitario, o.spaTreatmentId);
                                     setCatalogPickerOpen(false);
                                     setCatalogSearch("");
                                   }}

@@ -1666,6 +1666,31 @@ export function registerBillingRoutes(app: Express) {
               }
             : undefined,
         } as NewInvoiceData);
+        // "Turnos vendidos": si algún ítem viene de "Agregar desde catálogo" ▸
+        // Spa, quedó marcado con spaTreatmentId — se vendió el tratamiento
+        // aunque todavía no exista (o no haga falta) un turno agendado. Se
+        // registra por índice de ítem, idempotente ante un reintento.
+        if (Array.isArray(persistedItems)) {
+          for (const [index, item] of persistedItems.entries()) {
+            const treatmentId = (item as any)?.spaTreatmentId;
+            if (!treatmentId) continue;
+            const quantity = Number((item as any)?.cantidad) || 0;
+            if (quantity <= 0) continue;
+            await db.execute(sql`
+              INSERT INTO spa_treatment_sales (
+                sales_invoice_id, invoice_item_index, treatment_id, buyer_name,
+                quantity_purchased, unit_price_frozen
+              )
+              SELECT
+                ${emitted.id}, ${index}, ${treatmentId}, ${persistedCliente?.razonSocial},
+                ${quantity}, ${Number((item as any)?.precioUnitario) || 0}
+              WHERE NOT EXISTS (
+                SELECT 1 FROM spa_treatment_sales
+                WHERE sales_invoice_id = ${emitted.id} AND invoice_item_index = ${index}
+              )
+            `);
+          }
+        }
         // Factura T (turismo, Decreto 1043/2016) ya cobra el neto de IVA — no la
         // misma tarifa con el 21% incluido que paga un huésped local (ver el
         // ÷1.21 aplicado en PrefacturaDialog). El cargo original del Folio

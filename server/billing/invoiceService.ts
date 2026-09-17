@@ -14,6 +14,9 @@ export interface InvoiceItem {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Tratamiento de spa_treatments elegido del catálogo — permite registrar
+   * la venta como "turno vendido" pendiente de agendar. */
+  spaTreatmentId?: string;
 }
 
 export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa";
