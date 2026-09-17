@@ -2767,6 +2767,34 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cliente_document_type text`)))
   );
 
+  // "Turnos vendidos": puente entre una línea de comprobante que vendió un
+  // tratamiento y el/los turnos que después la consumen — ver spaTreatmentSales
+  // en shared/schema.ts.
+  await withTimeout("spa_treatment_sales", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE spa_treatment_sales (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        sales_invoice_id integer NOT NULL,
+        invoice_item_index integer NOT NULL,
+        treatment_id varchar NOT NULL REFERENCES spa_treatments(id) ON DELETE RESTRICT,
+        buyer_name text NOT NULL,
+        quantity_purchased integer NOT NULL,
+        quantity_scheduled integer NOT NULL DEFAULT 0,
+        quantity_used integer NOT NULL DEFAULT 0,
+        unit_price_frozen numeric(10,2) NOT NULL,
+        status text NOT NULL DEFAULT 'pendiente',
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("spa_treatment_sales_invoice_item_unique", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "spa_treatment_sales_invoice_item_unique",
+      "CREATE UNIQUE INDEX spa_treatment_sales_invoice_item_unique ON spa_treatment_sales (sales_invoice_id, invoice_item_index)",
+    )))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

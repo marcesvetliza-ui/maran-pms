@@ -1703,6 +1703,32 @@ export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).om
 export type InsertSpaAccountItem = z.infer<typeof insertSpaAccountItemSchema>;
 export type SpaAccountItem = typeof spaAccountItems.$inferSelect;
 
+// "Turnos vendidos": un comprobante puede vender un tratamiento antes de que
+// exista un turno (venta anticipada, regalo, paquete). Este registro es el
+// puente entre esa línea del comprobante y el/los turnos que después se
+// generen para consumirla — spa_accounts sigue exigiendo un appointmentId,
+// así que la venta vive acá hasta que se le asigna uno.
+export type SpaTreatmentSaleStatus = "pendiente" | "parcial" | "programado" | "utilizado" | "vencido" | "cancelado";
+
+export const spaTreatmentSales = pgTable("spa_treatment_sales", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salesInvoiceId: integer("sales_invoice_id").notNull(),
+  invoiceItemIndex: integer("invoice_item_index").notNull(),
+  treatmentId: varchar("treatment_id").notNull().references(() => spaTreatments.id, { onDelete: "restrict" }),
+  buyerName: text("buyer_name").notNull(),
+  quantityPurchased: integer("quantity_purchased").notNull(),
+  quantityScheduled: integer("quantity_scheduled").notNull().default(0),
+  quantityUsed: integer("quantity_used").notNull().default(0),
+  unitPriceFrozen: decimal("unit_price_frozen", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").$type<SpaTreatmentSaleStatus>().notNull().default("pendiente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSpaTreatmentSaleSchema = createInsertSchema(spaTreatmentSales).omit({ id: true, createdAt: true });
+export type InsertSpaTreatmentSale = z.infer<typeof insertSpaTreatmentSaleSchema>;
+export type SpaTreatmentSale = typeof spaTreatmentSales.$inferSelect;
+
 export const treatmentSupplies = pgTable("treatment_supplies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   treatmentId: varchar("treatment_id").notNull(),
@@ -1717,7 +1743,9 @@ export const insertTreatmentSupplySchema = createInsertSchema(treatmentSupplies)
 export type InsertTreatmentSupply = z.infer<typeof insertTreatmentSupplySchema>;
 export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
 
-export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente";
+// "venta_previa": el tratamiento ya fue facturado y cobrado antes de existir
+// el turno (ver "Turnos vendidos"/spa_treatment_sales) — no es un cobro nuevo.
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente" | "venta_previa";
 
 export const spaPayments = pgTable("spa_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

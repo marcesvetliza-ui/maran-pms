@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSe
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, subWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
@@ -254,7 +255,7 @@ type Company = {
   direccion?: string | null;
 };
 
-type NewAppointmentSettlement = "" | "room_charge" | "invoice" | "voucher";
+type NewAppointmentSettlement = "" | "room_charge" | "invoice" | "voucher" | "already_sold";
 
 type PendingSpaInvoice = {
   accountId: string;
@@ -452,15 +453,35 @@ type SpaRoomChargeType = {
 };
 
 type ViewMode = "daily" | "weekly";
-type SpaTab = "agenda" | "tratamientos" | "insumos" | "configuracion";
+type SpaTab = "agenda" | "vendidos" | "tratamientos" | "insumos" | "configuracion";
+
+type SpaTreatmentSale = {
+  id: string;
+  salesInvoiceId: number;
+  treatmentId: string;
+  treatmentName: string | null;
+  buyerName: string;
+  quantityPurchased: number;
+  quantityScheduled: number;
+  quantityUsed: number;
+  unitPriceFrozen: string;
+  status: string;
+  createdAt: string;
+  invoiceTipoComprobante: string | null;
+  invoicePuntoVenta: number | null;
+  invoiceNumero: number | null;
+  invoiceEstado: string | null;
+};
 
 export default function SpaPage() {
   const [selectedDate, setSelectedDate] = useState(startOfDay(new Date()));
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
   const [activeTab, setActiveTab] = useState<SpaTab>("agenda");
+  const [showAllTreatmentSales, setShowAllTreatmentSales] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [generatingFromSale, setGeneratingFromSale] = useState<SpaTreatmentSale | null>(null);
   const [newAppointmentSettlement, setNewAppointmentSettlement] = useState<NewAppointmentSettlement>("");
   const [newAppointmentRoomId, setNewAppointmentRoomId] = useState("");
   const [newAppointmentVoucherMethod, setNewAppointmentVoucherMethod] = useState("");
@@ -529,6 +550,15 @@ export default function SpaPage() {
 
   const { data: treatments = [] } = useQuery<SpaTreatment[]>({
     queryKey: ["/api/spa/treatments"],
+  });
+
+  const { data: treatmentSales = [], isLoading: treatmentSalesLoading } = useQuery<SpaTreatmentSale[]>({
+    queryKey: ["/api/spa/treatment-sales", showAllTreatmentSales],
+    queryFn: async () => {
+      const response = await fetch(`/api/spa/treatment-sales?pending=${!showAllTreatmentSales}`);
+      return response.json();
+    },
+    enabled: activeTab === "vendidos",
   });
 
   // Los cargos adicionales del folio usan el mismo catálogo que
@@ -793,7 +823,9 @@ export default function SpaPage() {
             ? { settlement: { type: "room_charge", reservationId: newAppointmentRoomId } }
             : newAppointmentSettlement === "voucher"
               ? { settlement: { type: "voucher", paymentMethod: newAppointmentVoucherMethod } }
-              : {}),
+              : newAppointmentSettlement === "already_sold" && generatingFromSale
+                ? { settlement: { type: "already_sold", soldTreatmentSaleId: generatingFromSale.id } }
+                : {}),
         }),
       });
       
@@ -814,11 +846,15 @@ export default function SpaPage() {
         toast({ title: "Turno creado y cargado al folio de la habitación" });
       } else if (createdApt.settlementType === "voucher") {
         toast({ title: "Turno creado y Voucher SPA registrado" });
+      } else if (createdApt.settlementType === "already_sold") {
+        queryClient.invalidateQueries({ queryKey: ["/api/spa/treatment-sales"] });
+        toast({ title: "Turno agendado — ya estaba pagado, no se volvió a cobrar" });
       } else if (newAppointmentSettlement === "invoice") {
         toast({ title: "Turno creado", description: "Completá la factura y la forma de pago." });
       } else {
         toast({ title: "Turno creado — imprimiendo comanda..." });
       }
+      setGeneratingFromSale(null);
 
       if (newAppointmentSettlement === "invoice" && createdApt.accountId) {
         const linkedReservation = variables.reservationId
@@ -1450,6 +1486,25 @@ export default function SpaPage() {
     setIsNewDialogOpen(true);
   };
 
+  const handleGenerateAppointmentFromSale = (sale: SpaTreatmentSale) => {
+    setIsEditMode(false);
+    setEditingAppointmentId(null);
+    setEditingAppointmentResources([]);
+    setCircuitBookings([]);
+    setCircuitDraftTreatmentId(null);
+    setGeneratingFromSale(sale);
+    setNewAppointmentSettlement("already_sold");
+    setNewAppointmentRoomId("");
+    setNewAppointmentVoucherMethod("");
+    form.reset({
+      cabinId: "", treatmentId: sale.treatmentId, professionalId: "",
+      guestName: sale.buyerName, guestLastName: "",
+      guestPhone: "", guestEmail: "", appointmentDate: dateStr,
+      startTime: "", reservationId: "", notes: "",
+    });
+    setIsNewDialogOpen(true);
+  };
+
   const handleEditAppointment = (apt: SpaAppointment) => {
     setIsEditMode(true);
     setEditingAppointmentId(apt.id);
@@ -1761,6 +1816,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <CalendarDays className="h-4 w-4 mr-1" /> Agenda
           </Button>
           <Button
+            variant={activeTab === "vendidos" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setActiveTab("vendidos")}
+            data-testid="tab-vendidos"
+          >
+            <Receipt className="h-4 w-4 mr-1" /> Turnos vendidos
+          </Button>
+          <Button
             variant={activeTab === "tratamientos" ? "default" : "ghost"}
             size="sm"
             onClick={() => setActiveTab("tratamientos")}
@@ -2049,6 +2112,117 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </Card>
           )}
         </>
+      )}
+
+      {activeTab === "vendidos" && (
+        <Card className="flex-1">
+          <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Turnos vendidos</CardTitle>
+            <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+              <Button
+                variant={!showAllTreatmentSales ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setShowAllTreatmentSales(false)}
+                data-testid="button-sales-filter-pending"
+              >
+                Pendientes de agendar
+              </Button>
+              <Button
+                variant={showAllTreatmentSales ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setShowAllTreatmentSales(true)}
+                data-testid="button-sales-filter-all"
+              >
+                Todos
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {treatmentSalesLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
+              </div>
+            ) : treatmentSales.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Receipt className="h-12 w-12 mx-auto mb-3 opacity-40" />
+                <p className="text-sm">
+                  {showAllTreatmentSales ? "No hay ventas de tratamientos registradas." : "No hay ventas pendientes de agendar."}
+                </p>
+                <p className="text-xs mt-1">Se registran automáticamente al elegir un tratamiento desde "Agregar desde catálogo" en Emitir Comprobante.</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Estado</TableHead>
+                    <TableHead>Tratamiento</TableHead>
+                    <TableHead>Comprador</TableHead>
+                    <TableHead>Comprobante</TableHead>
+                    <TableHead className="text-right">Comprado</TableHead>
+                    <TableHead className="text-right">Agendado</TableHead>
+                    <TableHead className="text-right">Usado</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {treatmentSales.map((sale) => {
+                    const statusLabel: Record<string, string> = {
+                      pendiente: "Pendiente",
+                      parcial: "Parcial",
+                      programado: "Programado",
+                      utilizado: "Utilizado",
+                      vencido: "Vencido",
+                      cancelado: "Cancelado",
+                    };
+                    const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+                      pendiente: "outline",
+                      parcial: "secondary",
+                      programado: "default",
+                      utilizado: "default",
+                      vencido: "destructive",
+                      cancelado: "destructive",
+                    };
+                    return (
+                      <TableRow key={sale.id} data-testid={`treatment-sale-row-${sale.id}`}>
+                        <TableCell>
+                          <Badge variant={statusVariant[sale.status] || "outline"}>
+                            {statusLabel[sale.status] || sale.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm font-medium">{sale.treatmentName || "—"}</TableCell>
+                        <TableCell className="text-sm">{sale.buyerName}</TableCell>
+                        <TableCell className="text-sm">
+                          {sale.invoiceTipoComprobante
+                            ? `${sale.invoiceTipoComprobante} ${String(sale.invoicePuntoVenta ?? 1).padStart(4, "0")}-${String(sale.invoiceNumero ?? 0).padStart(8, "0")}`
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityPurchased}</TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityScheduled}</TableCell>
+                        <TableCell className="text-right text-sm">{sale.quantityUsed}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatHotelDateTime(sale.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          {sale.quantityScheduled < sale.quantityPurchased && sale.status !== "cancelado" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleGenerateAppointmentFromSale(sale)}
+                              data-testid={`button-generate-appointment-${sale.id}`}
+                            >
+                              Generar turno
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {activeTab === "tratamientos" && (
@@ -2524,11 +2698,19 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); } }}>
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{isEditMode ? "Editar Turno" : "Nuevo Turno SPA"}</DialogTitle>
+            <DialogTitle>{isEditMode ? "Editar Turno" : generatingFromSale ? "Agendar turno vendido" : "Nuevo Turno SPA"}</DialogTitle>
           </DialogHeader>
+          {generatingFromSale && (
+            <div className="rounded-md border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300" data-testid="banner-generating-from-sale">
+              Ya vendido y cobrado
+              {generatingFromSale.invoiceTipoComprobante
+                ? ` — ${generatingFromSale.invoiceTipoComprobante} ${String(generatingFromSale.invoicePuntoVenta ?? 1).padStart(4, "0")}-${String(generatingFromSale.invoiceNumero ?? 0).padStart(8, "0")}`
+                : ""}. Solo falta elegir gabinete, fecha y horario — no se vuelve a pedir cobro.
+            </div>
+          )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField control={form.control} name="appointmentDate" render={({ field }) => (
@@ -2573,7 +2755,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               <FormField control={form.control} name="treatmentId" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Servicio SPA</FormLabel>
-                  <Select onValueChange={(value) => {
+                  <Select disabled={!!generatingFromSale} onValueChange={(value) => {
                     field.onChange(value);
                     setCircuitBookings([]);
                     setCircuitDraftTreatmentId(null);
@@ -2737,7 +2919,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </FormItem>
               )} />
 
-              {!isEditMode && (
+              {!isEditMode && !generatingFromSale && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3" data-testid="appointment-settlement-section">
                   <div className="flex items-start justify-between gap-3">
                     <div>

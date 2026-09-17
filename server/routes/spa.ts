@@ -12,6 +12,7 @@ import {
   spaAccountItems,
   spaAppointments,
   spaTreatments,
+  spaTreatmentSales,
   spaTreatmentResources,
   spaAppointmentResources,
   spaCabins,
@@ -771,6 +772,45 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
+  // "Turnos vendidos": tratamientos ya vendidos (comprobante emitido, cobrados)
+  // que todavía no tienen — o no agotaron — sus turnos agendados.
+  app.get("/api/spa/treatment-sales", requireAuth, async (req, res) => {
+    try {
+      const onlyPending = req.query.pending === "true";
+      const rows = await db
+        .select({
+          id: spaTreatmentSales.id,
+          salesInvoiceId: spaTreatmentSales.salesInvoiceId,
+          treatmentId: spaTreatmentSales.treatmentId,
+          treatmentName: spaTreatments.name,
+          buyerName: spaTreatmentSales.buyerName,
+          quantityPurchased: spaTreatmentSales.quantityPurchased,
+          quantityScheduled: spaTreatmentSales.quantityScheduled,
+          quantityUsed: spaTreatmentSales.quantityUsed,
+          unitPriceFrozen: spaTreatmentSales.unitPriceFrozen,
+          status: spaTreatmentSales.status,
+          createdAt: spaTreatmentSales.createdAt,
+          invoiceTipoComprobante: salesInvoices.tipoComprobante,
+          invoicePuntoVenta: salesInvoices.puntoVenta,
+          invoiceNumero: salesInvoices.numero,
+          invoiceEstado: salesInvoices.estado,
+        })
+        .from(spaTreatmentSales)
+        .leftJoin(spaTreatments, eq(spaTreatmentSales.treatmentId, spaTreatments.id))
+        .leftJoin(salesInvoices, eq(spaTreatmentSales.salesInvoiceId, salesInvoices.id))
+        .where(onlyPending
+          ? and(
+              sql`${spaTreatmentSales.quantityScheduled} < ${spaTreatmentSales.quantityPurchased}`,
+              sql`${spaTreatmentSales.status} != 'cancelado'`,
+            )
+          : undefined)
+        .orderBy(desc(spaTreatmentSales.createdAt));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa treatment sales" });
+    }
+  });
+
   app.post("/api/spa/appointments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
       const {
@@ -805,7 +845,7 @@ export function registerSpaRoutes(app: Express) {
       if (!isValidSpaTime(startTime) || !isValidSpaTime(endTime) || startTime >= endTime) {
         return res.status(400).json({ error: "El horario del turno no es válido" });
       }
-      if (settlement !== undefined && !["room_charge", "voucher"].includes(settlement?.type)) {
+      if (settlement !== undefined && !["room_charge", "voucher", "already_sold"].includes(settlement?.type)) {
         return res.status(400).json({ error: "La modalidad de cobro no es válida" });
       }
       if (settlement?.type === "room_charge" && !settlement.reservationId) {
@@ -817,12 +857,42 @@ export function registerSpaRoutes(app: Express) {
       ) {
         return res.status(400).json({ error: "Seleccione una forma de pago válida para el voucher" });
       }
+      if (settlement?.type === "already_sold" && !settlement.soldTreatmentSaleId) {
+        return res.status(400).json({ error: "Falta la venta de origen del turno" });
+      }
 
       const voucherCashShift = settlement?.type === "voucher"
         ? await storage.getOrCreateActiveTurno("spa")
         : null;
 
       const appointment = await db.transaction(async (tx) => {
+        // "Turnos vendidos": reclama la unidad ANTES de crear nada más, atómico
+        // contra otro operador agendando la misma venta a la vez. La condición
+        // en el WHERE (no solo el valor leído antes) es lo que hace la carrera
+        // segura — dos requests concurrentes nunca reclaman la misma unidad.
+        let soldSale: { id: string; unitPriceFrozen: string } | null = null;
+        if (settlement?.type === "already_sold") {
+          const claimed = await tx.execute(sql`
+            UPDATE spa_treatment_sales
+            SET quantity_scheduled = quantity_scheduled + 1,
+                status = CASE
+                  WHEN quantity_scheduled + 1 >= quantity_purchased THEN 'programado'
+                  ELSE 'parcial'
+                END
+            WHERE id = ${settlement.soldTreatmentSaleId}
+              AND treatment_id = ${treatmentId}
+              AND quantity_scheduled < quantity_purchased
+              AND status != 'cancelado'
+            RETURNING id, unit_price_frozen AS "unitPriceFrozen"
+          `);
+          soldSale = claimed.rows[0] as any;
+          if (!soldSale) {
+            throw Object.assign(new Error(
+              "La venta ya no tiene unidades pendientes de agendar, o no corresponde a este tratamiento."
+            ), { statusCode: 409 });
+          }
+        }
+
         const [treatment] = await tx.select().from(spaTreatments).where(eq(spaTreatments.id, treatmentId));
         if (!treatment) {
           throw Object.assign(new Error("Tratamiento no encontrado"), { statusCode: 400 });
@@ -867,7 +937,10 @@ export function registerSpaRoutes(app: Express) {
         }).returning();
 
         const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
-        const treatmentPrice = treatment.price || "0";
+        // La venta ya cobró al precio vigente el día que se facturó — el
+        // catálogo pudo cambiar de precio desde entonces, así que el turno
+        // se liquida al importe congelado en la venta, no al de hoy.
+        const treatmentPrice = soldSale ? soldSale.unitPriceFrozen : (treatment.price || "0");
         const [account] = await tx.insert(spaAccounts).values({
           appointmentId: createdAppointment.id,
           guestName: fullName,
@@ -924,7 +997,7 @@ export function registerSpaRoutes(app: Express) {
 
         let settlementPaymentId: string | null = null;
         let settlementCashMovementId: string | null = null;
-        if (settlement?.type === "room_charge" || settlement?.type === "voucher") {
+        if (settlement?.type === "room_charge" || settlement?.type === "voucher" || settlement?.type === "already_sold") {
           const settlementReservationId = settlement.type === "room_charge" ? String(settlement.reservationId) : null;
           if (settlementReservationId) {
             await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"reservation-finance:" + settlementReservationId}))`);
@@ -942,7 +1015,9 @@ export function registerSpaRoutes(app: Express) {
 
           const paymentMethod = settlement.type === "room_charge"
             ? "room_charge"
-            : String(settlement.paymentMethod);
+            : settlement.type === "already_sold"
+              ? "venta_previa"
+              : String(settlement.paymentMethod);
           const [payment] = await tx.insert(spaPayments).values({
             accountId: account.id,
             amount: treatmentPrice,
@@ -952,11 +1027,16 @@ export function registerSpaRoutes(app: Express) {
             reservationId: settlementReservationId,
             notes: settlement.type === "room_charge"
               ? "Transferido al folio de habitación al crear el turno"
-              : "Voucher SPA cobrado al crear el turno",
+              : settlement.type === "already_sold"
+                ? `Ya facturado y cobrado antes de agendar el turno (venta ${soldSale?.id})`
+                : "Voucher SPA cobrado al crear el turno",
             createdAt: new Date(),
           }).returning();
           settlementPaymentId = payment.id;
 
+          // "already_sold" no genera deuda nueva ni efectivo nuevo: el
+          // comprobante y el cobro ya existían antes de que este turno
+          // existiera (ver spa_treatment_sales) — solo cierra el folio SPA.
           if (settlement.type === "room_charge" && settlementReservationId) {
             await tx.insert(charges).values({
               reservationId: settlementReservationId,
@@ -987,7 +1067,11 @@ export function registerSpaRoutes(app: Express) {
             folioId: spaFolio.id,
             type: "payment",
             amount: treatmentPrice,
-            description: settlement.type === "room_charge" ? "SPA - Cargo a habitación" : "SPA - Voucher",
+            description: settlement.type === "room_charge"
+              ? "SPA - Cargo a habitación"
+              : settlement.type === "already_sold"
+                ? "SPA - Turno vendido (ya facturado)"
+                : "SPA - Voucher",
             sourceType: "spa_payment",
             sourceId: payment.id,
             paymentMethod,
