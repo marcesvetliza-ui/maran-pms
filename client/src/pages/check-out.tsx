@@ -402,6 +402,12 @@ export default function CheckOutPage() {
                         </div>
                         <span className="text-lg font-bold">${fmtMoney(reservation.totalRoomAmount || "0")}</span>
                       </div>
+                      {reservation.notes && (
+                        <div className="text-xs bg-muted/30 rounded-md p-2" data-testid={`checkout-notes-${reservation.id}`}>
+                          <div className="text-muted-foreground mb-0.5">Notas:</div>
+                          <div className="line-clamp-2" style={{ whiteSpace: "pre-wrap" }}>{reservation.notes}</div>
+                        </div>
+                      )}
                       <div className="pt-2">
                         <Button
                           variant="outline"
