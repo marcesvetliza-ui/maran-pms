@@ -251,7 +251,11 @@ export async function generarFacturaPDF(
     // Reserve enough space for payment totals, transparency, QR/CAE and footer.
     // Shrink FOOTER_TOP when optional sections (notaCredito, ficticio) consume extra space.
     const transparenciaFiscal = ["FB", "NCB", "NDB"].includes(tipoKey);
-    const FOOTER_H = 271 + (transparenciaFiscal ? 34 : 0);
+    // Decreto 1043/2016 — Factura T/NC T ya facturan el neto (turista
+    // extranjero, alojamiento/desayuno); el comprobante debe mostrar el IVA
+    // que se hubiera aplicado y el reintegro que lo cancela, más la leyenda.
+    const isTurismoReintegro = tipoKey === "FT" || tipoKey === "NCT";
+    const FOOTER_H = 271 + (transparenciaFiscal ? 34 : 0) + (isTurismoReintegro ? 34 : 0);
     const FOOTER_TOP = Math.floor(841.89 - 30 - FOOTER_H)
       - (notaCredito  ? 62 : 0)
       - (modoFicticio ? 16 : 0);
@@ -269,6 +273,7 @@ export async function generarFacturaPDF(
     const cfgInicio       = config?.inicioActividades ?? "01/01/2000";
 
     const discriminaIVA = ["FA", "NCA", "NDA", "FM", "NCM", "NDM"].includes(tipoKey);
+    const turismoIva = isTurismoReintegro ? $n((montoNoGravado * 0.21).toFixed(2)) : 0;
 
     // ── Helpers ────────────────────────────────────────────────────────────
     function hline(yy: number, lx = x0, lw = W, color = "#ccc") {
@@ -610,6 +615,11 @@ export async function generarFacturaPDF(
     if (discriminaIVA && montoNoGravado !== 0) totRows.push(["Importe No Gravado",   montoNoGravado]);
     if (discriminaIVA && montoIva21 !== 0)     totRows.push(["IVA 21%",              montoIva21]);
     if (discriminaIVA && montoIva105 !== 0)    totRows.push(["IVA 10.5%",            montoIva105]);
+    if (isTurismoReintegro) {
+      totRows.push(["Neto gravado",                              montoNoGravado]);
+      totRows.push(["IVA 21%",                                   turismoIva]);
+      totRows.push(["Reintegro Decreto 1043/2016",               -turismoIva]);
+    }
 
     for (const [label, val] of totRows) {
       doc.text(label, totX + 4, ty, { width: totW * 0.55 });
@@ -649,6 +659,18 @@ export async function generarFacturaPDF(
         .text("IVA contenido", x0 + 6, y + 17, { width: W * 0.55 })
         .font("Helvetica-Bold")
         .text(`$${fPeso(ivaContenido)}`, x0 + W * 0.62, y + 17, { width: W * 0.35, align: "right" });
+      doc.fillColor("#000");
+      y += 34;
+    }
+
+    if (isTurismoReintegro) {
+      box(x0, y, W, 30, "#9ca3af");
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#111827")
+        .text("Alcanzada por el beneficio de reintegro del IVA — Decreto 1043/2016", x0 + 6, y + 5, { width: W - 12 });
+      doc.font("Helvetica").fontSize(7.5)
+        .text("IVA reintegrado", x0 + 6, y + 17, { width: W * 0.55 })
+        .font("Helvetica-Bold")
+        .text(`$${fPeso(turismoIva)}`, x0 + W * 0.62, y + 17, { width: W * 0.35, align: "right" });
       doc.fillColor("#000");
       y += 34;
     }

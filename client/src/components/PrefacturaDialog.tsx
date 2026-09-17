@@ -878,12 +878,21 @@ export function PrefacturaDialog({
     originalBillableItems,
     invoicedAmountsByCharge,
   );
-  const selectedItems = folio
+  // Factura T (turismo, Decreto 1043/2016): a un huésped extranjero se le
+  // cobra el neto de IVA — no la misma tarifa con el 21% incluido que paga un
+  // huésped local — y así lo tiene que reflejar el comprobante ("alcanzada
+  // por el beneficio de reintegro del IVA"). Es la única excepción sancionada
+  // al principio de arriba ("changing the fiscal recipient cannot change the
+  // amount"): acá lo que cambia el monto es el tipo de comprobante exigido
+  // por ley, no a quién se le factura.
+  const applyFacturaTNetAmount = (items: SelectedFolioItem[]): SelectedFolioItem[] =>
+    tipo === "FT" ? items.map(item => ({ ...item, amount: Number((item.amount / 1.21).toFixed(2)) })) : items;
+  const selectedItems = applyFacturaTNetAmount(folio
     ? getSelectedFolioItems(selectedIds, folio, itemDescriptions, remainingAmountsByCharge)
-    : [];
-  const allBillableItems = folio
+    : []);
+  const allBillableItems = applyFacturaTNetAmount(folio
     ? getAllBillableFolioItems(folio, itemDescriptions, remainingAmountsByCharge)
-    : [];
+    : []);
   const availableAdvancePayments = getAvailableReservationAdvancePayments(
     folio?.payments || [],
     safeEmittedInvoices,
@@ -1620,7 +1629,12 @@ export function PrefacturaDialog({
                  <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                    <div className="text-right rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/20">
                       <div className="font-medium text-xs text-blue-700 dark:text-blue-300">Importe a facturar</div>
-                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200">${fmtMoney(totalSelected)}</div>
+                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
+                     {tipo === "FT" && (
+                       <div className="text-[11px] text-blue-700/80 dark:text-blue-300/80" data-testid="text-factura-t-reintegro-note">
+                         Ya sin el 21% de IVA — reintegro turismo (Decreto 1043/2016)
+                       </div>
+                     )}
                   </div>
                   <div className="text-right">
                      <div className="text-muted-foreground text-xs">Crédito liberado disponible en la reserva</div>
