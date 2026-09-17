@@ -1816,12 +1816,12 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <CalendarDays className="h-4 w-4 mr-1" /> Agenda
           </Button>
           <Button
-            variant={activeTab === "vendidos" ? "default" : "ghost"}
+            variant="ghost"
             size="sm"
-            onClick={() => setActiveTab("vendidos")}
-            data-testid="tab-vendidos"
+            onClick={() => setShowProdDialog(true)}
+            data-testid="button-prod-profesional"
           >
-            <Receipt className="h-4 w-4 mr-1" /> Turnos vendidos
+            <BarChart2 className="h-4 w-4 mr-1" /> % por Profesional
           </Button>
           <Button
             variant={activeTab === "tratamientos" ? "default" : "ghost"}
@@ -1916,10 +1916,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
-                onClick={() => setShowProdDialog(true)}
-                data-testid="button-prod-profesional"
+                onClick={() => setActiveTab("vendidos")}
+                data-testid="tab-vendidos"
               >
-                <BarChart2 className="h-4 w-4 mr-2" /> % por Profesional
+                <Receipt className="h-4 w-4 mr-2" /> Turnos vendidos
               </Button>
               {viewMode === "daily" && (
                 <Button onClick={() => {
