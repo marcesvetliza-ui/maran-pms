@@ -27,7 +27,6 @@ import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
-import { sendEmailWithPdfAttachment } from "../email-service";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { visibleGuestCondition } from "../guest-visibility";
 
@@ -1153,6 +1152,7 @@ export function registerSpaRoutes(app: Express) {
         const status = req.body.status ?? current.status;
         const enteringActiveStatus = (ACTIVE_SPA_STATUSES as readonly string[]).includes(status)
           && !(ACTIVE_SPA_STATUSES as readonly string[]).includes(current.status);
+        const enteringInProgress = status === "in_progress" && current.status !== "in_progress";
 
         if (scheduleChanged || enteringActiveStatus) {
           if (!isValidSpaDate(appointmentDate)) {
@@ -1249,10 +1249,24 @@ export function registerSpaRoutes(app: Express) {
           .set(allowedUpdates)
           .where(eq(spaAppointments.id, current.id))
           .returning();
-        return updated;
+        return { ...updated, enteringInProgress };
       });
 
-      res.json(appointment);
+      // Al iniciar el turno se consume el insumo del tratamiento, sin
+      // esperar a que se cobre o se cierre la cuenta — deductStockFromSpaAccount
+      // es idempotente por cuenta, así que el cierre posterior no lo descuenta
+      // dos veces.
+      const { enteringInProgress, ...appointmentResponse } = appointment;
+      if (enteringInProgress) {
+        const account = await storage.getSpaAccountByAppointment(appointment.id);
+        if (account) {
+          storage.deductStockFromSpaAccount(account.id).catch((error: any) =>
+            console.warn("[SPA] Error deducting stock on iniciar:", error)
+          );
+        }
+      }
+
+      res.json(appointmentResponse);
     } catch (error: any) {
       res.status(error?.statusCode || 500).json({
         error: "Error updating appointment",
@@ -2115,61 +2129,6 @@ export function registerSpaRoutes(app: Express) {
     } catch (error) {
       console.error("Error generating SPA receipt PDF:", error);
       res.status(500).json({ error: "Error generando comprobante PDF" });
-    }
-  });
-
-  // ── Email: Enviar comprobante SPA por email ────────────────────────────────
-  app.post("/api/spa/accounts/:id/receipt-email", requireAuth, async (req, res) => {
-    try {
-      const { to } = req.body;
-      if (!to?.trim()) return res.status(400).json({ error: "El destinatario (to) es requerido" });
-
-      const account = await storage.getSpaAccount(req.params.id);
-      if (!account) return res.status(404).json({ error: "Cuenta no encontrada" });
-      const appointment = await storage.getSpaAppointment(account.appointmentId);
-
-      const treatment = appointment?.treatmentId
-        ? await storage.getSpaTreatment(appointment.treatmentId)
-        : null;
-
-      const pdfBuffer = await generateSpaAccountReceiptPdf({
-        accountId: account.id,
-        guestName: account.guestName,
-        appointmentDate: appointment?.appointmentDate ?? getArgentinaOperationalDate(),
-        startTime: appointment?.startTime ?? "",
-        treatmentName: treatment?.name ?? "Servicio SPA",
-        receiptType: account.receiptType,
-        closedAt: account.closedAt ? String(account.closedAt) : null,
-        items: account.items.map((i: any) => ({
-          description: i.description,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          subtotal: i.subtotal,
-        })),
-        payments: account.payments.map((p: any) => ({ method: p.method, amount: p.amount })),
-        total: account.items.reduce((s: number, i: any) => s + parseFloat(i.subtotal), 0),
-      });
-
-      const guestSlug = account.guestName.replace(/\s+/g, "_");
-      const subject = `Comprobante SPA — ${account.guestName}`;
-      const body = `Estimado/a,\n\nAdjunto encontrará el comprobante de su sesión de SPA en Maran Suites & Towers.\n\nGracias por elegirnos.\n\nMaran Suites & Towers\nSPA & Wellness — Paraná, Entre Ríos`;
-
-      const result = await sendEmailWithPdfAttachment({
-        to: to.trim(),
-        subject,
-        body,
-        attachmentFilename: `Recibo_SPA_${guestSlug}.pdf`,
-        attachmentBuffer: pdfBuffer,
-      });
-
-      if (!result.ok) {
-        return res.status(502).json({ error: result.error || "Error al enviar el email" });
-      }
-
-      res.json({ ok: true });
-    } catch (error: any) {
-      console.error("Error sending SPA receipt email:", error);
-      res.status(500).json({ error: "Error al enviar el email" });
     }
   });
 
