@@ -8054,6 +8054,12 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
     if (existing) return existing;
     const codigo = await this.generateFolioCodigo(entityType);
+    // Two near-simultaneous charges to the same entity (e.g. fire-and-forget
+    // SPA/restaurant charges posted back to back) can both reach this point
+    // having seen no existing folio. ON CONFLICT DO NOTHING plus a fallback
+    // re-select (guarded by the folios_entity_type_entity_id_unique index —
+    // see migrate.ts) makes the loser return the winner's row instead of
+    // creating a second folio that splits the entity's balance in two.
     const [created] = await db.insert(folios).values({
       codigo,
       entityType,
@@ -8062,8 +8068,12 @@ export class DatabaseStorage implements IStorage {
       totalCharges: "0",
       totalPayments: "0",
       balance: "0",
-    }).returning();
-    return created;
+    }).onConflictDoNothing({ target: [folios.entityType, folios.entityId] }).returning();
+    if (created) return created;
+    const [winner] = await db.select().from(folios)
+      .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
+    if (!winner) throw new Error(`No se pudo crear ni recuperar el folio para ${entityType}:${entityId}`);
+    return winner;
   }
 
   async getFolioByEntity(entityType: FolioEntityType, entityId: string): Promise<Folio | null> {
