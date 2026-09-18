@@ -37,12 +37,14 @@ import { queryClient } from "@/lib/queryClient";
 import type { AccountMovement } from "@shared/schema";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { isOverdue } from "@/lib/account-aging";
 
 type GuestSummary = {
   id: string;
   name: string;
   balance: number;
   lastMovement: string | null;
+  daysOverdue: number | null;
 };
 
 type AccountData = {
@@ -173,9 +175,15 @@ export default function CcHuespedesPage() {
                 <p className={`font-bold text-sm ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
                   ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {g.balance > 0 ? "Pendiente" : "Al día"}
-                </p>
+                {isOverdue(g.daysOverdue) ? (
+                  <p className="text-[11px] font-medium text-red-600" title={`Deuda vencida desde hace ${g.daysOverdue} días`}>
+                    Vencida ({g.daysOverdue}d)
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    {g.balance > 0 ? "Pendiente" : "Al día"}
+                  </p>
+                )}
               </div>
             </div>
           ))}

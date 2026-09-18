@@ -851,8 +851,9 @@ export interface IStorage {
   getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number>;
   createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement>;
   getAccountSummary(): Promise<{
-    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+    companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
   }>;
   getPendingCharges(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente: number })[]>;
   createPaymentWithAllocations(

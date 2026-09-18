@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { getArgentinaOperationalParts } from "./utils/argentinaDateTime";
+import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import {
@@ -7876,9 +7876,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAccountSummary(): Promise<{
-    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
+    companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
   }> {
     // Balance de empresas: usamos account_movements como fuente de verdad (igual que agencias),
     // porque el listado de movimientos muestra account_movements y el saldo debe coincidir.
@@ -7891,7 +7891,6 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                                        AS last_movement
       FROM companies c
       LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
-      WHERE c.is_active = 'true'
       GROUP BY c.id, c.nombre_fantasia, c.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -7904,7 +7903,6 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                                        AS last_movement
       FROM agencies a
       LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
-      WHERE a.is_active = 'true'
       GROUP BY a.id, a.nombre_fantasia, a.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -7923,11 +7921,30 @@ export class DatabaseStorage implements IStorage {
       ORDER BY balance DESC
     `);
 
-    return {
-      companies: (companiesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-      agencies:  (agenciesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-      guests:    (guestsRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+    const withAging = async (rows: any[], entityType: AccountEntityType) => {
+      const today = getArgentinaToday();
+      return Promise.all(rows.map(async (r) => {
+        const balance = parseFloat(r.balance);
+        let oldestUnpaidDate: string | null = null;
+        let daysOverdue: number | null = null;
+        if (balance > 0.009) {
+          const pending = await this.getPendingCharges(entityType, r.id);
+          if (pending.length > 0) {
+            oldestUnpaidDate = pending[0].date;
+            daysOverdue = daysBetweenCalendarDates(oldestUnpaidDate, today);
+          }
+        }
+        return { id: r.id, name: r.name, balance, lastMovement: r.last_movement, oldestUnpaidDate, daysOverdue };
+      }));
     };
+
+    const [companies, agencies, guests] = await Promise.all([
+      withAging(companiesRes.rows as any[], "company"),
+      withAging(agenciesRes.rows as any[], "agency"),
+      withAging(guestsRes.rows as any[], "guest"),
+    ]);
+
+    return { companies, agencies, guests };
   }
 
   // ==================== MOTOR FINANCIERO — FOLIOS ====================

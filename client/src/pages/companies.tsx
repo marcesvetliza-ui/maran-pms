@@ -23,6 +23,7 @@ import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
 import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
+import { isOverdue } from "@/lib/account-aging";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -157,6 +158,15 @@ export default function CompaniesPage() {
   const { data: companies = [], isLoading } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
   });
+
+  const { data: accountSummary } = useQuery<{
+    companies: { id: string; balance: number; daysOverdue: number | null }[];
+  }>({
+    queryKey: ["/api/account-summary"],
+  });
+  const agingByCompanyId = new Map(
+    (accountSummary?.companies || []).map(c => [c.id, c])
+  );
 
   const { data: accountData, refetch: refetchAccount, isError: accountError, error: accountErrorObj } = useQuery<{
     movements: AccountMovement[];
@@ -446,6 +456,14 @@ export default function CompaniesPage() {
                       <Badge variant={company.isActive === "false" ? "destructive" : "default"}>
                         {company.isActive === "false" ? "Cortada" : "Activa"}
                       </Badge>
+                      {isOverdue(agingByCompanyId.get(company.id)?.daysOverdue) && (
+                        <div
+                          className="text-[10px] font-medium text-red-600 mt-0.5"
+                          title={`Deuda vencida desde hace ${agingByCompanyId.get(company.id)?.daysOverdue} días`}
+                        >
+                          Vencida ({agingByCompanyId.get(company.id)?.daysOverdue}d)
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
