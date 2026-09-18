@@ -7,6 +7,8 @@ import { useAuth } from "@/App";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import type { GiftVoucher } from "@shared/schema";
+import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -494,6 +496,7 @@ export default function SpaPage() {
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReservationId, setPaymentReservationId] = useState("");
+  const [paymentVoucher, setPaymentVoucher] = useState<GiftVoucher | null>(null);
   const [chargeDescription, setChargeDescription] = useState("");
   const [chargePrice, setChargePrice] = useState("");
   const [chargeQuantity, setChargeQuantity] = useState("1");
@@ -1033,11 +1036,11 @@ export default function SpaPage() {
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async ({ accountId, amount, method, reservationId }: {
-      accountId: string; amount: string; method: string; reservationId?: string;
+    mutationFn: async ({ accountId, amount, method, reservationId, voucherId }: {
+      accountId: string; amount: string; method: string; reservationId?: string; voucherId?: string;
     }) => {
       return apiRequest("POST", `/api/spa/accounts/${accountId}/payments`, {
-        amount, method, reservationId: reservationId || null,
+        amount, method, reservationId: reservationId || null, voucherId: voucherId || undefined,
       });
     },
     onSuccess: (_, variables) => {
@@ -1046,6 +1049,7 @@ export default function SpaPage() {
       setPaymentAmount("");
       setPaymentMethod("");
       setPaymentReservationId("");
+      setPaymentVoucher(null);
       toast({ title: "Pago registrado" });
 
       if (variables.method === "room_charge" && selectedAccount) {
@@ -1054,6 +1058,9 @@ export default function SpaPage() {
           receiptType: "cierre_spa",
         });
       }
+    },
+    onError: (err: any) => {
+      toast({ title: parseApiError(err) || "Error al registrar el pago", variant: "destructive" });
     },
   });
 
@@ -3946,7 +3953,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium">Método de Pago</label>
-                  <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); if (v !== "room_charge") setPaymentReservationId(""); }}>
+                  <Select value={paymentMethod} onValueChange={(v) => {
+                    setPaymentMethod(v);
+                    if (v !== "room_charge") setPaymentReservationId("");
+                    if (v !== "gift_voucher") setPaymentVoucher(null);
+                  }}>
                     <SelectTrigger data-testid="select-payment-method">
                       <SelectValue placeholder="Seleccionar" />
                     </SelectTrigger>
@@ -3957,9 +3968,25 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <SelectItem value="transfer">Transferencia</SelectItem>
                       <SelectItem value="mercadopago">MercadoPago</SelectItem>
                       <SelectItem value="room_charge">Cargo a Habitación</SelectItem>
+                      <SelectItem value="gift_voucher">Voucher de Regalo</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {paymentMethod === "gift_voucher" && (
+                  <GiftVoucherSelect
+                    area="spa"
+                    selectedVoucher={paymentVoucher}
+                    onSelect={(v) => {
+                      setPaymentVoucher(v);
+                      if (v?.valueType === "monetario" && v.valueAmount) {
+                        const vAmt = parseFloat(v.valueAmount);
+                        setPaymentAmount(String(Math.min(vAmt, accountBalance).toFixed(2)));
+                      }
+                    }}
+                    data-testid="select-spa-payment-voucher"
+                  />
+                )}
 
                 {paymentMethod === "room_charge" && (
                   <div>
@@ -3987,7 +4014,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setIsAddPaymentOpen(false)}>Cancelar</Button>
                   <Button
-                    disabled={!paymentAmount || !paymentMethod || addPaymentMutation.isPending || (paymentMethod === "room_charge" && !paymentReservationId)}
+                    disabled={
+                      !paymentAmount || !paymentMethod || addPaymentMutation.isPending
+                      || (paymentMethod === "room_charge" && !paymentReservationId)
+                      || (paymentMethod === "gift_voucher" && !paymentVoucher)
+                    }
                     onClick={() => {
                       if (selectedAccount) {
                         addPaymentMutation.mutate({
@@ -3995,6 +4026,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           amount: paymentAmount,
                           method: paymentMethod,
                           reservationId: paymentMethod === "room_charge" ? paymentReservationId : undefined,
+                          voucherId: paymentMethod === "gift_voucher" ? paymentVoucher?.id : undefined,
                         });
                       }
                     }}

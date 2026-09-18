@@ -1473,6 +1473,17 @@ export function registerSpaRoutes(app: Express) {
         console.warn("[SPA] Error deducting stock:", err)
       );
 
+      // Consumir cualquier voucher reservado contra esta cuenta — no debe
+      // bloquear el cierre por un problema de sincronización del voucher.
+      try {
+        const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", req.params.id);
+        for (const application of applications) {
+          await storage.consumeGiftVoucherApplication(application.id, (req as any).user?.username || "sistema");
+        }
+      } catch (e) {
+        console.error("[GiftVoucher] Error consumiendo voucher al cerrar cuenta SPA:", e);
+      }
+
       res.json(account);
     } catch (error) {
       res.status(500).json({ error: "Error closing spa account" });
@@ -1790,10 +1801,25 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:id/payments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
-      const { amount, method, isAdvance, appointmentId, reservationId, notes } = req.body;
+      const { amount, method, isAdvance, appointmentId, reservationId, notes, voucherId } = req.body;
 
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
+      }
+
+      // Igual que en reservas: se aplica el voucher ANTES de registrar el
+      // pago, para no dejar un pago "cubierto" por un voucher que en
+      // realidad no se pudo reservar (ya usado, vencido, etc.).
+      if (method === "gift_voucher") {
+        if (!voucherId) return res.status(400).json({ error: "voucherId es requerido para pagar con voucher de regalo" });
+        try {
+          await storage.applyGiftVoucher(
+            voucherId, "spa_account", req.params.id, parseFloat(String(amount)),
+            (req as any).user?.username || "sistema",
+          );
+        } catch (e: any) {
+          return res.status(400).json({ error: e?.message || "Error al aplicar el voucher de regalo" });
+        }
       }
 
       const payment = await storage.createSpaPayment({
@@ -1803,6 +1829,7 @@ export function registerSpaRoutes(app: Express) {
         isAdvance: isAdvance ? "true" : "false",
         appointmentId: appointmentId || null,
         reservationId: reservationId || null,
+        voucherId: method === "gift_voucher" ? voucherId : null,
         notes: notes || null,
         createdAt: new Date(),
       });
@@ -1858,6 +1885,22 @@ export function registerSpaRoutes(app: Express) {
         .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
         .where(eq(spaPayments.id, req.params.id))
         .returning();
+
+      if (pay.method === "gift_voucher" && pay.voucherId) {
+        try {
+          const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", pay.accountId);
+          const application = applications.find(a => a.voucherId === pay.voucherId);
+          if (application) {
+            await storage.releaseGiftVoucherApplication(
+              application.id, (req as any).user?.username || "sistema",
+              `Se anuló el pago: ${motivoAnulacion}`,
+            );
+          }
+        } catch (e) {
+          console.error("[GiftVoucher] Error liberando voucher al anular pago SPA:", e);
+        }
+      }
+
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });

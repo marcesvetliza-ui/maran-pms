@@ -2892,6 +2892,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN voucher_applied_amount numeric(10,2)
     `)))
   );
+  await withTimeout("spa_payments.voucher_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_payments ADD COLUMN voucher_id varchar`)))
+  );
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
