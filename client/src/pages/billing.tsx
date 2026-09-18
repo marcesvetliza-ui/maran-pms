@@ -11,7 +11,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +29,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const today = () => getArgentinaToday();
 const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
@@ -591,6 +592,10 @@ type Item = {
   /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
    * permite registrar la venta como turno vendido pendiente de agendar. */
   spaTreatmentId?: string;
+  /** Presente solo si este tratamiento se compra para regalar — crea un
+   * gift voucher "por prestación" vinculado a la venta, a nombre de este
+   * beneficiario. Solo aplica a ítems con spaTreatmentId. */
+  giftBeneficiaryName?: string;
 };
 
 export type EmitirFacturaInitialValues = {
@@ -992,6 +997,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
+      if (it.giftBeneficiaryName !== undefined && !it.giftBeneficiaryName.trim()) {
+        errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
+      }
     });
     if (cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
       errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : ccEntityType === "agency" ? "una agencia" : "un huésped"}`;
@@ -2133,6 +2141,31 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                     )}
                   </div>
                 </div>
+                {item.spaTreatmentId && (
+                  <div className="space-y-1.5 border-t pt-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`item-is-gift-${idx}`}
+                        data-testid={`checkbox-item-is-gift-${idx}`}
+                        checked={item.giftBeneficiaryName !== undefined}
+                        onCheckedChange={(checked) => updateItem(idx, "giftBeneficiaryName", checked ? "" : undefined)}
+                      />
+                      <Label htmlFor={`item-is-gift-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
+                        <Gift className="w-3.5 h-3.5" /> Es un regalo — genera un voucher por prestación
+                      </Label>
+                    </div>
+                    {item.giftBeneficiaryName !== undefined && (
+                      <Input
+                        data-testid={`item-gift-beneficiary-${idx}`}
+                        value={item.giftBeneficiaryName}
+                        onChange={e => updateItem(idx, "giftBeneficiaryName", e.target.value)}
+                        placeholder="Nombre del beneficiario"
+                        className={fieldErrors[`gift_beneficiary_${idx}`] ? "border-red-500" : ""}
+                      />
+                    )}
+                    {fieldErrors[`gift_beneficiary_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`gift_beneficiary_${idx}`]}</p>}
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {isFA

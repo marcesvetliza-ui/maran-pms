@@ -2979,6 +2979,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(FOLIOS_ENTITY_UNIQUE_MIGRATION_SQL))
   );
 
+  // "Voucher por prestación": un voucher regalo puede nacer vinculado a una
+  // venta anticipada de tratamiento SPA en vez de ser un monto libre. Su
+  // estado lo dicta esa venta (ver routes/spa.ts), no la acción manual de
+  // "Marcar como utilizado".
+  await withTimeout("gift_vouchers.linked_treatment_sale_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE gift_vouchers
+        ADD COLUMN linked_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

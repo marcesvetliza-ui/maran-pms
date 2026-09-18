@@ -17,6 +17,10 @@ export interface InvoiceItem {
   /** Tratamiento de spa_treatments elegido del catálogo — permite registrar
    * la venta como "turno vendido" pendiente de agendar. */
   spaTreatmentId?: string;
+  /** Presente solo si este tratamiento se compra para regalar — crea un
+   * gift voucher "por prestación" vinculado a la venta, a nombre de este
+   * beneficiario. Requiere spaTreatmentId. */
+  giftBeneficiaryName?: string;
 }
 
 export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa";

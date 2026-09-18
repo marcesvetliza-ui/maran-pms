@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
@@ -1689,6 +1689,43 @@ export function registerBillingRoutes(app: Express) {
                 WHERE sales_invoice_id = ${emitted.id} AND invoice_item_index = ${index}
               )
             `);
+
+            // "Voucher por prestación": el ítem se marcó como regalo — crea un
+            // gift voucher descriptivo vinculado a esta venta, a nombre del
+            // beneficiario cargado. Idempotente ante un reintento (chequea si
+            // ya existe un voucher para esta venta antes de crear otro).
+            const beneficiaryName = String((item as any)?.giftBeneficiaryName || "").trim();
+            if (beneficiaryName) {
+              const saleRows = await db.execute(sql`
+                SELECT id FROM spa_treatment_sales
+                WHERE sales_invoice_id = ${emitted.id} AND invoice_item_index = ${index}
+              `);
+              const saleId = (saleRows.rows[0] as any)?.id;
+              if (saleId) {
+                const existingVoucher = await db.execute(sql`
+                  SELECT id FROM gift_vouchers WHERE linked_treatment_sale_id = ${saleId}
+                `);
+                if (existingVoucher.rows.length === 0) {
+                  const treatmentRows = await db.execute(sql`
+                    SELECT name FROM spa_treatments WHERE id = ${treatmentId}
+                  `);
+                  const treatmentName = (treatmentRows.rows[0] as any)?.name || "Tratamiento SPA";
+                  const code = await storage.generateVoucherCode();
+                  await storage.createGiftVoucher({
+                    voucherCode: code,
+                    area: "spa",
+                    description: treatmentName,
+                    valueType: "descriptivo",
+                    buyerName: persistedCliente?.razonSocial || "—",
+                    beneficiaryName,
+                    pricePaid: ((Number((item as any)?.precioUnitario) || 0) * quantity).toFixed(2),
+                    saleInvoiceId: emitted.id,
+                    linkedTreatmentSaleId: saleId,
+                    createdBy: user?.fullName || user?.username || null,
+                  } as InsertGiftVoucher);
+                }
+              }
+            }
           }
         }
         // Factura T (turismo, Decreto 1043/2016) ya cobra el neto de IVA — no la
