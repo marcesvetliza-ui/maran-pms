@@ -2762,6 +2762,16 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 : ""}. Solo falta elegir gabinete, fecha y horario — no se vuelve a pedir cobro.
             </div>
           )}
+          {generatingFromSale?.voucherCode && (
+            <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 px-3 py-2" data-testid="banner-generating-from-voucher">
+              <Gift className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <span className="text-xs text-green-800 dark:text-green-300">
+                Es un regalo — para <span className="font-semibold">{generatingFromSale.voucherBeneficiaryName}</span>
+                {" · voucher "}
+                <span className="font-mono">{generatingFromSale.voucherCode}</span>
+              </span>
+            </div>
+          )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField control={form.control} name="appointmentDate" render={({ field }) => (
