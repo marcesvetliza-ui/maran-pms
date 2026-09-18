@@ -190,6 +190,10 @@ app.use((req, res, next) => {
         "[startup] Cobros maestros y Cuenta Corriente deshabilitados por un esquema incompleto.",
         err,
       );
+      if (err?.code === "COMPANY_OPENING_BALANCE_IMPORT_FAILED") {
+        logger.error("[startup] La importación obligatoria de saldos falló; se detiene el proceso sin servir la aplicación.");
+        process.exit(1);
+      }
       return;
     }
 
