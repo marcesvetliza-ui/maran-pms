@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, subWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
@@ -65,6 +66,7 @@ import {
   FileX,
   Ban,
   Gift,
+  Ticket,
   Search,
 } from "lucide-react";
 
@@ -486,6 +488,8 @@ export default function SpaPage() {
   const [activeTab, setActiveTab] = useState<SpaTab>("agenda");
   const [showAllTreatmentSales, setShowAllTreatmentSales] = useState(false);
   const [treatmentSalesSearch, setTreatmentSalesSearch] = useState("");
+  const [showVoucherPickerInSaleDialog, setShowVoucherPickerInSaleDialog] = useState(false);
+  const [pickedVoucherInSaleDialog, setPickedVoucherInSaleDialog] = useState<GiftVoucher | null>(null);
   const [selectedAppointment, setSelectedAppointment] = useState<SpaAppointment | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<{ invoice: any; linkedNc: any | null } | null>(null);
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
@@ -1505,6 +1509,8 @@ export default function SpaPage() {
     setNewAppointmentSettlement("already_sold");
     setNewAppointmentRoomId("");
     setNewAppointmentVoucherMethod("");
+    setShowVoucherPickerInSaleDialog(false);
+    setPickedVoucherInSaleDialog(null);
     form.reset({
       cabinId: "", treatmentId: sale.treatmentId, professionalId: "",
       // El voucher se le regaló al beneficiario, no a quien pagó la
@@ -1514,6 +1520,38 @@ export default function SpaPage() {
       startTime: "", reservationId: "", notes: "",
     });
     setIsNewDialogOpen(true);
+  };
+
+  // El buscador "Tiene voucher" dentro de "Agendar turno vendido" reusa el
+  // mismo GiftVoucherSelect de Recepción — busca entre todos los vouchers
+  // activos del área, no solo los vinculados a una venta. Elegir uno "por
+  // prestación" (linkedTreatmentSaleId) re-apunta el diálogo a esa venta,
+  // igual que si se hubiera hecho clic en "Generar turno" desde esa fila.
+  const handleVoucherPickedForSaleDialog = (voucher: GiftVoucher | null) => {
+    setPickedVoucherInSaleDialog(voucher);
+    if (!voucher) return;
+    if (!voucher.linkedTreatmentSaleId) {
+      toast({
+        title: "Ese voucher no está vinculado a un tratamiento",
+        description: "Es un voucher monetario — elegí uno \"por prestación\" (regalo de un tratamiento) para agendar el turno.",
+        variant: "destructive",
+      });
+      setPickedVoucherInSaleDialog(null);
+      return;
+    }
+    const matchingSale = treatmentSales.find((s) => s.id === voucher.linkedTreatmentSaleId);
+    if (!matchingSale) {
+      toast({
+        title: "No se encontró la venta de ese voucher",
+        description: "Puede que ya esté totalmente agendada o cancelada.",
+        variant: "destructive",
+      });
+      setPickedVoucherInSaleDialog(null);
+      return;
+    }
+    handleGenerateAppointmentFromSale(matchingSale);
+    setShowVoucherPickerInSaleDialog(true);
+    setPickedVoucherInSaleDialog(voucher);
   };
 
   const handleEditAppointment = (apt: SpaAppointment) => {
@@ -2749,7 +2787,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); } }}>
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); setShowVoucherPickerInSaleDialog(false); setPickedVoucherInSaleDialog(null); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Editar Turno" : generatingFromSale ? "Agendar turno vendido" : "Nuevo Turno SPA"}</DialogTitle>
@@ -2770,6 +2808,33 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 {" · voucher "}
                 <span className="font-mono">{generatingFromSale.voucherCode}</span>
               </span>
+            </div>
+          )}
+          {generatingFromSale && (
+            <div className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="showVoucherPickerInSaleDialog"
+                  checked={showVoucherPickerInSaleDialog}
+                  onCheckedChange={(checked) => {
+                    setShowVoucherPickerInSaleDialog(checked);
+                    if (!checked) setPickedVoucherInSaleDialog(null);
+                  }}
+                  data-testid="switch-has-voucher-sale-dialog"
+                />
+                <Label htmlFor="showVoucherPickerInSaleDialog" className="flex items-center gap-1.5 cursor-pointer">
+                  <Ticket className="h-4 w-4 text-muted-foreground" />
+                  Tiene voucher
+                </Label>
+              </div>
+              {showVoucherPickerInSaleDialog && (
+                <GiftVoucherSelect
+                  area="spa"
+                  selectedVoucher={pickedVoucherInSaleDialog}
+                  onSelect={handleVoucherPickedForSaleDialog}
+                  data-testid="select-sale-dialog-voucher"
+                />
+              )}
             </div>
           )}
           <Form {...form}>
