@@ -933,6 +933,7 @@ export function registerSpaRoutes(app: Express) {
           status: appointmentStatus,
           notes: notes || null,
           createdAt: new Date(),
+          soldTreatmentSaleId: soldSale?.id || null,
         }).returning();
 
         const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
@@ -1153,6 +1154,7 @@ export function registerSpaRoutes(app: Express) {
         const enteringActiveStatus = (ACTIVE_SPA_STATUSES as readonly string[]).includes(status)
           && !(ACTIVE_SPA_STATUSES as readonly string[]).includes(current.status);
         const enteringInProgress = status === "in_progress" && current.status !== "in_progress";
+        const enteringCompleted = status === "completed" && current.status !== "completed";
 
         if (scheduleChanged || enteringActiveStatus) {
           if (!isValidSpaDate(appointmentDate)) {
@@ -1249,6 +1251,24 @@ export function registerSpaRoutes(app: Express) {
           .set(allowedUpdates)
           .where(eq(spaAppointments.id, current.id))
           .returning();
+
+        // Cierra el círculo de "Turnos vendidos": si este turno viene de una
+        // venta anticipada, avisarle que ya se prestó. Mismo patrón atómico
+        // que el reclamo original (condición en el WHERE, no solo el valor
+        // leído antes) — evita contar dos veces ante un reintento.
+        if (enteringCompleted && current.soldTreatmentSaleId) {
+          await tx.execute(sql`
+            UPDATE spa_treatment_sales
+            SET quantity_used = quantity_used + 1,
+                status = CASE
+                  WHEN quantity_used + 1 >= quantity_purchased THEN 'utilizado'
+                  ELSE status
+                END
+            WHERE id = ${current.soldTreatmentSaleId}
+              AND quantity_used < quantity_purchased
+          `);
+        }
+
         return { ...updated, enteringInProgress };
       });
 

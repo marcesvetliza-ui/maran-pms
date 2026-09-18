@@ -2896,6 +2896,16 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_payments ADD COLUMN voucher_id varchar`)))
   );
 
+  // "Turnos vendidos" nunca cerraba el círculo: no había forma de saber, al
+  // completarse un turno, de qué venta anticipada venía — quantity_used
+  // quedaba en 0 para siempre. Guarda el vínculo al reclamar la unidad.
+  await withTimeout("spa_appointments.sold_treatment_sale_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_appointments
+        ADD COLUMN sold_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

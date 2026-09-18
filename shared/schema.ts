@@ -1637,6 +1637,10 @@ export const spaAppointments = pgTable("spa_appointments", {
   status: text("status").$type<SpaAppointmentStatus>().notNull().default("pending"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
+  // Presente solo cuando el turno se generó reclamando una unidad de una
+  // venta anticipada ("Turnos vendidos") — permite avisarle a esa venta
+  // cuando el turno efectivamente se presta (ver quantityUsed).
+  soldTreatmentSaleId: varchar("sold_treatment_sale_id").references(() => spaTreatmentSales.id),
 });
 
 export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).omit({ id: true });
@@ -1859,7 +1863,7 @@ export type MaintenanceBlock = typeof maintenanceBlocks.$inferSelect;
 // ============== ADMINISTRATION MODULE ==============
 
 // System User Roles (extends existing UserRole with admin roles)
-export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "jefe_recepcion" | "comercial";
+export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "responsable_area" | "jefe_recepcion" | "comercial";
 
 // System Users (Usuarios del Sistema)
 export const systemUsers = pgTable("system_users", {
