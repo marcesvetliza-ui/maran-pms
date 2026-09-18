@@ -214,6 +214,9 @@ import {
   type DuplicateCashPaymentLinkGroup,
   type GiftVoucher,
   type InsertGiftVoucher,
+  type GiftVoucherApplication,
+  type GiftVoucherApplicationTargetType,
+  type GiftVoucherEvent,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -868,9 +871,22 @@ export interface IStorage {
   getGiftVouchers(filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]>;
   getGiftVoucher(id: string): Promise<GiftVoucher | undefined>;
   getGiftVoucherByCode(code: string): Promise<GiftVoucher | undefined>;
+  getAvailableGiftVouchers(area: GiftVoucher["area"]): Promise<GiftVoucher[]>;
   createGiftVoucher(data: InsertGiftVoucher): Promise<GiftVoucher>;
-  updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined>;
-  markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined>;
-  deleteGiftVoucher(id: string): Promise<boolean>;
+  updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>, performedBy?: string): Promise<GiftVoucher | undefined>;
+  cancelGiftVoucher(id: string, performedBy: string, reason: string): Promise<GiftVoucher | undefined>;
+  markGiftVoucherUsedManually(id: string, performedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined>;
+  applyGiftVoucher(
+    voucherId: string,
+    targetType: GiftVoucherApplicationTargetType,
+    targetId: string,
+    requestedAmount: number,
+    performedBy: string,
+  ): Promise<{ application: GiftVoucherApplication; voucher: GiftVoucher }>;
+  releaseGiftVoucherApplication(applicationId: string, performedBy: string, reason?: string): Promise<GiftVoucherApplication | undefined>;
+  consumeGiftVoucherApplication(applicationId: string, performedBy: string): Promise<GiftVoucherApplication | undefined>;
+  getGiftVoucherApplicationForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication | undefined>;
+  getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]>;
+  getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]>;
   generateVoucherCode(): Promise<string>;
 }

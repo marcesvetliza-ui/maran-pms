@@ -2812,6 +2812,87 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE agencies ADD COLUMN tarifa_convenio text`)))
   );
 
+  // Vouchers de regalo: pasan de un solo campo de estado editado a mano a un
+  // circuito con aplicaciones (evita doble uso) y auditoría estructurada.
+  await withTimeout("gift_vouchers.lifecycle_fields", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE gift_vouchers
+        ADD COLUMN sale_invoice_id integer REFERENCES sales_invoices(id),
+        ADD COLUMN cancelled_at timestamp,
+        ADD COLUMN cancelled_by text,
+        ADD COLUMN cancel_reason text
+    `)))
+  );
+  await withTimeout("gift_vouchers.status_usado_to_utilizado", T, () =>
+    db.execute(sql`UPDATE gift_vouchers SET status = 'utilizado' WHERE status = 'usado'`)
+  );
+
+  await withTimeout("gift_voucher_applications.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE gift_voucher_applications (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_id varchar NOT NULL REFERENCES gift_vouchers(id),
+        target_type text NOT NULL,
+        target_id varchar NOT NULL,
+        amount numeric(10,2) NOT NULL,
+        status text NOT NULL DEFAULT 'reservado',
+        created_by text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        consumed_at timestamp,
+        released_at timestamp,
+        released_by text,
+        release_reason text
+      )
+    `)))
+  );
+  // Como mucho una aplicación viva (reservado/utilizado) por voucher a la
+  // vez — segunda barrera contra doble uso a nivel de base, además del
+  // SELECT ... FOR UPDATE que hace la transacción de aplicación.
+  await withTimeout("gift_voucher_applications_active_unique", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_applications_active_unique",
+      "CREATE UNIQUE INDEX gift_voucher_applications_active_unique ON gift_voucher_applications (voucher_id) WHERE status <> 'liberado'",
+    )))
+  );
+  await withTimeout("gift_voucher_applications_target_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_applications_target_idx",
+      "CREATE INDEX gift_voucher_applications_target_idx ON gift_voucher_applications (target_type, target_id)",
+    )))
+  );
+
+  await withTimeout("gift_voucher_events.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE gift_voucher_events (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_id varchar NOT NULL REFERENCES gift_vouchers(id),
+        event_type text NOT NULL,
+        from_status text,
+        to_status text,
+        field_changed text,
+        old_value text,
+        new_value text,
+        reason text,
+        performed_by text,
+        performed_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("gift_voucher_events_voucher_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_events_voucher_idx",
+      "CREATE INDEX gift_voucher_events_voucher_idx ON gift_voucher_events (voucher_id)",
+    )))
+  );
+
+  await withTimeout("reservations.voucher_link", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE reservations
+        ADD COLUMN voucher_id varchar,
+        ADD COLUMN voucher_applied_amount numeric(10,2)
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
