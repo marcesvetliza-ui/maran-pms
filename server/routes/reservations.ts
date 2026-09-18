@@ -425,7 +425,11 @@ export function registerReservationsRoutes(app: Express) {
         const newNights = Number(req.body.nights);
         const rate = parseFloat(existing.finalRatePerNight || "0");
         if (!isNaN(newNights) && newNights > 0 && rate > 0) {
-          req.body.totalRoomAmount = (rate * newNights).toFixed(2);
+          // El voucher descuenta una vez del total, no por noche — si la
+          // reserva ya tiene uno aplicado, el recálculo automático (drag &
+          // drop en planning) no debe hacerlo desaparecer del total.
+          const existingVoucherAmount = parseFloat(existing.voucherAppliedAmount || "0");
+          req.body.totalRoomAmount = Math.max(0, rate * newNights - existingVoucherAmount).toFixed(2);
         }
       }
 

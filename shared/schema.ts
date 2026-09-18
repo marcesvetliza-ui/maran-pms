@@ -298,6 +298,11 @@ export const reservations = pgTable("reservations", {
   notes: text("notes"),
   voucherCode: text("voucher_code"),
   voucherNotes: text("voucher_notes"),
+  // Vínculo real al voucher aplicado (ver gift_voucher_applications para el
+  // registro transaccional). voucherCode queda como caché de solo lectura
+  // para no tener que resolver el join en cada listado.
+  voucherId: varchar("voucher_id"),
+  voucherAppliedAmount: decimal("voucher_applied_amount", { precision: 10, scale: 2 }),
   isUpgrade: boolean("is_upgrade").default(false),
   originalRoomTypeId: varchar("original_room_type_id"),
   movedFromRoomNumber: text("moved_from_room_number"),
@@ -1987,7 +1992,7 @@ export type PackageWithDetails = Package & {
 };
 
 // System Notifications (base for chatbot + web check-in)
-export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert";
+export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert" | "gift_voucher_expiring";
 export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
 export type NotificationStatus = "pendiente" | "en_proceso" | "completado" | "rechazado";
@@ -3099,7 +3104,10 @@ export type ItemLoanWithItem = ItemLoan & { loanItem: LoanItem };
 
 // ── Gift Vouchers ──────────────────────────────────────────────────────────────
 export type GiftVoucherArea = "alojamiento" | "restaurant" | "spa" | "otro";
-export type GiftVoucherStatus = "activo" | "usado" | "vencido" | "cancelado";
+// reservado: aplicado a una operación (reserva, pedido) que todavía no se completó —
+// no es definitivo, se libera si esa operación se cancela.
+// utilizado: la operación a la que se aplicó ya se completó/facturó.
+export type GiftVoucherStatus = "activo" | "activo_facturado" | "reservado" | "utilizado" | "vencido" | "cancelado";
 export type GiftVoucherValueType = "monetario" | "descriptivo";
 
 export const giftVouchers = pgTable("gift_vouchers", {
@@ -3121,6 +3129,13 @@ export const giftVouchers = pgTable("gift_vouchers", {
   usedNotes: text("used_notes"),
   pricePaid: decimal("price_paid", { precision: 10, scale: 2 }),
   paymentMethod: text("payment_method"),
+  // Comprobante fiscal de la VENTA del voucher (si corresponde) — separado del
+  // comprobante de la operación donde luego se lo consume, que vive en la
+  // aplicación (gift_voucher_applications), no acá.
+  saleInvoiceId: integer("sale_invoice_id").references(() => salesInvoices.id),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledBy: text("cancelled_by"),
+  cancelReason: text("cancel_reason"),
   notes: text("notes"),
   createdBy: text("created_by"),
 });
@@ -3128,6 +3143,56 @@ export const giftVouchers = pgTable("gift_vouchers", {
 export const insertGiftVoucherSchema = createInsertSchema(giftVouchers).omit({ id: true, issuedAt: true, usedAt: true });
 export type InsertGiftVoucher = z.infer<typeof insertGiftVoucherSchema>;
 export type GiftVoucher = typeof giftVouchers.$inferSelect;
+
+// Cada vez que un voucher se aplica a una operación real (reserva, pedido de
+// restaurant). Es la fuente de verdad de "dónde está usado" un voucher — evita
+// depender de un solo campo de estado y permite bloquear el doble uso con un
+// SELECT ... FOR UPDATE sobre estas filas dentro de una transacción.
+export type GiftVoucherApplicationTargetType = "reservation" | "restaurant_order";
+export type GiftVoucherApplicationStatus = "reservado" | "utilizado" | "liberado";
+
+export const giftVoucherApplications = pgTable("gift_voucher_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  voucherId: varchar("voucher_id").notNull().references(() => giftVouchers.id),
+  targetType: text("target_type").$type<GiftVoucherApplicationTargetType>().notNull(),
+  targetId: varchar("target_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").$type<GiftVoucherApplicationStatus>().notNull().default("reservado"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  consumedAt: timestamp("consumed_at"),
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by"),
+  releaseReason: text("release_reason"),
+});
+
+export const insertGiftVoucherApplicationSchema = createInsertSchema(giftVoucherApplications).omit({ id: true, createdAt: true });
+export type InsertGiftVoucherApplication = z.infer<typeof insertGiftVoucherApplicationSchema>;
+export type GiftVoucherApplication = typeof giftVoucherApplications.$inferSelect;
+
+// Auditoría estructurada de un voucher: cada cambio de estado o de campo
+// editable queda registrado acá, no solo en un texto libre.
+export type GiftVoucherEventType =
+  | "emitido" | "facturado" | "reservado" | "liberado" | "utilizado"
+  | "cancelado" | "reactivado" | "vencido" | "editado";
+
+export const giftVoucherEvents = pgTable("gift_voucher_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  voucherId: varchar("voucher_id").notNull().references(() => giftVouchers.id),
+  eventType: text("event_type").$type<GiftVoucherEventType>().notNull(),
+  fromStatus: text("from_status").$type<GiftVoucherStatus>(),
+  toStatus: text("to_status").$type<GiftVoucherStatus>(),
+  fieldChanged: text("field_changed"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  reason: text("reason"),
+  performedBy: text("performed_by"),
+  performedAt: timestamp("performed_at").notNull().defaultNow(),
+});
+
+export const insertGiftVoucherEventSchema = createInsertSchema(giftVoucherEvents).omit({ id: true, performedAt: true });
+export type InsertGiftVoucherEvent = z.infer<typeof insertGiftVoucherEventSchema>;
+export type GiftVoucherEvent = typeof giftVoucherEvents.$inferSelect;
 
 // ==================== TOMA DE INVENTARIO ====================
 export const inventoryCounts = pgTable("inventory_counts", {

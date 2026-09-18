@@ -121,7 +121,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
-import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails } from "@shared/schema";
+import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
+import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
 function stripTransferTags(description: string): string {
@@ -255,7 +256,23 @@ export function ReservationFormDialog({
   const [resChargeQty, setResChargeQty] = useState(1);
   const [resChargeRecurring, setResChargeRecurring] = useState(false);
   const [resChargeCategory, setResChargeCategory] = useState("otros");
-  const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherCode || reservation?.voucherNotes));
+  const [hasVoucher, setHasVoucher] = useState(!!(reservation?.voucherId || reservation?.voucherCode || reservation?.voucherNotes));
+  const [selectedVoucher, setSelectedVoucher] = useState<GiftVoucher | null>(null);
+
+  // Al editar una reserva que ya tiene un voucher vinculado, hidratar el
+  // objeto completo (el que viaja en `reservation` es solo el código/id
+  // cacheados) para que el selector lo muestre seleccionado.
+  const { data: hydratedVoucher } = useQuery<GiftVoucher>({
+    queryKey: ["/api/gift-vouchers", reservation?.voucherId],
+    queryFn: async () => {
+      const res = await fetch(`/api/gift-vouchers/${reservation!.voucherId}`, { credentials: "include" });
+      return res.json();
+    },
+    enabled: !!reservation?.voucherId,
+  });
+  useEffect(() => {
+    if (hydratedVoucher) setSelectedVoucher(hydratedVoucher);
+  }, [hydratedVoucher]);
 
   type PendingCompanion = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string; guestId?: string | null };
   const emptyCompanion: PendingCompanion = { firstName: "", lastName: "", documentType: "DNI", documentNumber: "", dateOfBirth: "", nationality: "", guestId: null };
@@ -872,8 +889,15 @@ export function ReservationFormDialog({
       numberOfGuests: Number(formData.numberOfGuests),
       baseRatePerNight: String(formData.baseRatePerNight || "0"),
       finalRatePerNight: String(formData.finalRatePerNight || "0"),
-      totalRoomAmount: String(formData.totalRoomAmount || "0"),
+      // El voucher se descuenta una sola vez del total, no por noche (ver
+      // discountType/discountValue arriba, que son un concepto distinto:
+      // tarifa negociada por noche).
+      totalRoomAmount: String(Math.max(0, parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount).toFixed(2)),
       discountValue: String(formData.discountValue || "0"),
+      voucherId: hasVoucher ? (selectedVoucher?.id || null) : null,
+      voucherCode: hasVoucher ? (selectedVoucher?.voucherCode || null) : null,
+      voucherAppliedAmount: voucherAppliedAmount > 0 ? voucherAppliedAmount.toFixed(2) : null,
+      voucherNotes: hasVoucher ? (formData.voucherNotes || null) : null,
     });
   };
 
@@ -901,6 +925,12 @@ export function ReservationFormDialog({
       })
       .map((r: any) => r.roomId)
   );
+
+  // Se consume completo, no se conserva remanente: el voucher nunca descuenta
+  // más de lo que vale la reserva.
+  const voucherAppliedAmount = (hasVoucher && selectedVoucher && selectedVoucher.valueType === "monetario")
+    ? Math.min(parseFloat(selectedVoucher.valueAmount || "0"), parseFloat(formData.totalRoomAmount || "0"))
+    : 0;
 
   const availableRooms = isUpgrade
     ? rooms.filter((r) => {
@@ -1180,6 +1210,7 @@ export function ReservationFormDialog({
                     onCheckedChange={(checked) => {
                       setHasVoucher(checked);
                       if (!checked) {
+                        setSelectedVoucher(null);
                         setFormData(prev => ({ ...prev, voucherCode: "", voucherNotes: "" }));
                       }
                     }}
@@ -1222,21 +1253,20 @@ export function ReservationFormDialog({
             </div>
             {hasVoucher && (
               <div className="grid gap-3 pl-6 border-l-2 border-amber-300 dark:border-amber-700">
+                <GiftVoucherSelect
+                  area="alojamiento"
+                  selectedVoucher={selectedVoucher}
+                  onSelect={(v) => {
+                    setSelectedVoucher(v);
+                    setFormData(prev => ({ ...prev, voucherCode: v?.voucherCode || "" }));
+                  }}
+                  data-testid="select-reservation-voucher"
+                />
                 <div className="grid gap-2">
-                  <Label htmlFor="voucherCode">Número / Código de Voucher</Label>
-                  <Input
-                    id="voucherCode"
-                    placeholder="Ej: VCH-2026-00123"
-                    value={formData.voucherCode || ""}
-                    onChange={(e) => setFormData(prev => ({ ...prev, voucherCode: e.target.value }))}
-                    data-testid="input-voucher-code"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="voucherNotes">Observaciones del voucher</Label>
+                  <Label htmlFor="voucherNotes">Observaciones (opcional)</Label>
                   <Textarea
                     id="voucherNotes"
-                    placeholder="Ej: Voucher de regalo 2 noches, válido hasta dic 2026"
+                    placeholder="Notas adicionales sobre este voucher"
                     value={formData.voucherNotes || ""}
                     onChange={(e) => setFormData(prev => ({ ...prev, voucherNotes: e.target.value }))}
                     rows={2}
@@ -1732,13 +1762,19 @@ export function ReservationFormDialog({
                   <p className="text-lg font-semibold">${fmtMoney(formData.finalRatePerNight)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Total Alojamiento</p>
+                  <p className="text-sm text-muted-foreground">{voucherAppliedAmount > 0 ? "Subtotal Alojamiento" : "Total Alojamiento"}</p>
                   <p className="text-lg font-semibold">${fmtMoney(formData.totalRoomAmount)}</p>
                 </div>
               </div>
+              {voucherAppliedAmount > 0 && (
+                <div className="flex justify-between items-center text-sm text-amber-700 dark:text-amber-400">
+                  <span className="flex items-center gap-1"><Gift className="h-3.5 w-3.5" />Voucher aplicado ({selectedVoucher!.voucherCode})</span>
+                  <span className="font-medium">-${fmtMoney(voucherAppliedAmount)}</span>
+                </div>
+              )}
               {pendingCharges.length > 0 && (() => {
                 const chargesTotal = pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0);
-                const roomTotal = parseFloat(formData.totalRoomAmount || "0");
+                const roomTotal = parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount;
                 const grandTotal = fmtMoney(roomTotal + chargesTotal);
                 return (
                   <div className="border-t pt-2 flex justify-between items-center">
@@ -1749,7 +1785,7 @@ export function ReservationFormDialog({
               })()}
               {pendingCharges.length === 0 && (
                 <div className="border-t pt-2 flex justify-end">
-                  <p className="text-2xl font-bold text-primary">${fmtMoney(formData.totalRoomAmount)}</p>
+                  <p className="text-2xl font-bold text-primary">${fmtMoney(parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount)}</p>
                 </div>
               )}
             </div>

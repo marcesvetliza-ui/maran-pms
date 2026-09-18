@@ -16,7 +16,7 @@ import {
   Clock,
   Filter,
   Printer,
-  Trash2,
+  Ban,
   Eye,
   MoreHorizontal,
 } from "lucide-react";
@@ -63,15 +63,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { GiftVoucher } from "@shared/schema";
+import type { GiftVoucher, GiftVoucherApplication, GiftVoucherEvent } from "@shared/schema";
 import { insertGiftVoucherSchema } from "@shared/schema";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Status = "activo" | "usado" | "vencido" | "cancelado";
+type Status = "activo" | "activo_facturado" | "reservado" | "utilizado" | "vencido" | "cancelado";
 type Area = "alojamiento" | "restaurant" | "spa" | "otro";
 type ValueType = "monetario" | "descriptivo";
 
@@ -83,10 +84,12 @@ const AREA_LABELS: Record<Area, string> = {
 };
 
 const STATUS_CONFIG: Record<Status, { label: string; color: string; icon: any }> = {
-  activo:    { label: "Activo",    color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",  icon: CheckCircle2 },
-  usado:     { label: "Usado",     color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",         icon: CheckCircle2 },
-  vencido:   { label: "Vencido",   color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Clock },
-  cancelado: { label: "Cancelado", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",          icon: XCircle },
+  activo:            { label: "Activo",            color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",  icon: CheckCircle2 },
+  activo_facturado:  { label: "Activo Facturado",  color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 },
+  reservado:         { label: "Reservado",         color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",      icon: Clock },
+  utilizado:         { label: "Utilizado",         color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",         icon: CheckCircle2 },
+  vencido:           { label: "Vencido",           color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Clock },
+  cancelado:         { label: "Cancelado",         color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",          icon: XCircle },
 };
 
 const PAYMENT_METHODS = [
@@ -395,7 +398,7 @@ function MarkUsedDialog({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/gift-vouchers/${voucher!.id}/use`, { usedNotes: notes });
+      const res = await apiRequest("POST", `/api/gift-vouchers/${voucher!.id}/mark-used`, { usedNotes: notes });
       return res.json();
     },
     onSuccess: () => {
@@ -659,6 +662,46 @@ function printVoucher(v: GiftVoucher) {
   w.document.close();
 }
 
+// ── Historial (aplicaciones + eventos de auditoría) ─────────────────────────────
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  emitido: "Emitido", facturado: "Facturado", reservado: "Reservado",
+  liberado: "Liberado", utilizado: "Utilizado", cancelado: "Cancelado",
+  reactivado: "Reactivado", vencido: "Vencido", editado: "Editado",
+};
+
+function VoucherHistory({ voucherId }: { voucherId: string }) {
+  const { data, isLoading } = useQuery<{ applications: GiftVoucherApplication[]; events: GiftVoucherEvent[] }>({
+    queryKey: ["/api/gift-vouchers", voucherId, "history"],
+    queryFn: async () => {
+      const res = await fetch(`/api/gift-vouchers/${voucherId}/history`, { credentials: "include" });
+      return res.json();
+    },
+  });
+
+  if (isLoading) return <p className="text-xs text-muted-foreground">Cargando historial...</p>;
+  const events = data?.events || [];
+  if (events.length === 0) return <p className="text-xs text-muted-foreground">Sin eventos registrados</p>;
+
+  return (
+    <div>
+      <p className="text-muted-foreground text-xs uppercase tracking-wide mb-2">Historial</p>
+      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+        {events.map((e) => (
+          <div key={e.id} className="text-xs flex items-start gap-2 border-l-2 border-muted pl-2">
+            <div className="flex-1">
+              <span className="font-medium">{EVENT_TYPE_LABELS[e.eventType] || e.eventType}</span>
+              {e.fieldChanged && <span className="text-muted-foreground"> — {e.fieldChanged}: "{e.oldValue ?? "—"}" → "{e.newValue ?? "—"}"</span>}
+              {e.reason && <span className="text-muted-foreground"> — {e.reason}</span>}
+              <div className="text-muted-foreground">{formatHotelDateTime(e.performedAt)}{e.performedBy ? ` · ${e.performedBy}` : ""}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Detail Dialog ──────────────────────────────────────────────────────────────
 
 function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClose: () => void }) {
@@ -700,7 +743,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             {voucher.pricePaid && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Precio cobrado</p><p className="font-mono">${fmtMoney(voucher.pricePaid)}</p></div>}
             {voucher.paymentMethod && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Forma de pago</p><p className="capitalize">{voucher.paymentMethod}</p></div>}
           </div>
-          {voucher.status === "usado" && (
+          {voucher.status === "utilizado" && (
             <>
               <Separator />
               <div className="grid grid-cols-2 gap-3">
@@ -710,12 +753,24 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
               </div>
             </>
           )}
+          {voucher.status === "cancelado" && (
+            <>
+              <Separator />
+              <div className="grid grid-cols-2 gap-3">
+                {voucher.cancelledAt && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Cancelado el</p><p>{formatHotelDateTime(voucher.cancelledAt)}</p></div>}
+                {voucher.cancelledBy && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Cancelado por</p><p>{voucher.cancelledBy}</p></div>}
+                {voucher.cancelReason && <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Motivo</p><p>{voucher.cancelReason}</p></div>}
+              </div>
+            </>
+          )}
           {voucher.notes && (
             <>
               <Separator />
               <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Notas internas</p><p>{voucher.notes}</p></div>
             </>
           )}
+          <Separator />
+          <VoucherHistory voucherId={voucher.id} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => printVoucher(voucher)} data-testid="button-print-detail">
@@ -740,6 +795,7 @@ export default function GiftVouchersPage() {
   const [selectedForUse, setSelectedForUse] = useState<GiftVoucher | null>(null);
   const [selectedForDetail, setSelectedForDetail] = useState<GiftVoucher | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GiftVoucher | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const { data: vouchers = [], isLoading } = useQuery<GiftVoucher[]>({
     queryKey: ["/api/gift-vouchers", statusFilter, areaFilter, search],
@@ -754,23 +810,30 @@ export default function GiftVouchersPage() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/gift-vouchers/${id}`);
+  const cancelMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const res = await apiRequest("POST", `/api/gift-vouchers/${id}/cancel`, { reason });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Error al cancelar el voucher");
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/gift-vouchers"] });
-      toast({ title: "Voucher eliminado" });
+      toast({ title: "Voucher cancelado" });
       setDeleteTarget(null);
+      setCancelReason("");
     },
-    onError: () => toast({ title: "Error al eliminar", variant: "destructive" }),
+    onError: (err: any) => toast({ title: err?.message || "Error al cancelar el voucher", variant: "destructive" }),
   });
 
   // Stats
-  const totalActivos = vouchers.filter((v) => v.status === "activo").length;
-  const totalUsados  = vouchers.filter((v) => v.status === "usado").length;
-  const totalValor   = vouchers
-    .filter((v) => v.status === "activo" && v.valueAmount)
+  const totalActivos    = vouchers.filter((v) => ["activo", "activo_facturado"].includes(v.status)).length;
+  const totalReservados = vouchers.filter((v) => v.status === "reservado").length;
+  const totalUtilizados = vouchers.filter((v) => v.status === "utilizado").length;
+  const totalValor      = vouchers
+    .filter((v) => ["activo", "activo_facturado", "reservado"].includes(v.status) && v.valueAmount)
     .reduce((acc, v) => acc + Number(v.valueAmount), 0);
 
   return (
@@ -793,7 +856,7 @@ export default function GiftVouchersPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Activos</p>
@@ -802,8 +865,14 @@ export default function GiftVouchersPage() {
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Canjeados</p>
-            <p className="text-2xl font-bold text-gray-500">{totalUsados}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Reservados</p>
+            <p className="text-2xl font-bold text-blue-600">{totalReservados}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Utilizados</p>
+            <p className="text-2xl font-bold text-gray-500">{totalUtilizados}</p>
           </CardContent>
         </Card>
         <Card>
@@ -834,7 +903,9 @@ export default function GiftVouchersPage() {
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
             <SelectItem value="activo">Activo</SelectItem>
-            <SelectItem value="usado">Usado</SelectItem>
+            <SelectItem value="activo_facturado">Activo Facturado</SelectItem>
+            <SelectItem value="reservado">Reservado</SelectItem>
+            <SelectItem value="utilizado">Utilizado</SelectItem>
             <SelectItem value="vencido">Vencido</SelectItem>
             <SelectItem value="cancelado">Cancelado</SelectItem>
           </SelectContent>
@@ -929,17 +1000,19 @@ export default function GiftVouchersPage() {
                             <DropdownMenuItem onClick={() => printVoucher(v)}>
                               <Printer className="h-4 w-4 mr-2" /> Imprimir voucher
                             </DropdownMenuItem>
-                            {v.status === "activo" && (
+                            {["activo", "activo_facturado"].includes(v.status) && (
                               <DropdownMenuItem onClick={() => setSelectedForUse(v)}>
                                 <CheckCircle2 className="h-4 w-4 mr-2 text-green-600" /> Marcar como usado
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => setDeleteTarget(v)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" /> Eliminar
-                            </DropdownMenuItem>
+                            {!["utilizado", "cancelado"].includes(v.status) && (
+                              <DropdownMenuItem
+                                className="text-red-600"
+                                onClick={() => setDeleteTarget(v)}
+                              >
+                                <Ban className="h-4 w-4 mr-2" /> Cancelar voucher
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -960,22 +1033,35 @@ export default function GiftVouchersPage() {
       <MarkUsedDialog voucher={selectedForUse} onClose={() => setSelectedForUse(null)} />
       <DetailDialog voucher={selectedForDetail} onClose={() => setSelectedForDetail(null)} />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) { setDeleteTarget(null); setCancelReason(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar voucher?</AlertDialogTitle>
+            <AlertDialogTitle>¿Cancelar voucher?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminará el voucher <strong>{deleteTarget?.voucherCode}</strong> permanentemente. Esta acción no se puede deshacer.
+              El voucher <strong>{deleteTarget?.voucherCode}</strong> queda cancelado, no se borra — sigue visible con su historial completo.
+              {" "}Se puede reactivar más adelante si hace falta.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="py-2">
+            <Label htmlFor="cancel-reason" className="text-sm">Motivo de la cancelación *</Label>
+            <Textarea
+              id="cancel-reason"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ej: el cliente pidió reembolso, error de carga..."
+              rows={2}
+              data-testid="input-cancel-reason"
+            />
+          </div>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel data-testid="button-cancel-delete">Volver</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700"
-              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={!cancelReason.trim() || cancelMutation.isPending}
+              onClick={() => deleteTarget && cancelMutation.mutate({ id: deleteTarget.id, reason: cancelReason.trim() })}
               data-testid="button-confirm-delete"
             >
-              Eliminar
+              Cancelar voucher
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

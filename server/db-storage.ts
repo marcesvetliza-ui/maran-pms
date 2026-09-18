@@ -13,7 +13,7 @@ export function getArgentinaToday(): string {
 }
 
 const giftVoucherAreas = ["alojamiento", "restaurant", "spa", "otro"] as const;
-const giftVoucherStatuses = ["activo", "usado", "vencido", "cancelado"] as const;
+const giftVoucherStatuses = ["activo", "activo_facturado", "reservado", "utilizado", "vencido", "cancelado"] as const;
 const giftVoucherValueTypes = ["monetario", "descriptivo"] as const;
 
 function parseGiftVoucherArea(value: string): GiftVoucher["area"] {
@@ -159,6 +159,10 @@ import {
   type ReservationCompanion, type InsertReservationCompanion,
   giftVouchers,
   type GiftVoucher, type InsertGiftVoucher,
+  giftVoucherApplications,
+  type GiftVoucherApplication, type InsertGiftVoucherApplication, type GiftVoucherApplicationTargetType,
+  giftVoucherEvents,
+  type GiftVoucherEvent, type InsertGiftVoucherEvent,
   inventoryCounts,
   inventoryCountItems,
 } from "@shared/schema";
@@ -1088,7 +1092,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createReservation(reservation: InsertReservation): Promise<Reservation> {
-    const [created] = await db.insert(reservations).values(reservation as any).returning();
+    // El voucher se aplica ANTES de insertar la reserva (usando un id
+    // generado acá, no el default de la columna) para que una reserva nunca
+    // quede creada con un descuento que en realidad no se pudo reservar
+    // (voucher ya usado, vencido, etc.) — si applyGiftVoucher falla, no se
+    // crea nada.
+    const id = randomUUID();
+    const voucherId = (reservation as any).voucherId as string | null | undefined;
+    if (voucherId) {
+      const amount = parseFloat((reservation as any).voucherAppliedAmount || "0");
+      if (amount > 0) {
+        await this.applyGiftVoucher(voucherId, "reservation", id, amount, (reservation as any).lastModifiedBy || "sistema");
+      }
+    }
+    const [created] = await db.insert(reservations).values({ ...reservation, id } as any).returning();
     return created;
   }
 
@@ -1105,8 +1122,70 @@ export class DatabaseStorage implements IStorage {
       safeData[key] = value;
     }
     if (Object.keys(safeData).length === 0) return undefined;
+
+    const needsVoucherSync = "status" in safeData || "voucherId" in safeData;
+    const before = needsVoucherSync
+      ? (await db.select().from(reservations).where(eq(reservations.id, id)))[0]
+      : undefined;
+
+    // Igual que en createReservation: aplicar ANTES de commitear el update.
+    // Si el voucher ya no está disponible, el PATCH entero falla en vez de
+    // guardar una reserva con un descuento que en realidad no se reservó.
+    if (before && "voucherId" in safeData) {
+      const newVoucherId = safeData.voucherId || null;
+      const actor = safeData.lastModifiedBy || before.lastModifiedBy || "sistema";
+      if (newVoucherId && newVoucherId !== before.voucherId) {
+        const amount = parseFloat(safeData.voucherAppliedAmount ?? before.voucherAppliedAmount ?? "0");
+        if (amount > 0) {
+          await this.applyGiftVoucher(newVoucherId, "reservation", id, amount, actor);
+        }
+      } else if (!newVoucherId && before.voucherId) {
+        // Se sacó el voucher de la reserva — liberar la aplicación viva si
+        // todavía no se consumió (si ya se consumió no hay nada que hacer).
+        const application = await this.getGiftVoucherApplicationForTarget("reservation", id);
+        if (application) {
+          await this.releaseGiftVoucherApplication(application.id, actor, "Se quitó el voucher de la reserva");
+        }
+      }
+    }
+
     const [updated] = await db.update(reservations).set(safeData).where(eq(reservations.id, id)).returning();
+    if (!updated) return updated;
+
+    if (before) {
+      // A diferencia del apply de arriba, esto reacciona a una transición de
+      // estado ya decidida (check-out, cancelación) — no debe bloquearla por
+      // un problema de sincronización del voucher, así que se atrapa acá y
+      // queda logueado para revisar a mano.
+      try {
+        await this.syncGiftVoucherStatusTransition(before, updated);
+      } catch (e) {
+        console.error("[GiftVoucher] Error sincronizando estado del voucher con la reserva:", e);
+      }
+    }
     return updated;
+  }
+
+  private async syncGiftVoucherStatusTransition(before: Reservation, after: Reservation): Promise<void> {
+    const isRelease = ["cancelled", "no_show"].includes(after.status) && !["cancelled", "no_show"].includes(before.status);
+    const isConsume = after.status === "checked_out" && before.status !== "checked_out";
+    if (!isRelease && !isConsume) return;
+    const voucherId = after.voucherId || before.voucherId;
+    if (!voucherId) return;
+    const application = await this.getGiftVoucherApplicationForTarget("reservation", after.id);
+    if (!application) return;
+    const actor = after.lastModifiedBy || "sistema";
+    if (isRelease) {
+      await this.releaseGiftVoucherApplication(application.id, actor, `La reserva pasó a estado "${after.status}"`);
+      // El voucher vuelve a estar disponible para cualquier otra operación —
+      // si se restaura esta reserva más adelante, no debe quedar mostrando
+      // un vínculo que ya no representa nada reservado.
+      await db.update(reservations)
+        .set({ voucherId: null, voucherCode: null, voucherAppliedAmount: null })
+        .where(eq(reservations.id, after.id));
+    } else {
+      await this.consumeGiftVoucherApplication(application.id, actor);
+    }
   }
 
   async deleteReservation(id: string): Promise<boolean> {
@@ -8288,35 +8367,242 @@ export class DatabaseStorage implements IStorage {
       status: data.status === undefined ? undefined : parseGiftVoucherStatus(data.status),
       valueType: data.valueType === undefined ? undefined : parseGiftVoucherValueType(data.valueType),
     };
-    const [v] = await db.insert(giftVouchers).values(voucher).returning();
-    return v;
+    return db.transaction(async (tx) => {
+      const [v] = await tx.insert(giftVouchers).values(voucher).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: v.id,
+        eventType: v.saleInvoiceId ? "facturado" : "emitido",
+        toStatus: v.status,
+        performedBy: v.createdBy ?? null,
+      });
+      return v;
+    });
   }
 
-  async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined> {
-    const { area, status, valueType, ...voucherData } = data;
-    const voucher: Partial<typeof giftVouchers.$inferInsert> = {
-      ...voucherData,
-      ...(area === undefined ? {} : { area: parseGiftVoucherArea(area) }),
-      ...(status === undefined ? {} : { status: parseGiftVoucherStatus(status) }),
-      ...(valueType === undefined ? {} : { valueType: parseGiftVoucherValueType(valueType) }),
-    };
-    const [v] = await db.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
-    return v;
+  // Campos que reflejan un hecho ya consumado de la venta (importe, comprador,
+  // medio de pago, comprobante) — nunca editables desde el PATCH, se corrigen
+  // con una operación real (cancelar + emitir de nuevo), no pisando el dato.
+  private static readonly GIFT_VOUCHER_IMMUTABLE_FIELDS = [
+    "valueAmount", "valueType", "buyerName", "buyerPhone", "buyerEmail",
+    "pricePaid", "paymentMethod", "saleInvoiceId", "area",
+  ] as const;
+
+  async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>, performedBy?: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!existing) return undefined;
+
+      const attemptedImmutable = DatabaseStorage.GIFT_VOUCHER_IMMUTABLE_FIELDS.filter(
+        (field) => Object.prototype.hasOwnProperty.call(data, field),
+      );
+      if (attemptedImmutable.length > 0) {
+        throw new Error(
+          `Los campos ${attemptedImmutable.join(", ")} no se pueden modificar una vez emitido el voucher.`,
+        );
+      }
+      const editableWhileActiveOnly = ["beneficiaryName", "description", "expiresAt"] as const;
+      if (!["activo", "activo_facturado"].includes(existing.status)) {
+        const blocked = editableWhileActiveOnly.filter((field) => Object.prototype.hasOwnProperty.call(data, field));
+        if (blocked.length > 0) {
+          throw new Error(`No se puede editar ${blocked.join(", ")} — el voucher ya está en estado "${existing.status}".`);
+        }
+      }
+
+      const { area, status, valueType, ...rest } = data;
+      const voucher: Partial<typeof giftVouchers.$inferInsert> = { ...rest };
+      const [v] = await tx.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
+
+      const diffFields = Object.keys(rest) as (keyof typeof rest)[];
+      if (diffFields.length > 0) {
+        await tx.insert(giftVoucherEvents).values(
+          diffFields
+            .filter((field) => String((existing as any)[field] ?? "") !== String((rest as any)[field] ?? ""))
+            .map((field) => ({
+              voucherId: id,
+              eventType: "editado" as const,
+              fieldChanged: String(field),
+              oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
+              newValue: (rest as any)[field] == null ? null : String((rest as any)[field]),
+              performedBy: performedBy ?? null,
+            })),
+        );
+      }
+      return v;
+    });
   }
 
-  async markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined> {
-    const [v] = await db.update(giftVouchers).set({
-      status: "usado",
-      usedAt: new Date(),
-      usedBy,
-      usedNotes: usedNotes ?? null,
-    }).where(eq(giftVouchers.id, id)).returning();
-    return v;
+  async applyGiftVoucher(
+    voucherId: string,
+    targetType: GiftVoucherApplicationTargetType,
+    targetId: string,
+    requestedAmount: number,
+    performedBy: string,
+  ): Promise<{ application: GiftVoucherApplication; voucher: GiftVoucher }> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, voucherId)).for("update");
+      if (!voucher) throw new Error("Voucher no encontrado");
+      if (!["activo", "activo_facturado"].includes(voucher.status)) {
+        throw new Error(`El voucher no está disponible para aplicar (estado: ${voucher.status})`);
+      }
+      if (voucher.expiresAt && voucher.expiresAt < getArgentinaToday()) {
+        throw new Error("El voucher está vencido");
+      }
+      const [existingActive] = await tx.select({ id: giftVoucherApplications.id })
+        .from(giftVoucherApplications)
+        .where(and(eq(giftVoucherApplications.voucherId, voucherId), ne(giftVoucherApplications.status, "liberado")))
+        .for("update");
+      if (existingActive) {
+        throw new Error("El voucher ya está aplicado a otra operación");
+      }
+
+      const faceValue = parseFloat(voucher.valueAmount || "0");
+      const amount = Math.max(0, Math.min(requestedAmount, faceValue)).toFixed(2);
+
+      const [application] = await tx.insert(giftVoucherApplications).values({
+        voucherId, targetType, targetId, amount, status: "reservado", createdBy: performedBy,
+      }).returning();
+
+      const [updatedVoucher] = await tx.update(giftVouchers)
+        .set({ status: "reservado" })
+        .where(eq(giftVouchers.id, voucherId))
+        .returning();
+
+      await tx.insert(giftVoucherEvents).values({
+        voucherId, eventType: "reservado", fromStatus: voucher.status, toStatus: "reservado",
+        reason: `Aplicado a ${targetType === "reservation" ? "reserva" : "pedido"} ${targetId}`,
+        performedBy,
+      });
+
+      return { application, voucher: updatedVoucher };
+    });
   }
 
-  async deleteGiftVoucher(id: string): Promise<boolean> {
-    const result = await db.delete(giftVouchers).where(eq(giftVouchers.id, id)).returning();
-    return result.length > 0;
+  async releaseGiftVoucherApplication(applicationId: string, performedBy: string, reason?: string): Promise<GiftVoucherApplication | undefined> {
+    return db.transaction(async (tx) => {
+      const [application] = await tx.select().from(giftVoucherApplications).where(eq(giftVoucherApplications.id, applicationId)).for("update");
+      if (!application) return undefined;
+      if (application.status !== "reservado") {
+        throw new Error(`No se puede liberar una aplicación en estado "${application.status}"`);
+      }
+      const [updated] = await tx.update(giftVoucherApplications)
+        .set({ status: "liberado", releasedAt: new Date(), releasedBy: performedBy, releaseReason: reason ?? null })
+        .where(eq(giftVoucherApplications.id, applicationId))
+        .returning();
+
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, application.voucherId)).for("update");
+      if (voucher && voucher.status === "reservado") {
+        const restoredStatus: GiftVoucher["status"] = voucher.saleInvoiceId ? "activo_facturado" : "activo";
+        await tx.update(giftVouchers).set({ status: restoredStatus }).where(eq(giftVouchers.id, voucher.id));
+        await tx.insert(giftVoucherEvents).values({
+          voucherId: voucher.id, eventType: "liberado", fromStatus: "reservado", toStatus: restoredStatus,
+          reason: reason ?? "Se liberó la aplicación", performedBy,
+        });
+      }
+      return updated;
+    });
+  }
+
+  async consumeGiftVoucherApplication(applicationId: string, performedBy: string): Promise<GiftVoucherApplication | undefined> {
+    return db.transaction(async (tx) => {
+      const [application] = await tx.select().from(giftVoucherApplications).where(eq(giftVoucherApplications.id, applicationId)).for("update");
+      if (!application) return undefined;
+      if (application.status !== "reservado") {
+        throw new Error(`No se puede consumir una aplicación en estado "${application.status}"`);
+      }
+      const [updated] = await tx.update(giftVoucherApplications)
+        .set({ status: "utilizado", consumedAt: new Date() })
+        .where(eq(giftVoucherApplications.id, applicationId))
+        .returning();
+
+      await tx.update(giftVouchers).set({ status: "utilizado", usedAt: new Date(), usedBy: performedBy })
+        .where(eq(giftVouchers.id, application.voucherId));
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: application.voucherId, eventType: "utilizado", fromStatus: "reservado", toStatus: "utilizado",
+        performedBy,
+      });
+      return updated;
+    });
+  }
+
+  async getGiftVoucherApplicationForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication | undefined> {
+    const [application] = await db.select().from(giftVoucherApplications)
+      .where(and(
+        eq(giftVoucherApplications.targetType, targetType),
+        eq(giftVoucherApplications.targetId, targetId),
+        eq(giftVoucherApplications.status, "reservado"),
+      ));
+    return application;
+  }
+
+  async getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]> {
+    return db.select().from(giftVoucherApplications)
+      .where(eq(giftVoucherApplications.voucherId, voucherId))
+      .orderBy(desc(giftVoucherApplications.createdAt));
+  }
+
+  async getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]> {
+    return db.select().from(giftVoucherEvents)
+      .where(eq(giftVoucherEvents.voucherId, voucherId))
+      .orderBy(desc(giftVoucherEvents.performedAt));
+  }
+
+  async getAvailableGiftVouchers(area: GiftVoucher["area"]): Promise<GiftVoucher[]> {
+    const today = getArgentinaToday();
+    return db.select().from(giftVouchers)
+      .where(and(
+        eq(giftVouchers.area, area),
+        inArray(giftVouchers.status, ["activo", "activo_facturado"]),
+        or(isNull(giftVouchers.expiresAt), gte(giftVouchers.expiresAt, today)),
+      ))
+      .orderBy(desc(giftVouchers.issuedAt));
+  }
+
+  // Para áreas sin circuito automatizado todavía (SPA, otro): cierra el
+  // voucher directamente, sin pasar por la tabla de aplicaciones porque no
+  // hay una operación real del sistema a la que vincularlo.
+  async markGiftVoucherUsedManually(id: string, performedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!voucher) return undefined;
+      if (!["activo", "activo_facturado"].includes(voucher.status)) {
+        throw new Error(`No se puede marcar como utilizado un voucher en estado "${voucher.status}"`);
+      }
+      const [updated] = await tx.update(giftVouchers).set({
+        status: "utilizado", usedAt: new Date(), usedBy: performedBy, usedNotes: usedNotes ?? null,
+      }).where(eq(giftVouchers.id, id)).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: id, eventType: "utilizado", fromStatus: voucher.status, toStatus: "utilizado",
+        reason: usedNotes ?? null, performedBy,
+      });
+      return updated;
+    });
+  }
+
+  async cancelGiftVoucher(id: string, performedBy: string, reason: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!voucher) return undefined;
+      if (voucher.status === "utilizado") {
+        throw new Error("No se puede cancelar un voucher ya utilizado");
+      }
+      if (voucher.status === "cancelado") {
+        return voucher;
+      }
+      const [existingActive] = await tx.select({ id: giftVoucherApplications.id })
+        .from(giftVoucherApplications)
+        .where(and(eq(giftVoucherApplications.voucherId, id), eq(giftVoucherApplications.status, "reservado")))
+        .for("update");
+      if (existingActive) {
+        throw new Error("El voucher tiene una aplicación reservada activa; liberala antes de cancelar");
+      }
+      const [updated] = await tx.update(giftVouchers).set({
+        status: "cancelado", cancelledAt: new Date(), cancelledBy: performedBy, cancelReason: reason,
+      }).where(eq(giftVouchers.id, id)).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: id, eventType: "cancelado", fromStatus: voucher.status, toStatus: "cancelado", reason, performedBy,
+      });
+      return updated;
+    });
   }
 
   async generateVoucherCode(): Promise<string> {
