@@ -828,10 +828,18 @@ export function registerSpaRoutes(app: Express) {
           invoicePuntoVenta: salesInvoices.puntoVenta,
           invoiceNumero: salesInvoices.numero,
           invoiceEstado: salesInvoices.estado,
+          // "Voucher por prestación": si esta venta se compró como regalo,
+          // mostrar a nombre de quién y con qué código, para que el
+          // recepcionista pueda identificarla cuando el beneficiario se
+          // presenta con el voucher (no necesariamente el mismo nombre
+          // que el comprador de la factura).
+          voucherCode: giftVouchers.voucherCode,
+          voucherBeneficiaryName: giftVouchers.beneficiaryName,
         })
         .from(spaTreatmentSales)
         .leftJoin(spaTreatments, eq(spaTreatmentSales.treatmentId, spaTreatments.id))
         .leftJoin(salesInvoices, eq(spaTreatmentSales.salesInvoiceId, salesInvoices.id))
+        .leftJoin(giftVouchers, eq(giftVouchers.linkedTreatmentSaleId, spaTreatmentSales.id))
         .where(onlyPending
           ? and(
               sql`${spaTreatmentSales.quantityScheduled} < ${spaTreatmentSales.quantityPurchased}`,
