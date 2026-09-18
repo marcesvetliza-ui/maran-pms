@@ -382,6 +382,71 @@ export const RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL = serializeIncrementa
   END $$;
 `);
 
+/**
+ * getOrCreateFolio() used to be a plain check-then-insert: two nearly
+ * simultaneous charges to the same entity (e.g. two fire-and-forget SPA
+ * account charges posted back to back) could both miss the other's folio
+ * and each create their own, splitting that entity's balance across two
+ * rows. Before enforcing the one-folio-per-entity invariant, merge any
+ * duplicates already on disk: re-parent their folio_movements onto the
+ * earliest folio for that (entity_type, entity_id), recompute its totals,
+ * and drop the now-empty duplicates — no financial data is lost.
+ */
+export const FOLIOS_ENTITY_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF to_regclass('folios_entity_type_entity_id_unique') IS NULL THEN
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id, entity_type, entity_id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      ),
+      duplicate_folios AS (
+        SELECT f.id AS duplicate_id, c.id AS canonical_id
+        FROM folios f
+        JOIN canonical c ON c.entity_type = f.entity_type AND c.entity_id = f.entity_id
+        WHERE f.id <> c.id
+      )
+      UPDATE folio_movements fm
+      SET folio_id = d.canonical_id
+      FROM duplicate_folios d
+      WHERE fm.folio_id = d.duplicate_id;
+
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      ),
+      totals AS (
+        SELECT
+          folio_id,
+          COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('charge','transfer_in')), 0) AS total_charges,
+          COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('payment','advance','discount','transfer_out','void')), 0) AS total_payments
+        FROM folio_movements
+        WHERE folio_id IN (SELECT id FROM canonical)
+        GROUP BY folio_id
+      )
+      UPDATE folios f
+      SET total_charges = t.total_charges,
+          total_payments = t.total_payments,
+          balance = t.total_charges - t.total_payments
+      FROM totals t
+      WHERE f.id = t.folio_id;
+
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      )
+      DELETE FROM folios
+      WHERE id NOT IN (SELECT id FROM canonical);
+
+      CREATE UNIQUE INDEX folios_entity_type_entity_id_unique
+        ON folios (entity_type, entity_id);
+    END IF;
+  END $$
+`);
+
 // Wraps a migration in a timeout so a hung DDL lock never kills the startup
 async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): Promise<T | undefined> {
   try {
@@ -2904,6 +2969,14 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ALTER TABLE spa_appointments
         ADD COLUMN sold_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
     `)))
+  );
+
+  // getOrCreateFolio() had a check-then-insert race: two near-simultaneous
+  // charges to the same entity could each miss the other's folio and create
+  // a duplicate, splitting that entity's balance in two. Merges any existing
+  // duplicates and guards the invariant going forward (see storage.ts fix).
+  await withTimeout("folios.entity_unique", T, () =>
+    db.execute(sql.raw(FOLIOS_ENTITY_UNIQUE_MIGRATION_SQL))
   );
 
   const financialSchema = await verifyFinancialSchema();
