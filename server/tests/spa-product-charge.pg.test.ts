@@ -70,6 +70,28 @@ async function waitUntilStockMovementExists(itemId: string) {
   throw new Error("El movimiento de stock no se registró a tiempo");
 }
 
+// El POST de "Agregar Cargo" escribe el cargo al folio en segundo plano
+// (fire-and-forget, igual que en restaurant.ts y events.ts) — el 201 vuelve
+// antes de que exista la fila en folio_movements. Sin esperarla acá, el
+// cleanup de este test puede borrar folio_movements y folios justo cuando
+// esa escritura tardía inserta una fila nueva, violando la FK.
+async function waitUntilFolioMovementCount(appointmentId: string, expectedCount: number) {
+  if (!pool) throw new Error("DATABASE_URL no está configurado");
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query(
+      `SELECT count(*)::int AS count FROM folio_movements fm
+         JOIN folios f ON f.id = fm.folio_id
+        WHERE f.entity_type = 'spa_account'
+          AND f.entity_id IN (SELECT id::text FROM spa_accounts WHERE appointment_id = $1)`,
+      [appointmentId],
+    );
+    if (result.rows[0]?.count >= expectedCount) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Los cargos al folio no se registraron a tiempo");
+}
+
 runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
   beforeAll(async () => {
     if (pool) await startServer();
@@ -156,6 +178,8 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
         expect.objectContaining({ item_type: "product", inventory_item_id: productId }),
         expect.objectContaining({ item_type: "extra", inventory_item_id: null }),
       ]));
+
+      await waitUntilFolioMovementCount(appointmentId!, 2);
     } finally {
       if (appointmentId) {
         await pool.query(
