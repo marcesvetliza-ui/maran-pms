@@ -137,6 +137,19 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
       );
       expect(events.rows).toEqual([{ event_type: "facturado" }]);
 
+      // "Turnos vendidos" (donde recepción genera el turno) tiene que poder
+      // identificar esta venta como un regalo — sin esto, no hay forma de
+      // saber a quién corresponde cuando el beneficiario presenta el voucher.
+      const pendingList = await request("GET", "/api/spa/treatment-sales?pending=true");
+      expect(pendingList.status).toBe(200);
+      expect(pendingList.body).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          salesInvoiceId: invoiceId,
+          voucherCode: expect.any(String),
+          voucherBeneficiaryName: "María Gómez",
+        }),
+      ]));
+
       const appointmentResponse = await request("POST", "/api/spa/appointments", {
         cabinId, treatmentId, guestName: "María Gómez",
         appointmentDate: "2026-11-10", startTime: "10:00", endTime: "11:00",

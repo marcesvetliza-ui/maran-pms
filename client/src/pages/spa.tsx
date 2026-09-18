@@ -64,6 +64,7 @@ import {
   Download,
   FileX,
   Ban,
+  Gift,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -472,6 +473,10 @@ type SpaTreatmentSale = {
   invoicePuntoVenta: number | null;
   invoiceNumero: number | null;
   invoiceEstado: string | null;
+  /** Presente solo si esta venta se compró como "voucher por prestación" —
+   * un regalo, no necesariamente a nombre del comprador de la factura. */
+  voucherCode: string | null;
+  voucherBeneficiaryName: string | null;
 };
 
 export default function SpaPage() {
@@ -2193,7 +2198,19 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm font-medium">{sale.treatmentName || "—"}</TableCell>
-                        <TableCell className="text-sm">{sale.buyerName}</TableCell>
+                        <TableCell className="text-sm">
+                          <div>{sale.buyerName}</div>
+                          {sale.voucherCode && (
+                            <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground" data-testid={`sale-gift-badge-${sale.id}`}>
+                              <Gift className="h-3 w-3 shrink-0" />
+                              <span>
+                                Regalo para <span className="font-medium">{sale.voucherBeneficiaryName}</span>
+                                {" · "}
+                                <span className="font-mono">{sale.voucherCode}</span>
+                              </span>
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm">
                           {sale.invoiceTipoComprobante
                             ? `${sale.invoiceTipoComprobante} ${String(sale.invoicePuntoVenta ?? 1).padStart(4, "0")}-${String(sale.invoiceNumero ?? 0).padStart(8, "0")}`
