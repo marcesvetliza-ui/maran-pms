@@ -292,11 +292,11 @@ export async function importCompanyOpeningBalances20260918() {
 }
 
 export const AGENCY_OPENING_BALANCES_2026_09_18 = [
-  { companyName: "GBT II ARGENTINA S.R.L", agencyName: "GBT II ARGENTINA S.R.L", amount: "1338500.00" },
-  { companyName: "GRUPO SAN MARCOS SRL", agencyName: "GRUPO SAN MARCOS SRL", amount: "546000.00" },
-  { companyName: "DESPEGAR.COM.AR SA", agencyName: "DESPEGAR.COM.AR SA", amount: "2198632.60" },
-  { companyName: "ITS INTERNATIONAL SERVICES SA", agencyName: "ITS INTERNATIONAL SERVICES SA", amount: "814000.00" },
-  { companyName: "PUNTO TURISTICO SA", agencyName: "PUNTO TURISTICO SA", amount: "1693000.00" },
+  { companyName: "GBT II ARGENTINA S.R.L", agencyName: "GBT II ARGENTINA S.R.L", tradeName: "GLOBAL BUSINESS TRAVEL", cuit: "30714466603", amount: "1338500.00" },
+  { companyName: "GRUPO SAN MARCOS SRL", agencyName: "GRUPO SAN MARCOS SRL", tradeName: "KEEPERS TRAVEL", cuit: "30714516546", amount: "546000.00" },
+  { companyName: "DESPEGAR.COM.AR SA", agencyName: "DESPEGAR.COM.AR SA", tradeName: "DESPEGAR", cuit: "30701307115", amount: "2198632.60" },
+  { companyName: "ITS INTERNATIONAL SERVICES SA", agencyName: "ITS INTERNATIONAL SERVICES SA", tradeName: "PEZZATTI", cuit: "30676757917", amount: "814000.00" },
+  { companyName: "PUNTO TURISTICO SA", agencyName: "PUNTO TURISTICO SA", tradeName: "PUNTO TURISTICO", cuit: "30698479252", amount: "1693000.00" },
 ] as const;
 
 const agencyCompanyNames = new Set<string>(
@@ -312,7 +312,7 @@ const remainingCompanyOpeningBalanceValuesSql = COMPANY_OPENING_BALANCES_2026_09
   })
   .join(",\n        ");
 const agencyOpeningBalanceValuesSql = AGENCY_OPENING_BALANCES_2026_09_18
-  .map((row) => `('${escapeSqlLiteral(row.companyName)}', '${escapeSqlLiteral(row.agencyName)}', ${row.amount}::numeric)`)
+  .map((row) => `('${escapeSqlLiteral(row.companyName)}', '${escapeSqlLiteral(row.agencyName)}', '${escapeSqlLiteral(row.tradeName)}', '${row.cuit}', ${row.amount}::numeric)`)
   .join(",\n        ");
 
 export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalDdl(`
@@ -377,7 +377,7 @@ export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalD
       SELECT *
       FROM (VALUES
         ${agencyOpeningBalanceValuesSql}
-      ) AS source(company_name, agency_name, amount)
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
     LOOP
       SELECT count(*), min(c.id)
       INTO matched_count, matched_company_id
@@ -396,11 +396,30 @@ export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalD
       FROM agencies a
       WHERE regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
           = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
-      IF matched_count <> 1 THEN
+      IF matched_count > 1 THEN
         RAISE EXCEPTION
           'Reasignación detenida: la agencia % tiene % coincidencias',
           opening.agency_name,
           matched_count;
+      END IF;
+
+      IF matched_count = 0 THEN
+        INSERT INTO agencies (
+          razon_social,
+          nombre_fantasia,
+          cuil_cuit,
+          notes,
+          is_active,
+          created_at
+        ) VALUES (
+          opening.agency_name,
+          opening.trade_name,
+          opening.cuit,
+          'Creada al reclasificar saldo inicial desde Empresas',
+          'true',
+          now()
+        )
+        RETURNING id INTO matched_agency_id;
       END IF;
 
       IF EXISTS (
@@ -429,7 +448,7 @@ export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalD
       SELECT *
       FROM (VALUES
         ${agencyOpeningBalanceValuesSql}
-      ) AS source(company_name, agency_name, amount)
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
     LOOP
       SELECT min(c.id), min(a.id)
       INTO matched_company_id, matched_agency_id
@@ -499,7 +518,7 @@ export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalD
       SELECT *
       FROM (VALUES
         ${agencyOpeningBalanceValuesSql}
-      ) AS source(company_name, agency_name, amount)
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
     LOOP
       SELECT min(a.id)
       INTO matched_agency_id
@@ -536,7 +555,7 @@ export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalD
       SELECT 1
       FROM (VALUES
         ${agencyOpeningBalanceValuesSql}
-      ) AS source(company_name, agency_name, amount)
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
       WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
           = regexp_replace(lower(translate(source.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
     );

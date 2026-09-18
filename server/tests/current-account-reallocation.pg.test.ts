@@ -27,8 +27,13 @@ async function withFixtureSchema(suffix: string, run: () => Promise<void>) {
         razon_social text NOT NULL
       );
       CREATE TABLE agencies (
-        id varchar PRIMARY KEY,
-        razon_social text NOT NULL
+        id varchar PRIMARY KEY DEFAULT md5(random()::text || clock_timestamp()::text),
+        razon_social text NOT NULL,
+        nombre_fantasia text,
+        cuil_cuit text NOT NULL DEFAULT '',
+        notes text,
+        is_active text,
+        created_at timestamp
       );
       CREATE TABLE guests (
         id varchar PRIMARY KEY,
@@ -111,6 +116,7 @@ runIfDatabaseIsConfigured("current-account opening balance reallocation", () => 
   it("rebuilds the ledger, transfers references and deletes the five company duplicates", async () => {
     await withFixtureSchema("success", async () => {
       if (!client) throw new Error("DATABASE_URL no está configurado");
+      await client.query("DELETE FROM agencies WHERE id = 'agency-3'");
       const gbtCompanyId = `company-${COMPANY_OPENING_BALANCES_2026_09_18.findIndex(
         (row) => row.name === "GBT II ARGENTINA S.R.L",
       )}`;
@@ -170,6 +176,14 @@ runIfDatabaseIsConfigured("current-account opening balance reallocation", () => 
       ]);
       expect((await client.query("SELECT count(*)::int AS n FROM account_movement_allocations")).rows[0].n).toBe(0);
       expect((await client.query("SELECT count(*)::int AS n FROM companies")).rows[0].n).toBe(25);
+      expect((await client.query(`
+        SELECT nombre_fantasia, cuil_cuit
+        FROM agencies
+        WHERE razon_social = 'ITS INTERNATIONAL SERVICES SA'
+      `)).rows[0]).toEqual({
+        nombre_fantasia: "PEZZATTI",
+        cuil_cuit: "30676757917",
+      });
       expect((await client.query(
         "SELECT company_id, agency_id FROM reservations WHERE id='reservation-linked'",
       )).rows[0]).toEqual({ company_id: null, agency_id: "agency-0" });
