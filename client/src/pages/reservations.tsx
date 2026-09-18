@@ -627,26 +627,45 @@ export function ReservationFormDialog({
     return paxRateMap[numGuests] || plan.baseRate;
   };
 
+  // Un paquete y un plan tarifario son dos formas alternativas de poner
+  // precio a la misma noche, no cargos que se suman — elegir un paquete ya
+  // limpiaba el plan tarifario (buildPackagePricingPatch), pero el camino
+  // inverso no existía: el paquete quedaba seleccionado en pantalla sin
+  // ningún efecto real sobre el total. Acá se cierra ese hueco.
   const handleRatePlanChange = (ratePlanId: string) => {
+    const hadPackage = !!selectedPackageId;
+    if (hadPackage) setSelectedPackageId("");
+    const notesWithoutPackageTag = hadPackage
+      ? (formData.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "")
+      : formData.notes;
+
     if (ratePlanId === "__special__") {
-      setFormData({ ...formData, ratePlanId: "__special__", specialRateReason: formData.specialRateReason || "" });
+      setFormData({
+        ...formData, ratePlanId: "__special__", specialRateReason: formData.specialRateReason || "",
+        notes: notesWithoutPackageTag,
+      });
       return;
     }
     const plan = ratePlans?.find(p => p.id === ratePlanId);
     if (plan) {
       if (!formData.checkInDate || !formData.checkOutDate) {
-        setFormData({ ...formData, ratePlanId, specialRateReason: "", baseRatePerNight: getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2) });
+        setFormData({
+          ...formData, ratePlanId, specialRateReason: "",
+          baseRatePerNight: getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2),
+          notes: notesWithoutPackageTag,
+        });
         return;
       }
       const nights = calculateNights(formData.checkInDate, formData.checkOutDate);
       const rate = getPaxRate(plan, parseInt(String(formData.numberOfGuests)) || 2);
       const totals = calculateTotals(rate, formData.discountType as DiscountType, formData.discountValue || "0", nights);
-      setFormData({ 
-        ...formData, 
-        ratePlanId, 
+      setFormData({
+        ...formData,
+        ratePlanId,
         specialRateReason: "",
         baseRatePerNight: rate,
         ...totals,
+        notes: notesWithoutPackageTag,
       });
     }
   };
