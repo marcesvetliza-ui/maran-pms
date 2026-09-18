@@ -36,6 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { AccountMovement } from "@shared/schema";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
 
 type GuestSummary = {
   id: string;
@@ -246,8 +247,8 @@ export default function CcHuespedesPage() {
                     .map((m) => (
                       <TableRow key={m.id} data-testid={`row-movement-${m.id}`}>
                         <TableCell className="text-xs">{m.date}</TableCell>
-                        <TableCell className="text-xs">{m.description}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{m.reference || "—"}</TableCell>
+                        <TableCell className="text-xs">{cleanAccountMovementDescription(m.description, m.reservationCode)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">{m.reservationCode || m.reference || "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {parseFloat(m.amount) > 0

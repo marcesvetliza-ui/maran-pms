@@ -66,6 +66,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { parseNightAuditDetail } from "@shared/nightAudit";
 import type { DuplicateCashPaymentLinkGroup } from "@shared/schema";
+import { cleanCashMovementLabel } from "@/lib/account-movement-display";
 
 type CashConfig = {
   area: string;
@@ -318,7 +319,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                       <div key={m.id ?? i} className="flex items-center gap-3 py-1 text-xs border-b border-muted/50 last:border-0">
                         <span className="text-muted-foreground w-11 shrink-0 tabular-nums">{formatTime(m.createdAt)}</span>
                         <span className="flex-1 truncate font-medium">
-                          {m.sourceLabel || m.description || "—"}
+                          {cleanCashMovementLabel(m.sourceLabel || m.description) || "—"}
                           {m.registeredBy ? <span className="ml-2 text-muted-foreground font-normal">({m.registeredBy})</span> : null}
                         </span>
                         <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground line-through" : ""}`}>
@@ -903,7 +904,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                           )}
                         </TableCell>
                         <TableCell className={m.anulado ? "line-through text-muted-foreground" : ""}>
-                          <div>{m.description || m.sourceLabel || "-"}</div>
+                          <div>{cleanCashMovementLabel(m.description || m.sourceLabel) || "-"}</div>
                           {m.sourceType === "group_payment" && (
                             <div className="text-xs text-muted-foreground mt-0.5">
                               {formatAdvanceReference(m)}
@@ -1897,7 +1898,7 @@ function HistorialTab() {
                     {shiftDetail.movements.map((m) => (
                       <TableRow key={m.id}>
                         <TableCell className="text-xs tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
-                        <TableCell>{m.description || m.sourceLabel || "-"}</TableCell>
+                        <TableCell>{cleanCashMovementLabel(m.description || m.sourceLabel) || "-"}</TableCell>
                         <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
                           {m.movementType === "informational" ? (

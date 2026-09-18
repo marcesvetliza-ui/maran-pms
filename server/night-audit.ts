@@ -439,17 +439,18 @@ async function runNightAuditUnlocked(options: {
           reservationId: r.id, reservationCode: r.reservationCode,
           scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival",
           roomId: r.roomId, guestId: r.guestId, specialRateReason: r.specialRateReason,
-          companyId: r.companyId, companyName: r.companyId ? companyNames.get(r.companyId) ?? null : null,
-          agencyId: r.agencyId, agencyName: r.agencyId ? agencyNames.get(r.agencyId) ?? null : null,
+          companyId: r.companyId, agencyId: r.agencyId,
+          ...stableById.get(r.id),
         })),
         rateIssues: allReservations.flatMap(r => {
           const kind = classifyReservationRate(r.finalRatePerNight, r.specialRateReason);
           if (!kind) return [];
           return [{ reservationId: r.id, reservationCode: r.reservationCode,
-            scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", kind }];
+            scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", kind,
+            ...stableById.get(r.id) }];
         }),
         missingBedType: allReservations.filter(r => !r.bedTypeId && !r.bedTypeNotes)
-          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", roomId: r.roomId })),
+          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", roomId: r.roomId, ...stableById.get(r.id) })),
         webCheckin: allReservations.map(r => ({
           reservationId: r.id, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", status: checkinStatus.get(r.id) ?? "missing",
         })),
@@ -457,7 +458,7 @@ async function runNightAuditUnlocked(options: {
         sourceIssues: allReservations.filter(r =>
           (r.source === "agencia" && !r.agencyId) ||
           (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(r.source as string) && !r.otaChannelId)
-        ).map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", source: r.source })),
+        ).map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", source: r.source, ...stableById.get(r.id) })),
        },
       },
     };

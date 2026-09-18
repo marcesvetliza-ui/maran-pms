@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -702,13 +703,13 @@ export default function CompaniesPage() {
                       <TableCell className="text-sm">{mov.date}</TableCell>
                       <TableCell>
                         <div>
-                          <p className="text-sm">{mov.description}</p>
+                          <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>
                           {mov.guestName && (
                             <p className="text-xs text-muted-foreground">{mov.guestName}</p>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{mov.reference || "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground font-mono">{mov.reservationCode || mov.reference || "—"}</TableCell>
                       <TableCell className={`text-right font-medium tabular-nums ${
                         parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
                       }`}>
