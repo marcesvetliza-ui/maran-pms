@@ -1637,6 +1637,10 @@ export const spaAppointments = pgTable("spa_appointments", {
   status: text("status").$type<SpaAppointmentStatus>().notNull().default("pending"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
+  // Presente solo cuando el turno se generó reclamando una unidad de una
+  // venta anticipada ("Turnos vendidos") — permite avisarle a esa venta
+  // cuando el turno efectivamente se presta (ver quantityUsed).
+  soldTreatmentSaleId: varchar("sold_treatment_sale_id").references(() => spaTreatmentSales.id),
 });
 
 export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).omit({ id: true });
