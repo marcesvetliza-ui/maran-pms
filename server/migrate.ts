@@ -33,6 +33,256 @@ function escapeSqlLiteral(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+export const COMPANY_OPENING_BALANCES_2026_09_18 = [
+  { code: "11749", name: "ASOCIACION MUTUAL MODELO DE ENTRE RIOS", amount: "1254500.16", aliases: ["ASOCIACION MUTUAL MODELO DE ENTRE RIOS"] },
+  { code: "111177", name: "B GAMING S.A.", amount: "268000.00", aliases: ["B GAMING S.A."] },
+  { code: "11891", name: "BANCO DE SANTA CRUZ SA", amount: "535500.00", aliases: ["BANCO DE SANTA CRUZ SA"] },
+  { code: "11135809", name: "CAMARA DE INDUSTRIA Y COMERCIO ARGENTINO", amount: "1679450.00", aliases: ["CAMARA DE INDUSTRIA Y COMERCIO ARGENTINO"] },
+  { code: "111901", name: "CLUB DE VOLANTES ENTRERRIANOS", amount: "4417187.00", aliases: ["CLUB DE VOLANTES ENTRERRIANOS"] },
+  { code: "112094", name: "CONSEJO PROF. DE CS ECON. ENTRE RIOS", amount: "250000.00", aliases: ["CONSEJO PROF. DE CS ECON. ENTRE RIOS", "CONSEJO PROFESIONAL DE CS ECO DE ER"] },
+  { code: "112519", name: "DESPEGAR.COM.AR SA", amount: "2198632.60", aliases: ["DESPEGAR.COM.AR SA"] },
+  { code: "112973", name: "ENER SA", amount: "2396000.13", aliases: ["ENER SA"] },
+  { code: "113029", name: "ERIOCHEM S.A.", amount: "1053000.00", aliases: ["ERIOCHEM S.A.", "ERIOCHEM SA"] },
+  { code: "113195", name: "F.A.D.R.A", amount: "1306500.00", aliases: ["F.A.D.R.A"] },
+  { code: "11124128", name: "FGPC SRL", amount: "168500.00", aliases: ["FGPC SRL"] },
+  { code: "11136329", name: "FONDO INTERNACIONAL DE DESARROLLO AGRICOLA", amount: "418840.00", aliases: ["FONDO INTERNACIONAL DE DESARROLLO AGRICOLA"] },
+  { code: "11133146", name: "FUNDACION MIRADORTEC - PARQUE TECNOLOGICO", amount: "4351700.04", aliases: ["FUNDACION MIRADORTEC - PARQUE TECNOLOGICO", "FUNDACION MIRADORTEC PARQUE TECNOLOGICO"] },
+  { code: "113651", name: "FUNDACION UNIVERSIDAD CATOLICA ARGENTINA", amount: "608000.00", aliases: ["FUNDACION UNIVERSIDAD CATOLICA ARGENTINA", "UNIVERSIDAD CATOLICA ARGENTINA SEDE PARANA"] },
+  { code: "113800", name: "GBT II ARGENTINA S.R.L", amount: "1338500.00", aliases: ["GBT II ARGENTINA S.R.L"] },
+  { code: "114082", name: "GRUPO SAN MARCOS SRL", amount: "546000.00", aliases: ["GRUPO SAN MARCOS SRL"] },
+  { code: "114529", name: "INSTITUTO AUTARQUICO PROV. DEL SEGURO", amount: "6211500.11", aliases: ["INSTITUTO AUTARQUICO PROV. DEL SEGURO", "IAPSER"] },
+  { code: "114331", name: "ITS INTERNATIONAL SERVICES SA", amount: "814000.00", aliases: ["ITS INTERNATIONAL SERVICES SA"] },
+  { code: "114705", name: "JOHNSON ACERO S.A.", amount: "2425200.10", aliases: ["JOHNSON ACERO S.A.", "JOHNSON ACERO SA"] },
+  { code: "11126237", name: "MEDIA SERVICIOS S.A.", amount: "6240000.00", aliases: ["MEDIA SERVICIOS S.A."] },
+  { code: "11134775", name: "MINISTERIO DE TURISMO DE URUGUAY", amount: "1566500.00", aliases: ["MINISTERIO DE TURISMO DE URUGUAY"] },
+  { code: "1182734", name: "MONTI CARLOS NORBERTO", amount: "160500.00", aliases: ["MONTI CARLOS NORBERTO"] },
+  { code: "116261", name: "NUEVO BANCO DE ENTRE RIOS SA", amount: "2745600.04", aliases: ["NUEVO BANCO DE ENTRE RIOS SA"] },
+  { code: "116409", name: "OSDE ORGANIZACION DE SERVICIOS DIRECTOS", amount: "275000.00", aliases: ["OSDE ORGANIZACION DE SERVICIOS DIRECTOS", "OSDE ORGANIZACION DE SERVICIOS DIRECTOS EMPRESARIOS"] },
+  { code: "116527", name: "PAPELERA ENTRE RIOS S.A", amount: "983400.06", aliases: ["PAPELERA ENTRE RIOS S.A", "PAPELERA ER SA"] },
+  { code: "1198703", name: "PARACIMA PRODUCCIONES SAS", amount: "377300.00", aliases: ["PARACIMA PRODUCCIONES SAS"] },
+  { code: "116942", name: "PUNTO TURISTICO SA", amount: "1693000.00", aliases: ["PUNTO TURISTICO SA"] },
+  { code: "117623", name: "SECAR SECURITY ARGENTINA S.A.", amount: "728000.00", aliases: ["SECAR SECURITY ARGENTINA S.A.", "SECAR SECURITY ARGENTINA SA"] },
+  { code: "115911", name: "Secretaria De Trabajo De La Provincia De Entre Rios", amount: "316000.00", aliases: ["Secretaria De Trabajo De La Provincia De Entre Rios"] },
+  { code: "1174120", name: "UNER", amount: "134000.00", aliases: ["UNER"] },
+] as const;
+
+const companyOpeningBalanceValuesSql = COMPANY_OPENING_BALANCES_2026_09_18.map((row) => {
+  if (!/^\d+$/.test(row.code) || !/^\d+\.\d{2}$/.test(row.amount)) {
+    throw new Error(`Saldo inicial de empresa inválido: ${row.code}`);
+  }
+  const aliasesSql = row.aliases
+    .map((alias) => `'${escapeSqlLiteral(alias)}'`)
+    .join(", ");
+  return `('${row.code}', '${escapeSqlLiteral(row.name)}', ${row.amount}::numeric, ARRAY[${aliasesSql}]::text[])`;
+}).join(",\n        ");
+
+export const COMPANY_OPENING_BALANCES_2026_09_18_SQL = serializeIncrementalDdl(`
+  SET LOCAL lock_timeout = '8s';
+  SET LOCAL statement_timeout = '30s';
+
+  DO $migration$
+  DECLARE
+    opening record;
+    matched_company_id varchar;
+    matched_count integer;
+    imported_count integer := 0;
+    imported_total numeric := 0;
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM audit_logs
+      WHERE action = 'IMPORT_OPENING_BALANCES'
+        AND module = 'cuenta_corriente'
+        AND details LIKE '%OPENING-COMPANY-2026-09-18%'
+    ) THEN
+      RETURN;
+    END IF;
+
+    LOCK TABLE companies, account_movements, account_movement_allocations
+      IN ACCESS EXCLUSIVE MODE;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${companyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      IF matched_count > 1 THEN
+        RAISE EXCEPTION
+          'Importación de saldos detenida: la empresa % tiene % coincidencias',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      IF matched_count = 0 THEN
+        INSERT INTO companies (
+          razon_social,
+          nombre_fantasia,
+          cuil_cuit,
+          pais,
+          condicion_iva,
+          payment_term_days,
+          condicion_venta_predeterminada,
+          regimen_hospedaje,
+          notes,
+          is_active,
+          created_at
+        ) VALUES (
+          opening.company_name,
+          opening.company_name,
+          '',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          'Creada desde saldo inicial; cuenta legacy ' || opening.legacy_code,
+          'true',
+          now()
+        )
+        RETURNING id INTO matched_company_id;
+      END IF;
+    END LOOP;
+
+    DELETE FROM account_movement_allocations allocation
+    WHERE EXISTS (
+      SELECT 1 FROM account_movements movement
+      WHERE movement.id = allocation.pago_id
+        AND movement.entity_type = 'company'
+    )
+    OR EXISTS (
+      SELECT 1 FROM account_movements movement
+      WHERE movement.id = allocation.cargo_id
+        AND movement.entity_type = 'company'
+    );
+
+    DELETE FROM account_movements WHERE entity_type = 'company';
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${companyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Importación de saldos detenida: la empresa % tiene % coincidencias al insertar',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      INSERT INTO account_movements (
+        entity_type,
+        entity_id,
+        date,
+        type,
+        description,
+        amount,
+        reference,
+        created_by,
+        created_at
+      ) VALUES (
+        'company',
+        matched_company_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-COMPANY-2026-09-18',
+        'system-import',
+        now()
+      );
+
+      imported_count := imported_count + 1;
+      imported_total := imported_total + opening.amount;
+    END LOOP;
+
+    IF imported_count <> 30 OR imported_total <> 47460310.24::numeric THEN
+      RAISE EXCEPTION
+        'Importación de saldos detenida: resultado % empresas, total %',
+        imported_count,
+        imported_total;
+    END IF;
+
+    IF EXISTS (
+      SELECT entity_id
+      FROM account_movements
+      WHERE entity_type = 'company'
+      GROUP BY entity_id
+      HAVING count(*) <> 1
+    ) OR (
+      SELECT count(*) FROM account_movements WHERE entity_type = 'company'
+    ) <> 30 THEN
+      RAISE EXCEPTION 'Importación de saldos detenida: movimientos duplicados o residuales';
+    END IF;
+
+    INSERT INTO audit_logs (
+      user_name,
+      action,
+      module,
+      entity_type,
+      description,
+      details,
+      "timestamp"
+    ) VALUES (
+      'system-import',
+      'IMPORT_OPENING_BALANCES',
+      'cuenta_corriente',
+      'company',
+      'Importación de saldos iniciales de empresas',
+      'OPENING-COMPANY-2026-09-18; 30 empresas; fecha 18/09/2026; total 47460310.24',
+      now()
+    );
+  END
+  $migration$;
+`);
+
+export async function importCompanyOpeningBalances20260918() {
+  try {
+    await db.execute(sql.raw(COMPANY_OPENING_BALANCES_2026_09_18_SQL));
+    const { rows } = await db.execute(sql`
+      SELECT
+        count(*)::int AS count,
+        coalesce(sum(amount), 0)::numeric(14,2)::text AS total
+      FROM account_movements
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    `);
+    const count = Number((rows[0] as any)?.count ?? 0);
+    const total = String((rows[0] as any)?.total ?? "0");
+    if (count !== 30 || total !== "47460310.24") {
+      throw new Error(`verificación posterior inválida: ${count} movimientos, total ${total}`);
+    }
+    logger.info(`Saldos iniciales de empresas verificados: ${count} movimientos, total ${total}.`);
+  } catch (cause: any) {
+    throw Object.assign(
+      new Error(`No se pudieron importar los saldos iniciales de empresas: ${cause?.message ?? cause}`),
+      {
+        code: "COMPANY_OPENING_BALANCE_IMPORT_FAILED",
+        cause,
+      },
+    );
+  }
+}
+
 /**
  * PostgreSQL's native DROP ... IF EXISTS always emits a NOTICE when the
  * object is absent — unlike CREATE ... IF NOT EXISTS, this has no "quiet"
@@ -2989,6 +3239,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN linked_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
     `)))
   );
+
+  // One-time cutover from the fictitious company current-account ledger to
+  // the externally reconciled balances dated 18/09/2026. The audit marker
+  // makes reruns a no-op; any ambiguous company match aborts the transaction
+  // before existing movements are removed.
+  await importCompanyOpeningBalances20260918();
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
