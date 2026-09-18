@@ -2803,6 +2803,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_account_items ADD COLUMN inventory_item_id varchar`)))
   );
 
+  // Tarifa convenio (mayorista/minorista) de empresas y agencias — distinto
+  // de regimen_hospedaje, que describe qué incluye la tarifa.
+  await withTimeout("companies.tarifa_convenio", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN tarifa_convenio text`)))
+  );
+  await withTimeout("agencies.tarifa_convenio", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE agencies ADD COLUMN tarifa_convenio text`)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

@@ -16,12 +16,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText } from "lucide-react";
+import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText, Ban, CheckCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -214,6 +215,7 @@ export default function CompaniesPage() {
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
       regimenHospedaje: "",
+      tarifaConvenio: "",
       notes: "",
     },
   });
@@ -264,6 +266,19 @@ export default function CompaniesPage() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: string }) => {
+      const res = await apiRequest("PATCH", `/api/companies/${id}`, { isActive });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar el estado de la empresa", variant: "destructive" });
+    },
+  });
+
   const handleDelete = (company: Company) => {
     if (window.confirm(`¿Estás seguro de eliminar "${company.razonSocial}"?`)) {
       deleteMutation.mutate(company.id);
@@ -299,6 +314,7 @@ export default function CompaniesPage() {
       paymentTermDays: company.paymentTermDays || 30,
       condicionVentaPredeterminada: (company as any).condicionVentaPredeterminada || "contado",
       regimenHospedaje: (company as any).regimenHospedaje || "",
+      tarifaConvenio: company.tarifaConvenio || "",
       notes: company.notes || "",
     });
     setShowForm(true);
@@ -332,6 +348,7 @@ export default function CompaniesPage() {
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
       regimenHospedaje: "",
+      tarifaConvenio: "",
       notes: "",
     });
     setShowForm(true);
@@ -381,14 +398,15 @@ export default function CompaniesPage() {
                 <TableHead>Nombre Fantasía</TableHead>
                 <TableHead>Contacto</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead className="w-[140px]">Acciones</TableHead>
+                <TableHead>Tarifa convenio</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="w-[160px]">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredCompanies.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-16">
+                  <TableCell colSpan={7} className="py-16">
                     <div className="flex flex-col items-center gap-3 text-center">
                       <Building2 className="h-10 w-10 text-muted-foreground/40" />
                       <div>
@@ -419,7 +437,16 @@ export default function CompaniesPage() {
                     <TableCell>{company.nombreFantasia || "-"}</TableCell>
                     <TableCell>{company.contactName || "-"}</TableCell>
                     <TableCell>{company.contactEmail || "-"}</TableCell>
-                    <TableCell>{company.telefono || "-"}</TableCell>
+                    <TableCell>
+                      {company.tarifaConvenio
+                        ? <Badge variant="outline">{TARIFA_CONVENIO_SHORT[company.tarifaConvenio] || company.tarifaConvenio}</Badge>
+                        : "-"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={company.isActive === "false" ? "destructive" : "default"}>
+                        {company.isActive === "false" ? "Cortada" : "Activa"}
+                      </Badge>
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Button
@@ -439,6 +466,17 @@ export default function CompaniesPage() {
                           data-testid={`button-account-company-${company.id}`}
                         >
                           <Receipt className="h-4 w-4 text-blue-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleActiveMutation.mutate({ id: company.id, isActive: company.isActive === "false" ? "true" : "false" })}
+                          title={company.isActive === "false" ? "Marcar como Activa" : "Marcar como Cortada"}
+                          data-testid={`button-toggle-active-company-${company.id}`}
+                        >
+                          {company.isActive === "false"
+                            ? <CheckCircle className="h-4 w-4 text-green-600" />
+                            : <Ban className="h-4 w-4 text-red-600" />}
                         </Button>
                         <Button
                           variant="ghost"
@@ -596,6 +634,23 @@ export default function CompaniesPage() {
                     <FormItem>
                       <FormLabel>Plazo de Pago (días)</FormLabel>
                       <FormControl><Input {...field} value={field.value ?? ""} type="number" data-testid="input-company-payment-term" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="tarifaConvenio" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tarifa Convenio</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-company-tarifa-convenio">
+                            <SelectValue placeholder="Sin definir" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="mayorista">{TARIFA_CONVENIO_LABEL.mayorista}</SelectItem>
+                          <SelectItem value="minorista">{TARIFA_CONVENIO_LABEL.minorista}</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )} />

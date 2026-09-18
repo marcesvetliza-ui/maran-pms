@@ -17,11 +17,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText } from "lucide-react";
+import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText, Ban, CheckCircle } from "lucide-react";
 import { insertAgencySchema, type Agency, type AccountMovement, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
 
 const agencyFormSchema = insertAgencySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -243,6 +244,7 @@ export default function AgenciesPage() {
       creditLimit: "0",
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
+      tarifaConvenio: "",
       notes: "",
     },
   });
@@ -293,6 +295,19 @@ export default function AgenciesPage() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: string }) => {
+      const res = await apiRequest("PATCH", `/api/agencies/${id}`, { isActive });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agencies"] });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar el estado de la agencia", variant: "destructive" });
+    },
+  });
+
   const handleDelete = (agency: Agency) => {
     if (window.confirm(`¿Estás seguro de eliminar "${agency.razonSocial}"?`)) {
       deleteMutation.mutate(agency.id);
@@ -328,6 +343,7 @@ export default function AgenciesPage() {
       creditLimit: agency.creditLimit || "0",
       paymentTermDays: agency.paymentTermDays || 30,
       condicionVentaPredeterminada: (agency as any).condicionVentaPredeterminada || "contado",
+      tarifaConvenio: agency.tarifaConvenio || "",
       notes: agency.notes || "",
     });
     setShowForm(true);
@@ -361,6 +377,7 @@ export default function AgenciesPage() {
       creditLimit: "0",
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
+      tarifaConvenio: "",
       notes: "",
     });
     setShowForm(true);
@@ -422,10 +439,10 @@ export default function AgenciesPage() {
                     <TableHead>Razón Social</TableHead>
                     <TableHead>Nombre Fantasía</TableHead>
                     <TableHead>Comisión %</TableHead>
-                    <TableHead>Contacto</TableHead>
+                    <TableHead>Tarifa convenio</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead className="w-[120px]">Acciones</TableHead>
+                    <TableHead className="w-[140px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -463,11 +480,15 @@ export default function AgenciesPage() {
                         <TableCell>
                           <Badge variant="secondary">{agency.commissionRate}%</Badge>
                         </TableCell>
-                        <TableCell>{agency.contactName || "-"}</TableCell>
+                        <TableCell>
+                          {agency.tarifaConvenio
+                            ? <Badge variant="outline">{TARIFA_CONVENIO_SHORT[agency.tarifaConvenio] || agency.tarifaConvenio}</Badge>
+                            : "-"}
+                        </TableCell>
                         <TableCell>{agency.contactEmail || "-"}</TableCell>
                         <TableCell>
-                          <Badge variant={agency.isActive === "true" ? "default" : "outline"}>
-                            {agency.isActive === "true" ? "Activa" : "Inactiva"}
+                          <Badge variant={agency.isActive === "false" ? "destructive" : "default"}>
+                            {agency.isActive === "false" ? "Cortada" : "Activa"}
                           </Badge>
                         </TableCell>
                         <TableCell>
@@ -497,6 +518,17 @@ export default function AgenciesPage() {
                               data-testid={`button-stats-agency-${agency.id}`}
                             >
                               <BarChart3 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => toggleActiveMutation.mutate({ id: agency.id, isActive: agency.isActive === "false" ? "true" : "false" })}
+                              title={agency.isActive === "false" ? "Marcar como Activa" : "Marcar como Cortada"}
+                              data-testid={`button-toggle-active-agency-${agency.id}`}
+                            >
+                              {agency.isActive === "false"
+                                ? <CheckCircle className="h-4 w-4 text-green-600" />
+                                : <Ban className="h-4 w-4 text-red-600" />}
                             </Button>
                             <Button
                               variant="ghost"
@@ -918,6 +950,23 @@ export default function AgenciesPage() {
                     <FormItem>
                       <FormLabel>Plazo de Pago (días)</FormLabel>
                       <FormControl><Input {...field} value={field.value ?? 30} type="number" data-testid="input-agency-payment-term" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="tarifaConvenio" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tarifa Convenio</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-agency-tarifa-convenio">
+                            <SelectValue placeholder="Sin definir" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="mayorista">{TARIFA_CONVENIO_LABEL.mayorista}</SelectItem>
+                          <SelectItem value="minorista">{TARIFA_CONVENIO_LABEL.minorista}</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )} />

@@ -140,6 +140,7 @@ export const companies = pgTable("companies", {
   montoBaseFce: text("monto_base_fce"),
   condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
   regimenHospedaje: text("regimen_hospedaje"),
+  tarifaConvenio: text("tarifa_convenio").$type<"mayorista" | "minorista">(),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
@@ -171,6 +172,7 @@ export const agencies = pgTable("agencies", {
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
   condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
+  tarifaConvenio: text("tarifa_convenio").$type<"mayorista" | "minorista">(),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
