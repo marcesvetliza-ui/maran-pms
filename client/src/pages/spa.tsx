@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek, addWeeks, subWeeks, isBefore } from "date-fns";
 import { es } from "date-fns/locale";
@@ -65,6 +66,8 @@ import {
   FileX,
   Ban,
   Gift,
+  Ticket,
+  Search,
 } from "lucide-react";
 
 type SpaCabin = {
@@ -491,6 +494,8 @@ export default function SpaPage() {
   const [newAppointmentSettlement, setNewAppointmentSettlement] = useState<NewAppointmentSettlement>("");
   const [newAppointmentRoomId, setNewAppointmentRoomId] = useState("");
   const [newAppointmentVoucherMethod, setNewAppointmentVoucherMethod] = useState("");
+  const [hasSoldVoucher, setHasSoldVoucher] = useState(false);
+  const [soldVoucherSearch, setSoldVoucherSearch] = useState("");
   const [pendingSpaInvoice, setPendingSpaInvoice] = useState<PendingSpaInvoice | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
@@ -561,7 +566,9 @@ export default function SpaPage() {
       const response = await fetch(`/api/spa/treatment-sales?pending=${!showAllTreatmentSales}`);
       return response.json();
     },
-    enabled: activeTab === "vendidos",
+    // También hace falta con la agenda abierta: el buscador "Tiene voucher"
+    // del turno nuevo depende de esta lista, sin importar qué pestaña esté activa.
+    enabled: activeTab === "vendidos" || isNewDialogOpen,
   });
 
   // Los cargos adicionales del folio usan el mismo catálogo que
@@ -1485,6 +1492,8 @@ export default function SpaPage() {
     setEditingAppointmentResources([]);
     setCircuitBookings([]);
     setCircuitDraftTreatmentId(null);
+    setHasSoldVoucher(false);
+    setSoldVoucherSearch("");
     form.reset({
       cabinId, treatmentId: "", professionalId: "", guestName: "", guestLastName: "",
       guestPhone: "", guestEmail: "", appointmentDate: dateStr,
@@ -1503,9 +1512,13 @@ export default function SpaPage() {
     setNewAppointmentSettlement("already_sold");
     setNewAppointmentRoomId("");
     setNewAppointmentVoucherMethod("");
+    setHasSoldVoucher(false);
+    setSoldVoucherSearch("");
     form.reset({
       cabinId: "", treatmentId: sale.treatmentId, professionalId: "",
-      guestName: sale.buyerName, guestLastName: "",
+      // El voucher se le regaló al beneficiario, no a quien pagó la
+      // factura — es quien se va a presentar al turno.
+      guestName: sale.voucherBeneficiaryName || sale.buyerName, guestLastName: "",
       guestPhone: "", guestEmail: "", appointmentDate: dateStr,
       startTime: "", reservationId: "", notes: "",
     });
@@ -2717,11 +2730,84 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       {/* New / Edit Appointment Dialog */}
-      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); } }}>
+      <Dialog open={isNewDialogOpen} onOpenChange={(open) => { if (!open) { setIsNewDialogOpen(false); setIsEditMode(false); setEditingAppointmentId(null); setCircuitBookings([]); setCircuitDraftTreatmentId(null); setEditingAppointmentResources([]); setNewAppointmentSettlement(""); setNewAppointmentRoomId(""); setNewAppointmentVoucherMethod(""); setGeneratingFromSale(null); setHasSoldVoucher(false); setSoldVoucherSearch(""); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{isEditMode ? "Editar Turno" : generatingFromSale ? "Agendar turno vendido" : "Nuevo Turno SPA"}</DialogTitle>
           </DialogHeader>
+          {!isEditMode && !generatingFromSale && (
+            <div className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="hasSoldVoucher"
+                  checked={hasSoldVoucher}
+                  onCheckedChange={(checked) => {
+                    setHasSoldVoucher(checked);
+                    if (!checked) setSoldVoucherSearch("");
+                  }}
+                  data-testid="switch-has-sold-voucher"
+                />
+                <Label htmlFor="hasSoldVoucher" className="flex items-center gap-1.5 cursor-pointer">
+                  <Ticket className="h-4 w-4 text-muted-foreground" />
+                  Tiene voucher
+                </Label>
+              </div>
+              {hasSoldVoucher && (() => {
+                const term = soldVoucherSearch.trim().toLowerCase();
+                const matches = treatmentSales.filter((sale) =>
+                  sale.voucherCode
+                  && sale.quantityScheduled < sale.quantityPurchased
+                  && sale.status !== "cancelado"
+                  && (term === ""
+                    || sale.voucherCode!.toLowerCase().includes(term)
+                    || (sale.voucherBeneficiaryName || "").toLowerCase().includes(term)
+                    || sale.buyerName.toLowerCase().includes(term)
+                    || (sale.treatmentName || "").toLowerCase().includes(term)),
+                );
+                return (
+                  <div className="grid gap-2 pl-6 border-l-2 border-amber-300 dark:border-amber-700">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Input
+                        value={soldVoucherSearch}
+                        onChange={(e) => setSoldVoucherSearch(e.target.value)}
+                        placeholder="Buscar por código o beneficiario..."
+                        className="pl-8"
+                        data-testid="input-search-sold-voucher"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto border rounded-md divide-y">
+                      {matches.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-muted-foreground" data-testid="text-sold-voucher-no-results">
+                          {treatmentSales.some((s) => s.voucherCode)
+                            ? "Sin resultados"
+                            : "No hay ventas con voucher pendientes de agendar"}
+                        </div>
+                      ) : (
+                        matches.map((sale) => (
+                          <button
+                            key={sale.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex flex-col gap-0.5"
+                            onClick={() => handleGenerateAppointmentFromSale(sale)}
+                            data-testid={`button-sold-voucher-result-${sale.id}`}
+                          >
+                            <span className="font-medium font-mono flex items-center gap-1.5">
+                              <Gift className="h-3.5 w-3.5 text-muted-foreground" />
+                              {sale.voucherCode}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              Regalo para {sale.voucherBeneficiaryName} · {sale.treatmentName}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
           {generatingFromSale && (
             <div className="rounded-md border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300" data-testid="banner-generating-from-sale">
               Ya vendido y cobrado
