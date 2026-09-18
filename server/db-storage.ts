@@ -1142,8 +1142,8 @@ export class DatabaseStorage implements IStorage {
       } else if (!newVoucherId && before.voucherId) {
         // Se sacó el voucher de la reserva — liberar la aplicación viva si
         // todavía no se consumió (si ya se consumió no hay nada que hacer).
-        const application = await this.getGiftVoucherApplicationForTarget("reservation", id);
-        if (application) {
+        const applications = await this.getGiftVoucherApplicationsForTarget("reservation", id);
+        for (const application of applications) {
           await this.releaseGiftVoucherApplication(application.id, actor, "Se quitó el voucher de la reserva");
         }
       }
@@ -1172,11 +1172,13 @@ export class DatabaseStorage implements IStorage {
     if (!isRelease && !isConsume) return;
     const voucherId = after.voucherId || before.voucherId;
     if (!voucherId) return;
-    const application = await this.getGiftVoucherApplicationForTarget("reservation", after.id);
-    if (!application) return;
+    const applications = await this.getGiftVoucherApplicationsForTarget("reservation", after.id);
+    if (applications.length === 0) return;
     const actor = after.lastModifiedBy || "sistema";
     if (isRelease) {
-      await this.releaseGiftVoucherApplication(application.id, actor, `La reserva pasó a estado "${after.status}"`);
+      for (const application of applications) {
+        await this.releaseGiftVoucherApplication(application.id, actor, `La reserva pasó a estado "${after.status}"`);
+      }
       // El voucher vuelve a estar disponible para cualquier otra operación —
       // si se restaura esta reserva más adelante, no debe quedar mostrando
       // un vínculo que ya no representa nada reservado.
@@ -1184,7 +1186,9 @@ export class DatabaseStorage implements IStorage {
         .set({ voucherId: null, voucherCode: null, voucherAppliedAmount: null })
         .where(eq(reservations.id, after.id));
     } else {
-      await this.consumeGiftVoucherApplication(application.id, actor);
+      for (const application of applications) {
+        await this.consumeGiftVoucherApplication(application.id, actor);
+      }
     }
   }
 
@@ -8524,14 +8528,16 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getGiftVoucherApplicationForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication | undefined> {
-    const [application] = await db.select().from(giftVoucherApplications)
+  // Una misma reserva/pedido/cuenta puede tener más de un voucher aplicado
+  // (ej. dos vouchers distintos contra la misma cuenta de SPA) — nunca
+  // asumir que hay una sola aplicación viva por destino.
+  async getGiftVoucherApplicationsForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication[]> {
+    return db.select().from(giftVoucherApplications)
       .where(and(
         eq(giftVoucherApplications.targetType, targetType),
         eq(giftVoucherApplications.targetId, targetId),
         eq(giftVoucherApplications.status, "reservado"),
       ));
-    return application;
   }
 
   async getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]> {

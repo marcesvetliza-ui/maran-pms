@@ -885,7 +885,7 @@ export interface IStorage {
   ): Promise<{ application: GiftVoucherApplication; voucher: GiftVoucher }>;
   releaseGiftVoucherApplication(applicationId: string, performedBy: string, reason?: string): Promise<GiftVoucherApplication | undefined>;
   consumeGiftVoucherApplication(applicationId: string, performedBy: string): Promise<GiftVoucherApplication | undefined>;
-  getGiftVoucherApplicationForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication | undefined>;
+  getGiftVoucherApplicationsForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication[]>;
   getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]>;
   getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]>;
   generateVoucherCode(): Promise<string>;

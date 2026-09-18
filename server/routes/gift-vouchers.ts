@@ -113,9 +113,11 @@ router.post("/release", requireAuth, async (req, res) => {
       targetId: string;
       reason?: string;
     };
-    const application = await storage.getGiftVoucherApplicationForTarget(targetType, targetId);
-    if (!application) return res.status(404).json({ error: "No hay una aplicación de voucher activa para esta operación" });
-    const released = await storage.releaseGiftVoucherApplication(application.id, actorName(req), reason);
+    const applications = await storage.getGiftVoucherApplicationsForTarget(targetType, targetId);
+    if (applications.length === 0) return res.status(404).json({ error: "No hay una aplicación de voucher activa para esta operación" });
+    const released = await Promise.all(
+      applications.map(a => storage.releaseGiftVoucherApplication(a.id, actorName(req), reason)),
+    );
     res.json(released);
   } catch (err: any) {
     res.status(400).json({ error: err?.message || "Error al liberar el voucher" });
@@ -128,9 +130,11 @@ router.post("/consume", requireAuth, async (req, res) => {
       targetType: GiftVoucherApplicationTargetType;
       targetId: string;
     };
-    const application = await storage.getGiftVoucherApplicationForTarget(targetType, targetId);
-    if (!application) return res.status(404).json({ error: "No hay una aplicación de voucher activa para esta operación" });
-    const consumed = await storage.consumeGiftVoucherApplication(application.id, actorName(req));
+    const applications = await storage.getGiftVoucherApplicationsForTarget(targetType, targetId);
+    if (applications.length === 0) return res.status(404).json({ error: "No hay una aplicación de voucher activa para esta operación" });
+    const consumed = await Promise.all(
+      applications.map(a => storage.consumeGiftVoucherApplication(a.id, actorName(req))),
+    );
     res.json(consumed);
   } catch (err: any) {
     res.status(400).json({ error: err?.message || "Error al consumir el voucher" });

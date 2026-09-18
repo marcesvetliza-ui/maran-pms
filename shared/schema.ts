@@ -1756,7 +1756,7 @@ export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
 
 // "venta_previa": el tratamiento ya fue facturado y cobrado antes de existir
 // el turno (ver "Turnos vendidos"/spa_treatment_sales) — no es un cobro nuevo.
-export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente" | "venta_previa";
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente" | "venta_previa" | "gift_voucher";
 
 export const spaPayments = pgTable("spa_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1766,6 +1766,10 @@ export const spaPayments = pgTable("spa_payments", {
   isAdvance: text("is_advance").default("false"),
   appointmentId: varchar("appointment_id"),
   reservationId: varchar("reservation_id"),
+  // Solo presente cuando method es "gift_voucher" — permite liberar la
+  // aplicación exacta si este pago puntual se anula, en vez de asumir que
+  // hay una sola aplicación viva contra la cuenta.
+  voucherId: varchar("voucher_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
   status: text("status").notNull().default("active"),
@@ -3148,7 +3152,7 @@ export type GiftVoucher = typeof giftVouchers.$inferSelect;
 // restaurant). Es la fuente de verdad de "dónde está usado" un voucher — evita
 // depender de un solo campo de estado y permite bloquear el doble uso con un
 // SELECT ... FOR UPDATE sobre estas filas dentro de una transacción.
-export type GiftVoucherApplicationTargetType = "reservation" | "restaurant_order";
+export type GiftVoucherApplicationTargetType = "reservation" | "restaurant_order" | "spa_account";
 export type GiftVoucherApplicationStatus = "reservado" | "utilizado" | "liberado";
 
 export const giftVoucherApplications = pgTable("gift_voucher_applications", {
