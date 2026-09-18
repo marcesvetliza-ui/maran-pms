@@ -179,7 +179,13 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
         expect.objectContaining({ item_type: "extra", inventory_item_id: null }),
       ]));
 
-      await waitUntilFolioMovementCount(appointmentId!, 2);
+      // 3, no 2: el turno ya escribió el cargo del tratamiento en el mismo
+      // folio al crearse (sincrónico, dentro de esa transacción) — el
+      // producto y el concepto de este test se suman a ese, no lo reemplazan.
+      // Esperar solo 2 dejaba una ventana donde el cleanup podía correr
+      // mientras el tercer cargo (fire-and-forget) todavía estaba en
+      // camino, violando la FK folio_movements → folios.
+      await waitUntilFolioMovementCount(appointmentId!, 3);
     } finally {
       if (appointmentId) {
         await pool.query(
