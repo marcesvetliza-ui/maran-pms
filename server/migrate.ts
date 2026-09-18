@@ -261,14 +261,22 @@ export async function importCompanyOpeningBalances20260918() {
     const { rows } = await db.execute(sql`
       SELECT
         count(*)::int AS count,
-        coalesce(sum(amount), 0)::numeric(14,2)::text AS total
+        coalesce(sum(amount), 0)::numeric(14,2)::text AS total,
+        EXISTS (
+          SELECT 1 FROM audit_logs
+          WHERE action = 'REALLOCATE_OPENING_BALANCES'
+            AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+        ) AS reallocated
       FROM account_movements
       WHERE entity_type = 'company'
         AND reference = 'OPENING-COMPANY-2026-09-18'
     `);
     const count = Number((rows[0] as any)?.count ?? 0);
     const total = String((rows[0] as any)?.total ?? "0");
-    if (count !== 30 || total !== "47460310.24") {
+    const reallocated = Boolean((rows[0] as any)?.reallocated);
+    const expectedCount = reallocated ? 25 : 30;
+    const expectedTotal = reallocated ? "40870177.64" : "47460310.24";
+    if (count !== expectedCount || total !== expectedTotal) {
       throw new Error(`verificación posterior inválida: ${count} movimientos, total ${total}`);
     }
     logger.info(`Saldos iniciales de empresas verificados: ${count} movimientos, total ${total}.`);
@@ -277,6 +285,371 @@ export async function importCompanyOpeningBalances20260918() {
       new Error(`No se pudieron importar los saldos iniciales de empresas: ${cause?.message ?? cause}`),
       {
         code: "COMPANY_OPENING_BALANCE_IMPORT_FAILED",
+        cause,
+      },
+    );
+  }
+}
+
+export const AGENCY_OPENING_BALANCES_2026_09_18 = [
+  { companyName: "GBT II ARGENTINA S.R.L", agencyName: "GBT II ARGENTINA S.R.L", tradeName: "GLOBAL BUSINESS TRAVEL", cuit: "30714466603", amount: "1338500.00" },
+  { companyName: "GRUPO SAN MARCOS SRL", agencyName: "GRUPO SAN MARCOS SRL", tradeName: "KEEPERS TRAVEL", cuit: "30714516546", amount: "546000.00" },
+  { companyName: "DESPEGAR.COM.AR SA", agencyName: "DESPEGAR.COM.AR SA", tradeName: "DESPEGAR", cuit: "30701307115", amount: "2198632.60" },
+  { companyName: "ITS INTERNATIONAL SERVICES SA", agencyName: "ITS INTERNATIONAL SERVICES SA", tradeName: "PEZZATTI", cuit: "30676757917", amount: "814000.00" },
+  { companyName: "PUNTO TURISTICO SA", agencyName: "PUNTO TURISTICO SA", tradeName: "PUNTO TURISTICO", cuit: "30698479252", amount: "1693000.00" },
+] as const;
+
+const agencyCompanyNames = new Set<string>(
+  AGENCY_OPENING_BALANCES_2026_09_18.map((row) => row.companyName),
+);
+const remainingCompanyOpeningBalanceValuesSql = COMPANY_OPENING_BALANCES_2026_09_18
+  .filter((row) => !agencyCompanyNames.has(row.name))
+  .map((row) => {
+    const aliasesSql = row.aliases
+      .map((alias) => `'${escapeSqlLiteral(alias)}'`)
+      .join(", ");
+    return `('${row.code}', '${escapeSqlLiteral(row.name)}', ${row.amount}::numeric, ARRAY[${aliasesSql}]::text[])`;
+  })
+  .join(",\n        ");
+const agencyOpeningBalanceValuesSql = AGENCY_OPENING_BALANCES_2026_09_18
+  .map((row) => `('${escapeSqlLiteral(row.companyName)}', '${escapeSqlLiteral(row.agencyName)}', '${escapeSqlLiteral(row.tradeName)}', '${row.cuit}', ${row.amount}::numeric)`)
+  .join(",\n        ");
+
+export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalDdl(`
+  SET LOCAL lock_timeout = '8s';
+  SET LOCAL statement_timeout = '30s';
+
+  DO $migration$
+  DECLARE
+    opening record;
+    matched_company_id varchar;
+    matched_agency_id varchar;
+    matched_count integer;
+    company_count integer := 0;
+    company_total numeric := 0;
+    agency_count integer := 0;
+    agency_total numeric := 0;
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM audit_logs
+      WHERE action = 'REALLOCATE_OPENING_BALANCES'
+        AND module = 'cuenta_corriente'
+        AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+    ) THEN
+      RETURN;
+    END IF;
+
+    LOCK TABLE
+      companies,
+      agencies,
+      guests,
+      reservations,
+      payments,
+      events,
+      account_movements,
+      account_movement_allocations
+      IN ACCESS EXCLUSIVE MODE;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${remainingCompanyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la empresa % tiene % coincidencias',
+          opening.company_name,
+          matched_count;
+      END IF;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la empresa-agencia % tiene % fichas de empresa',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      SELECT count(*), min(a.id)
+      INTO matched_count, matched_agency_id
+      FROM agencies a
+      WHERE regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+      IF matched_count > 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la agencia % tiene % coincidencias',
+          opening.agency_name,
+          matched_count;
+      END IF;
+
+      IF matched_count = 0 THEN
+        INSERT INTO agencies (
+          razon_social,
+          nombre_fantasia,
+          cuil_cuit,
+          notes,
+          is_active,
+          created_at
+        ) VALUES (
+          opening.agency_name,
+          opening.trade_name,
+          opening.cuit,
+          'Creada al reclasificar saldo inicial desde Empresas',
+          'true',
+          now()
+        )
+        RETURNING id INTO matched_agency_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM guests
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) OR EXISTS (
+        SELECT 1 FROM reservations
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) OR EXISTS (
+        SELECT 1 FROM payments
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: % tiene referencias con otra agencia',
+          opening.company_name;
+      END IF;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT min(c.id), min(a.id)
+      INTO matched_company_id, matched_agency_id
+      FROM companies c
+      CROSS JOIN agencies a
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        AND regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+
+      UPDATE guests
+      SET company_id = NULL, agency_id = matched_agency_id
+      WHERE company_id = matched_company_id;
+
+      UPDATE reservations
+      SET company_id = NULL, agency_id = matched_agency_id
+      WHERE company_id = matched_company_id;
+
+      UPDATE payments
+      SET
+        company_id = NULL,
+        agency_id = matched_agency_id,
+        billing_target = CASE WHEN billing_target = 'company' THEN 'agency' ELSE billing_target END
+      WHERE company_id = matched_company_id;
+
+      UPDATE events
+      SET company_id = NULL
+      WHERE company_id = matched_company_id;
+    END LOOP;
+
+    DELETE FROM account_movement_allocations;
+    DELETE FROM account_movements;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${remainingCompanyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT min(c.id)
+      INTO matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      INSERT INTO account_movements (
+        entity_type, entity_id, date, type, description, amount, reference, created_by, created_at
+      ) VALUES (
+        'company',
+        matched_company_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-COMPANY-2026-09-18',
+        'system-import',
+        now()
+      );
+      company_count := company_count + 1;
+      company_total := company_total + opening.amount;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT min(a.id)
+      INTO matched_agency_id
+      FROM agencies a
+      WHERE regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+
+      INSERT INTO account_movements (
+        entity_type, entity_id, date, type, description, amount, reference, created_by, created_at
+      ) VALUES (
+        'agency',
+        matched_agency_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-AGENCY-2026-09-18',
+        'system-import',
+        now()
+      );
+      agency_count := agency_count + 1;
+      agency_total := agency_total + opening.amount;
+    END LOOP;
+
+    IF company_count <> 25 OR company_total <> 40870177.64::numeric
+       OR agency_count <> 5 OR agency_total <> 6590132.60::numeric THEN
+      RAISE EXCEPTION
+        'Reasignación detenida: empresas %/% agencias %/%',
+        company_count, company_total, agency_count, agency_total;
+    END IF;
+
+    DELETE FROM companies c
+    WHERE EXISTS (
+      SELECT 1
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(source.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+    );
+
+    IF (SELECT count(*) FROM account_movements WHERE entity_type = 'company') <> 25
+       OR (SELECT coalesce(sum(amount), 0) FROM account_movements WHERE entity_type = 'company') <> 40870177.64::numeric
+       OR (SELECT count(*) FROM account_movements WHERE entity_type = 'agency') <> 5
+       OR (SELECT coalesce(sum(amount), 0) FROM account_movements WHERE entity_type = 'agency') <> 6590132.60::numeric
+       OR EXISTS (SELECT 1 FROM account_movements WHERE entity_type = 'guest') THEN
+      RAISE EXCEPTION 'Reasignación detenida: los saldos finales no coinciden';
+    END IF;
+
+    INSERT INTO audit_logs (
+      user_name, action, module, entity_type, description, details, "timestamp"
+    ) VALUES (
+      'system-import',
+      'REALLOCATE_OPENING_BALANCES',
+      'cuenta_corriente',
+      'company_agency_guest',
+      'Reasignación de saldos iniciales de empresas a agencias y limpieza de clientes',
+      'OPENING-CC-REALLOCATION-2026-09-18; empresas 25/40870177.64; agencias 5/6590132.60; clientes 0',
+      now()
+    );
+  END
+  $migration$;
+`);
+
+export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_POSTCHECK_SQL = `
+  SELECT
+    count(*) FILTER (
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    )::int AS company_count,
+    coalesce(sum(amount) FILTER (
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    ), 0)::numeric(14,2)::text AS company_total,
+    count(*) FILTER (
+      WHERE entity_type = 'agency'
+        AND reference = 'OPENING-AGENCY-2026-09-18'
+    )::int AS agency_count,
+    coalesce(sum(amount) FILTER (
+      WHERE entity_type = 'agency'
+        AND reference = 'OPENING-AGENCY-2026-09-18'
+    ), 0)::numeric(14,2)::text AS agency_total,
+    (
+      SELECT count(*)::int
+      FROM companies c
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (ARRAY[
+          'gbtiiargentinasrl',
+          'gruposanmarcossrl',
+          'despegarcomarsa',
+          'itsinternationalservicessa',
+          'puntoturisticosa'
+        ])
+    ) AS duplicate_company_count,
+    EXISTS (
+      SELECT 1 FROM audit_logs
+      WHERE action = 'REALLOCATE_OPENING_BALANCES'
+        AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+    ) AS audit_exists
+  FROM account_movements
+`;
+
+export function assertCurrentAccountReallocationPostcheck(result: any) {
+  if (
+    Number(result?.company_count) !== 25
+    || String(result?.company_total) !== "40870177.64"
+    || Number(result?.agency_count) !== 5
+    || String(result?.agency_total) !== "6590132.60"
+    || Number(result?.duplicate_company_count) !== 0
+    || result?.audit_exists !== true
+  ) {
+    throw new Error(`verificación posterior inválida: ${JSON.stringify(result)}`);
+  }
+}
+
+export async function reallocateCurrentAccountOpeningBalances20260918() {
+  try {
+    await db.execute(sql.raw(CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL));
+    const { rows } = await db.execute(
+      sql.raw(CURRENT_ACCOUNT_REALLOCATION_2026_09_18_POSTCHECK_SQL),
+    );
+    const result = rows[0] as any;
+    assertCurrentAccountReallocationPostcheck(result);
+    logger.info(
+      "Cuentas corrientes verificadas: empresas 25/$40870177.64, agencias 5/$6590132.60, clientes $0.",
+    );
+  } catch (cause: any) {
+    throw Object.assign(
+      new Error(`No se pudieron reasignar los saldos de cuentas corrientes: ${cause?.message ?? cause}`),
+      {
+        code: "CURRENT_ACCOUNT_REALLOCATION_FAILED",
         cause,
       },
     );
@@ -3245,6 +3618,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // makes reruns a no-op; any ambiguous company match aborts the transaction
   // before existing movements are removed.
   await importCompanyOpeningBalances20260918();
+  await reallocateCurrentAccountOpeningBalances20260918();
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
