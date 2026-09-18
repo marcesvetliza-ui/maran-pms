@@ -21,6 +21,9 @@ import {
   cashMovements,
   folios,
   auditLogs,
+  giftVouchers,
+  giftVoucherEvents,
+  type GiftVoucherStatus,
 } from "@shared/schema";
 import { requireAuth, requireRole } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
@@ -239,6 +242,38 @@ async function lockAndAssertSpaAvailability(
       );
     }
   }
+}
+
+// "Voucher por prestación": un gift voucher puede nacer vinculado a una venta
+// anticipada de tratamiento (linked_treatment_sale_id) en vez de ser un monto
+// libre. Su estado lo dicta esa venta, no la acción manual de "Marcar como
+// utilizado" — agendar el turno lo reserva, completarlo lo consume. Solo
+// transiciona si el voucher sigue en el estado de origen esperado, así que
+// es un no-op seguro ante un reintento o si no hay voucher vinculado.
+async function syncLinkedGiftVoucherStatus(
+  tx: any,
+  treatmentSaleId: string,
+  toStatus: "reservado" | "utilizado",
+  reason: string,
+  performedBy: string | null,
+) {
+  const fromStatuses: GiftVoucherStatus[] = toStatus === "reservado" ? ["activo", "activo_facturado"] : ["reservado"];
+  const [voucher] = await tx.select().from(giftVouchers)
+    .where(and(
+      eq(giftVouchers.linkedTreatmentSaleId, treatmentSaleId),
+      inArray(giftVouchers.status, fromStatuses),
+    ))
+    .for("update");
+  if (!voucher) return;
+
+  await tx.update(giftVouchers)
+    .set(toStatus === "utilizado"
+      ? { status: toStatus, usedAt: new Date(), usedBy: performedBy }
+      : { status: toStatus })
+    .where(eq(giftVouchers.id, voucher.id));
+  await tx.insert(giftVoucherEvents).values({
+    voucherId: voucher.id, eventType: toStatus, fromStatus: voucher.status, toStatus, reason, performedBy,
+  });
 }
 
 export function registerSpaRoutes(app: Express) {
@@ -936,6 +971,14 @@ export function registerSpaRoutes(app: Express) {
           soldTreatmentSaleId: soldSale?.id || null,
         }).returning();
 
+        if (soldSale) {
+          await syncLinkedGiftVoucherStatus(
+            tx, soldSale.id, "reservado",
+            `Turno agendado (${createdAppointment.id})`,
+            (req as any).user?.username || null,
+          );
+        }
+
         const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
         // La venta ya cobró al precio vigente el día que se facturó — el
         // catálogo pudo cambiar de precio desde entonces, así que el turno
@@ -1267,6 +1310,11 @@ export function registerSpaRoutes(app: Express) {
             WHERE id = ${current.soldTreatmentSaleId}
               AND quantity_used < quantity_purchased
           `);
+          await syncLinkedGiftVoucherStatus(
+            tx, current.soldTreatmentSaleId, "utilizado",
+            `Turno completado (${current.id})`,
+            (req as any).user?.username || null,
+          );
         }
 
         return { ...updated, enteringInProgress };

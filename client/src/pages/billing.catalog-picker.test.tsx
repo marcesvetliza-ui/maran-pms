@@ -213,5 +213,75 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
       await waitFor(() => expect(capture.body).toBeTruthy());
       expect(capture.body.items[0].spaTreatmentId).toBeUndefined();
     });
+
+    describe("Voucher por prestación — marcar un ítem de Spa como regalo", () => {
+      it("el toggle 'Es un regalo' sólo aparece en ítems con spaTreatmentId", async () => {
+        const user = userEvent.setup();
+        renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+        // Fila manual inicial — sin spaTreatmentId, sin toggle.
+        expect(screen.queryByTestId("checkbox-item-is-gift-0")).not.toBeInTheDocument();
+
+        await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+        await user.click(await screen.findByTestId("catalog-item-tr-2"));
+
+        expect(screen.getByTestId("checkbox-item-is-gift-0")).toBeInTheDocument();
+      });
+
+      it("tildarlo pide el nombre del beneficiario y lo manda como giftBeneficiaryName", async () => {
+        const capture: { body: any } = { body: undefined };
+        vi.stubGlobal("fetch", buildCaptureFetchMock(capture));
+        vi.stubGlobal("open", vi.fn());
+        const user = userEvent.setup();
+        renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+        await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+        await user.click(await screen.findByTestId("catalog-item-tr-2"));
+        await user.click(screen.getByTestId("checkbox-item-is-gift-0"));
+        await user.type(screen.getByTestId("item-gift-beneficiary-0"), "María Gómez");
+
+        await user.type(screen.getByTestId("input-razon-social"), "Cliente de Prueba");
+        await user.click(screen.getByTestId("btn-emitir-confirmar"));
+        await user.click(screen.getByTestId("btn-confirmar-emitir"));
+
+        await waitFor(() => expect(capture.body).toBeTruthy());
+        expect(capture.body.items[0]).toMatchObject({
+          descripcion: "Circuito Spa", spaTreatmentId: "tr-2", giftBeneficiaryName: "María Gómez",
+        });
+      });
+
+      it("tildarlo sin cargar el beneficiario bloquea el envío", async () => {
+        const user = userEvent.setup();
+        renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+        await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+        await user.click(await screen.findByTestId("catalog-item-tr-2"));
+        await user.click(screen.getByTestId("checkbox-item-is-gift-0"));
+
+        await user.type(screen.getByTestId("input-razon-social"), "Cliente de Prueba");
+        await user.click(screen.getByTestId("btn-emitir-confirmar"));
+
+        expect(screen.queryByTestId("btn-confirmar-emitir")).not.toBeInTheDocument();
+        expect(screen.getByText("Nombre del beneficiario requerido")).toBeInTheDocument();
+      });
+
+      it("un ítem de spa sin tildar 'Es un regalo' no manda giftBeneficiaryName", async () => {
+        const capture: { body: any } = { body: undefined };
+        vi.stubGlobal("fetch", buildCaptureFetchMock(capture));
+        vi.stubGlobal("open", vi.fn());
+        const user = userEvent.setup();
+        renderDialog({ allowedTipos: ["FB"], cashArea: "spa", showPaymentMethod: true });
+
+        await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+        await user.click(await screen.findByTestId("catalog-item-tr-2"));
+
+        await user.type(screen.getByTestId("input-razon-social"), "Cliente de Prueba");
+        await user.click(screen.getByTestId("btn-emitir-confirmar"));
+        await user.click(screen.getByTestId("btn-confirmar-emitir"));
+
+        await waitFor(() => expect(capture.body).toBeTruthy());
+        expect(capture.body.items[0].giftBeneficiaryName).toBeUndefined();
+      });
+    });
   });
 });

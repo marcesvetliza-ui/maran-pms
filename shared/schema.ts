@@ -3141,6 +3141,12 @@ export const giftVouchers = pgTable("gift_vouchers", {
   // comprobante de la operación donde luego se lo consume, que vive en la
   // aplicación (gift_voucher_applications), no acá.
   saleInvoiceId: integer("sale_invoice_id").references(() => salesInvoices.id),
+  // Presente solo en un voucher "por prestación" (regalar un tratamiento SPA
+  // concreto, no un monto): la venta anticipada de la que nació. Mientras
+  // esté seteado, el estado del voucher lo dicta el turno vendido — agendar
+  // lo pasa a "reservado", completarlo a "utilizado" (ver routes/spa.ts) —
+  // en vez de la acción manual de "Marcar como utilizado".
+  linkedTreatmentSaleId: varchar("linked_treatment_sale_id").references(() => spaTreatmentSales.id),
   cancelledAt: timestamp("cancelled_at"),
   cancelledBy: text("cancelled_by"),
   cancelReason: text("cancel_reason"),

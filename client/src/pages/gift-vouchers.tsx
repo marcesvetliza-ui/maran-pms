@@ -19,6 +19,7 @@ import {
   Ban,
   Eye,
   MoreHorizontal,
+  Link as LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -725,6 +726,13 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Área</p><p className="font-medium">{AREA_LABELS[voucher.area as Area] ?? voucher.area}</p></div>
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Tipo</p><p className="font-medium">{voucher.valueType === "monetario" ? "Monetario" : "Descriptivo"}</p></div>
             <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Descripción</p><p className="font-medium">{voucher.description}</p></div>
+            {voucher.linkedTreatmentSaleId && (
+              <div className="col-span-2 flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 rounded-md px-2 py-1.5">
+                <LinkIcon className="h-3.5 w-3.5 shrink-0" />
+                Vinculado a un turno vendido — su estado lo actualiza automáticamente
+                el circuito de Turnos Vendidos al agendar y completar el turno, no se marca a mano.
+              </div>
+            )}
             {voucher.valueAmount && (
               <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Valor</p><p className="font-medium text-green-600 font-mono">${fmtMoney(voucher.valueAmount)}</p></div>
             )}
@@ -1000,7 +1008,7 @@ export default function GiftVouchersPage() {
                             <DropdownMenuItem onClick={() => printVoucher(v)}>
                               <Printer className="h-4 w-4 mr-2" /> Imprimir voucher
                             </DropdownMenuItem>
-                            {["activo", "activo_facturado"].includes(v.status) && (
+                            {["activo", "activo_facturado"].includes(v.status) && !v.linkedTreatmentSaleId && (
                               <DropdownMenuItem onClick={() => setSelectedForUse(v)}>
                                 <CheckCircle2 className="h-4 w-4 mr-2 text-green-600" /> Marcar como usado
                               </DropdownMenuItem>
