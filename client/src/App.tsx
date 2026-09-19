@@ -78,6 +78,7 @@ const CostCentersAbmPage = lazy(() => import("@/pages/cost-centers-abm"));
 const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
+const GroupFiscalCollectionWatcher = lazy(() => import("@/components/group-fiscal-collection-watcher"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
 const RecetasCostosPage = lazy(() => import("@/pages/recetas-costos"));
 const AdminIndecPage = lazy(() => import("@/pages/admin-indec"));
@@ -384,6 +385,9 @@ function AppLayout() {
       </div>
       <Suspense fallback={null}>
         <HelpChat />
+      </Suspense>
+      <Suspense fallback={null}>
+        <GroupFiscalCollectionWatcher />
       </Suspense>
     </SidebarProvider>
   );

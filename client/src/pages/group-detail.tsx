@@ -106,6 +106,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { recoverGroupFiscalCollection } from "@/lib/group-fiscal-collection-recovery";
 import {
   availableGroupInvoiceTotal,
   buildGroupInvoiceItems,
@@ -1174,84 +1175,17 @@ export default function GroupDetailPage() {
   useEffect(() => {
     for (const pending of pendingFiscalCollections) {
       const invoiceId = Number(pending?.id);
-      const intent = pending?.intent;
-      if (!invoiceId || recoveringFiscalInvoices.current.has(invoiceId) || !intent?.endpoint || !intent?.body) continue;
-      const allowedEndpoints = new Set([
-        `/api/groups/${groupId}/payment`,
-        `/api/groups/${groupId}/master-payment`,
-      ]);
-      if (!allowedEndpoints.has(String(intent.endpoint))) continue;
+      if (!invoiceId || recoveringFiscalInvoices.current.has(invoiceId)) continue;
       recoveringFiscalInvoices.current.add(invoiceId);
-      const finalConcepts = (Array.isArray(pending.items) ? pending.items : [])
-        .map((item: any) => ({
-          description: String(item.descripcion || item.description || "").trim(),
-          amount: Number(item.subtotal ?? (Number(item.precioUnitario || 0) * Number(item.cantidad || 1))),
-        }))
-        .filter((item: any) => item.description && item.amount > 0);
-      const oldTotal = (intent.body.concepts || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
-      const newTotal = finalConcepts.reduce((sum: number, item: any) => sum + item.amount, 0);
-      const sourceRows = intent.body.paymentRows || [];
-      // An emitted invoice can have been created by an older client which put
-      // its gross document amount in paymentRows even though an advance had
-      // already settled part of it. The persisted settlement breakdown is the
-      // authoritative recovery instruction: never recreate that overpayment
-      // from the stale payment rows. This also keeps an operator's edited
-      // invoice total aligned with the original advance application.
-      const appliedAdvances = Math.min(
-        newTotal,
-        Math.max(0, Number(intent.body.settlementBreakdown?.appliedAdvances || 0)),
-      );
-      const targetGrossCents = Math.round((newTotal - appliedAdvances) * 100);
-      const retentionCents = Math.round(sourceRows.reduce((sum: number, row: any) =>
-        sum + Number(row.retention?.monto || 0), 0) * 100);
-      if (targetGrossCents <= retentionCents || targetGrossCents <= 0) {
-        recoveringFiscalInvoices.current.delete(invoiceId);
-        toast({
-          title: "Cobro fiscal pendiente",
-          description: "El comprobante emitido requiere revisar sus retenciones antes de poder registrar el cobro.",
-          variant: "destructive",
+      recoverGroupFiscalCollection(groupId, pending)
+        .then((result) => {
+          if (result !== "recovered") recoveringFiscalInvoices.current.delete(invoiceId);
+        })
+        .catch(() => {
+          recoveringFiscalInvoices.current.delete(invoiceId);
         });
-        continue;
-      }
-      const eligible = sourceRows.map((row: any, index: number) => ({ row, index }))
-        .filter(({ row }: any) => row.method !== "retencion" && Number(row.amount || 0) > 0);
-      const weightTotal = eligible.reduce((sum: number, entry: any) => sum + Number(entry.row.amount || 0), 0);
-      let allocated = 0;
-      const centsByIndex = new Map<number, number>();
-      eligible.forEach((entry: any, position: number) => {
-        const cents = position === eligible.length - 1
-          ? targetGrossCents - retentionCents - allocated
-          : Math.floor((targetGrossCents - retentionCents) * Number(entry.row.amount || 0) / weightTotal);
-        centsByIndex.set(entry.index, cents);
-        allocated += cents;
-      });
-      const paymentRows = sourceRows.map((row: any, index: number) =>
-        centsByIndex.has(index) ? { ...row, amount: (centsByIndex.get(index)! / 100).toFixed(2) } : row
-      );
-      apiRequest("POST", intent.endpoint, {
-        ...intent.body,
-        paymentRows,
-        concepts: finalConcepts,
-        settlementBreakdown: {
-          documentTotal: newTotal,
-          appliedAdvances,
-          newCollection: targetGrossCents / 100,
-        },
-        // The post-emission snapshot no longer has a non-fiscal advance (the
-        // invoice consumes fiscal availability). Supply its persisted intent
-        // so the server can validate the same advance split on recovery.
-        invoiceData: { id: invoiceId, groupPaymentIntent: intent },
-      }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-fiscal-collections"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
-        toast({ title: "Cobro fiscal recuperado", description: "Se completó un cobro confirmado que había quedado pendiente." });
-      }).catch(() => {
-        recoveringFiscalInvoices.current.delete(invoiceId);
-      });
     }
-  }, [pendingFiscalCollections, groupId, queryClient, toast]);
+  }, [pendingFiscalCollections, groupId]);
 
   const refreshGroupBillingState = async () => {
     await Promise.all([
