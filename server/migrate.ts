@@ -3728,6 +3728,20 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // Confirmación selectiva de revisiones de Channex (#542): antes, "Sincronizar
+  // y confirmar" volvía a pedirle a Channex todo lo pendiente en ese momento y
+  // confirmaba el lote entero, así que una revisión nueva aparecida entre el
+  // preview y la confirmación se confirmaba sin que nadie la hubiera visto.
+  // Con esta columna, confirmar opera solo sobre lo ya persistido por un
+  // preview previo.
+  await withTimeout("channex_bookings.acknowledged_revision_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE channex_bookings
+        ADD COLUMN acknowledged_revision_id text,
+        ADD COLUMN acknowledged_at timestamp
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

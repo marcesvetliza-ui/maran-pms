@@ -672,6 +672,13 @@ export const channexBookings = pgTable("channex_bookings", {
   errorMessage: text("error_message"),
   importedAt: timestamp("imported_at"),
   importedBy: varchar("imported_by"),
+  // Confirmación selectiva (#542): mientras acknowledgedRevisionId sea distinto
+  // de channexRevisionId (o nulo), esta fila está pendiente de confirmar a
+  // Channex. Confirmar solo opera sobre filas ya persistidas por un preview
+  // previo — nunca sobre lo que devuelva un fetch nuevo — así una revisión
+  // que apareció después del preview no puede confirmarse sin haberla visto.
+  acknowledgedRevisionId: text("acknowledged_revision_id"),
+  acknowledgedAt: timestamp("acknowledged_at"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 }, (table) => ({

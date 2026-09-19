@@ -126,6 +126,25 @@ async function isMapped(connectionId: string, channexRoomTypeId: string | null, 
   return Boolean(roomTypeMapping?.roomTypeId) && Boolean(ratePlanMapping?.ratePlanId);
 }
 
+/**
+ * `channexBookings.isMapped` se calcula y guarda en el momento del preview
+ * (syncBookings) — si alguien completa el mapeo DESPUÉS de haber
+ * previsualizado una reserva, esa fila queda con isMapped=false stale hasta
+ * que se vuelva a previsualizar. Recepción no debería tener que previsualizar
+ * de nuevo solo para que el sistema note un mapeo que ya completó, así que
+ * las rutas que editan un mapeo (ver routes/channex.ts) llaman esto después.
+ */
+export async function recomputeMappedFlags(connectionId: string): Promise<void> {
+  const rows = await db.select().from(channexBookings).where(eq(channexBookings.connectionId, connectionId));
+  for (const row of rows) {
+    if (!row.channexRoomTypeId || !row.channexRatePlanId) continue; // multiRoom u otro caso sin datos de mapeo
+    const mapped = await isMapped(connectionId, row.channexRoomTypeId, row.channexRatePlanId);
+    if (mapped !== row.isMapped) {
+      await db.update(channexBookings).set({ isMapped: mapped, updatedAt: new Date() }).where(eq(channexBookings.id, row.id));
+    }
+  }
+}
+
 type ExtractedBooking = {
   channexBookingId: string;
   otaName: string | null;
@@ -189,25 +208,19 @@ export type BookingSyncSummary = {
   fetched: number;
   created: number;
   updated: number;
-  ackFailures: number;
-  acknowledged: boolean;
 };
 
 /**
- * `acknowledge` decide si esta corrida le confirma a Channex las revisiones
- * que trajo. Confirmar es lo que las saca del feed de pendientes — con la
- * propiedad demo (10 reservas fijas) conviene poder traer y revisar sin
- * gastar ese cupo, así que el default es `false` ("Previsualizar"): guarda
- * todo localmente igual, pero no le confirma nada a Channex, y la próxima
- * corrida vuelve a traer las mismas revisiones. `acknowledge: true`
- * ("Sincronizar y confirmar") es la única que de verdad consume el feed.
+ * "Previsualizar": trae el feed de Channex y lo guarda localmente. NUNCA
+ * confirma nada a Channex — eso es un paso aparte, ver confirmBookings.
+ * Se puede repetir sin gastar el feed (con la demo, 10 reservas fijas).
  */
-export async function syncBookings(connectionId: string, acknowledge = false): Promise<BookingSyncSummary> {
+export async function syncBookings(connectionId: string): Promise<BookingSyncSummary> {
   const connection = await getConnectionOrThrow(connectionId);
   const credentials = toCredentials(connection);
   const revisions = await fetchPendingBookingRevisions(credentials, connection.channexPropertyId);
 
-  const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0, ackFailures: 0, acknowledged: acknowledge };
+  const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0 };
 
   for (const revision of revisions) {
     const extracted = extractBookingFields(revision);
@@ -268,20 +281,78 @@ export async function syncBookings(connectionId: string, acknowledge = false): P
       await db.insert(channexBookings).values({ ...values, createdAt: new Date() });
       summary.created += 1;
     }
+  }
 
-    if (!acknowledge) continue;
+  await db.update(channexConnections).set({ lastBookingSyncAt: new Date() }).where(eq(channexConnections.id, connectionId));
 
+  return summary;
+}
+
+export class InvalidRevisionSelectionError extends Error {
+  invalidRevisionIds: string[];
+
+  constructor(invalidRevisionIds: string[]) {
+    super(`Estas revisiones no están pendientes de confirmar en esta conexión: ${invalidRevisionIds.join(", ")}`);
+    this.name = "InvalidRevisionSelectionError";
+    this.invalidRevisionIds = invalidRevisionIds;
+  }
+}
+
+export type ConfirmBookingsSummary = {
+  pending: number;
+  selected: number;
+  confirmed: number;
+  failed: number;
+};
+
+/**
+ * Confirma (ACK) revisiones a Channex. Nunca vuelve a pedirle el feed a
+ * Channex — opera solo sobre lo que un preview previo ya dejó guardado en
+ * `channex_bookings` (ver acknowledgedRevisionId en schema.ts). Por eso una
+ * revisión nueva que haya aparecido en Channex después del último preview
+ * no puede colarse en una confirmación: si nadie la previsualizó, no existe
+ * todavía como fila local para seleccionar.
+ *
+ * `revisionIds` opcional: cuáles confirmar. Si se omite, confirma el lote
+ * completo de lo pendiente. Si se pasa, cualquier id que no esté pendiente
+ * en ESTA conexión (de otra conexión, ya confirmado, o inexistente) hace
+ * que la llamada entera se rechace con InvalidRevisionSelectionError, sin
+ * confirmar nada.
+ */
+export async function confirmBookings(connectionId: string, revisionIds?: string[]): Promise<ConfirmBookingsSummary> {
+  const connection = await getConnectionOrThrow(connectionId);
+  const credentials = toCredentials(connection);
+
+  const rows = await db.select().from(channexBookings).where(eq(channexBookings.connectionId, connectionId));
+  const pendingRows = rows.filter((row) => row.channexRevisionId && row.channexRevisionId !== row.acknowledgedRevisionId);
+
+  let toConfirm = pendingRows;
+  if (revisionIds && revisionIds.length > 0) {
+    const pendingByRevisionId = new Map(pendingRows.map((row) => [row.channexRevisionId as string, row]));
+    const invalid = revisionIds.filter((id) => !pendingByRevisionId.has(id));
+    if (invalid.length > 0) throw new InvalidRevisionSelectionError(invalid);
+    toConfirm = revisionIds.map((id) => pendingByRevisionId.get(id)!);
+  }
+
+  const summary: ConfirmBookingsSummary = { pending: pendingRows.length, selected: toConfirm.length, confirmed: 0, failed: 0 };
+
+  for (const row of toConfirm) {
     try {
-      await acknowledgeBookingRevision(credentials, revision.id as string);
+      await acknowledgeBookingRevision(credentials, row.channexRevisionId as string);
+      await db
+        .update(channexBookings)
+        .set({ acknowledgedRevisionId: row.channexRevisionId, acknowledgedAt: new Date(), errorMessage: null, updatedAt: new Date() })
+        .where(eq(channexBookings.id, row.id));
+      summary.confirmed += 1;
     } catch (err) {
-      summary.ackFailures += 1;
+      summary.failed += 1;
       const note = err instanceof ChannexApiError
         ? `No se pudo confirmar la recepción a Channex (ack): ${err.message}`
         : `No se pudo confirmar la recepción a Channex (ack): ${(err as Error).message}`;
       await db
         .update(channexBookings)
-        .set({ errorMessage: [errorMessage, note].filter(Boolean).join(" | "), updatedAt: new Date() })
-        .where(and(eq(channexBookings.connectionId, connectionId), eq(channexBookings.channexBookingId, extracted.channexBookingId)));
+        .set({ errorMessage: [row.errorMessage, note].filter(Boolean).join(" | "), updatedAt: new Date() })
+        .where(eq(channexBookings.id, row.id));
     }
   }
 
