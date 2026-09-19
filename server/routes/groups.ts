@@ -1210,6 +1210,39 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  // Same recovery source as the per-group endpoint below, but scanning every
+  // group instead of one. Reception (or anyone logged in) may never reopen
+  // the specific group whose cobro got orphaned — a confirmed invoice with
+  // no linked Caja/CC movement must not depend on that. Polled in the
+  // background by GroupFiscalCollectionWatcher (client/src/App.tsx).
+  app.get("/api/groups/pending-fiscal-collections", requireAuth, async (req, res) => {
+    try {
+      assertFinancialSchemaReady();
+      const result = await db.execute(sql`
+        SELECT id, group_id, items, group_payment_intent
+        FROM sales_invoices
+        WHERE group_id IS NOT NULL
+          AND estado = 'emitida'
+          AND group_payment_id IS NULL
+          AND group_payment_intent IS NOT NULL
+        ORDER BY id
+      `);
+      res.json(result.rows.map((row: any) => ({
+        id: Number(row.id),
+        groupId: row.group_id,
+        items: row.items,
+        intent: row.group_payment_intent,
+      })));
+    } catch (error) {
+      console.error("[pending-fiscal-collections:all] Error:", error);
+      const typedError = error as any;
+      res.status(typedError?.statusCode || 500).json({
+        error: typedError?.message || "No se pudieron recuperar los cobros fiscales pendientes",
+        ...(typedError?.code ? { code: typedError.code } : {}),
+      });
+    }
+  });
+
   app.get("/api/groups/:groupId/pending-fiscal-collections", requireAuth, async (req, res) => {
     try {
       assertFinancialSchemaReady();
