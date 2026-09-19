@@ -584,6 +584,108 @@ export type OTAReservationLogWithChannel = OTAReservationLog & {
   channel: OTAChannel;
 };
 
+// Channex (channel manager) — conexión, mapeo de catálogo y bandeja de reservas.
+// Fase 1: solo lectura desde Channex. "Importar" nunca escribe en `reservations` —
+// ver ChannexBooking.status "imported" como una marca de revisión, no una reserva real.
+export type ChannexEnvironment = "demo" | "real";
+export type ChannexBookingStatus = "new" | "needs_review" | "imported" | "modified" | "cancelled" | "error";
+
+export const channexConnections = pgTable("channex_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  label: text("label").notNull(),
+  environment: text("environment").$type<ChannexEnvironment>().notNull().default("demo"),
+  channexPropertyId: text("channex_property_id").notNull(),
+  apiKey: text("api_key").notNull(),
+  baseUrl: text("base_url").notNull().default("https://staging.channex.io/api/v1"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastCatalogSyncAt: timestamp("last_catalog_sync_at"),
+  lastBookingSyncAt: timestamp("last_booking_sync_at"),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export const insertChannexConnectionSchema = createInsertSchema(channexConnections)
+  .omit({ id: true, createdAt: true })
+  .extend({ environment: z.enum(["demo", "real"]).default("demo") });
+export type InsertChannexConnection = z.infer<typeof insertChannexConnectionSchema>;
+export type ChannexConnection = typeof channexConnections.$inferSelect;
+export type ChannexConnectionPublic = Omit<ChannexConnection, "apiKey">;
+
+export const channexRoomTypeMappings = pgTable("channex_room_type_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexRoomTypeId: text("channex_room_type_id").notNull(),
+  channexRoomTypeTitle: text("channex_room_type_title").notNull(),
+  roomTypeId: varchar("room_type_id"),
+  createdAt: timestamp("created_at").notNull(),
+}, (table) => ({
+  connectionChannexRoomTypeUnique: uniqueIndex("channex_room_type_mappings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexRoomTypeId),
+}));
+
+export const insertChannexRoomTypeMappingSchema = createInsertSchema(channexRoomTypeMappings).omit({ id: true, createdAt: true });
+export type InsertChannexRoomTypeMapping = z.infer<typeof insertChannexRoomTypeMappingSchema>;
+export type ChannexRoomTypeMapping = typeof channexRoomTypeMappings.$inferSelect;
+
+export const channexRatePlanMappings = pgTable("channex_rate_plan_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexRatePlanId: text("channex_rate_plan_id").notNull(),
+  channexRatePlanTitle: text("channex_rate_plan_title").notNull(),
+  channexRoomTypeId: text("channex_room_type_id").notNull(),
+  ratePlanId: varchar("rate_plan_id"),
+  createdAt: timestamp("created_at").notNull(),
+}, (table) => ({
+  connectionChannexRatePlanUnique: uniqueIndex("channex_rate_plan_mappings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexRatePlanId),
+}));
+
+export const insertChannexRatePlanMappingSchema = createInsertSchema(channexRatePlanMappings).omit({ id: true, createdAt: true });
+export type InsertChannexRatePlanMapping = z.infer<typeof insertChannexRatePlanMappingSchema>;
+export type ChannexRatePlanMapping = typeof channexRatePlanMappings.$inferSelect;
+
+export const channexBookings = pgTable("channex_bookings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexBookingId: text("channex_booking_id").notNull(),
+  channexRevisionId: text("channex_revision_id"),
+  status: text("status").$type<ChannexBookingStatus>().notNull().default("new"),
+  otaName: text("ota_name"),
+  guestName: text("guest_name"),
+  guestEmail: text("guest_email"),
+  guestPhone: text("guest_phone"),
+  arrivalDate: date("arrival_date"),
+  departureDate: date("departure_date"),
+  adults: integer("adults"),
+  children: integer("children"),
+  infants: integer("infants"),
+  currency: text("currency"),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
+  commissionAmount: decimal("commission_amount", { precision: 10, scale: 2 }),
+  netAmount: decimal("net_amount", { precision: 10, scale: 2 }),
+  channexRoomTypeId: text("channex_room_type_id"),
+  channexRatePlanId: text("channex_rate_plan_id"),
+  isMapped: boolean("is_mapped").notNull().default(false),
+  rawPayload: jsonb("raw_payload"),
+  errorMessage: text("error_message"),
+  importedAt: timestamp("imported_at"),
+  importedBy: varchar("imported_by"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+}, (table) => ({
+  connectionChannexBookingUnique: uniqueIndex("channex_bookings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexBookingId),
+}));
+
+export const insertChannexBookingSchema = createInsertSchema(channexBookings).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertChannexBooking = z.infer<typeof insertChannexBookingSchema>;
+export type ChannexBooking = typeof channexBookings.$inferSelect;
+
+export type ChannexBookingWithMappingNames = ChannexBooking & {
+  channexRoomTypeTitle: string | null;
+  channexRatePlanTitle: string | null;
+  mappedRoomTypeName: string | null;
+};
+
 // Groups (Grupos de reservas)
 export type GroupStatus = "tentative" | "blocked" | "confirmed" | "inhouse" | "finished" | "cancelled";
 

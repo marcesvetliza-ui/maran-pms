@@ -25,6 +25,7 @@ import { registerReportsRoutes } from "./reports/routes";
 import { registerOperationalReportRoutes } from "./reports/operational";
 import { registerHospitalityRoutes } from "./routes/hospitality";
 import { registerOtaRoutes } from "./routes/ota";
+import { registerChannexRoutes } from "./routes/channex";
 import { registerPlanningRoutes } from "./routes/planning";
 import { registerPackagesRoutes } from "./routes/packages";
 import { registerRoomsRoutes } from "./routes/rooms";
@@ -3939,6 +3940,7 @@ export async function registerRoutes(
   registerRoomsRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);
+  registerChannexRoutes(app);
   registerPlanningRoutes(app);
   registerPackagesRoutes(app);
   registerExportRoutes(app);

@@ -25,6 +25,7 @@ const CheckInPage = lazy(() => import("@/pages/check-in"));
 const CheckOutPage = lazy(() => import("@/pages/check-out"));
 const RatePlansPage = lazy(() => import("@/pages/rate-plans"));
 const OTAChannelsPage = lazy(() => import("@/pages/ota-channels"));
+const ChannexPage = lazy(() => import("@/pages/channex"));
 const NewReservationPage = lazy(() => import("@/pages/new-reservation"));
 const GroupsPage = lazy(() => import("@/pages/groups"));
 const GroupDetailPage = lazy(() => import("@/pages/group-detail"));
@@ -220,6 +221,7 @@ function Router() {
         <Route path="/check-out" component={CheckOutPage} />
         <Route path="/rate-plans" component={RatePlansPage} />
         <Route path="/ota-channels" component={OTAChannelsPage} />
+        <Route path="/channex" component={ChannexPage} />
         <Route path="/reviews" component={ReviewsPage} />
         <Route path="/housekeeping" component={HousekeepingPage} />
         <Route path="/presupuestos" component={PresupuestosPage} />
