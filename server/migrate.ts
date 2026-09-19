@@ -3355,6 +3355,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       unexpected_legacy_ids text;
       purchase_supplier_type text;
       purchase_orders_have_rows boolean;
+      legacy_supplier record;
+      matched_accounting_supplier_id integer;
+      legacy_supplier_has_items boolean;
     BEGIN
       IF to_regclass('public.suppliers') IS NOT NULL THEN
         EXECUTE $query$
@@ -3367,6 +3370,58 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
             'Migración detenida: suppliers contiene IDs no reconocidos: %',
             unexpected_legacy_ids;
         END IF;
+      END IF;
+
+      -- Antes de tirar inventory_items.supplier_id (y la tabla suppliers que
+      -- le da sentido), preservar cada vínculo item->proveedor en la tabla
+      -- puente nueva. Matchea por CUIT contra accounting_suppliers, que es
+      -- único; si un proveedor legacy con artículos asignados no tiene CUIT
+      -- o no coincide con ningún accounting_suppliers existente, se detiene
+      -- la migración en vez de perder el vínculo o inventar un proveedor
+      -- contable — mismo criterio que el chequeo de IDs no reconocidos de
+      -- arriba.
+      IF to_regclass('public.suppliers') IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'inventory_items' AND column_name = 'supplier_id'
+         ) THEN
+        IF to_regclass('public.inventory_item_suppliers') IS NULL THEN
+          EXECUTE $ddl$
+            CREATE TABLE inventory_item_suppliers (
+              item_id varchar NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+              accounting_supplier_id integer NOT NULL REFERENCES accounting_suppliers(id) ON DELETE RESTRICT,
+              is_preferred boolean NOT NULL DEFAULT false,
+              PRIMARY KEY (item_id, accounting_supplier_id)
+            )
+          $ddl$;
+        END IF;
+
+        FOR legacy_supplier IN EXECUTE $query$
+          SELECT id::text AS id, name, cuit FROM suppliers
+        $query$ LOOP
+          matched_accounting_supplier_id := NULL;
+          IF legacy_supplier.cuit IS NOT NULL AND btrim(legacy_supplier.cuit) <> '' THEN
+            EXECUTE 'SELECT id FROM accounting_suppliers WHERE cuit = $1'
+              INTO matched_accounting_supplier_id USING legacy_supplier.cuit;
+          END IF;
+
+          IF matched_accounting_supplier_id IS NULL THEN
+            EXECUTE 'SELECT EXISTS (SELECT 1 FROM inventory_items WHERE supplier_id = $1)'
+              INTO legacy_supplier_has_items USING legacy_supplier.id;
+            IF legacy_supplier_has_items THEN
+              RAISE EXCEPTION
+                'Migración detenida: el proveedor legacy % (%) tiene artículos de inventario asignados pero no coincide por CUIT con ningún accounting_suppliers -- vinculá o creá ese proveedor en Contabilidad antes de reintentar',
+                legacy_supplier.id, legacy_supplier.name;
+            END IF;
+            CONTINUE;
+          END IF;
+
+          EXECUTE $ins$
+            INSERT INTO inventory_item_suppliers (item_id, accounting_supplier_id, is_preferred)
+            SELECT id, $1, true FROM inventory_items WHERE supplier_id = $2
+            ON CONFLICT (item_id, accounting_supplier_id) DO NOTHING
+          $ins$ USING matched_accounting_supplier_id, legacy_supplier.id;
+        END LOOP;
       END IF;
 
       IF to_regclass('public.purchase_orders') IS NOT NULL THEN
