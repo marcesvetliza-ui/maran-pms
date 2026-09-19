@@ -1,7 +1,9 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
-import { sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
+import { channexConnections } from "@shared/schema";
+import { encryptChannexApiKey } from "./channex/credentials";
 
 /**
  * Serializes catalog-check + DDL batches across concurrently starting app
@@ -3619,6 +3621,146 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // before existing movements are removed.
   await importCompanyOpeningBalances20260918();
   await reallocateCurrentAccountOpeningBalances20260918();
+
+  // Channex (channel manager) — fase 1: conexión (demo primero), mapeo de
+  // catálogo Channex -> PMS y bandeja de reservas. Ninguna acción de esta
+  // fase crea filas en `reservations` — ver comentario en schema.ts. (No es
+  // estrictamente "solo lectura": el sync sí le confirma a Channex el ack
+  // de cada booking_revision que persiste, lo cual es una escritura del
+  // lado de Channex, aunque no toque nada de la operación real del PMS.)
+  await withTimeout("channex_connections.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_connections (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        label text NOT NULL,
+        environment text NOT NULL DEFAULT 'demo',
+        channex_property_id text NOT NULL,
+        api_key text,
+        api_key_encrypted text,
+        base_url text NOT NULL DEFAULT 'https://staging.channex.io/api/v1',
+        is_active boolean NOT NULL DEFAULT true,
+        last_catalog_sync_at timestamp,
+        last_booking_sync_at timestamp,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_connections.encrypted_api_key", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE channex_connections
+        ADD COLUMN api_key_encrypted text
+    `)))
+  );
+  await withTimeout("channex_connections.legacy_api_key_nullable", T, () =>
+    db.execute(sql.raw(`
+      ALTER TABLE channex_connections
+        ALTER COLUMN api_key DROP NOT NULL
+    `))
+  );
+
+  // Backfill fail-closed: si hay claves históricas en texto plano, la
+  // migración exige la clave maestra, cifra cada una y recién entonces borra
+  // el valor legible. Una instalación sin conexiones Channex no necesita el
+  // secreto hasta que cree la primera.
+  const legacyChannexCredentials = await db
+    .select({ id: channexConnections.id, apiKey: channexConnections.apiKey })
+    .from(channexConnections)
+    .where(isNotNull(channexConnections.apiKey));
+  for (const connection of legacyChannexCredentials) {
+    if (!connection.apiKey) continue;
+    await db
+      .update(channexConnections)
+      .set({
+        apiKeyEncrypted: encryptChannexApiKey(connection.apiKey),
+        apiKey: null,
+      })
+      .where(eq(channexConnections.id, connection.id));
+  }
+
+  await withTimeout("channex_room_type_mappings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_room_type_mappings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_room_type_id text NOT NULL,
+        channex_room_type_title text NOT NULL,
+        room_type_id varchar REFERENCES room_types(id),
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_room_type_mappings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_room_type_mappings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_room_type_mappings_connection_channex_id_idx ON channex_room_type_mappings (connection_id, channex_room_type_id)",
+    )))
+  );
+
+  await withTimeout("channex_rate_plan_mappings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_rate_plan_mappings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_rate_plan_id text NOT NULL,
+        channex_rate_plan_title text NOT NULL,
+        channex_room_type_id text NOT NULL,
+        rate_plan_id varchar REFERENCES rate_plans(id),
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_rate_plan_mappings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_rate_plan_mappings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_rate_plan_mappings_connection_channex_id_idx ON channex_rate_plan_mappings (connection_id, channex_rate_plan_id)",
+    )))
+  );
+
+  await withTimeout("channex_bookings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_bookings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_booking_id text NOT NULL,
+        channex_revision_id text,
+        status text NOT NULL DEFAULT 'new',
+        ota_name text,
+        guest_name text,
+        guest_email text,
+        guest_phone text,
+        arrival_date date,
+        departure_date date,
+        adults integer,
+        children integer,
+        infants integer,
+        currency text,
+        total_amount numeric(10,2),
+        commission_amount numeric(10,2),
+        net_amount numeric(10,2),
+        channex_room_type_id text,
+        channex_rate_plan_id text,
+        is_mapped boolean NOT NULL DEFAULT false,
+        raw_payload jsonb,
+        error_message text,
+        imported_at timestamp,
+        imported_by varchar,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_bookings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_bookings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_bookings_connection_channex_id_idx ON channex_bookings (connection_id, channex_booking_id)",
+    )))
+  );
+  await withTimeout("channex_bookings_status_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_bookings_status_idx",
+      "CREATE INDEX channex_bookings_status_idx ON channex_bookings (connection_id, status)",
+    )))
+  );
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {

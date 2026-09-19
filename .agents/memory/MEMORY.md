@@ -68,3 +68,4 @@
 - [REUB virtual Planning row](reub-virtual-room.md) — REUB is an operational staging row below Notas, never hotel inventory or an occupancy/revenue metric input.
 - [Invoice payment-method detail](invoice-payment-method-detail.md) — invoice PDFs use persisted method+amount rows; keep the legacy single method only for compatibility.
 - [Restaurant breakfast navigation](restaurant-breakfast-navigation.md) — reuse the dashboard breakfast view in Restaurant as a button/dialog, not another main tab.
+- [Channex staging ACK](channex-staging-ack.md) — real staging ACK removes the revision from the pending feed while preserving only the local Channex inbox row.

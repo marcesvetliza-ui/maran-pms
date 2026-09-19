@@ -16,6 +16,7 @@ import {
   Tag,
   Package,
   Globe,
+  Satellite,
   Users,
   Star,
   User,
@@ -144,6 +145,7 @@ const menuSections = [
     items: [
       { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: CORE_RECEPCION },
       { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: CORE_RECEPCION },
+      { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              roles: CORE_RECEPCION },
       { label: "Grupos",            icon: Users,             href: "/groups",               roles: CORE_RECEPCION },
       { label: "Empresas",          icon: Building2,         href: "/companies",            roles: CORE_RECEPCION },
       { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: CORE_RECEPCION },
