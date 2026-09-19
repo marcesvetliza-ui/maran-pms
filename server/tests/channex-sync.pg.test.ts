@@ -20,7 +20,9 @@
  *   - resincronizar la misma reserva no la duplica en la bandeja;
  *   - una reserva cancelada en Channex no se puede aceptar;
  *   - si el ack a Channex falla, la reserva igual queda guardada (no se
- *     pierde el dato por un problema de un endpoint externo).
+ *     pierde el dato por un problema de un endpoint externo);
+ *   - la API key se guarda cifrada (AES-256-GCM, ver channex/credentials.ts),
+ *     nunca en texto plano ni expuesta en ninguna respuesta.
  */
 
 import { randomUUID } from "node:crypto";
@@ -28,6 +30,10 @@ import pg from "pg";
 import express from "express";
 import * as http from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// La suite usa una clave propia y determinística: no debe depender del
+// secreto real del entorno ni intentar descifrar credenciales externas.
+process.env.CHANNEX_CREDENTIALS_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 vi.mock("../auth", () => ({
   requireAuth: (req: any, _res: any, next: () => void) => {
@@ -384,6 +390,45 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1)", ()
       expect(bookings.body[0].errorMessage).toMatch(/ack/i);
       expect(bookings.body[0].guestName).toBe("Jane Doe"); // el dato no se perdió aunque el ack falló
       expect(bookings.body[0].acknowledgedRevisionId).toBeNull(); // sigue pendiente, se puede reintentar
+    } finally {
+      if (connectionId) await pool.query("DELETE FROM channex_connections WHERE id = $1", [connectionId]);
+    }
+  });
+
+  it("guarda la API key cifrada (AES-256-GCM) y nunca la expone en texto plano", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const suffix = randomUUID();
+    const channexPropertyId = `channex-prop-${suffix}`;
+    let connectionId: string | null = null;
+
+    const client = await import("../channex/client");
+
+    try {
+      (client.fetchChannexProperties as any).mockResolvedValue([{ id: channexPropertyId, attributes: { title: "Demo Property" } }]);
+      const created = await request("POST", "/api/channex/connections", {
+        label: `Channex Demo ${suffix}`,
+        environment: "demo",
+        channexPropertyId,
+        apiKey: "test-key-en-texto-plano",
+        baseUrl: "https://staging.channex.io/api/v1",
+      });
+      expect(created.status).toBe(201);
+      expect(created.body.apiKey).toBeUndefined();
+      expect(created.body.apiKeyEncrypted).toBeUndefined();
+      connectionId = created.body.id;
+
+      const stored = await pool.query(
+        `SELECT api_key, api_key_encrypted FROM channex_connections WHERE id = $1`,
+        [connectionId],
+      );
+      expect(stored.rows[0].api_key).toBeNull();
+      expect(stored.rows[0].api_key_encrypted).not.toBeNull();
+      expect(stored.rows[0].api_key_encrypted).not.toContain("test-key-en-texto-plano");
+
+      const list = await request("GET", "/api/channex/connections");
+      const listed = list.body.find((c: any) => c.id === connectionId);
+      expect(listed.apiKey).toBeUndefined();
+      expect(listed.apiKeyEncrypted).toBeUndefined();
     } finally {
       if (connectionId) await pool.query("DELETE FROM channex_connections WHERE id = $1", [connectionId]);
     }

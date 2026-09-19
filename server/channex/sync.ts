@@ -18,6 +18,7 @@ import {
   fetchChannexRoomTypes,
   fetchPendingBookingRevisions,
 } from "./client";
+import { decryptChannexApiKey } from "./credentials";
 
 const SENSITIVE_KEY_PATTERN = /card|cvv|cvc|guarantee/i;
 
@@ -35,7 +36,15 @@ function redactSensitive(value: unknown): unknown {
 }
 
 function toCredentials(connection: ChannexConnection) {
-  return { apiKey: connection.apiKey, baseUrl: connection.baseUrl };
+  if (!connection.apiKeyEncrypted) {
+    throw new Error(
+      "La conexión de Channex no tiene una credencial cifrada; ejecutá la migración antes de sincronizar",
+    );
+  }
+  return {
+    apiKey: decryptChannexApiKey(connection.apiKeyEncrypted),
+    baseUrl: connection.baseUrl,
+  };
 }
 
 async function getConnectionOrThrow(connectionId: string): Promise<ChannexConnection> {

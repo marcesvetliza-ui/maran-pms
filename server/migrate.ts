@@ -1,7 +1,9 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
-import { sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
+import { channexConnections } from "@shared/schema";
+import { encryptChannexApiKey } from "./channex/credentials";
 
 /**
  * Serializes catalog-check + DDL batches across concurrently starting app
@@ -3633,7 +3635,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         label text NOT NULL,
         environment text NOT NULL DEFAULT 'demo',
         channex_property_id text NOT NULL,
-        api_key text NOT NULL,
+        api_key text,
+        api_key_encrypted text,
         base_url text NOT NULL DEFAULT 'https://staging.channex.io/api/v1',
         is_active boolean NOT NULL DEFAULT true,
         last_catalog_sync_at timestamp,
@@ -3642,6 +3645,37 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       )
     `)))
   );
+  await withTimeout("channex_connections.encrypted_api_key", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE channex_connections
+        ADD COLUMN api_key_encrypted text
+    `)))
+  );
+  await withTimeout("channex_connections.legacy_api_key_nullable", T, () =>
+    db.execute(sql.raw(`
+      ALTER TABLE channex_connections
+        ALTER COLUMN api_key DROP NOT NULL
+    `))
+  );
+
+  // Backfill fail-closed: si hay claves históricas en texto plano, la
+  // migración exige la clave maestra, cifra cada una y recién entonces borra
+  // el valor legible. Una instalación sin conexiones Channex no necesita el
+  // secreto hasta que cree la primera.
+  const legacyChannexCredentials = await db
+    .select({ id: channexConnections.id, apiKey: channexConnections.apiKey })
+    .from(channexConnections)
+    .where(isNotNull(channexConnections.apiKey));
+  for (const connection of legacyChannexCredentials) {
+    if (!connection.apiKey) continue;
+    await db
+      .update(channexConnections)
+      .set({
+        apiKeyEncrypted: encryptChannexApiKey(connection.apiKey),
+        apiKey: null,
+      })
+      .where(eq(channexConnections.id, connection.id));
+  }
 
   await withTimeout("channex_room_type_mappings.create", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`

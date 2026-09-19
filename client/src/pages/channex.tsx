@@ -368,7 +368,7 @@ export default function ChannexPage() {
 
       {connectionsLoading ? (
         <Skeleton className="h-32 w-full" />
-      ) : !connections || connections.length === 0 ? (
+      ) : (!connections || connections.length === 0) && !canConfigure ? (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground flex items-center gap-2">
             <Info className="h-4 w-4" />
@@ -377,7 +377,7 @@ export default function ChannexPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue="bandeja">
+        <Tabs defaultValue={!connections || connections.length === 0 ? "conexion" : "bandeja"}>
           <TabsList>
             <TabsTrigger value="bandeja" data-testid="tab-bandeja">Bandeja</TabsTrigger>
             {canConfigure && <TabsTrigger value="mapeo" data-testid="tab-mapeo">Mapeo</TabsTrigger>}
