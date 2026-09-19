@@ -132,11 +132,11 @@ export default function ChannexPage() {
     onSuccess: (preview) => {
       queryClient.invalidateQueries({ queryKey: ["/api/channex/bookings", activeConnectionId] });
       toast({
-        title: "Reserva importada (entorno de prueba)",
-        description: `${preview.roomTypeName} · ${preview.ratePlanName}. No se creó ninguna reserva real — esto es una vista previa del circuito de importación.`,
+        title: "Reserva aceptada (vista previa)",
+        description: `${preview.roomTypeName} · ${preview.ratePlanName}. Esto NO crea una reserva en el PMS — es una vista previa de cómo quedaría, para que Recepción practique el mapeo y la revisión.`,
       });
     },
-    onError: (err: any) => toast({ title: "No se pudo importar", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "No se pudo aceptar", description: err.message, variant: "destructive" }),
   });
 
   const markReviewMutation = useMutation({
@@ -244,7 +244,7 @@ export default function ChannexPage() {
             </p>
             <p>
               {activeConnection.environment === "demo"
-                ? "Estas reservas no afectan la operación real. \"Importar\" no crea ninguna reserva en el PMS — solo muestra cómo quedaría."
+                ? "Estas reservas no afectan la operación real. \"Aceptar\" no crea ninguna reserva en el PMS — solo muestra cómo quedaría."
                 : "Conexión marcada como real, pero esta fase del sistema todavía no crea reservas reales ni envía disponibilidad/tarifas a Channex."}
             </p>
           </div>
@@ -373,8 +373,9 @@ export default function ChannexPage() {
                               disabled={!booking.isMapped || booking.status === "cancelled" || importMutation.isPending}
                               onClick={() => importMutation.mutate(booking.id)}
                               data-testid={`button-import-${booking.id}`}
+                              title="No crea una reserva en el PMS — solo marca esta reserva de Channex como aceptada/revisada."
                             >
-                              Importar
+                              Aceptar
                             </Button>
                             <Button size="sm" variant="ghost" onClick={() => markReviewMutation.mutate(booking.id)}>
                               Revisión
@@ -569,8 +570,9 @@ export default function ChannexPage() {
               variant="outline"
               disabled={!selectedBooking?.isMapped || selectedBooking?.status === "cancelled"}
               onClick={() => selectedBooking && importMutation.mutate(selectedBooking.id)}
+              title="No crea una reserva en el PMS — solo marca esta reserva de Channex como aceptada/revisada."
             >
-              Importar
+              Aceptar
             </Button>
             <Button variant="ghost" onClick={() => selectedBooking && markReviewMutation.mutate(selectedBooking.id)}>Marcar para revisión</Button>
             <Button variant="ghost" onClick={() => selectedBooking && retryMutation.mutate(selectedBooking.id)}>Reintentar</Button>

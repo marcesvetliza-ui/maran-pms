@@ -6,13 +6,14 @@
  * para listas), montos como strings decimales, ids relacionados dentro de
  * `relationships`, no en `attributes`.
  *
- * El endpoint de acknowledge de `booking_revisions` (`acknowledgeBookingRevision`
- * abajo) NO se pudo verificar contra la API real porque este entorno no tiene
- * salida de red hacia channex.io — está armado según la documentación pública
- * (POST .../ack) pero conviene confirmarlo la primera vez que se corra el
- * sync contra staging de verdad; si Channex devuelve 404/405 ahí, el sync no
- * se cae (ver server/channex/sync.ts), pero esa reserva va a quedar marcada
- * con error hasta ajustar el endpoint.
+ * `POST /booking_revisions/:id/ack` (acknowledgeBookingRevision) y
+ * `GET /booking_revisions/feed` (fetchPendingBookingRevisions) están
+ * confirmados contra la documentación oficial, pero ninguno de los dos se
+ * ejecutó todavía contra la API real (este entorno no tiene salida de red a
+ * channex.io; la revisión que sí tiene salida tampoco llegó a ejecutar un
+ * ack real). Si el ack falla, el sync no se cae (ver server/channex/sync.ts)
+ * — la reserva queda guardada igual, marcada con error, hasta confirmarlo
+ * con una corrida real.
  */
 
 export type ChannexConnectionCredentials = {
@@ -83,10 +84,16 @@ export async function fetchChannexRatePlans(connection: ChannexConnectionCredent
   return body?.data ?? [];
 }
 
+/**
+ * `/booking_revisions/feed` (no `/booking_revisions?filter[acknowledge_status]=pending`)
+ * es el endpoint que la documentación de Channex recomienda para integraciones
+ * de PMS — devuelve únicamente revisiones sin ack, ordenables por `inserted_at`,
+ * y queda vacío cuando ya se confirmó todo.
+ */
 export async function fetchPendingBookingRevisions(connection: ChannexConnectionCredentials, propertyId: string): Promise<any[]> {
   const body = await channexRequest(
     connection,
-    `/booking_revisions?filter[property_id]=${encodeURIComponent(propertyId)}&filter[acknowledge_status]=pending`,
+    `/booking_revisions/feed?filter[property_id]=${encodeURIComponent(propertyId)}&order[inserted_at]=asc`,
   );
   return body?.data ?? [];
 }

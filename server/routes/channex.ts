@@ -224,7 +224,7 @@ export function registerChannexRoutes(app: Express) {
       const preview = await importBooking(req.params.id, actorName(req));
       res.json(preview);
     } catch (err) {
-      handleError(res, err, "Error al importar la reserva de Channex");
+      handleError(res, err, "Error al aceptar la reserva de Channex");
     }
   });
 

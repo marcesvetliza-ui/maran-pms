@@ -337,12 +337,18 @@ export type ImportPreview = {
   ratePlanName: string;
 };
 
+/**
+ * A pesar del nombre (por la ruta/estado `imported`, ver comentario en
+ * schema.ts), esto NUNCA crea una reserva real en `reservations` — solo
+ * valida el mapeo y marca la reserva de Channex como aceptada/revisada.
+ * El frontend la muestra como "Aceptar", no "Importar".
+ */
 export async function importBooking(bookingRowId: string, actor: string): Promise<ImportPreview> {
   const [row] = await db.select().from(channexBookings).where(eq(channexBookings.id, bookingRowId));
   if (!row) throw new Error("Reserva de Channex no encontrada");
-  if (row.status === "cancelled") throw new Error("No se puede importar una reserva cancelada");
+  if (row.status === "cancelled") throw new Error("No se puede aceptar una reserva cancelada");
   if (!row.channexRoomTypeId || !row.channexRatePlanId) {
-    throw new Error("Reserva con varias habitaciones u otro dato faltante — revisar manualmente antes de importar");
+    throw new Error("Reserva con varias habitaciones u otro dato faltante — revisar manualmente antes de aceptar");
   }
 
   const [roomTypeMapping] = await db
@@ -355,7 +361,7 @@ export async function importBooking(bookingRowId: string, actor: string): Promis
     .where(and(eq(channexRatePlanMappings.connectionId, row.connectionId), eq(channexRatePlanMappings.channexRatePlanId, row.channexRatePlanId)));
 
   if (!roomTypeMapping?.roomTypeId || !ratePlanMapping?.ratePlanId) {
-    throw new Error("Faltan mapeos de habitación y/o tarifa para esta reserva — completalos en 'Mapeo' antes de importar");
+    throw new Error("Faltan mapeos de habitación y/o tarifa para esta reserva — completalos en 'Mapeo' antes de aceptar");
   }
 
   const [roomType] = await db.select().from(roomTypes).where(eq(roomTypes.id, roomTypeMapping.roomTypeId));
