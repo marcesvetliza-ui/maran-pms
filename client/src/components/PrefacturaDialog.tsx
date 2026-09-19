@@ -507,6 +507,15 @@ export function PrefacturaDialog({
   const [saleCondition, setSaleCondition] = useState<SaleCondition>("contado");
   const [doCheckout, setDoCheckout] = useState(true);
 
+  // Step 1: agregar un cargo sin salir del check-out (antes había que cerrar
+  // el diálogo y abrir el folio de la reserva aparte).
+  const [showAddCharge, setShowAddCharge] = useState(false);
+  const [addChargePresetId, setAddChargePresetId] = useState("manual");
+  const [addChargeDescription, setAddChargeDescription] = useState("");
+  const [addChargeAmount, setAddChargeAmount] = useState("");
+  const [addChargeCategory, setAddChargeCategory] = useState("otros");
+  const [isAddingCharge, setIsAddingCharge] = useState(false);
+
   // Step 2: payments
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" },
@@ -574,6 +583,10 @@ export function PrefacturaDialog({
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
+    queryKey: ["/api/charge-types"],
+    enabled: open,
+  });
 
   // Emitted fiscal invoices for this reservation (for NC flow)
   const { data: emittedInvoices = [], isLoading: invoicesLoading, refetch: refetchEmittedInvoices } = useQuery<any[]>({
@@ -707,24 +720,32 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folio?.balance, open, invoicesLoading, safeEmittedInvoices]);
 
-  // When reservation loads: auto-fill client data
+  // When reservation loads: auto-fill client data. A linked company/agency
+  // is the natural starting point (reception shouldn't have to re-pick and
+  // re-type data the reservation already has) — but it's still just the
+  // initial guess, never locked: handleBillingTargetChange lets reception
+  // switch to the guest (or back) at any time.
   useEffect(() => {
     if (!reservation || !open) return;
-    // A linked company/agency is an available billing target, not the forced
-    // recipient. Start from the guest so reception can explicitly choose the
-    // linked entity when needed.
-    fillFromReservation(reservation, "init", "guest");
+    const hasCompany = !!(reservation.companyId || (reservation as any).company?.id);
+    const hasAgency = !!(reservation.agencyId || (reservation as any).agency?.id);
+    const preferredTarget = hasCompany ? "company" : hasAgency ? "agency" : "guest";
+    fillFromReservation(reservation, "init", preferredTarget);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservation?.id, open]);
 
-  // Auto-suggest default POS
+  // Auto-suggest default POS. Falls back to billing_config.puntoVenta
+  // whenever pos_configs no tiene filas activas para matchear — antes, ese
+  // fallback solo se probaba si pos_configs estaba vacía del todo, así que
+  // con filas inactivas o sin match quedaba en blanco para siempre.
   useEffect(() => {
-    if (posConfigs.length > 0 && !puntoVenta) {
-      const activePos = posConfigs.filter((p: any) => p.activo !== false);
-      const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
-      const defaultPos = configuredPos || activePos[0];
-      if (defaultPos) setPuntoVenta(String(defaultPos.numero));
-    } else if (!puntoVenta && billingConfig?.puntoVenta) {
+    if (puntoVenta) return;
+    const activePos = posConfigs.filter((p: any) => p.activo !== false);
+    const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
+    const defaultPos = configuredPos || activePos[0];
+    if (defaultPos) {
+      setPuntoVenta(String(defaultPos.numero));
+    } else if (billingConfig?.puntoVenta) {
       setPuntoVenta(String(billingConfig.puntoVenta));
     }
   }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
@@ -830,6 +851,48 @@ export function PrefacturaDialog({
     const list = entityType === "company" ? companies : agencies;
     const entity = list.find((e: any) => String(e.id) === id);
     if (entity) applyEntity(entity, entityType);
+  }
+
+  const addChargePresets = [
+    ...chargeTypesData.map(ct => ({ id: ct.id, label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
+    { id: "manual", label: "Cargo editable", description: "", amount: "", category: "otros", allowPriceEdit: true },
+  ];
+
+  function handleAddChargePresetSelect(id: string) {
+    setAddChargePresetId(id);
+    const preset = addChargePresets.find(p => p.id === id);
+    if (!preset) return;
+    setAddChargeDescription(preset.description || preset.label);
+    setAddChargeAmount(preset.amount);
+    setAddChargeCategory(preset.category);
+  }
+
+  async function handleAddCharge() {
+    if (!addChargeDescription.trim() || !addChargeAmount || parseFloat(addChargeAmount) <= 0) {
+      toast({ title: "Completá la descripción y un monto mayor a 0", variant: "destructive" });
+      return;
+    }
+    setIsAddingCharge(true);
+    try {
+      await apiRequest("POST", "/api/charges", {
+        description: addChargeDescription.trim(),
+        amount: addChargeAmount,
+        category: addChargeCategory,
+        reservationId,
+        date: getLocalToday(),
+      });
+      await refetchFolio();
+      toast({ title: "Cargo agregado", description: "Se sumó al folio de esta habitación." });
+      setShowAddCharge(false);
+      setAddChargePresetId("manual");
+      setAddChargeDescription("");
+      setAddChargeAmount("");
+      setAddChargeCategory("otros");
+    } catch (err: any) {
+      toast({ title: parseApiError(err), variant: "destructive" });
+    } finally {
+      setIsAddingCharge(false);
+    }
   }
 
   // Clear the split-balance warning whenever rows drop to a single entry,
@@ -986,6 +1049,16 @@ export function PrefacturaDialog({
   // on each render and must not itself be used as an effect dependency.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, safeEmittedInvoices]);
+
+  // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
+  // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
+  // se ofrece igual el PV único de billing_config en vez de dejarlo vacío.
+  const activePosConfigs = posConfigs.filter((p: any) => p.activo !== false);
+  const posOptions = activePosConfigs.length > 0
+    ? activePosConfigs
+    : billingConfig?.puntoVenta
+      ? [{ id: "default-pv", numero: billingConfig.puntoVenta, nombre: "" }]
+      : [];
 
   // A linked company/agency is a billing option, never a forced recipient:
   // reception must still be able to issue the stay to the guest.
@@ -1508,6 +1581,79 @@ export function PrefacturaDialog({
               </div>
             )}
 
+            {/* Agregar cargo sin salir del check-out */}
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Cargos de la habitación</Label>
+              {!showAddCharge && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddCharge(true)}
+                  data-testid="button-open-add-charge"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  Agregar cargo
+                </Button>
+              )}
+            </div>
+            {showAddCharge && (
+              <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Tipo</Label>
+                    <Select value={addChargePresetId} onValueChange={handleAddChargePresetSelect}>
+                      <SelectTrigger className="h-8 text-sm" data-testid="select-add-charge-preset"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {addChargePresets.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
+                    <Input
+                      type="number"
+                      className="h-8 text-sm"
+                      value={addChargeAmount}
+                      onChange={(e) => setAddChargeAmount(e.target.value)}
+                      data-testid="input-add-charge-amount"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Descripción</Label>
+                  <Input
+                    className="h-8 text-sm"
+                    value={addChargeDescription}
+                    onChange={(e) => setAddChargeDescription(e.target.value)}
+                    data-testid="input-add-charge-description"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowAddCharge(false); setAddChargePresetId("manual"); setAddChargeDescription(""); setAddChargeAmount(""); }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isAddingCharge}
+                    onClick={handleAddCharge}
+                    data-testid="button-confirm-add-charge"
+                  >
+                    {isAddingCharge ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+                    Agregar
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Charges table */}
             {folioLoading ? (
               <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
@@ -1830,7 +1976,7 @@ export function PrefacturaDialog({
                   <Select value={puntoVenta} onValueChange={setPuntoVenta}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger>
                     <SelectContent>
-                      {posConfigs.filter((p: any) => p.activo !== false).map((p: any) => (
+                      {posOptions.map((p: any) => (
                         <SelectItem key={p.id} value={String(p.numero)}>
                           PV {String(p.numero).padStart(4, "0")} {p.nombre ? `— ${p.nombre}` : ""}
                         </SelectItem>
