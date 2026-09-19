@@ -1,14 +1,19 @@
 /**
- * Fase 1 de la integración con Channex: bandeja de solo lectura, aislada de
- * la operación real. Estos tests fijan los invariantes que importan más que
- * el detalle de la llamada HTTP (que está mockeada, ver vi.mock abajo):
- *   - una reserva nunca se puede "Importar" sin mapeo completo de
+ * Fase 1 de la integración con Channex: bandeja aislada de la operación
+ * real (no es "solo lectura" en sentido estricto — confirmar el feed sí es
+ * una escritura hacia Channex, ver acknowledge más abajo). Estos tests
+ * fijan los invariantes que importan más que el detalle de la llamada HTTP
+ * (que está mockeada, ver vi.mock abajo):
+ *   - una reserva nunca se puede "Aceptar" (endpoint /import, por motivos
+ *     históricos — ver comentario en sync.ts) sin mapeo completo de
  *     habitación + tarifa;
- *   - "Importar" jamás crea una fila en `reservations` (esa es la garantía
+ *   - "Aceptar" jamás crea una fila en `reservations` (esa es la garantía
  *     de que el modo de prueba no toca la operación real — ver decisión de
  *     diseño en shared/schema.ts sobre channexBookings);
+ *   - sincronizar sin `acknowledge` (Previsualizar) guarda igual pero no le
+ *     confirma nada a Channex — se puede repetir sin gastar el feed demo;
  *   - resincronizar la misma reserva no la duplica en la bandeja;
- *   - una reserva cancelada en Channex no se puede importar;
+ *   - una reserva cancelada en Channex no se puede aceptar;
  *   - si el ack a Channex falla, la reserva igual queda guardada (no se
  *     pierde el dato por un problema de un endpoint externo).
  */
@@ -117,7 +122,7 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
     await pool?.end();
   });
 
-  it("bloquea importar sin mapeo, importa cuando está mapeado sin crear ninguna reserva real, no duplica en re-sync y respeta cancelaciones", async () => {
+  it("bloquea aceptar sin mapeo, acepta cuando está mapeado sin crear ninguna reserva real, previsualizar no confirma nada, no duplica en re-sync y respeta cancelaciones", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
     const roomTypeId = `room-type-${suffix}`;
@@ -178,16 +183,24 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       expect(ratePlanMappingsBefore.body).toHaveLength(1);
       const ratePlanMappingId = ratePlanMappingsBefore.body[0].id;
 
-      // --- sync de reservas ANTES de mapear: debe traer la reserva pero sin poder importarla ---
+      // --- Previsualizar (sin acknowledge) ANTES de mapear: trae y guarda la
+      // reserva, pero no le confirma nada a Channex todavía ---
       (client.fetchPendingBookingRevisions as any).mockResolvedValue([
         revision({ bookingId: channexBookingId, channexRoomTypeId, channexRatePlanId }),
       ]);
       (client.acknowledgeBookingRevision as any).mockResolvedValue(undefined);
 
-      const firstSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`);
-      expect(firstSync.status).toBe(200);
-      expect(firstSync.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 0 });
-      expect(client.acknowledgeBookingRevision).toHaveBeenCalledTimes(1);
+      const firstPreview = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: false });
+      expect(firstPreview.status).toBe(200);
+      expect(firstPreview.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 0, acknowledged: false });
+      expect(client.acknowledgeBookingRevision).not.toHaveBeenCalled();
+
+      // Previsualizar de nuevo (todavía sin mapear) no duplica y sigue sin acknowledge:
+      // el feed demo no se gasta por mirar.
+      const secondPreview = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: false });
+      expect(secondPreview.status).toBe(200);
+      expect(secondPreview.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: false });
+      expect(client.acknowledgeBookingRevision).not.toHaveBeenCalled();
 
       const bookingsAfterFirstSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookingsAfterFirstSync.body).toHaveLength(1);
@@ -206,10 +219,12 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       const mapRatePlan = await request("PATCH", `/api/channex/rate-plan-mappings/${ratePlanMappingId}`, { ratePlanId });
       expect(mapRatePlan.status).toBe(200);
 
-      const secondSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`);
+      // Ahora sí, confirmar de verdad (acknowledge:true) — la única corrida que consume el feed.
+      const secondSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(secondSync.status).toBe(200);
       // misma reserva otra vez: no se duplica (created sigue en 0, updated sube)
-      expect(secondSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0 });
+      expect(secondSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: true });
+      expect(client.acknowledgeBookingRevision).toHaveBeenCalledTimes(1);
 
       const bookingsAfterSecondSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookingsAfterSecondSync.body).toHaveLength(1); // sigue siendo una sola fila
@@ -218,6 +233,7 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       const reservationsBeforeImport = await pool.query(`SELECT count(*)::int AS count FROM reservations WHERE room_type_id = $1`, [roomTypeId]);
       expect(reservationsBeforeImport.rows[0].count).toBe(0);
 
+      // "Aceptar" en la UI, endpoint /import por motivos históricos (ver comentario en sync.ts).
       const importResult = await request("POST", `/api/channex/bookings/${bookingRow.id}/import`);
       expect(importResult.status).toBe(200);
       expect(importResult.body.roomTypeName).toBe("Doble de prueba");
@@ -225,26 +241,26 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       expect(importResult.body.booking.status).toBe("imported");
       expect(importResult.body.booking.importedBy).toBe("channex-sync-test");
 
-      // Garantía central de la fase 1: "Importar" en modo demo no toca la operación real.
+      // Garantía central de la fase 1: "Aceptar" en modo demo no toca la operación real.
       const reservationsAfterImport = await pool.query(`SELECT count(*)::int AS count FROM reservations WHERE room_type_id = $1`, [roomTypeId]);
       expect(reservationsAfterImport.rows[0].count).toBe(0);
 
-      // --- una nueva revisión de la misma reserva ya importada llega como "modificada" ---
+      // --- una nueva revisión de la misma reserva ya aceptada llega como "modificada" ---
       (client.fetchPendingBookingRevisions as any).mockResolvedValue([
         revision({ bookingId: channexBookingId, channexRoomTypeId, channexRatePlanId, revisionId: `rev-mod-${suffix}` }),
       ]);
-      const thirdSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`);
+      const thirdSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(thirdSync.status).toBe(200);
-      expect(thirdSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0 });
+      expect(thirdSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: true });
       const bookingsAfterThirdSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookingsAfterThirdSync.body).toHaveLength(1);
       expect(bookingsAfterThirdSync.body[0].status).toBe("modified");
 
-      // --- Channex cancela la reserva: no se puede importar ---
+      // --- Channex cancela la reserva: no se puede aceptar ---
       (client.fetchPendingBookingRevisions as any).mockResolvedValue([
         revision({ bookingId: channexBookingId, channexRoomTypeId, channexRatePlanId, status: "cancelled", revisionId: `rev-cancel-${suffix}` }),
       ]);
-      const cancelSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`);
+      const cancelSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(cancelSync.status).toBe(200);
       const bookingsAfterCancel = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookingsAfterCancel.body[0].status).toBe("cancelled");
@@ -284,9 +300,9 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       (client.fetchPendingBookingRevisions as any).mockResolvedValue([revision({ bookingId: channexBookingId })]);
       (client.acknowledgeBookingRevision as any).mockRejectedValue(new Error("404 not found"));
 
-      const sync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`);
+      const sync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(sync.status).toBe(200);
-      expect(sync.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 1 });
+      expect(sync.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 1, acknowledged: true });
 
       const bookings = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookings.body).toHaveLength(1);

@@ -190,14 +190,24 @@ export type BookingSyncSummary = {
   created: number;
   updated: number;
   ackFailures: number;
+  acknowledged: boolean;
 };
 
-export async function syncBookings(connectionId: string): Promise<BookingSyncSummary> {
+/**
+ * `acknowledge` decide si esta corrida le confirma a Channex las revisiones
+ * que trajo. Confirmar es lo que las saca del feed de pendientes — con la
+ * propiedad demo (10 reservas fijas) conviene poder traer y revisar sin
+ * gastar ese cupo, así que el default es `false` ("Previsualizar"): guarda
+ * todo localmente igual, pero no le confirma nada a Channex, y la próxima
+ * corrida vuelve a traer las mismas revisiones. `acknowledge: true`
+ * ("Sincronizar y confirmar") es la única que de verdad consume el feed.
+ */
+export async function syncBookings(connectionId: string, acknowledge = false): Promise<BookingSyncSummary> {
   const connection = await getConnectionOrThrow(connectionId);
   const credentials = toCredentials(connection);
   const revisions = await fetchPendingBookingRevisions(credentials, connection.channexPropertyId);
 
-  const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0, ackFailures: 0 };
+  const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0, ackFailures: 0, acknowledged: acknowledge };
 
   for (const revision of revisions) {
     const extracted = extractBookingFields(revision);
@@ -258,6 +268,8 @@ export async function syncBookings(connectionId: string): Promise<BookingSyncSum
       await db.insert(channexBookings).values({ ...values, createdAt: new Date() });
       summary.created += 1;
     }
+
+    if (!acknowledge) continue;
 
     try {
       await acknowledgeBookingRevision(credentials, revision.id as string);

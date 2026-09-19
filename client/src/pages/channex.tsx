@@ -12,8 +12,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, RefreshCw, PlugZap, Info } from "lucide-react";
+import { AlertTriangle, RefreshCw, PlugZap, Info, Eye, CheckCheck } from "lucide-react";
 import type {
   ChannexBooking,
   ChannexBookingStatus,
@@ -28,7 +39,7 @@ const CHANNEX_CONFIG_ROLES = ["admin", "manager", "resp_administracion", "jefe_r
 const STATUS_LABELS: Record<ChannexBookingStatus, string> = {
   new: "Nuevas",
   needs_review: "Requieren revisión",
-  imported: "Importadas",
+  imported: "Aceptadas",
   modified: "Modificadas",
   cancelled: "Canceladas",
   error: "Con error",
@@ -109,15 +120,21 @@ export default function ChannexPage() {
     ratePlanMappings?.find((m) => m.channexRatePlanId === channexRatePlanId)?.channexRatePlanTitle ?? channexRatePlanId ?? "—";
 
   const syncBookingsMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/channex/connections/${activeConnectionId}/sync-bookings`);
+    mutationFn: async (acknowledge: boolean) => {
+      const res = await apiRequest("POST", `/api/channex/connections/${activeConnectionId}/sync-bookings`, { acknowledge });
       return res.json();
     },
     onSuccess: (summary) => {
       queryClient.invalidateQueries({ queryKey: ["/api/channex/bookings", activeConnectionId] });
       toast({
-        title: "Sincronización completa",
-        description: `${summary.fetched} novedades recibidas (${summary.created} nuevas, ${summary.updated} actualizadas)${summary.ackFailures ? ` — ${summary.ackFailures} sin confirmar a Channex` : ""}.`,
+        title: summary.acknowledged ? "Sincronizado y confirmado a Channex" : "Previsualización (sin confirmar)",
+        description: `${summary.fetched} novedades recibidas (${summary.created} nuevas, ${summary.updated} actualizadas)${
+          summary.acknowledged
+            ? summary.ackFailures
+              ? ` — ${summary.ackFailures} sin confirmar a Channex`
+              : ""
+            : " — no se le confirmó nada a Channex, la próxima previsualización vuelve a traer lo mismo."
+        }`,
       });
     },
     onError: (err: any) => toast({ title: "Error al sincronizar", description: err.message, variant: "destructive" }),
@@ -269,12 +286,35 @@ export default function ChannexPage() {
         <Button
           variant="outline"
           disabled={!activeConnectionId || syncBookingsMutation.isPending}
-          onClick={() => syncBookingsMutation.mutate()}
-          data-testid="button-sync-bookings"
+          onClick={() => syncBookingsMutation.mutate(false)}
+          data-testid="button-preview-bookings"
+          title="Trae y guarda las reservas pendientes, pero no le confirma nada a Channex — se puede repetir sin gastar el feed demo."
         >
-          <RefreshCw className={`h-4 w-4 mr-2 ${syncBookingsMutation.isPending ? "animate-spin" : ""}`} />
-          Sincronizar reservas
+          <Eye className={`h-4 w-4 mr-2 ${syncBookingsMutation.isPending ? "animate-pulse" : ""}`} />
+          Previsualizar
         </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="outline" disabled={!activeConnectionId || syncBookingsMutation.isPending} data-testid="button-sync-bookings">
+              <CheckCheck className="h-4 w-4 mr-2" />
+              Sincronizar y confirmar
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Confirmar recepción a Channex?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esto le confirma (ACK) a Channex cada reserva pendiente que traiga. Una vez confirmada, esa reserva deja de aparecer
+                como pendiente — con la propiedad demo (10 reservas fijas) no conviene hacerlo mientras todavía se está probando,
+                salvo que quieras específicamente probar que el ACK funciona.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={() => syncBookingsMutation.mutate(true)}>Confirmar y sincronizar</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {activeConnection?.lastBookingSyncAt && (
           <span className="text-xs text-muted-foreground">
             Última sincronización: {new Date(activeConnection.lastBookingSyncAt).toLocaleString("es-AR")}

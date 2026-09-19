@@ -184,9 +184,13 @@ export function registerChannexRoutes(app: Express) {
 
   app.post("/api/channex/connections/:id/sync-bookings", requireAuth, async (req, res) => {
     try {
-      const summary = await syncBookings(req.params.id);
+      // Por defecto NO confirma nada a Channex (ver comentario en sync.ts) —
+      // hay que pedir acknowledge:true explícitamente para consumir el feed.
+      const { acknowledge } = z.object({ acknowledge: z.boolean().optional() }).parse(req.body ?? {});
+      const summary = await syncBookings(req.params.id, acknowledge ?? false);
       res.json(summary);
     } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
       handleError(res, err, "Error al sincronizar reservas de Channex");
     }
   });

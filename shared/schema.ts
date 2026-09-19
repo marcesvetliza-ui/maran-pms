@@ -585,8 +585,11 @@ export type OTAReservationLogWithChannel = OTAReservationLog & {
 };
 
 // Channex (channel manager) — conexión, mapeo de catálogo y bandeja de reservas.
-// Fase 1: solo lectura desde Channex. "Importar" nunca escribe en `reservations` —
-// ver ChannexBooking.status "imported" como una marca de revisión, no una reserva real.
+// Fase 1: aislada de la operación real (no "solo lectura" en sentido estricto —
+// confirmarle a Channex el feed de reservas sí es una escritura del lado de
+// Channex). El status "imported" y el endpoint /import (ver server/routes/channex.ts)
+// conservan ese nombre por motivos históricos: la UI lo muestra como "Aceptar" y
+// nunca escribe en `reservations` — es una marca de revisión, no una reserva real.
 export type ChannexEnvironment = "demo" | "real";
 export type ChannexBookingStatus = "new" | "needs_review" | "imported" | "modified" | "cancelled" | "error";
 
