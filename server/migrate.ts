@@ -3448,18 +3448,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         END IF;
       END IF;
 
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'inventory_items'
-          AND column_name = 'supplier_id'
-      ) THEN
-        EXECUTE 'ALTER TABLE inventory_items DROP COLUMN supplier_id';
-      END IF;
-
-      IF to_regclass('public.suppliers') IS NOT NULL THEN
-        EXECUTE 'DROP TABLE suppliers';
-      END IF;
+      -- Fase 2 (pendiente, NO hacer todavía): una vez que producción confirme
+      -- que el backfill de más abajo migró los 12 vínculos reales a
+      -- inventory_item_suppliers, retomar acá:
+      --   EXECUTE 'ALTER TABLE inventory_items DROP COLUMN supplier_id';
+      --   EXECUTE 'DROP TABLE suppliers';
+      -- y sacar suppliers/inventoryItems.supplierId de shared/schema.ts
+      -- para que el próximo diff de despliegue sí las proponga borrar.
 
       IF to_regclass('public.inventory_item_suppliers') IS NULL THEN
         EXECUTE $ddl$
