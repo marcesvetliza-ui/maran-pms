@@ -7,13 +7,12 @@
  * `relationships`, no en `attributes`.
  *
  * `POST /booking_revisions/:id/ack` (acknowledgeBookingRevision) y
- * `GET /booking_revisions/feed` (fetchPendingBookingRevisions) están
- * confirmados contra la documentación oficial, pero ninguno de los dos se
- * ejecutó todavía contra la API real (este entorno no tiene salida de red a
- * channex.io; la revisión que sí tiene salida tampoco llegó a ejecutar un
- * ack real). Si el ack falla, el sync no se cae (ver server/channex/sync.ts)
- * — la reserva queda guardada igual, marcada con error, hasta confirmarlo
- * con una corrida real.
+ * `GET /booking_revisions/feed` (fetchPendingBookingRevisions) fueron
+ * verificados contra Channex staging el 2026-09-19: una revisión pendiente
+ * quedó guardada localmente, el ACK respondió correctamente y la revisión
+ * dejó de aparecer en el feed. Si el ack falla, el sync no se cae (ver
+ * server/channex/sync.ts): la reserva queda guardada igual, marcada con
+ * error, para poder reintentar.
  */
 
 export type ChannexConnectionCredentials = {
@@ -103,7 +102,6 @@ export async function fetchChannexBooking(connection: ChannexConnectionCredentia
   return body?.data ?? null;
 }
 
-/** Ver advertencia de verificación pendiente en el comentario del archivo. */
 export async function acknowledgeBookingRevision(
   connection: ChannexConnectionCredentials,
   revisionId: string,
