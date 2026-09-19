@@ -24,6 +24,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import { AlertTriangle, RefreshCw, PlugZap, Info, Eye, CheckCheck } from "lucide-react";
 import type {
   ChannexBooking,
@@ -70,6 +71,7 @@ export default function ChannexPage() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<ChannexBookingStatus | "all">("all");
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [selectedRevisionIds, setSelectedRevisionIds] = useState<Set<string>>(new Set());
   const [newConnection, setNewConnection] = useState({
     label: "",
     environment: "demo" as ChannexEnvironment,
@@ -119,37 +121,41 @@ export default function ChannexPage() {
   const ratePlanTitleFor = (channexRatePlanId: string | null) =>
     ratePlanMappings?.find((m) => m.channexRatePlanId === channexRatePlanId)?.channexRatePlanTitle ?? channexRatePlanId ?? "—";
 
+  const isPendingAck = (booking: ChannexBooking) =>
+    Boolean(booking.channexRevisionId) && booking.channexRevisionId !== booking.acknowledgedRevisionId;
+
   const syncBookingsMutation = useMutation({
-    mutationFn: async (acknowledge: boolean) => {
-      const res = await apiRequest("POST", `/api/channex/connections/${activeConnectionId}/sync-bookings`, { acknowledge });
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/channex/connections/${activeConnectionId}/sync-bookings`);
       return res.json();
     },
     onSuccess: (summary) => {
       queryClient.invalidateQueries({ queryKey: ["/api/channex/bookings", activeConnectionId] });
-      const allAcksSucceeded =
-        summary.acknowledgeRequested &&
-        summary.ackFailures === 0 &&
-        summary.acknowledgedCount === summary.fetched;
-      const noAcksSucceeded =
-        summary.acknowledgeRequested &&
-        summary.fetched > 0 &&
-        summary.acknowledgedCount === 0;
       toast({
-        title: !summary.acknowledgeRequested
-          ? "Previsualización completada"
-          : allAcksSucceeded
-            ? "Sincronizado y confirmado a Channex"
-            : noAcksSucceeded
-              ? "Reservas guardadas, pero sin confirmar a Channex"
-              : "Sincronizado con confirmaciones pendientes",
-        description: `${summary.fetched} novedades recibidas (${summary.created} nuevas, ${summary.updated} actualizadas)${
-          summary.acknowledgeRequested
-            ? ` — ${summary.acknowledgedCount} confirmadas, ${summary.ackFailures} sin confirmar`
-            : " — no se le confirmó nada a Channex, la próxima previsualización vuelve a traer lo mismo."
-        }`,
+        title: "Previsualización (sin confirmar)",
+        description: `${summary.fetched} novedades recibidas (${summary.created} nuevas, ${summary.updated} actualizadas) — no se le confirmó nada a Channex todavía.`,
       });
     },
     onError: (err: any) => toast({ title: "Error al sincronizar", description: err.message, variant: "destructive" }),
+  });
+
+  const confirmBookingsMutation = useMutation({
+    mutationFn: async (revisionIds: string[]) => {
+      const res = await apiRequest("POST", `/api/channex/connections/${activeConnectionId}/confirm-bookings`, {
+        revisionIds: revisionIds.length > 0 ? revisionIds : undefined,
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Error al confirmar");
+      return res.json();
+    },
+    onSuccess: (summary) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/channex/bookings", activeConnectionId] });
+      setSelectedRevisionIds(new Set());
+      toast({
+        title: "Confirmado a Channex",
+        description: `${summary.selected} seleccionadas de ${summary.pending} pendientes — ${summary.confirmed} confirmadas${summary.failed ? `, ${summary.failed} fallidas` : ""}.`,
+      });
+    },
+    onError: (err: any) => toast({ title: "No se pudo confirmar", description: err.message, variant: "destructive" }),
   });
 
   const importMutation = useMutation({
@@ -250,6 +256,22 @@ export default function ChannexPage() {
 
   const selectedBooking = bookings?.find((b) => b.id === selectedBookingId) ?? null;
 
+  const pendingAckBookings = useMemo(() => (bookings ?? []).filter(isPendingAck), [bookings]);
+  const allPendingSelected = pendingAckBookings.length > 0 && pendingAckBookings.every((b) => selectedRevisionIds.has(b.channexRevisionId!));
+
+  function toggleRevisionSelected(revisionId: string, checked: boolean) {
+    setSelectedRevisionIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(revisionId);
+      else next.delete(revisionId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllPending(checked: boolean) {
+    setSelectedRevisionIds(checked ? new Set(pendingAckBookings.map((b) => b.channexRevisionId!)) : new Set());
+  }
+
   return (
     <div className="p-6 space-y-6" data-testid="page-channex">
       <div>
@@ -298,7 +320,7 @@ export default function ChannexPage() {
         <Button
           variant="outline"
           disabled={!activeConnectionId || syncBookingsMutation.isPending}
-          onClick={() => syncBookingsMutation.mutate(false)}
+          onClick={() => syncBookingsMutation.mutate()}
           data-testid="button-preview-bookings"
           title="Trae y guarda las reservas pendientes, pero no le confirma nada a Channex — se puede repetir sin gastar el feed demo."
         >
@@ -307,23 +329,33 @@ export default function ChannexPage() {
         </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button variant="outline" disabled={!activeConnectionId || syncBookingsMutation.isPending} data-testid="button-sync-bookings">
+            <Button
+              variant="outline"
+              disabled={!activeConnectionId || pendingAckBookings.length === 0 || confirmBookingsMutation.isPending}
+              data-testid="button-sync-bookings"
+            >
               <CheckCheck className="h-4 w-4 mr-2" />
-              Sincronizar y confirmar
+              {selectedRevisionIds.size > 0 ? `Confirmar ${selectedRevisionIds.size} seleccionadas` : `Confirmar todas las pendientes (${pendingAckBookings.length})`}
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>¿Confirmar recepción a Channex?</AlertDialogTitle>
               <AlertDialogDescription>
-                Esto le confirma (ACK) a Channex cada reserva pendiente que traiga. Una vez confirmada, esa reserva deja de aparecer
-                como pendiente — con la propiedad demo (10 reservas fijas) no conviene hacerlo mientras todavía se está probando,
-                salvo que quieras específicamente probar que el ACK funciona.
+                Esto le confirma (ACK) a Channex{" "}
+                {selectedRevisionIds.size > 0
+                  ? `las ${selectedRevisionIds.size} reservas que seleccionaste`
+                  : `las ${pendingAckBookings.length} reservas pendientes de la última previsualización`}
+                . Una vez confirmada, esa reserva deja de aparecer como pendiente en el feed de Channex — con la propiedad demo (10
+                reservas fijas) no conviene hacerlo mientras todavía se está probando, salvo que quieras específicamente probar que
+                el ACK funciona. Solo se confirma lo que ya se previsualizó — una reserva nueva que haya aparecido después no se toca.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction onClick={() => syncBookingsMutation.mutate(true)}>Confirmar y sincronizar</AlertDialogAction>
+              <AlertDialogAction onClick={() => confirmBookingsMutation.mutate(Array.from(selectedRevisionIds))}>
+                Confirmar
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -379,11 +411,20 @@ export default function ChannexPage() {
                 {bookingsLoading ? (
                   <div className="p-6"><Skeleton className="h-40 w-full" /></div>
                 ) : filteredBookings.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No hay reservas en este estado. Probá "Sincronizar reservas".</div>
+                  <div className="p-6 text-sm text-muted-foreground">No hay reservas en este estado. Probá "Previsualizar".</div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={allPendingSelected}
+                            disabled={pendingAckBookings.length === 0}
+                            onCheckedChange={(checked) => toggleSelectAllPending(Boolean(checked))}
+                            data-testid="checkbox-select-all-pending"
+                            title="Seleccionar todas las reservas pendientes de confirmar"
+                          />
+                        </TableHead>
                         <TableHead>Canal</TableHead>
                         <TableHead>Localizador</TableHead>
                         <TableHead>Huésped</TableHead>
@@ -399,6 +440,15 @@ export default function ChannexPage() {
                     <TableBody>
                       {filteredBookings.map((booking) => (
                         <TableRow key={booking.id} data-testid={`row-booking-${booking.id}`}>
+                          <TableCell>
+                            {isPendingAck(booking) && (
+                              <Checkbox
+                                checked={selectedRevisionIds.has(booking.channexRevisionId!)}
+                                onCheckedChange={(checked) => toggleRevisionSelected(booking.channexRevisionId!, Boolean(checked))}
+                                data-testid={`checkbox-select-${booking.id}`}
+                              />
+                            )}
+                          </TableCell>
                           <TableCell>{booking.otaName ?? "—"}</TableCell>
                           <TableCell
                             className="font-mono text-xs cursor-pointer underline"
@@ -416,6 +466,9 @@ export default function ChannexPage() {
                             <Badge variant={STATUS_BADGE[booking.status]}>{STATUS_LABELS[booking.status]}</Badge>
                             {!booking.isMapped && booking.status !== "cancelled" && (
                               <div className="text-xs text-destructive mt-1">falta mapeo</div>
+                            )}
+                            {isPendingAck(booking) && (
+                              <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">sin confirmar</div>
                             )}
                           </TableCell>
                           <TableCell className="text-right space-x-1">

@@ -14,7 +14,7 @@ import {
 } from "@shared/schema";
 import { ChannexApiError, fetchChannexProperties } from "../channex/client";
 import { encryptChannexApiKey } from "../channex/credentials";
-import { importBooking, markForReview, retryBooking, syncBookings, syncCatalog } from "../channex/sync";
+import { confirmBookings, importBooking, InvalidRevisionSelectionError, markForReview, recomputeMappedFlags, retryBooking, syncBookings, syncCatalog } from "../channex/sync";
 import { z } from "zod";
 
 /** Config de conexión y mapeo: solo quienes pueden decidir cómo se conecta el PMS a un canal real. */
@@ -158,6 +158,9 @@ export function registerChannexRoutes(app: Express) {
         .where(eq(channexRoomTypeMappings.id, req.params.id))
         .returning();
       if (!updated) return res.status(404).json({ error: "Mapeo no encontrado" });
+      // Sin esto, una reserva ya previsualizada queda marcada "falta mapeo"
+      // hasta la próxima previsualización aunque el mapeo ya esté completo.
+      await recomputeMappedFlags(updated.connectionId);
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
@@ -190,6 +193,7 @@ export function registerChannexRoutes(app: Express) {
         .where(eq(channexRatePlanMappings.id, req.params.id))
         .returning();
       if (!updated) return res.status(404).json({ error: "Mapeo no encontrado" });
+      await recomputeMappedFlags(updated.connectionId);
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
@@ -199,16 +203,31 @@ export function registerChannexRoutes(app: Express) {
 
   // --- Bandeja de reservas (cualquier usuario autenticado, ej. Recepción) ---
 
+  // "Previsualizar": trae el feed de Channex y lo guarda, sin confirmar nada.
   app.post("/api/channex/connections/:id/sync-bookings", requireAuth, async (req, res) => {
     try {
-      // Por defecto NO confirma nada a Channex (ver comentario en sync.ts) —
-      // hay que pedir acknowledge:true explícitamente para consumir el feed.
-      const { acknowledge } = z.object({ acknowledge: z.boolean().optional() }).parse(req.body ?? {});
-      const summary = await syncBookings(req.params.id, acknowledge ?? false);
+      const summary = await syncBookings(req.params.id);
+      res.json(summary);
+    } catch (err) {
+      handleError(res, err, "Error al sincronizar reservas de Channex");
+    }
+  });
+
+  // "Sincronizar y confirmar": ACK selectivo (#542) — solo sobre lo ya
+  // previsualizado. `revisionIds` opcional: cuáles confirmar; sin eso,
+  // confirma el lote completo de lo pendiente. Cualquier id que no esté
+  // pendiente en esta conexión rechaza la llamada entera (ver sync.ts).
+  app.post("/api/channex/connections/:id/confirm-bookings", requireAuth, async (req, res) => {
+    try {
+      const { revisionIds } = z.object({ revisionIds: z.array(z.string()).optional() }).parse(req.body ?? {});
+      const summary = await confirmBookings(req.params.id, revisionIds);
       res.json(summary);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
-      handleError(res, err, "Error al sincronizar reservas de Channex");
+      if (err instanceof InvalidRevisionSelectionError) {
+        return res.status(400).json({ error: err.message, invalidRevisionIds: err.invalidRevisionIds });
+      }
+      handleError(res, err, "Error al confirmar reservas de Channex");
     }
   });
 
