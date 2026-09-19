@@ -3400,9 +3400,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
           SELECT id::text AS id, name, cuit FROM suppliers
         $query$ LOOP
           matched_accounting_supplier_id := NULL;
-          IF legacy_supplier.cuit IS NOT NULL AND btrim(legacy_supplier.cuit) <> '' THEN
-            EXECUTE 'SELECT id FROM accounting_suppliers WHERE cuit = $1'
-              INTO matched_accounting_supplier_id USING legacy_supplier.cuit;
+          IF legacy_supplier.cuit IS NOT NULL AND btrim(regexp_replace(legacy_supplier.cuit, '\\D', '', 'g')) <> '' THEN
+            -- suppliers.cuit guarda guiones ("30-71234567-8"); accounting_suppliers.cuit
+            -- se guarda sin formato en todo el resto del código (ver server/billing/*.ts).
+            -- Comparar solo dígitos evita un falso "no matchea" por formato. \\D (no \D):
+            -- esto vive dentro de un template literal de JS, que se come una barra sola.
+            EXECUTE 'SELECT id FROM accounting_suppliers WHERE regexp_replace(cuit, ''\\D'', '''', ''g'') = $1'
+              INTO matched_accounting_supplier_id USING regexp_replace(legacy_supplier.cuit, '\\D', '', 'g');
           END IF;
 
           IF matched_accounting_supplier_id IS NULL THEN
