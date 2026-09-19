@@ -13,6 +13,7 @@ import {
   type ChannexConnectionPublic,
 } from "@shared/schema";
 import { ChannexApiError, fetchChannexProperties } from "../channex/client";
+import { encryptChannexApiKey } from "../channex/credentials";
 import { importBooking, markForReview, retryBooking, syncBookings, syncCatalog } from "../channex/sync";
 import { z } from "zod";
 
@@ -24,7 +25,7 @@ function actorName(req: any): string {
 }
 
 function toPublicConnection(connection: any): ChannexConnectionPublic {
-  const { apiKey, ...rest } = connection;
+  const { apiKey, apiKeyEncrypted, ...rest } = connection;
   return rest;
 }
 
@@ -68,7 +69,17 @@ export function registerChannexRoutes(app: Express) {
         });
       }
 
-      const [created] = await db.insert(channexConnections).values({ ...parsed, baseUrl, createdAt: new Date() }).returning();
+      const { apiKey, ...publicFields } = parsed;
+      const [created] = await db
+        .insert(channexConnections)
+        .values({
+          ...publicFields,
+          baseUrl,
+          apiKey: null,
+          apiKeyEncrypted: encryptChannexApiKey(apiKey),
+          createdAt: new Date(),
+        })
+        .returning();
       res.status(201).json(toPublicConnection(created));
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
@@ -79,9 +90,15 @@ export function registerChannexRoutes(app: Express) {
   app.patch("/api/channex/connections/:id", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
     try {
       const parsed = insertChannexConnectionSchema.partial().parse(req.body);
+      const { apiKey, ...fields } = parsed;
       const [updated] = await db
         .update(channexConnections)
-        .set(parsed)
+        .set({
+          ...fields,
+          ...(apiKey
+            ? { apiKey: null, apiKeyEncrypted: encryptChannexApiKey(apiKey) }
+            : {}),
+        })
         .where(eq(channexConnections.id, req.params.id))
         .returning();
       if (!updated) return res.status(404).json({ error: "Conexión no encontrada" });

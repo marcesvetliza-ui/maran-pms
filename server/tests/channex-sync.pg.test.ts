@@ -24,6 +24,10 @@ import express from "express";
 import * as http from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+// La suite siempre usa una clave propia y determinística: no debe depender del
+// secreto real del entorno ni intentar descifrar credenciales externas.
+process.env.CHANNEX_CREDENTIALS_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+
 vi.mock("../auth", () => ({
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { id: "channex-sync-test", username: "channex-sync-test", role: "admin" };
@@ -112,7 +116,7 @@ function revision(overrides: Record<string, any> = {}) {
   };
 }
 
-runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo lectura)", () => {
+runIfDatabaseIsConfigured("Channex — bandeja aislada con previsualización y ACK explícito", () => {
   beforeAll(async () => {
     if (pool) await startServer();
   });
@@ -158,7 +162,14 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       });
       expect(createConnection.status).toBe(201);
       expect(createConnection.body.apiKey).toBeUndefined(); // nunca se devuelve la key
+      expect(createConnection.body.apiKeyEncrypted).toBeUndefined();
       connectionId = createConnection.body.id;
+      const storedCredential = await pool.query(
+        `SELECT api_key, api_key_encrypted FROM channex_connections WHERE id = $1`,
+        [connectionId],
+      );
+      expect(storedCredential.rows[0].api_key).toBeNull();
+      expect(storedCredential.rows[0].api_key_encrypted).not.toContain("test-key");
 
       // --- catálogo: sincronizar y mapear ---
       (client.fetchChannexRoomTypes as any).mockResolvedValue([
@@ -192,14 +203,28 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
 
       const firstPreview = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: false });
       expect(firstPreview.status).toBe(200);
-      expect(firstPreview.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 0, acknowledged: false });
+      expect(firstPreview.body).toEqual({
+        fetched: 1,
+        created: 1,
+        updated: 0,
+        ackFailures: 0,
+        acknowledgeRequested: false,
+        acknowledgedCount: 0,
+      });
       expect(client.acknowledgeBookingRevision).not.toHaveBeenCalled();
 
       // Previsualizar de nuevo (todavía sin mapear) no duplica y sigue sin acknowledge:
       // el feed demo no se gasta por mirar.
       const secondPreview = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: false });
       expect(secondPreview.status).toBe(200);
-      expect(secondPreview.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: false });
+      expect(secondPreview.body).toEqual({
+        fetched: 1,
+        created: 0,
+        updated: 1,
+        ackFailures: 0,
+        acknowledgeRequested: false,
+        acknowledgedCount: 0,
+      });
       expect(client.acknowledgeBookingRevision).not.toHaveBeenCalled();
 
       const bookingsAfterFirstSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
@@ -223,7 +248,14 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       const secondSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(secondSync.status).toBe(200);
       // misma reserva otra vez: no se duplica (created sigue en 0, updated sube)
-      expect(secondSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: true });
+      expect(secondSync.body).toEqual({
+        fetched: 1,
+        created: 0,
+        updated: 1,
+        ackFailures: 0,
+        acknowledgeRequested: true,
+        acknowledgedCount: 1,
+      });
       expect(client.acknowledgeBookingRevision).toHaveBeenCalledTimes(1);
 
       const bookingsAfterSecondSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
@@ -251,7 +283,14 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
       ]);
       const thirdSync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(thirdSync.status).toBe(200);
-      expect(thirdSync.body).toEqual({ fetched: 1, created: 0, updated: 1, ackFailures: 0, acknowledged: true });
+      expect(thirdSync.body).toEqual({
+        fetched: 1,
+        created: 0,
+        updated: 1,
+        ackFailures: 0,
+        acknowledgeRequested: true,
+        acknowledgedCount: 1,
+      });
       const bookingsAfterThirdSync = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookingsAfterThirdSync.body).toHaveLength(1);
       expect(bookingsAfterThirdSync.body[0].status).toBe("modified");
@@ -302,7 +341,14 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1, solo
 
       const sync = await request("POST", `/api/channex/connections/${connectionId}/sync-bookings`, { acknowledge: true });
       expect(sync.status).toBe(200);
-      expect(sync.body).toEqual({ fetched: 1, created: 1, updated: 0, ackFailures: 1, acknowledged: true });
+      expect(sync.body).toEqual({
+        fetched: 1,
+        created: 1,
+        updated: 0,
+        ackFailures: 1,
+        acknowledgeRequested: true,
+        acknowledgedCount: 0,
+      });
 
       const bookings = await request("GET", `/api/channex/bookings?connectionId=${connectionId}`);
       expect(bookings.body).toHaveLength(1);

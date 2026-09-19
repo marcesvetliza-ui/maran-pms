@@ -598,7 +598,11 @@ export const channexConnections = pgTable("channex_connections", {
   label: text("label").notNull(),
   environment: text("environment").$type<ChannexEnvironment>().notNull().default("demo"),
   channexPropertyId: text("channex_property_id").notNull(),
-  apiKey: text("api_key").notNull(),
+  // apiKey queda nullable sólo para migrar instalaciones que todavía tengan
+  // la credencial histórica en texto plano. Las escrituras nuevas usan
+  // apiKeyEncrypted y la migración deja apiKey en NULL.
+  apiKey: text("api_key"),
+  apiKeyEncrypted: text("api_key_encrypted"),
   baseUrl: text("base_url").notNull().default("https://staging.channex.io/api/v1"),
   isActive: boolean("is_active").notNull().default(true),
   lastCatalogSyncAt: timestamp("last_catalog_sync_at"),
@@ -606,12 +610,17 @@ export const channexConnections = pgTable("channex_connections", {
   createdAt: timestamp("created_at").notNull(),
 });
 
-export const insertChannexConnectionSchema = createInsertSchema(channexConnections)
-  .omit({ id: true, createdAt: true })
-  .extend({ environment: z.enum(["demo", "real"]).default("demo") });
+export const insertChannexConnectionSchema = z.object({
+  label: z.string().trim().min(1),
+  environment: z.enum(["demo", "real"]).default("demo"),
+  channexPropertyId: z.string().trim().min(1),
+  apiKey: z.string().trim().min(1),
+  baseUrl: z.string().url().default("https://staging.channex.io/api/v1"),
+  isActive: z.boolean().default(true),
+});
 export type InsertChannexConnection = z.infer<typeof insertChannexConnectionSchema>;
 export type ChannexConnection = typeof channexConnections.$inferSelect;
-export type ChannexConnectionPublic = Omit<ChannexConnection, "apiKey">;
+export type ChannexConnectionPublic = Omit<ChannexConnection, "apiKey" | "apiKeyEncrypted">;
 
 export const channexRoomTypeMappings = pgTable("channex_room_type_mappings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

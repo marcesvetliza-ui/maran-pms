@@ -126,13 +126,25 @@ export default function ChannexPage() {
     },
     onSuccess: (summary) => {
       queryClient.invalidateQueries({ queryKey: ["/api/channex/bookings", activeConnectionId] });
+      const allAcksSucceeded =
+        summary.acknowledgeRequested &&
+        summary.ackFailures === 0 &&
+        summary.acknowledgedCount === summary.fetched;
+      const noAcksSucceeded =
+        summary.acknowledgeRequested &&
+        summary.fetched > 0 &&
+        summary.acknowledgedCount === 0;
       toast({
-        title: summary.acknowledged ? "Sincronizado y confirmado a Channex" : "Previsualización (sin confirmar)",
+        title: !summary.acknowledgeRequested
+          ? "Previsualización completada"
+          : allAcksSucceeded
+            ? "Sincronizado y confirmado a Channex"
+            : noAcksSucceeded
+              ? "Reservas guardadas, pero sin confirmar a Channex"
+              : "Sincronizado con confirmaciones pendientes",
         description: `${summary.fetched} novedades recibidas (${summary.created} nuevas, ${summary.updated} actualizadas)${
-          summary.acknowledged
-            ? summary.ackFailures
-              ? ` — ${summary.ackFailures} sin confirmar a Channex`
-              : ""
+          summary.acknowledgeRequested
+            ? ` — ${summary.acknowledgedCount} confirmadas, ${summary.ackFailures} sin confirmar`
             : " — no se le confirmó nada a Channex, la próxima previsualización vuelve a traer lo mismo."
         }`,
       });

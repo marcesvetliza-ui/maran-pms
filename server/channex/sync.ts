@@ -18,6 +18,7 @@ import {
   fetchChannexRoomTypes,
   fetchPendingBookingRevisions,
 } from "./client";
+import { decryptChannexApiKey } from "./credentials";
 
 const SENSITIVE_KEY_PATTERN = /card|cvv|cvc|guarantee/i;
 
@@ -35,7 +36,15 @@ function redactSensitive(value: unknown): unknown {
 }
 
 function toCredentials(connection: ChannexConnection) {
-  return { apiKey: connection.apiKey, baseUrl: connection.baseUrl };
+  if (!connection.apiKeyEncrypted) {
+    throw new Error(
+      "La conexión de Channex no tiene una credencial cifrada; ejecutá la migración antes de sincronizar",
+    );
+  }
+  return {
+    apiKey: decryptChannexApiKey(connection.apiKeyEncrypted),
+    baseUrl: connection.baseUrl,
+  };
 }
 
 async function getConnectionOrThrow(connectionId: string): Promise<ChannexConnection> {
@@ -190,7 +199,8 @@ export type BookingSyncSummary = {
   created: number;
   updated: number;
   ackFailures: number;
-  acknowledged: boolean;
+  acknowledgeRequested: boolean;
+  acknowledgedCount: number;
 };
 
 /**
@@ -207,7 +217,14 @@ export async function syncBookings(connectionId: string, acknowledge = false): P
   const credentials = toCredentials(connection);
   const revisions = await fetchPendingBookingRevisions(credentials, connection.channexPropertyId);
 
-  const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0, ackFailures: 0, acknowledged: acknowledge };
+  const summary: BookingSyncSummary = {
+    fetched: revisions.length,
+    created: 0,
+    updated: 0,
+    ackFailures: 0,
+    acknowledgeRequested: acknowledge,
+    acknowledgedCount: 0,
+  };
 
   for (const revision of revisions) {
     const extracted = extractBookingFields(revision);
@@ -273,6 +290,7 @@ export async function syncBookings(connectionId: string, acknowledge = false): P
 
     try {
       await acknowledgeBookingRevision(credentials, revision.id as string);
+      summary.acknowledgedCount += 1;
     } catch (err) {
       summary.ackFailures += 1;
       const note = err instanceof ChannexApiError
