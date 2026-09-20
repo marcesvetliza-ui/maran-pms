@@ -498,6 +498,7 @@ export function registerRestaurantRoutes(app: Express) {
           type: "cargo",
           description: label,
           amount: String(finalTotal.toFixed(2)),
+          area: "restaurant",
         });
       }
 
@@ -1110,6 +1111,7 @@ export function registerRestaurantRoutes(app: Express) {
           amount,
           reference: `Orden: ${order.orderNumber}`,
           createdBy: (req as any).user?.id || null,
+          area: "restaurant",
         } as any);
       }
 

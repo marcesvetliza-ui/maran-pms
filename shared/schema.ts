@@ -2430,6 +2430,12 @@ export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;
 export type AccountMovementType = "cargo" | "pago" | "nota_credito" | "ajuste";
 export type AccountEntityType = "company" | "agency" | "guest";
 
+// Qué área del hotel generó el movimiento. Se completa desde ahora en
+// adelante en cada punto que crea un cargo; los movimientos históricos
+// (de antes de este campo) quedan en null — se muestran como "Sin
+// clasificar" en vez de adivinar, no se migran retroactivamente.
+export type AccountMovementArea = "recepcion" | "restaurant" | "eventos" | "spa" | "grupos" | "otros";
+
 export type AccountRetention = { concepto: string; monto: number };
 
 export const accountMovements = pgTable("account_movements", {
@@ -2449,6 +2455,7 @@ export const accountMovements = pgTable("account_movements", {
   // permitted deletions keep the current-account ledger in lockstep.
   groupPaymentId: varchar("group_payment_id").references(() => groupPayments.id),
   retentions: jsonb("retentions").$type<AccountRetention[]>(),
+  area: text("area").$type<AccountMovementArea>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

@@ -3930,6 +3930,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // ── Cuentas corrientes: área de origen del cargo ──────────────────────────
+  // Deja filtrar la deuda de una empresa/agencia por el área que la generó
+  // (Recepción, Restaurant, Eventos, Grupos). Solo hacia adelante: los
+  // movimientos existentes quedan en null ("Sin clasificar"), no se infiere
+  // retroactivamente.
+  await withTimeout("account_movements.area", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE account_movements
+      ADD COLUMN area text
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

@@ -1805,6 +1805,9 @@ export class DatabaseStorage implements IStorage {
           reservationId: payment.reservationId,
           reference: input.accountSettlement.reference ?? payment.reference ?? payment.invoiceRef ?? null,
           createdBy: input.accountSettlement.createdBy ?? null,
+          // Esta función solo liquida CC de una reserva (reservationId es
+          // obligatorio más arriba), así que el área es siempre recepción.
+          area: "recepcion",
         } as any);
         if (input.accountSettlement.invoiceId) {
           for (const advanceId of input.accountSettlement.advancePaymentIds || []) {
@@ -3379,6 +3382,7 @@ export class DatabaseStorage implements IStorage {
                 groupPaymentId: groupPayment.id,
                 reference: row.reference || input.reference || "Pago Folio Maestro",
                 paymentMethod: row.method,
+                area: "grupos",
               } as any);
             }
             continue;
@@ -3418,6 +3422,7 @@ export class DatabaseStorage implements IStorage {
               guestName: reservation?.guestName || "Huésped",
               reference: row.reference || input.reference || "Pago grupal",
               paymentMethod: row.method,
+              area: "grupos",
             } as any);
           }
         }
@@ -7971,7 +7976,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(accountMovementAllocations.pagoId, pagoId));
   }
 
-  async getAccountSummary(): Promise<{
+  async getAccountSummary(area?: string | null): Promise<{
     companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
     agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
     guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
@@ -8017,8 +8022,9 @@ export class DatabaseStorage implements IStorage {
       ORDER BY balance DESC
     `);
 
+    const today = getArgentinaToday();
+
     const withAging = async (rows: any[], entityType: AccountEntityType) => {
-      const today = getArgentinaToday();
       return Promise.all(rows.map(async (r) => {
         const balance = parseFloat(r.balance);
         let oldestUnpaidDate: string | null = null;
@@ -8034,10 +8040,71 @@ export class DatabaseStorage implements IStorage {
       }));
     };
 
+    if (!area) {
+      const [companies, agencies, guests] = await Promise.all([
+        withAging(companiesRes.rows as any[], "company"),
+        withAging(agenciesRes.rows as any[], "agency"),
+        withAging(guestsRes.rows as any[], "guest"),
+      ]);
+      return { companies, agencies, guests };
+    }
+
+    // Filtrado por área: el saldo de cada entidad pasa a ser la suma de sus
+    // cargos pendientes (amount - asignado, ver account_movement_allocations)
+    // que pertenecen a esa área — reusa getPendingCharges en vez de sumar
+    // movimientos por separado, para no divergir del cálculo que ya se usa
+    // al elegir qué comprobantes cubre un pago nuevo. Los pagos/ajustes no
+    // están etiquetados por área (no hace falta: ya redujeron el cargo
+    // específico que cubrieron vía account_movement_allocations).
+    //
+    // Candidatos: cualquier entidad con al menos un cargo de esa área, con
+    // su nombre resuelto directo desde companies/agencies/guests — no desde
+    // companiesRes/agenciesRes/guestsRes (esas ya vienen filtradas por saldo
+    // NETO <> 0 más arriba, y una entidad puede tener saldo neto cero por
+    // deuda de un área cancelada con crédito de otra, y aun así deber
+    // realmente en el área que estamos filtrando).
+    const areaCondition = area === "sin_clasificar" ? sql`m.area IS NULL` : sql`m.area = ${area}`;
+    const candidatesFor = async (entityType: AccountEntityType) => {
+      const table = entityType === "company" ? "companies" : entityType === "agency" ? "agencies" : "guests";
+      const nameExpr = entityType === "guest"
+        ? sql`e.last_name || ' ' || e.first_name`
+        : sql`COALESCE(NULLIF(e.nombre_fantasia, ''), e.razon_social)`;
+      const res = await db.execute(sql`
+        SELECT DISTINCT e.id, ${nameExpr} AS name
+        FROM account_movements m
+        JOIN ${sql.raw(table)} e ON e.id = m.entity_id
+        WHERE m.entity_type = ${entityType} AND m.type = 'cargo' AND ${areaCondition}
+      `);
+      return res.rows as { id: string; name: string }[];
+    };
+
+    const matchesArea = (movementArea: string | null | undefined) =>
+      area === "sin_clasificar" ? !movementArea : movementArea === area;
+
+    const withAreaBalance = async (entityType: AccountEntityType) => {
+      const candidates = await candidatesFor(entityType);
+      const results = await Promise.all(candidates.map(async (r) => {
+        const pending = (await this.getPendingCharges(entityType, r.id)).filter(p => matchesArea(p.area));
+        if (pending.length === 0) return null;
+        const balance = Math.round(pending.reduce((sum, p) => sum + p.saldoPendiente, 0) * 100) / 100;
+        const oldestUnpaidDate = pending[0].date;
+        const lastMovement = pending[pending.length - 1].date;
+        return {
+          id: r.id,
+          name: r.name,
+          balance,
+          lastMovement,
+          oldestUnpaidDate,
+          daysOverdue: daysBetweenCalendarDates(oldestUnpaidDate, today),
+        };
+      }));
+      return results.filter((r): r is NonNullable<typeof r> => r !== null && r.balance > 0.009);
+    };
+
     const [companies, agencies, guests] = await Promise.all([
-      withAging(companiesRes.rows as any[], "company"),
-      withAging(agenciesRes.rows as any[], "agency"),
-      withAging(guestsRes.rows as any[], "guest"),
+      withAreaBalance("company"),
+      withAreaBalance("agency"),
+      withAreaBalance("guest"),
     ]);
 
     return { companies, agencies, guests };

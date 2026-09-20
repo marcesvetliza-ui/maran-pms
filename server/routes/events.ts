@@ -400,6 +400,7 @@ export function registerEventsRoutes(app: Express) {
             type: "cargo",
             description: `Evento: ${evt?.name || req.params.eventId}`,
             amount: String(parseFloat(amount).toFixed(2)),
+            area: "eventos",
           });
         }
       }

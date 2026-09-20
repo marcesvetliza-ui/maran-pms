@@ -853,7 +853,7 @@ export interface IStorage {
   getAccountMovementsByReservation(reservationId: string): Promise<AccountMovement[]>;
   getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number>;
   createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement>;
-  getAccountSummary(): Promise<{
+  getAccountSummary(area?: string | null): Promise<{
     companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
     agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
     guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
