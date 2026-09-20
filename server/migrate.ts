@@ -3891,6 +3891,45 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     await db.execute(sql.raw(SPA_TREATMENT_RESOURCE_KIND_FOREIGN_KEYS_MIGRATION_SQL));
   });
 
+  // ── Caja fuerte: registro de apertura/reseteo de código ───────────────────
+  // Reemplaza la planilla en papel que llevaba recepción (fecha, habitación,
+  // quién abrió, quién solicitó) por un log simple en Housekeeping.
+  await withTimeout("safe_box_openings (create)", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE safe_box_openings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        room_id varchar NOT NULL,
+        date date NOT NULL,
+        opened_by text NOT NULL,
+        requested_by text NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("safe_box_openings foreign key", T, () =>
+    db.execute(sql.raw(serializeIncrementalDdl(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'safe_box_openings_room_fk'
+            AND conrelid = 'safe_box_openings'::regclass
+        ) THEN
+          ALTER TABLE safe_box_openings
+          ADD CONSTRAINT safe_box_openings_room_fk
+          FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE RESTRICT;
+        END IF;
+      END
+      $$
+    `)))
+  );
+  await withTimeout("safe_box_openings index", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "idx_safe_box_openings_room_date",
+      "CREATE INDEX idx_safe_box_openings_room_date ON safe_box_openings (room_id, date DESC)",
+    )))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

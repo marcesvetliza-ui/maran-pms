@@ -2896,6 +2896,23 @@ export const insertLostFoundSchema = createInsertSchema(lostFoundItems).omit({
 export type InsertLostFound = z.infer<typeof insertLostFoundSchema>;
 export type LostFoundItem = typeof lostFoundItems.$inferSelect;
 
+// Registro de apertura/reseteo del código de la caja fuerte por habitación —
+// reemplaza la planilla en papel que llevaba recepción a mano.
+export const safeBoxOpenings = pgTable("safe_box_openings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "restrict" }),
+  date: date("date").notNull(),
+  openedBy: text("opened_by").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSafeBoxOpeningSchema = createInsertSchema(safeBoxOpenings).omit({
+  id: true, createdAt: true,
+});
+export type InsertSafeBoxOpening = z.infer<typeof insertSafeBoxOpeningSchema>;
+export type SafeBoxOpening = typeof safeBoxOpenings.$inferSelect;
+
 // ==================== SYSTEM INCIDENTS ====================
 export type IncidentSeverity = "baja" | "media" | "alta" | "critica";
 export type IncidentStatus = "pendiente" | "en_revision" | "resuelto" | "descartado";
