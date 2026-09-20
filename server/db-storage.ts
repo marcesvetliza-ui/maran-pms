@@ -5190,6 +5190,7 @@ export class DatabaseStorage implements IStorage {
           id: spaAppointmentResources.id,
           appointmentId: spaAppointmentResources.appointmentId,
           cabinId: spaAppointmentResources.cabinId,
+          resourceTreatmentId: spaAppointmentResources.resourceTreatmentId,
           startTime: spaAppointmentResources.startTime,
           endTime: spaAppointmentResources.endTime,
           durationMinutes: spaAppointmentResources.durationMinutes,
@@ -5204,14 +5205,27 @@ export class DatabaseStorage implements IStorage {
         .where(inArray(spaAppointmentResources.appointmentId, apptIds)),
     ]);
 
+    // Plain follow-up lookup rather than a second (aliased) join to
+    // spa_treatments — a resource that's a treatment (e.g. a massage bundled
+    // into a circuit) is the rare case, so this keeps the main query simple.
+    const resourceTreatmentIds = [...new Set(resourceRows.map(r => r.resourceTreatmentId).filter((id): id is string => !!id))];
+    const resourceTreatmentById = resourceTreatmentIds.length > 0
+      ? new Map((await db.select({ id: spaTreatments.id, name: spaTreatments.name, description: spaTreatments.description })
+          .from(spaTreatments)
+          .where(inArray(spaTreatments.id, resourceTreatmentIds))
+        ).map(t => [t.id, t]))
+      : new Map<string, { id: string; name: string; description: string | null }>();
+
     const rowMap = new Map((result.rows as any[]).map(r => [r.appointmentId, r]));
     const resourcesMap = new Map<string, any[]>();
     for (const resource of resourceRows) {
       if (!resourcesMap.has(resource.appointmentId)) resourcesMap.set(resource.appointmentId, []);
+      const resourceTreatment = resource.resourceTreatmentId ? resourceTreatmentById.get(resource.resourceTreatmentId) : undefined;
       resourcesMap.get(resource.appointmentId)!.push({
         id: resource.id,
         appointmentId: resource.appointmentId,
         cabinId: resource.cabinId,
+        resourceTreatmentId: resource.resourceTreatmentId,
         startTime: resource.startTime,
         endTime: resource.endTime,
         durationMinutes: resource.durationMinutes,
@@ -5222,6 +5236,11 @@ export class DatabaseStorage implements IStorage {
           name: resource.cabinName,
           description: resource.cabinDescription,
           isActive: resource.cabinIsActive,
+        } : undefined,
+        resourceTreatment: resourceTreatment ? {
+          id: resourceTreatment.id,
+          name: resourceTreatment.name,
+          description: resourceTreatment.description,
         } : undefined,
       });
     }
@@ -5255,14 +5274,8 @@ export class DatabaseStorage implements IStorage {
   async getSpaAppointment(id: string): Promise<SpaAppointmentWithDetails | undefined> {
     const [appt] = await db.select().from(spaAppointments).where(eq(spaAppointments.id, id));
     if (!appt) return undefined;
-    const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, appt.cabinId));
-    const [treatment] = await db.select().from(spaTreatments).where(eq(spaTreatments.id, appt.treatmentId));
-    const resourceReservations = await db
-      .select()
-      .from(spaAppointmentResources)
-      .where(eq(spaAppointmentResources.appointmentId, id))
-      .orderBy(spaAppointmentResources.sortOrder);
-    return { ...appt, cabin, treatment, resourceReservations };
+    const [enriched] = await this.enrichSpaAppointmentsBulk([appt]);
+    return enriched;
   }
 
   async getSpaAppointmentsByCabin(cabinId: string, date: string): Promise<SpaAppointment[]> {

@@ -992,6 +992,37 @@ export const SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL = serializeIncremen
   $$
 `);
 
+// Added later, alongside the resource_treatment_id columns themselves (see
+// the "SPA circuit treatment resources" incremental block near the end of
+// this file) — kept separate from SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL
+// above so a brand-new database never runs a constraint before the column it
+// references exists (that constant runs immediately after the original
+// CREATE TABLE, long before resource_treatment_id is added).
+export const SPA_TREATMENT_RESOURCE_KIND_FOREIGN_KEYS_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_treatment_resources_resource_treatment_fk'
+        AND conrelid = 'spa_treatment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_treatment_resources
+      ADD CONSTRAINT spa_treatment_resources_resource_treatment_fk
+      FOREIGN KEY (resource_treatment_id) REFERENCES spa_treatments(id) ON DELETE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_appointment_resources_resource_treatment_fk'
+        AND conrelid = 'spa_appointment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_appointment_resources
+      ADD CONSTRAINT spa_appointment_resources_resource_treatment_fk
+      FOREIGN KEY (resource_treatment_id) REFERENCES spa_treatments(id) ON DELETE RESTRICT;
+    END IF;
+  END
+  $$
+`);
+
 export const RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL = serializeIncrementalDdl(`
   DO $$ BEGIN
     IF NOT EXISTS (
@@ -3829,6 +3860,36 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN acknowledged_at timestamp
     `)))
   );
+
+  // ── SPA circuit resources: allow a plain treatment (e.g. a massage) as one
+  // of a circuit's bundled resources, not only a gabinete ──────────────────
+  // A circuit's resource row was cabin-only (Sauna/Hidromasaje). Reception
+  // needs to bundle an actual treatment too — e.g. "masaje" alongside
+  // "sauna" and "hidromasaje" inside the same circuito. Both resource
+  // template rows and their booked instances become cabin-xor-treatment:
+  // default_cabin_id/cabin_id turn nullable, and a new resource_treatment_id
+  // column carries the treatment when that's what the resource is.
+  await withTimeout("spa_treatment_resources.default_cabin_id_nullable", T, () =>
+    db.execute(sql`ALTER TABLE spa_treatment_resources ALTER COLUMN default_cabin_id DROP NOT NULL`)
+  );
+  await withTimeout("spa_treatment_resources.resource_treatment_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_treatment_resources
+      ADD COLUMN resource_treatment_id varchar
+    `)))
+  );
+  await withTimeout("spa_appointment_resources.cabin_id_nullable", T, () =>
+    db.execute(sql`ALTER TABLE spa_appointment_resources ALTER COLUMN cabin_id DROP NOT NULL`)
+  );
+  await withTimeout("spa_appointment_resources.resource_treatment_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_appointment_resources
+      ADD COLUMN resource_treatment_id varchar
+    `)))
+  );
+  await withTimeout("spa treatment resource kind foreign keys", T, async () => {
+    await db.execute(sql.raw(SPA_TREATMENT_RESOURCE_KIND_FOREIGN_KEYS_MIGRATION_SQL));
+  });
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {

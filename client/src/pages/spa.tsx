@@ -89,10 +89,15 @@ type SpaTreatment = {
   isCircuit?: boolean;
 };
 
+// Every resource row is exactly one kind: a gabinete (defaultCabinId) or a
+// plain treatment bundled into the circuit, like a massage (resourceTreatmentId)
+// — never both.
 type SpaTreatmentResource = {
   id: string;
   treatmentId: string;
-  defaultCabinId: string;
+  defaultCabinId: string | null;
+  resourceTreatmentId?: string | null;
+  resourceTreatmentName?: string | null;
   durationMinutes: number;
   sortOrder: number;
   cabinName?: string | null;
@@ -102,17 +107,20 @@ type SpaTreatmentResource = {
 type SpaAppointmentResource = {
   id: string;
   appointmentId: string;
-  cabinId: string;
+  cabinId: string | null;
+  resourceTreatmentId?: string | null;
   startTime: string;
   endTime: string;
   durationMinutes: number;
   sortOrder: number;
   cabin?: SpaCabin;
+  resourceTreatment?: { id: string; name: string; description: string | null };
 };
 
 type CircuitBookingDraft = {
   templateResourceId: string;
   cabinId: string;
+  resourceTreatmentId: string;
   startTime: string;
   durationMinutes: number;
   sortOrder: number;
@@ -352,6 +360,7 @@ function CircuitResourceBookingRow({
   index,
   draft,
   cabins,
+  treatments,
   appointmentDate,
   excludeAppointmentId,
   onChange,
@@ -359,10 +368,17 @@ function CircuitResourceBookingRow({
   index: number;
   draft: CircuitBookingDraft;
   cabins: SpaCabin[];
+  treatments: SpaTreatment[];
   appointmentDate: string;
   excludeAppointmentId: string | null;
   onChange: (patch: Partial<CircuitBookingDraft>) => void;
 }) {
+  // Fixed by the circuit's own template (see the effect that builds
+  // circuitBookings): this row books either a gabinete or a bundled
+  // treatment, never either — swapping the specific one is allowed, but not
+  // the kind.
+  const isTreatmentResource = !!draft.resourceTreatmentId;
+
   const availabilityQuery = useQuery<{ slots: string[] }>({
     queryKey: [
       "/api/spa/resource-availability",
@@ -382,7 +398,7 @@ function CircuitResourceBookingRow({
       if (!response.ok) throw new Error("No se pudo consultar la disponibilidad");
       return response.json();
     },
-    enabled: !!appointmentDate && !!draft.cabinId,
+    enabled: !isTreatmentResource && !!appointmentDate && !!draft.cabinId,
     staleTime: 10_000,
   });
 
@@ -394,44 +410,71 @@ function CircuitResourceBookingRow({
           <p className="text-sm font-medium">Recurso {index + 1}</p>
           <p className="text-xs text-muted-foreground">{draft.durationMinutes} minutos</p>
         </div>
-        {selectedCabin?.resourceType && (
+        {isTreatmentResource ? (
+          <Badge variant="outline" className="text-[10px]">Tratamiento</Badge>
+        ) : selectedCabin?.resourceType && (
           <Badge variant="outline" className="text-[10px] capitalize">{selectedCabin.resourceType}</Badge>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs text-muted-foreground">Recurso a reservar</label>
-          <Select value={draft.cabinId} onValueChange={(value) => onChange({ cabinId: value, startTime: "" })}>
-            <SelectTrigger data-testid={`select-circuit-resource-${index}`}>
-              <SelectValue placeholder="Seleccionar" />
-            </SelectTrigger>
-            <SelectContent>
-              {cabins.filter((cabin) => cabin.id).map((cabin) => (
-                <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {isTreatmentResource ? (
+            <Select value={draft.resourceTreatmentId} onValueChange={(value) => onChange({ resourceTreatmentId: value })}>
+              <SelectTrigger data-testid={`select-circuit-resource-${index}`}>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
+              <SelectContent>
+                {treatments.filter((treatment) => treatment.id).map((treatment) => (
+                  <SelectItem key={treatment.id} value={treatment.id}>{treatment.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Select value={draft.cabinId} onValueChange={(value) => onChange({ cabinId: value, startTime: "" })}>
+              <SelectTrigger data-testid={`select-circuit-resource-${index}`}>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
+              <SelectContent>
+                {cabins.filter((cabin) => cabin.id).map((cabin) => (
+                  <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <div>
-          <label className="text-xs text-muted-foreground">Horario disponible</label>
-          <Select value={draft.startTime} onValueChange={(value) => onChange({ startTime: value })} disabled={!draft.cabinId || availabilityQuery.isLoading}>
-            <SelectTrigger data-testid={`select-circuit-time-${index}`}>
-              <SelectValue placeholder={availabilityQuery.isLoading ? "Consultando..." : "Seleccionar"} />
-            </SelectTrigger>
-            <SelectContent>
-              {(availabilityQuery.data?.slots ?? []).map((time) => (
-                <SelectItem key={time} value={time}>
-                  {time}–{addMinutesToTime(time, draft.durationMinutes)}
-                </SelectItem>
-              ))}
-              {!availabilityQuery.isLoading && (availabilityQuery.data?.slots?.length ?? 0) === 0 && (
-                <SelectItem value="__no_slots__" disabled>Sin horarios disponibles</SelectItem>
-              )}
-            </SelectContent>
-          </Select>
+          <label className="text-xs text-muted-foreground">Horario</label>
+          {isTreatmentResource ? (
+            // Un tratamiento embebido en el circuito hoy no tiene disponibilidad
+            // propia para consultar (sin profesional asignado por recurso), así
+            // que el horario se carga a mano en vez de elegirlo de una lista.
+            <Input
+              type="time"
+              value={draft.startTime}
+              onChange={(event) => onChange({ startTime: event.target.value })}
+              data-testid={`input-circuit-time-${index}`}
+            />
+          ) : (
+            <Select value={draft.startTime} onValueChange={(value) => onChange({ startTime: value })} disabled={!draft.cabinId || availabilityQuery.isLoading}>
+              <SelectTrigger data-testid={`select-circuit-time-${index}`}>
+                <SelectValue placeholder={availabilityQuery.isLoading ? "Consultando..." : "Seleccionar"} />
+              </SelectTrigger>
+              <SelectContent>
+                {(availabilityQuery.data?.slots ?? []).map((time) => (
+                  <SelectItem key={time} value={time}>
+                    {time}–{addMinutesToTime(time, draft.durationMinutes)}
+                  </SelectItem>
+                ))}
+                {!availabilityQuery.isLoading && (availabilityQuery.data?.slots?.length ?? 0) === 0 && (
+                  <SelectItem value="__no_slots__" disabled>Sin horarios disponibles</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
-      {availabilityQuery.isError && (
+      {!isTreatmentResource && availabilityQuery.isError && (
         <p className="text-xs text-destructive">No se pudo consultar la disponibilidad.</p>
       )}
     </div>
@@ -524,7 +567,7 @@ export default function SpaPage() {
   const [circuitBookings, setCircuitBookings] = useState<CircuitBookingDraft[]>([]);
   const [circuitDraftTreatmentId, setCircuitDraftTreatmentId] = useState<string | null>(null);
   const [editingAppointmentResources, setEditingAppointmentResources] = useState<SpaAppointmentResource[]>([]);
-  const [treatmentResourceDrafts, setTreatmentResourceDrafts] = useState<Array<{ defaultCabinId: string; durationMinutes: number }>>([]);
+  const [treatmentResourceDrafts, setTreatmentResourceDrafts] = useState<Array<{ defaultCabinId: string; resourceTreatmentId: string; durationMinutes: number }>>([]);
   const [supplyItemId, setSupplyItemId] = useState("");
   const [supplyQty, setSupplyQty] = useState("1");
   const [cabinDialogOpen, setCabinDialogOpen] = useState(false);
@@ -747,6 +790,10 @@ export default function SpaPage() {
   const selectedAppointmentDate = form.watch("appointmentDate");
   const selectedTreatment = treatments.find((treatment) => treatment.id === selectedTreatmentId);
   const resourceCabins = activeCabins.filter((cabin) => !!cabin.resourceType);
+  // Any plain (non-circuit) active treatment can be bundled as a circuit
+  // resource — a circuit is always excluded here (isCircuit), so this never
+  // offers nesting a circuit inside itself.
+  const resourceTreatments = treatments.filter((treatment) => treatment.isActive === "true" && !treatment.isCircuit);
 
   const { data: selectedCircuitTemplates = EMPTY_SPA_TREATMENT_RESOURCES, isFetching: isFetchingCircuitTemplates } = useQuery<SpaTreatmentResource[]>({
     queryKey: ["/api/spa/treatments", selectedTreatmentId, "resources"],
@@ -772,7 +819,8 @@ export default function SpaPage() {
       const existing = editingByOrder.get(template.sortOrder);
       return {
         templateResourceId: template.id,
-        cabinId: existing?.cabinId || template.defaultCabinId,
+        cabinId: existing?.cabinId || template.defaultCabinId || "",
+        resourceTreatmentId: existing?.resourceTreatmentId || template.resourceTreatmentId || "",
         startTime: existing?.startTime || "",
         durationMinutes: template.durationMinutes,
         sortOrder: template.sortOrder,
@@ -838,7 +886,7 @@ export default function SpaPage() {
           endTime,
           status: "confirmed",
           resourceReservations: selectedTreatment?.isCircuit
-            ? circuitBookings.map(({ templateResourceId, cabinId, startTime }) => ({ templateResourceId, cabinId, startTime }))
+            ? circuitBookings.map(({ templateResourceId, cabinId, resourceTreatmentId, startTime }) => ({ templateResourceId, cabinId, resourceTreatmentId, startTime }))
             : [],
           ...(newAppointmentSettlement === "room_charge"
             ? { settlement: { type: "room_charge", reservationId: newAppointmentRoomId } }
@@ -973,7 +1021,7 @@ export default function SpaPage() {
           reservationId: data.reservationId || null,
           notes: data.notes || null,
           resourceReservations: selectedTreatment?.isCircuit
-            ? circuitBookings.map(({ templateResourceId, cabinId, startTime }) => ({ templateResourceId, cabinId, startTime }))
+            ? circuitBookings.map(({ templateResourceId, cabinId, resourceTreatmentId, startTime }) => ({ templateResourceId, cabinId, resourceTreatmentId, startTime }))
             : [],
         }),
       });
@@ -1324,7 +1372,8 @@ export default function SpaPage() {
       return;
     }
     setTreatmentResourceDrafts(editingTreatmentResources.map((resource) => ({
-      defaultCabinId: resource.defaultCabinId,
+      defaultCabinId: resource.defaultCabinId || "",
+      resourceTreatmentId: resource.resourceTreatmentId || "",
       durationMinutes: resource.durationMinutes,
     })));
   }, [editingTreatment?.id, editingTreatment?.isCircuit, editingTreatmentResources, isFetchingTreatmentResources]);
@@ -1637,7 +1686,7 @@ export default function SpaPage() {
   const onSubmit = (data: AppointmentFormValues) => {
     if (selectedTreatment?.isCircuit && selectedCircuitTemplates.length > 0) {
       const incomplete = circuitBookings.length !== selectedCircuitTemplates.length
-        || circuitBookings.some((booking) => !booking.cabinId || !booking.startTime);
+        || circuitBookings.some((booking) => (!booking.cabinId && !booking.resourceTreatmentId) || !booking.startTime);
       if (incomplete) {
         toast({ title: "Completá todos los recursos y horarios del circuito", variant: "destructive" });
         return;
@@ -2939,6 +2988,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           index={index}
                           draft={booking}
                           cabins={resourceCabins}
+                          treatments={resourceTreatments}
                           appointmentDate={selectedAppointmentDate}
                           excludeAppointmentId={editingAppointmentId}
                           onChange={(patch) => setCircuitBookings((current) => current.map((item, itemIndex) => (
@@ -3276,7 +3326,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     {selectedAppointment.resourceReservations!.map((resource) => (
                       <div key={resource.id} className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
                         <span className="font-medium">
-                          {resource.cabin?.name || cabins.find((cabin) => cabin.id === resource.cabinId)?.name || "Recurso SPA"}
+                          {resource.cabin?.name
+                            || (resource.cabinId ? cabins.find((cabin) => cabin.id === resource.cabinId)?.name : undefined)
+                            || resource.resourceTreatment?.name
+                            || (resource.resourceTreatmentId ? treatments.find((treatment) => treatment.id === resource.resourceTreatmentId)?.name : undefined)
+                            || "Recurso SPA"}
                         </span>
                         <span className="text-muted-foreground tabular-nums">
                           {resource.startTime}–{resource.endTime} · {resource.durationMinutes} min
@@ -4257,18 +4311,38 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             <div>
                               <label className="text-xs text-muted-foreground">Recurso {index + 1}</label>
                               <Select
-                                value={resource.defaultCabinId}
-                                onValueChange={(value) => setTreatmentResourceDrafts((current) => current.map((row, rowIndex) => (
-                                  rowIndex === index ? { ...row, defaultCabinId: value } : row
-                                )))}
+                                value={resource.defaultCabinId ? `cabin:${resource.defaultCabinId}` : resource.resourceTreatmentId ? `treatment:${resource.resourceTreatmentId}` : ""}
+                                onValueChange={(value) => {
+                                  const [kind, id] = value.split(":");
+                                  const pickedTreatment = kind === "treatment" ? resourceTreatments.find((t) => t.id === id) : undefined;
+                                  setTreatmentResourceDrafts((current) => current.map((row, rowIndex) => (
+                                    rowIndex === index ? {
+                                      ...row,
+                                      defaultCabinId: kind === "cabin" ? id : "",
+                                      resourceTreatmentId: kind === "treatment" ? id : "",
+                                      // El tratamiento trae su propia duración habitual como punto de partida.
+                                      durationMinutes: pickedTreatment ? pickedTreatment.durationMinutes : row.durationMinutes,
+                                    } : row
+                                  )));
+                                }}
                               >
                                 <SelectTrigger data-testid={`select-template-resource-${index}`}>
-                                  <SelectValue placeholder="Sauna o Hidromasaje" />
+                                  <SelectValue placeholder="Sauna, Hidromasaje o un tratamiento" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {resourceCabins.filter((cabin) => cabin.id).map((cabin) => (
-                                    <SelectItem key={cabin.id} value={cabin.id}>{cabin.name}</SelectItem>
-                                  ))}
+                                  <SelectGroup>
+                                    <SelectLabel>Gabinetes</SelectLabel>
+                                    {resourceCabins.filter((cabin) => cabin.id).map((cabin) => (
+                                      <SelectItem key={cabin.id} value={`cabin:${cabin.id}`}>{cabin.name}</SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                  <SelectSeparator />
+                                  <SelectGroup>
+                                    <SelectLabel>Tratamientos</SelectLabel>
+                                    {resourceTreatments.filter((treatment) => treatment.id).map((treatment) => (
+                                      <SelectItem key={treatment.id} value={`treatment:${treatment.id}`}>{treatment.name}</SelectItem>
+                                    ))}
+                                  </SelectGroup>
                                 </SelectContent>
                               </Select>
                             </div>
@@ -4313,7 +4387,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         disabled={treatmentResourceDrafts.length >= 6}
                         onClick={() => setTreatmentResourceDrafts((current) => [
                           ...current,
-                          { defaultCabinId: resourceCabins[0]?.id || "", durationMinutes: 30 },
+                          { defaultCabinId: resourceCabins[0]?.id || "", resourceTreatmentId: "", durationMinutes: 30 },
                         ])}
                         data-testid="button-add-circuit-resource"
                       >
@@ -4322,7 +4396,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <Button
                         type="button"
                         size="sm"
-                        disabled={saveTreatmentResourcesMutation.isPending || treatmentResourceDrafts.some((resource) => !resource.defaultCabinId)}
+                        disabled={saveTreatmentResourcesMutation.isPending || treatmentResourceDrafts.some((resource) => !resource.defaultCabinId && !resource.resourceTreatmentId)}
                         onClick={() => saveTreatmentResourcesMutation.mutate()}
                         data-testid="button-save-circuit-resources"
                       >
