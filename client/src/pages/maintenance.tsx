@@ -494,6 +494,10 @@ export default function MaintenancePage() {
   const [blockRoom, setBlockRoom] = useState(false);
   const [blockFrom, setBlockFrom] = useState("");
   const [blockTo, setBlockTo] = useState("");
+  // Bloqueo de piso entero: reemplaza el selector de habitación única por uno
+  // de piso, y crea una orden + bloqueo por cada habitación de ese piso.
+  const [floorBlockMode, setFloorBlockMode] = useState(false);
+  const [selectedFloor, setSelectedFloor] = useState("");
   // Block state for detail/edit dialog
   const [detailBlockEnabled, setDetailBlockEnabled] = useState(false);
   const [detailBlockFrom, setDetailBlockFrom] = useState("");
@@ -507,6 +511,15 @@ export default function MaintenancePage() {
     | { type: "add_block"; payload: { workOrderId: string; roomId: string; blockFrom: string; blockTo: string; blockedBy: string } }
     | { type: "new_order"; orderData: any }
     | null
+  >(null);
+
+  // Bloqueo de piso: conflictos agrupados por habitación (a diferencia del
+  // flujo de una sola habitación, acá "confirmar" NO fuerza el bloqueo sobre
+  // las habitaciones con conflicto — las saltea y bloquea solo el resto.
+  type FloorRoomConflict = { room: Room; conflicts: ConflictRes[] };
+  const [floorConflicts, setFloorConflicts] = useState<FloorRoomConflict[]>([]);
+  const [pendingFloorBlock, setPendingFloorBlock] = useState<
+    { rooms: Room[]; orderData: WorkOrderFormValues; blockFrom: string; blockTo: string } | null
   >(null);
 
   const { data: dashboardStats, isLoading: isLoadingStats } = useQuery<DashboardStats>({
@@ -606,6 +619,55 @@ export default function MaintenancePage() {
     },
     onError: () => {
       toast({ title: "Error", description: "No se pudo crear la orden de trabajo", variant: "destructive" });
+    },
+  });
+
+  // No hay soporte de orden multi-habitación en el modelo de datos: una
+  // orden = una habitación. "Bloqueo de piso entero" reusa la misma orden
+  // POST /api/maintenance/work-orders una vez por habitación del piso.
+  const createFloorBlockMutation = useMutation({
+    mutationFn: async ({ rooms, orderData, blockFrom: from, blockTo: to }: {
+      rooms: Room[]; orderData: WorkOrderFormValues; blockFrom: string; blockTo: string;
+    }) => {
+      const results = await Promise.allSettled(rooms.map((room) =>
+        apiRequest("POST", "/api/maintenance/work-orders", {
+          ...orderData,
+          title: `${orderData.title} — Hab. ${room.roomNumber}`,
+          roomId: room.id,
+          location: null,
+          assignedToId: orderData.assignedToId && orderData.assignedToId !== "none" ? orderData.assignedToId : null,
+          status: orderData.assignedToId && orderData.assignedToId !== "none" ? "assigned" : "pending",
+          blockRoom: true,
+          blockFrom: from,
+          blockTo: to,
+          blockedBy: user?.username || "Sistema",
+        })
+      ));
+      const failedCount = results.filter((r) => r.status === "rejected").length;
+      return { total: rooms.length, failedCount };
+    },
+    onSuccess: ({ total, failedCount }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setIsNewOrderDialogOpen(false);
+      orderForm.reset();
+      setFloorBlockMode(false);
+      setSelectedFloor("");
+      setBlockFrom("");
+      setBlockTo("");
+      if (failedCount > 0) {
+        toast({
+          title: "Bloqueo de piso parcial",
+          description: `${total - failedCount} de ${total} habitaciones bloqueadas. ${failedCount} fallaron — revisá el piso.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Piso bloqueado", description: `Se crearon ${total} órdenes y se bloquearon ${total} habitaciones.` });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo bloquear el piso", variant: "destructive" });
     },
   });
 
@@ -763,6 +825,39 @@ export default function MaintenancePage() {
       }
     } catch {
       executeBlockAction(action); // If check fails, proceed anyway
+    }
+  };
+
+  // Helper: check conflicts for every room of a floor, then either proceed
+  // for all of them or show a warning listing which ones have a reserva
+  // activa — confirming skips those rooms rather than blocking them anyway.
+  const checkFloorConflictsAndProceed = async (
+    rooms: Room[],
+    orderData: WorkOrderFormValues,
+    from: string,
+    to: string,
+  ) => {
+    try {
+      const perRoom = await Promise.all(rooms.map(async (room) => {
+        const res = await fetch(
+          `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(room.id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+          { credentials: "include" }
+        );
+        const conflicts: ConflictRes[] = res.ok ? await res.json() : [];
+        return { room, conflicts: Array.isArray(conflicts) ? conflicts : [] };
+      }));
+      const withConflicts = perRoom.filter((r) => r.conflicts.length > 0);
+      if (withConflicts.length > 0) {
+        const cleanRooms = perRoom.filter((r) => r.conflicts.length === 0).map((r) => r.room);
+        setFloorConflicts(withConflicts);
+        setPendingFloorBlock({ rooms: cleanRooms, orderData, blockFrom: from, blockTo: to });
+      } else {
+        createFloorBlockMutation.mutate({ rooms, orderData, blockFrom: from, blockTo: to });
+      }
+    } catch {
+      // Si falla la verificación, se procede igual que en el flujo de una
+      // sola habitación — no bloquear la carga por un error de consulta.
+      createFloorBlockMutation.mutate({ rooms, orderData, blockFrom: from, blockTo: to });
     }
   };
 
@@ -1226,6 +1321,23 @@ export default function MaintenancePage() {
           </DialogHeader>
           <Form {...orderForm}>
             <form onSubmit={orderForm.handleSubmit(async (data) => {
+              if (floorBlockMode) {
+                if (!selectedFloor || !blockFrom || !blockTo) {
+                  toast({ title: "Completá piso, desde y hasta", variant: "destructive" });
+                  return;
+                }
+                if (blockTo < blockFrom) {
+                  toast({ title: "La fecha de fin debe ser posterior a la de inicio", variant: "destructive" });
+                  return;
+                }
+                const floorRooms = rooms.filter((r) => String(r.floor) === selectedFloor);
+                if (floorRooms.length === 0) {
+                  toast({ title: "Ese piso no tiene habitaciones cargadas", variant: "destructive" });
+                  return;
+                }
+                await checkFloorConflictsAndProceed(floorRooms, data, blockFrom, blockTo);
+                return;
+              }
               const roomIdClean = data.roomId && data.roomId !== "none" ? data.roomId : null;
               if (roomIdClean) {
                 const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -1264,6 +1376,73 @@ export default function MaintenancePage() {
                   </FormItem>
                 )}
               />
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Bloqueo de piso entero</span>
+                </div>
+                <Switch
+                  checked={floorBlockMode}
+                  onCheckedChange={(checked) => {
+                    setFloorBlockMode(checked);
+                    setSelectedFloor("");
+                    setBlockFrom("");
+                    setBlockTo("");
+                    setBlockRoom(false);
+                    if (checked) orderForm.setValue("roomId", "");
+                  }}
+                  data-testid="switch-floor-block"
+                />
+              </div>
+              {floorBlockMode ? (
+                <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 p-4 space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Piso</Label>
+                    <Select value={selectedFloor} onValueChange={setSelectedFloor}>
+                      <SelectTrigger data-testid="select-order-floor">
+                        <SelectValue placeholder="Seleccionar piso" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[...new Set(rooms.map((r) => r.floor))]
+                          .sort((a, b) => a - b)
+                          .map((floor) => (
+                            <SelectItem key={floor} value={String(floor)}>
+                              Piso {floor} ({rooms.filter((r) => r.floor === floor).length} habitaciones)
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-orange-700 dark:text-orange-400">
+                    Se creará una orden y se bloqueará cada habitación del piso durante el período indicado.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Desde</Label>
+                      <Input
+                        type="date"
+                        value={blockFrom}
+                        onChange={(e) => setBlockFrom(e.target.value)}
+                        data-testid="input-floor-block-from"
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Hasta</Label>
+                      <Input
+                        type="date"
+                        value={blockTo}
+                        onChange={(e) => setBlockTo(e.target.value)}
+                        data-testid="input-floor-block-to"
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                  {blockFrom && blockTo && blockTo < blockFrom && (
+                    <p className="text-xs text-red-600">La fecha de fin debe ser posterior a la de inicio.</p>
+                  )}
+                </div>
+              ) : (
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={orderForm.control}
@@ -1306,6 +1485,7 @@ export default function MaintenancePage() {
                   )}
                 />
               </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={orderForm.control}
@@ -1442,9 +1622,9 @@ export default function MaintenancePage() {
                 <Button type="button" variant="outline" onClick={() => setIsNewOrderDialogOpen(false)}>
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={createOrderMutation.isPending} data-testid="button-submit-order">
-                  {createOrderMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Crear Orden
+                <Button type="submit" disabled={createOrderMutation.isPending || createFloorBlockMutation.isPending} data-testid="button-submit-order">
+                  {(createOrderMutation.isPending || createFloorBlockMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {floorBlockMode ? "Bloquear Piso" : "Crear Orden"}
                 </Button>
               </DialogFooter>
             </form>
@@ -1781,6 +1961,64 @@ export default function MaintenancePage() {
               data-testid="button-conflict-confirm"
             >
               {blockRoom ? "Confirmar bloqueo de todas formas" : "Crear orden de todas formas"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={floorConflicts.length > 0}
+        onOpenChange={(open) => { if (!open) { setFloorConflicts([]); setPendingFloorBlock(null); } }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+              <AlertTriangle className="h-5 w-5" />
+              {floorConflicts.length} habitacion{floorConflicts.length === 1 ? "" : "es"} con reserva activa
+            </DialogTitle>
+            <DialogDescription>
+              Estas habitaciones del piso tienen reservas que se superponen con el período de bloqueo.
+              Podés confirmar y bloquear el resto del piso salteando estas habitaciones, o cancelar todo
+              para revisar primero.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900 max-h-64 overflow-y-auto">
+            {floorConflicts.map(({ room, conflicts }) => (
+              <div key={room.id} className="px-3 py-2">
+                <p className="font-medium text-sm">Hab. {room.roomNumber}</p>
+                {conflicts.map((c) => (
+                  <p key={c.id} className="text-xs text-muted-foreground">
+                    {c.guestName || "Sin nombre"} · Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
+          {pendingFloorBlock && pendingFloorBlock.rooms.length === 0 && (
+            <p className="text-xs text-destructive">
+              Todas las habitaciones del piso tienen conflicto — no queda ninguna para bloquear.
+            </p>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => { setFloorConflicts([]); setPendingFloorBlock(null); }}
+              data-testid="button-floor-conflict-cancel"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!pendingFloorBlock || pendingFloorBlock.rooms.length === 0}
+              onClick={() => {
+                if (!pendingFloorBlock) return;
+                createFloorBlockMutation.mutate(pendingFloorBlock);
+                setFloorConflicts([]);
+                setPendingFloorBlock(null);
+              }}
+              data-testid="button-floor-conflict-confirm"
+            >
+              Bloquear el resto del piso ({pendingFloorBlock?.rooms.length ?? 0})
             </Button>
           </DialogFooter>
         </DialogContent>
