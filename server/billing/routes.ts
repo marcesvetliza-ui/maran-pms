@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
@@ -1864,6 +1864,15 @@ export function registerBillingRoutes(app: Express) {
             const existingCargos = await storage.getAccountMovements(ccEntityType, ccEntityId);
             const alreadyCharged = existingCargos.some((m) => m.type === "cargo" && m.reference === nroFac);
             if (!alreadyCharged) {
+              // cashArea ya identifica desde qué área se está facturando (Centro
+              // de Comprobantes de restaurant/spa/eventos/recepción); se traduce
+              // 1 a 1 al área de la cuenta corriente en vez de adivinarla.
+              const CASH_AREA_TO_ACCOUNT_AREA: Record<string, AccountMovementArea> = {
+                reception: "recepcion",
+                restaurant: "restaurant",
+                spa: "spa",
+                event: "eventos",
+              };
               await storage.createAccountMovement({
                 entityType: ccEntityType,
                 entityId: ccEntityId,
@@ -1873,6 +1882,7 @@ export function registerBillingRoutes(app: Express) {
                 amount: total.toFixed(2),
                 reference: nroFac,
                 createdBy: user?.id || null,
+                area: CASH_AREA_TO_ACCOUNT_AREA[String(cashArea || "")] || "otros",
               } as any);
             }
           }

@@ -906,6 +906,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (billingTarget === "agency" && effectiveAgencyId) {
@@ -919,6 +920,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (billingTarget === "guest" && guestId) {
@@ -932,6 +934,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else {
@@ -1060,6 +1063,7 @@ export async function registerRoutes(
               reservationId: row.id,
               reservationCode: row.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (row.agency_id) {
@@ -1073,6 +1077,7 @@ export async function registerRoutes(
               reservationId: row.id,
               reservationCode: row.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (row.guest_id) {
@@ -1086,6 +1091,7 @@ export async function registerRoutes(
               reservationId: row.id,
               reservationCode: row.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else {

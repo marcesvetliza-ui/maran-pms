@@ -515,6 +515,7 @@ export function registerGuestsRoutes(app: Express) {
             reservationId: row.id,
             reservationCode: row.reservation_code,
             guestName,
+            area: "recepcion",
           } as any);
         }
       }
@@ -609,7 +610,8 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/account-summary", async (req, res) => {
     try {
-      const summary = await storage.getAccountSummary();
+      const area = typeof req.query.area === "string" ? req.query.area : undefined;
+      const summary = await storage.getAccountSummary(area);
       res.json(summary);
     } catch (error) {
       console.error("[account-summary] Error:", error);
@@ -668,7 +670,7 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/account-movements/report", async (req, res) => {
     try {
-      const { from, to } = req.query as { from?: string; to?: string };
+      const { from, to, area } = req.query as { from?: string; to?: string; area?: string };
       const summary = await storage.getAccountSummary();
 
       const movements: any[] = [];
@@ -698,10 +700,17 @@ export function registerGuestsRoutes(app: Express) {
         return true;
       };
 
+      const matchesArea = (m: any) => {
+        if (!area) return true;
+        if (area === "sin_clasificar") return !m.area;
+        return m.area === area;
+      };
+
       const filtered = movements.filter(m => {
         if (from && m.date < from) return false;
         if (to && m.date > to) return false;
         if (!isFiscalMovement(m.description)) return false;
+        if (!matchesArea(m)) return false;
         return true;
       }).sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt)));
 

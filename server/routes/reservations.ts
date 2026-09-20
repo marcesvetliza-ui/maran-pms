@@ -1465,6 +1465,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.agencyId) {
               await storage.createAccountMovement({
@@ -1477,6 +1478,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.guestId) {
               await storage.createAccountMovement({
@@ -1489,6 +1491,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             }
           } catch (e) {
@@ -1522,6 +1525,7 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           } else if (ccPayment.billingTarget === "agency" && reservation.agencyId) {
             await storage.createAccountMovement({
@@ -1534,6 +1538,7 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           }
         }
