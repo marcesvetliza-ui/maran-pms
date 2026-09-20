@@ -88,6 +88,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem, SafeBoxOpening, InsertSafeBoxOpening } from "@shared/schema";
+import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
@@ -1686,6 +1687,9 @@ export default function Housekeeping() {
   const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor).filter((f): f is number => f != null))).sort((a, b) => a - b) : [];
   
   const filteredRooms = rooms?.filter(room => {
+    // REUB es una habitación virtual de reubicación (ver shared/room-availability.ts),
+    // no una habitación física real — no debe aparecer en la grilla de limpieza.
+    if (!isOperationalInventoryRoom(room)) return false;
     if (floorFilter !== "all" && room.floor !== parseInt(floorFilter)) return false;
     if (statusFilter !== "all" && room.status !== statusFilter) return false;
     return true;
