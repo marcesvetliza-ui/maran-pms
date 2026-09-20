@@ -46,15 +46,25 @@ function minutesToTime(minutes: number): string {
 
 type SpaResourceBookingInput = {
   templateResourceId: string;
-  cabinId: string;
+  cabinId?: string | null;
+  resourceTreatmentId?: string | null;
   startTime: string;
 };
 
-type NormalizedSpaResourceBooking = SpaResourceBookingInput & {
+// A resource is always exactly one kind, fixed by its template row: a
+// gabinete (cabinId) or a plain treatment bundled into the circuit, like a
+// massage (resourceTreatmentId) — the other stays null. Only cabin-kind
+// resources are checked for booking conflicts (see lockAndAssertSpaAvailability);
+// a treatment resource today carries no staff-availability check.
+type NormalizedSpaResourceBooking = {
+  templateResourceId: string;
+  cabinId: string | null;
+  resourceTreatmentId: string | null;
+  startTime: string;
   endTime: string;
   durationMinutes: number;
   sortOrder: number;
-  cabinName: string;
+  label: string;
 };
 
 const ACTIVE_SPA_STATUSES = ["pending", "confirmed", "in_progress"] as const;
@@ -110,12 +120,15 @@ function isValidSpaStatus(value: unknown): value is typeof ALL_SPA_STATUSES[numb
 }
 
 function assertNoInternalSpaResourceOverlap(
-  bookings: Array<{ cabinId: string; startTime: string; endTime: string; label: string }>,
+  bookings: Array<{ cabinId: string | null; startTime: string; endTime: string; label: string }>,
 ) {
-  for (let i = 0; i < bookings.length; i++) {
-    for (let j = i + 1; j < bookings.length; j++) {
-      const current = bookings[i];
-      const other = bookings[j];
+  // A treatment resource (cabinId null) has no physical room to double-book,
+  // so there is nothing to check it against.
+  const cabinBookings = bookings.filter((booking) => booking.cabinId);
+  for (let i = 0; i < cabinBookings.length; i++) {
+    for (let j = i + 1; j < cabinBookings.length; j++) {
+      const current = cabinBookings[i];
+      const other = cabinBookings[j];
       if (
         current.cabinId === other.cabinId
         && current.startTime < other.endTime
@@ -153,11 +166,16 @@ async function normalizeSpaResourceBookings(
 
   const templateMap = new Map<string, any>(templates.map((template: any) => [template.id, template]));
   const usedTemplateIds = new Set<string>();
-  const cabinIds = [...new Set(inputs.map((input) => input?.cabinId).filter(Boolean))];
+  const cabinIds = [...new Set(inputs.map((input) => input?.cabinId).filter((id): id is string => !!id))];
   const resourceCabins = cabinIds.length > 0
     ? await tx.select().from(spaCabins).where(inArray(spaCabins.id, cabinIds))
     : [];
   const cabinMap = new Map<string, any>(resourceCabins.map((cabin: any) => [cabin.id, cabin]));
+  const resourceTreatmentIds = [...new Set(inputs.map((input) => input?.resourceTreatmentId).filter((id): id is string => !!id))];
+  const candidateTreatments = resourceTreatmentIds.length > 0
+    ? await tx.select().from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+    : [];
+  const treatmentMap = new Map<string, any>(candidateTreatments.map((treatment: any) => [treatment.id, treatment]));
 
   return inputs.map((input) => {
     const template = templateMap.get(input?.templateResourceId);
@@ -166,28 +184,44 @@ async function normalizeSpaResourceBookings(
     }
     usedTemplateIds.add(template.id);
 
-    const cabin = cabinMap.get(input.cabinId);
-    if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-      throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
+    let cabinId: string | null = null;
+    let resourceTreatmentId: string | null = null;
+    let label: string;
+    if (template.resourceTreatmentId) {
+      const treatment = input.resourceTreatmentId ? treatmentMap.get(input.resourceTreatmentId) : undefined;
+      if (!treatment || treatment.isActive !== "true" || treatment.isCircuit) {
+        throw Object.assign(new Error("El tratamiento seleccionado no está disponible para circuitos."), { statusCode: 400 });
+      }
+      resourceTreatmentId = treatment.id;
+      label = treatment.name;
+    } else {
+      const cabin = input.cabinId ? cabinMap.get(input.cabinId) : undefined;
+      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+        throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
+      }
+      cabinId = cabin.id;
+      label = cabin.name;
     }
+
     if (!isValidSpaTime(input.startTime)) {
-      throw Object.assign(new Error(`El horario seleccionado para ${cabin.name} no es válido.`), { statusCode: 400 });
+      throw Object.assign(new Error(`El horario seleccionado para ${label} no es válido.`), { statusCode: 400 });
     }
 
     const startMinutes = timeToMinutes(input.startTime);
     const endMinutes = startMinutes + Number(template.durationMinutes);
     if (endMinutes > SPA_CLOSE_MINUTES) {
-      throw Object.assign(new Error(`${cabin.name} debe finalizar antes de las 22:00.`), { statusCode: 400 });
+      throw Object.assign(new Error(`${label} debe finalizar antes de las 22:00.`), { statusCode: 400 });
     }
 
     return {
       templateResourceId: template.id,
-      cabinId: cabin.id,
+      cabinId,
+      resourceTreatmentId,
       startTime: input.startTime,
       endTime: minutesToTime(endMinutes),
       durationMinutes: Number(template.durationMinutes),
       sortOrder: Number(template.sortOrder),
-      cabinName: cabin.name,
+      label,
     };
   });
 }
@@ -195,11 +229,16 @@ async function normalizeSpaResourceBookings(
 async function lockAndAssertSpaAvailability(
   tx: any,
   appointmentDate: string,
-  bookings: Array<{ cabinId: string; startTime: string; endTime: string; label: string }>,
+  bookings: Array<{ cabinId: string | null; startTime: string; endTime: string; label: string }>,
   excludeAppointmentId?: string,
 ) {
   assertNoInternalSpaResourceOverlap(bookings);
-  const cabinIds = [...new Set(bookings.map((booking) => booking.cabinId))].sort();
+  // A treatment resource (cabinId null) is not a room booking, so it has
+  // nothing to lock or check for conflicts against.
+  const cabinBookings = bookings.filter(
+    (booking): booking is { cabinId: string; startTime: string; endTime: string; label: string } => !!booking.cabinId,
+  );
+  const cabinIds = [...new Set(cabinBookings.map((booking) => booking.cabinId))].sort();
 
   // Serialize reservations per date/cabin. The final conflict query still runs
   // inside the transaction, closing the race between availability and insert.
@@ -208,7 +247,7 @@ async function lockAndAssertSpaAvailability(
   }
 
   const excludedId = excludeAppointmentId ?? "";
-  for (const booking of bookings) {
+  for (const booking of cabinBookings) {
     const conflict = await tx.execute(sql`
       SELECT occupied.guest_name, occupied.start_time, occupied.end_time
       FROM (
@@ -587,6 +626,7 @@ export function registerSpaRoutes(app: Express) {
           id: spaTreatmentResources.id,
           treatmentId: spaTreatmentResources.treatmentId,
           defaultCabinId: spaTreatmentResources.defaultCabinId,
+          resourceTreatmentId: spaTreatmentResources.resourceTreatmentId,
           durationMinutes: spaTreatmentResources.durationMinutes,
           sortOrder: spaTreatmentResources.sortOrder,
           cabinName: spaCabins.name,
@@ -596,7 +636,19 @@ export function registerSpaRoutes(app: Express) {
         .leftJoin(spaCabins, eq(spaCabins.id, spaTreatmentResources.defaultCabinId))
         .where(eq(spaTreatmentResources.treatmentId, req.params.id))
         .orderBy(spaTreatmentResources.sortOrder);
-      res.json(resources);
+
+      // Second, plain lookup rather than a Drizzle self-join alias — resources
+      // referencing a treatment are the rare case and this keeps the query simple.
+      const resourceTreatmentIds = [...new Set(resources.map((r) => r.resourceTreatmentId).filter(Boolean))] as string[];
+      const resourceTreatments = resourceTreatmentIds.length > 0
+        ? await db.select({ id: spaTreatments.id, name: spaTreatments.name }).from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+        : [];
+      const resourceTreatmentNameById = new Map(resourceTreatments.map((t) => [t.id, t.name]));
+
+      res.json(resources.map((r) => ({
+        ...r,
+        resourceTreatmentName: r.resourceTreatmentId ? resourceTreatmentNameById.get(r.resourceTreatmentId) ?? null : null,
+      })));
     } catch (error) {
       res.status(500).json({ error: "Error fetching circuit resources" });
     }
@@ -614,19 +666,44 @@ export function registerSpaRoutes(app: Express) {
         ? await db.select().from(spaCabins).where(inArray(spaCabins.id, cabinIds))
         : [];
       const cabinMap = new Map(cabins.map((cabin) => [cabin.id, cabin]));
+      // A circuit resource treatment must be a plain, active treatment — never
+      // another circuit (isCircuit already excludes this same treatment, since
+      // req.params.id is itself a circuit).
+      const resourceTreatmentIds = [...new Set(rawResources.map((row: any) => row?.resourceTreatmentId).filter(Boolean))] as string[];
+      const candidateTreatments = resourceTreatmentIds.length > 0
+        ? await db.select().from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+        : [];
+      const resourceTreatmentMap = new Map(candidateTreatments.map((treatment) => [treatment.id, treatment]));
 
       const normalized = rawResources.map((row: any, index: number) => {
-        const cabin = cabinMap.get(row?.defaultCabinId);
         const durationMinutes = Number(row?.durationMinutes);
-        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna o Hidromasaje)."), { statusCode: 400 });
-        }
         if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 240) {
           throw Object.assign(new Error("La duración de cada recurso debe estar entre 15 y 240 minutos."), { statusCode: 400 });
+        }
+        if (row?.defaultCabinId && row?.resourceTreatmentId) {
+          throw Object.assign(new Error("Cada recurso es un gabinete o un tratamiento, no ambos."), { statusCode: 400 });
+        }
+        if (row?.resourceTreatmentId) {
+          const treatment = resourceTreatmentMap.get(row.resourceTreatmentId);
+          if (!treatment || treatment.isActive !== "true" || treatment.isCircuit) {
+            throw Object.assign(new Error("Seleccioná un tratamiento activo para este recurso."), { statusCode: 400 });
+          }
+          return {
+            treatmentId: req.params.id,
+            defaultCabinId: null,
+            resourceTreatmentId: treatment.id,
+            durationMinutes,
+            sortOrder: index,
+          };
+        }
+        const cabin = cabinMap.get(row?.defaultCabinId);
+        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna, Hidromasaje o un tratamiento)."), { statusCode: 400 });
         }
         return {
           treatmentId: req.params.id,
           defaultCabinId: cabin.id,
+          resourceTreatmentId: null,
           durationMinutes,
           sortOrder: index,
         };
@@ -772,7 +849,7 @@ export function registerSpaRoutes(app: Express) {
         const occupiedCabinIds = [...new Set([
           apt.cabinId,
           ...(apt.resourceReservations ?? []).map((resource) => resource.cabinId),
-        ])];
+        ].filter((id): id is string => !!id))];
         for (const cabinId of occupiedCabinIds) {
           const key = `${cabinId}_${apt.appointmentDate}`;
           if (!summaryMap.has(key)) {
@@ -956,7 +1033,7 @@ export function registerSpaRoutes(app: Express) {
             cabinId: resource.cabinId,
             startTime: resource.startTime,
             endTime: resource.endTime,
-            label: resource.cabinName,
+            label: resource.label,
           })),
         ]);
 
@@ -1039,6 +1116,7 @@ export function registerSpaRoutes(app: Express) {
           await tx.insert(spaAppointmentResources).values(normalizedResources.map((resource) => ({
             appointmentId: createdAppointment.id,
             cabinId: resource.cabinId,
+            resourceTreatmentId: resource.resourceTreatmentId,
             startTime: resource.startTime,
             endTime: resource.endTime,
             durationMinutes: resource.durationMinutes,
@@ -1232,6 +1310,7 @@ export function registerSpaRoutes(app: Express) {
               .select({
                 id: spaAppointmentResources.id,
                 cabinId: spaAppointmentResources.cabinId,
+                resourceTreatmentId: spaAppointmentResources.resourceTreatmentId,
                 startTime: spaAppointmentResources.startTime,
                 endTime: spaAppointmentResources.endTime,
                 durationMinutes: spaAppointmentResources.durationMinutes,
@@ -1241,14 +1320,22 @@ export function registerSpaRoutes(app: Express) {
               .from(spaAppointmentResources)
               .leftJoin(spaCabins, eq(spaCabins.id, spaAppointmentResources.cabinId))
               .where(eq(spaAppointmentResources.appointmentId, current.id));
-            normalizedResources = existingResources.map((resource) => ({
+            const existingResourceTreatmentIds = [...new Set(existingResources.map((r: any) => r.resourceTreatmentId).filter(Boolean))];
+            const existingResourceTreatments = existingResourceTreatmentIds.length > 0
+              ? await tx.select({ id: spaTreatments.id, name: spaTreatments.name }).from(spaTreatments).where(inArray(spaTreatments.id, existingResourceTreatmentIds))
+              : [];
+            const existingResourceTreatmentNameById = new Map(existingResourceTreatments.map((t: any) => [t.id, t.name]));
+            normalizedResources = existingResources.map((resource: any) => ({
               templateResourceId: resource.id,
               cabinId: resource.cabinId,
+              resourceTreatmentId: resource.resourceTreatmentId,
               startTime: resource.startTime,
               endTime: resource.endTime,
               durationMinutes: resource.durationMinutes,
               sortOrder: resource.sortOrder,
-              cabinName: resource.cabinName || "Recurso SPA",
+              label: resource.cabinName
+                || (resource.resourceTreatmentId ? existingResourceTreatmentNameById.get(resource.resourceTreatmentId) : null)
+                || "Recurso SPA",
             }));
           } else if (treatment.isCircuit) {
             normalizedResources = await normalizeSpaResourceBookings(tx, treatmentId, req.body.resourceReservations);
@@ -1261,7 +1348,7 @@ export function registerSpaRoutes(app: Express) {
                 cabinId: resource.cabinId,
                 startTime: resource.startTime,
                 endTime: resource.endTime,
-                label: resource.cabinName,
+                label: resource.label,
               })),
             ], current.id);
           }
@@ -1272,6 +1359,7 @@ export function registerSpaRoutes(app: Express) {
               await tx.insert(spaAppointmentResources).values(normalizedResources.map((resource) => ({
                 appointmentId: current.id,
                 cabinId: resource.cabinId,
+                resourceTreatmentId: resource.resourceTreatmentId,
                 startTime: resource.startTime,
                 endTime: resource.endTime,
                 durationMinutes: resource.durationMinutes,

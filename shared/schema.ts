@@ -1717,10 +1717,15 @@ export type SpaTreatment = typeof spaTreatments.$inferSelect;
 
 // Default resource slots required by a circuit. Staff may adjust the cabin
 // and time when booking, while duration and ordering come from this template.
+// Each row is exactly one kind of resource: a gabinete (defaultCabinId) or a
+// plain treatment bundled into the circuit, like a massage (resourceTreatmentId)
+// — never both. Which kind a row is gets fixed here at template time; only the
+// specific cabin/treatment and its time may change when actually booking.
 export const spaTreatmentResources = pgTable("spa_treatment_resources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   treatmentId: varchar("treatment_id").notNull().references(() => spaTreatments.id, { onDelete: "cascade" }),
-  defaultCabinId: varchar("default_cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  defaultCabinId: varchar("default_cabin_id").references(() => spaCabins.id, { onDelete: "restrict" }),
+  resourceTreatmentId: varchar("resource_treatment_id").references(() => spaTreatments.id, { onDelete: "restrict" }),
   durationMinutes: integer("duration_minutes").notNull().default(30),
   sortOrder: integer("sort_order").notNull().default(0),
 });
@@ -1797,10 +1802,14 @@ export type SpaAppointment = typeof spaAppointments.$inferSelect;
 
 // Concrete resource reservations created for a circuit appointment.
 // They do not create charges: the parent appointment remains the financial source.
+// Same cabin-xor-treatment shape as spaTreatmentResources above; a treatment
+// resource (e.g. a massage bundled into the circuit) has no cabinId, since it
+// isn't a room booking and today carries no staff-availability check either.
 export const spaAppointmentResources = pgTable("spa_appointment_resources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   appointmentId: varchar("appointment_id").notNull().references(() => spaAppointments.id, { onDelete: "cascade" }),
-  cabinId: varchar("cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  cabinId: varchar("cabin_id").references(() => spaCabins.id, { onDelete: "restrict" }),
+  resourceTreatmentId: varchar("resource_treatment_id").references(() => spaTreatments.id, { onDelete: "restrict" }),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   durationMinutes: integer("duration_minutes").notNull(),
