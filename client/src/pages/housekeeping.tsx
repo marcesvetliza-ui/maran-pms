@@ -39,6 +39,7 @@ import {
   X,
   Ban,
   ShieldCheck,
+  Lock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -83,9 +84,10 @@ import {
 } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem } from "@shared/schema";
+import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem, SafeBoxOpening, InsertSafeBoxOpening } from "@shared/schema";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
@@ -935,6 +937,175 @@ function LostFoundTab() {
   );
 }
 
+// ===================== CAJA FUERTE (apertura/reseteo de código) =====================
+// Reemplaza la planilla en papel que llevaba recepción: fecha, habitación,
+// quién abrió la caja y quién lo solicitó (ambos texto libre).
+
+function SafeBoxForm({
+  open,
+  onOpenChange,
+  onSubmit,
+  isPending,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSubmit: (data: Partial<InsertSafeBoxOpening>) => void;
+  isPending: boolean;
+}) {
+  const today = getArgentinaToday();
+  const [roomId, setRoomId] = useState("");
+  const [date, setDate] = useState(today);
+  const [openedBy, setOpenedBy] = useState("");
+  const [requestedBy, setRequestedBy] = useState("");
+
+  const { data: rooms = [] } = useQuery<RoomWithType[]>({ queryKey: ["/api/rooms"] });
+
+  const handleSubmit = () => {
+    if (!roomId || !date || !openedBy.trim() || !requestedBy.trim()) return;
+    onSubmit({ roomId, date, openedBy: openedBy.trim(), requestedBy: requestedBy.trim() });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Registrar apertura de caja fuerte</DialogTitle>
+          <DialogDescription>Fecha, habitación, quién abrió la caja y quién lo solicitó.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Habitación *</Label>
+              <Select value={roomId} onValueChange={setRoomId}>
+                <SelectTrigger data-testid="select-safebox-room" className="mt-1">
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {rooms
+                    .slice()
+                    .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
+                    .filter(r => r.id)
+                    .map(r => (
+                      <SelectItem key={r.id} value={r.id}>
+                        Hab. {r.roomNumber} — Piso {r.floor}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Fecha *</Label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} data-testid="input-safebox-date" className="mt-1" />
+            </div>
+          </div>
+          <div>
+            <Label>Quién abrió la caja *</Label>
+            <Input value={openedBy} onChange={e => setOpenedBy(e.target.value)} placeholder="Nombre del empleado" data-testid="input-safebox-opened-by" />
+          </div>
+          <div>
+            <Label>Quién solicitó *</Label>
+            <Input value={requestedBy} onChange={e => setRequestedBy(e.target.value)} placeholder="Ej: Huésped, HK, nombre..." data-testid="input-safebox-requested-by" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isPending || !roomId || !date || !openedBy.trim() || !requestedBy.trim()}
+            data-testid="button-safebox-save"
+          >
+            {isPending ? "Guardando..." : "Registrar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SafeBoxTab() {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+
+  const { data: items = [], isLoading } = useQuery<SafeBoxOpening[]>({
+    queryKey: ["/api/safe-box-openings"],
+  });
+  const { data: rooms = [] } = useQuery<RoomWithType[]>({ queryKey: ["/api/rooms"] });
+  const roomNumberById = new Map(rooms.map(r => [r.id, r.roomNumber]));
+
+  const sortedItems = [...items].sort((a, b) =>
+    b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt))
+  );
+
+  const createMutation = useMutation({
+    mutationFn: (data: Partial<InsertSafeBoxOpening>) =>
+      apiRequest("POST", "/api/safe-box-openings", data).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/safe-box-openings"] });
+      setShowForm(false);
+      toast({ title: "Apertura registrada" });
+    },
+    onError: () => toast({ title: "Error al registrar", variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4 mt-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Caja Fuerte</h2>
+          <p className="text-sm text-muted-foreground">Registro de aperturas y reseteos de código.</p>
+        </div>
+        <Button onClick={() => setShowForm(true)} data-testid="button-safebox-new">
+          <Plus className="h-4 w-4 mr-1" /> Registrar apertura
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+        </div>
+      ) : sortedItems.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Lock className="h-12 w-12 mx-auto mb-3 opacity-30" />
+          <p className="text-sm font-medium">No hay aperturas registradas</p>
+          <p className="text-xs mt-1">Los registros de apertura de caja fuerte aparecerán aquí</p>
+        </div>
+      ) : (
+        <div className="border rounded-lg overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fecha</TableHead>
+                <TableHead>Habitación</TableHead>
+                <TableHead>Abrió caja</TableHead>
+                <TableHead>Solicitó</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedItems.map(item => (
+                <TableRow key={item.id} data-testid={`safebox-row-${item.id}`}>
+                  <TableCell>{new Date(item.date + "T12:00:00").toLocaleDateString("es-AR")}</TableCell>
+                  <TableCell>Hab. {roomNumberById.get(item.roomId) ?? "—"}</TableCell>
+                  <TableCell>{item.openedBy}</TableCell>
+                  <TableCell>{item.requestedBy}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {showForm && (
+        <SafeBoxForm
+          open={showForm}
+          onOpenChange={setShowForm}
+          isPending={createMutation.isPending}
+          onSubmit={data => createMutation.mutate(data)}
+        />
+      )}
+    </div>
+  );
+}
+
 // ===================== MOBILE ROOM CARD =====================
 
 // ─── Elapsed time hook ────────────────────────────────────────────────────────
@@ -1648,6 +1819,10 @@ export default function Housekeeping() {
               </Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="safe-box" data-testid="tab-safe-box" className="gap-1">
+            <Lock className="h-4 w-4" />
+            Caja Fuerte
+          </TabsTrigger>
           <TabsTrigger value="elementos-prestados" data-testid="tab-elementos-prestados" className="gap-1">
             <Boxes className="h-4 w-4" />
             Elementos Prestados
@@ -2026,6 +2201,10 @@ export default function Housekeeping() {
 
         <TabsContent value="lost-found">
           <LostFoundTab />
+        </TabsContent>
+
+        <TabsContent value="safe-box">
+          <SafeBoxTab />
         </TabsContent>
 
         <TabsContent value="elementos-prestados">
