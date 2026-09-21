@@ -1466,13 +1466,17 @@ export default function Housekeeping() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [mobileView, setMobileView] = useState(() => localStorage.getItem("hk_mobile_view") === "true");
   const toggleMobileView = () => setMobileView(v => { const next = !v; localStorage.setItem("hk_mobile_view", String(next)); return next; });
-  const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [taskType, setTaskType] = useState<TaskType>("checkout_clean");
   const [priority, setPriority] = useState<Priority>("normal");
   const [notes, setNotes] = useState("");
   const [detailNotes, setDetailNotes] = useState("");
+  // "Crear tarea de limpieza" es una sección opcional dentro del diálogo de
+  // detalle único (antes era un diálogo aparte) — se abre expandida cuando
+  // se entra por el botón "Tarea" de la tarjeta, y colapsada cuando se entra
+  // por "Ver Detalles / Notas".
+  const [showTaskSection, setShowTaskSection] = useState(false);
 
   // ── Bloqueo de habitación por fechas (limpiezas de varios días) ──────────
   // Reusa maintenance_blocks — la misma tabla y los mismos endpoints que ya
@@ -1642,8 +1646,7 @@ export default function Housekeeping() {
       apiRequest("POST", "/api/housekeeping", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
-      setCreateTaskDialogOpen(false);
-      setSelectedRoomId(null);
+      setShowTaskSection(false);
       setNotes("");
       toast({ title: "Tarea creada", description: "La tarea de limpieza ha sido asignada." });
     },
@@ -1804,7 +1807,11 @@ export default function Housekeeping() {
 
   const handleCreateTask = (roomId: string) => {
     setSelectedRoomId(roomId);
-    setCreateTaskDialogOpen(true);
+    const roomTasks = getTasksForRoom(roomId);
+    const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
+    setDetailNotes(existingNotes);
+    setShowTaskSection(true);
+    setDetailsDialogOpen(true);
   };
 
   const handleOpenDetails = (roomId: string) => {
@@ -1812,6 +1819,7 @@ export default function Housekeeping() {
     const roomTasks = getTasksForRoom(roomId);
     const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
     setDetailNotes(existingNotes);
+    setShowTaskSection(false);
     setDetailsDialogOpen(true);
   };
 
@@ -2495,73 +2503,6 @@ export default function Housekeeping() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={createTaskDialogOpen} onOpenChange={setCreateTaskDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Crear Tarea de Limpieza</DialogTitle>
-            <DialogDescription>
-              Asignar una nueva tarea para la habitacion {rooms?.find(r => r.id === selectedRoomId)?.roomNumber}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Tipo de Tarea</Label>
-              <Select value={taskType} onValueChange={(v) => setTaskType(v as TaskType)}>
-                <SelectTrigger data-testid="select-task-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="checkout_clean">Limpieza Check-out</SelectItem>
-                  <SelectItem value="stayover_clean">Limpieza Estancia</SelectItem>
-                  <SelectItem value="deep_clean">Limpieza Profunda</SelectItem>
-                  <SelectItem value="inspection">Inspeccion</SelectItem>
-                  <SelectItem value="maintenance_prep">Prep. Mantenimiento</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Prioridad</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                <SelectTrigger data-testid="select-priority">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Baja</SelectItem>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="high">Alta</SelectItem>
-                  <SelectItem value="urgent">Urgente</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Notas (opcional)</Label>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Instrucciones adicionales..."
-                data-testid="input-notes"
-              />
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateTaskDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleSubmitTask} 
-              disabled={createTaskMutation.isPending}
-              data-testid="button-submit-task"
-            >
-              {createTaskMutation.isPending ? "Creando..." : "Crear Tarea"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2615,6 +2556,72 @@ export default function Housekeeping() {
                   Mantenimiento
                 </Button>
               </div>
+            </div>
+
+            <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm font-medium">Crear tarea de limpieza</Label>
+                </div>
+                <Switch
+                  checked={showTaskSection}
+                  onCheckedChange={setShowTaskSection}
+                  data-testid="switch-create-task"
+                />
+              </div>
+              {showTaskSection && (
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Tipo de Tarea</Label>
+                    <Select value={taskType} onValueChange={(v) => setTaskType(v as TaskType)}>
+                      <SelectTrigger data-testid="select-task-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="checkout_clean">Limpieza Check-out</SelectItem>
+                        <SelectItem value="stayover_clean">Limpieza Estancia</SelectItem>
+                        <SelectItem value="deep_clean">Limpieza Profunda</SelectItem>
+                        <SelectItem value="inspection">Inspeccion</SelectItem>
+                        <SelectItem value="maintenance_prep">Prep. Mantenimiento</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Prioridad</Label>
+                    <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+                      <SelectTrigger data-testid="select-priority">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Baja</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="high">Alta</SelectItem>
+                        <SelectItem value="urgent">Urgente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Notas (opcional)</Label>
+                    <Textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Instrucciones adicionales..."
+                      className="text-sm"
+                      data-testid="input-notes"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={handleSubmitTask}
+                    disabled={createTaskMutation.isPending}
+                    data-testid="button-submit-task"
+                  >
+                    <Sparkles className="mr-2 h-3.5 w-3.5" />
+                    {createTaskMutation.isPending ? "Creando..." : "Crear Tarea"}
+                  </Button>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
