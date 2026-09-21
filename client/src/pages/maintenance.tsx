@@ -502,6 +502,9 @@ export default function MaintenancePage() {
   const [detailBlockEnabled, setDetailBlockEnabled] = useState(false);
   const [detailBlockFrom, setDetailBlockFrom] = useState("");
   const [detailBlockTo, setDetailBlockTo] = useState("");
+  // Edición de fechas de un bloqueo ya existente (distinto de detailBlockEnabled,
+  // que es para crear uno nuevo cuando la orden todavía no tiene ninguno).
+  const [editingBlockMode, setEditingBlockMode] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -509,6 +512,7 @@ export default function MaintenancePage() {
   const [blockConflicts, setBlockConflicts] = useState<ConflictRes[]>([]);
   const [pendingBlockAction, setPendingBlockAction] = useState<
     | { type: "add_block"; payload: { workOrderId: string; roomId: string; blockFrom: string; blockTo: string; blockedBy: string } }
+    | { type: "edit_block"; payload: { blockId: string; blockFrom: string; blockTo: string } }
     | { type: "new_order"; orderData: any }
     | null
   >(null);
@@ -529,6 +533,15 @@ export default function MaintenancePage() {
   const { data: workOrders = [], isLoading: isLoadingOrders } = useQuery<WorkOrder[]>({
     queryKey: ["/api/maintenance/work-orders"],
   });
+
+  // selectedOrder es una foto tomada al abrir el diálogo — sin esto, crear,
+  // editar o eliminar un bloqueo actualiza la base pero el diálogo abierto
+  // sigue mostrando los datos viejos hasta cerrarlo y reabrirlo.
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const fresh = workOrders.find(o => o.id === selectedOrder.id);
+    if (fresh && fresh !== selectedOrder) setSelectedOrder(fresh);
+  }, [workOrders, selectedOrder]);
 
   const { data: staff = [], isLoading: isLoadingStaff } = useQuery<MaintenanceStaff[]>({
     queryKey: ["/api/maintenance/staff"],
@@ -720,6 +733,23 @@ export default function MaintenancePage() {
     },
   });
 
+  const updateBlockMutation = useMutation({
+    mutationFn: async ({ blockId, blockFrom, blockTo }: { blockId: string; blockFrom: string; blockTo: string }) => {
+      return apiRequest("PATCH", `/api/maintenance/blocks/${blockId}`, { blockFrom, blockTo });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/work-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setEditingBlockMode(false);
+      setDetailBlockFrom("");
+      setDetailBlockTo("");
+      toast({ title: "Bloqueo actualizado", description: "Las fechas del bloqueo fueron modificadas." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar el bloqueo.", variant: "destructive" });
+    },
+  });
+
   const removeBlockMutation = useMutation({
     mutationFn: async (blockId: string) => {
       return apiRequest("DELETE", `/api/maintenance/blocks/${blockId}`);
@@ -797,6 +827,8 @@ export default function MaintenancePage() {
   const executeBlockAction = (action: NonNullable<typeof pendingBlockAction>) => {
     if (action.type === "add_block") {
       addBlockMutation.mutate(action.payload);
+    } else if (action.type === "edit_block") {
+      updateBlockMutation.mutate(action.payload);
     } else {
       createOrderMutation.mutate(action.orderData);
     }
@@ -1632,7 +1664,7 @@ export default function MaintenancePage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedOrder} onOpenChange={() => { setSelectedOrder(null); setDetailBlockEnabled(false); setDetailBlockFrom(""); setDetailBlockTo(""); }}>
+      <Dialog open={!!selectedOrder} onOpenChange={() => { setSelectedOrder(null); setDetailBlockEnabled(false); setDetailBlockFrom(""); setDetailBlockTo(""); setEditingBlockMode(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Orden {selectedOrder?.orderCode}</DialogTitle>
@@ -1679,34 +1711,97 @@ export default function MaintenancePage() {
                       <Lock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
                       <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Habitación bloqueada en el planning</span>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive hover:text-destructive h-7 px-2 text-xs"
-                      onClick={() => {
-                        if (confirm("¿Eliminar el bloqueo del planning?")) {
-                          removeBlockMutation.mutate(selectedOrder.maintenanceBlock!.id);
-                        }
-                      }}
-                      disabled={removeBlockMutation.isPending}
-                    >
-                      Eliminar bloqueo
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          if (editingBlockMode) {
+                            setEditingBlockMode(false);
+                          } else {
+                            setDetailBlockFrom(selectedOrder.maintenanceBlock!.blockFrom);
+                            setDetailBlockTo(selectedOrder.maintenanceBlock!.blockTo);
+                            setEditingBlockMode(true);
+                          }
+                        }}
+                      >
+                        {editingBlockMode ? "Cancelar" : "Editar fechas"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive h-7 px-2 text-xs"
+                        onClick={() => {
+                          if (confirm("¿Eliminar el bloqueo del planning?")) {
+                            removeBlockMutation.mutate(selectedOrder.maintenanceBlock!.id);
+                          }
+                        }}
+                        disabled={removeBlockMutation.isPending}
+                      >
+                        Eliminar bloqueo
+                      </Button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Desde</p>
-                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockFrom}</p>
+                  {editingBlockMode ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Desde</Label>
+                          <Input
+                            type="date"
+                            value={detailBlockFrom}
+                            onChange={(e) => setDetailBlockFrom(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Hasta</Label>
+                          <Input
+                            type="date"
+                            value={detailBlockTo}
+                            onChange={(e) => setDetailBlockTo(e.target.value)}
+                            min={detailBlockFrom}
+                          />
+                        </div>
+                      </div>
+                      {detailBlockFrom && detailBlockTo && detailBlockTo < detailBlockFrom && (
+                        <p className="text-xs text-destructive">La fecha de fin debe ser posterior al inicio.</p>
+                      )}
+                      <Button
+                        size="sm"
+                        disabled={!detailBlockFrom || !detailBlockTo || detailBlockTo < detailBlockFrom || updateBlockMutation.isPending}
+                        onClick={() => {
+                          checkConflictsAndProceed(
+                            selectedOrder.roomId!,
+                            detailBlockFrom,
+                            detailBlockTo,
+                            { type: "edit_block", payload: {
+                              blockId: selectedOrder.maintenanceBlock!.id,
+                              blockFrom: detailBlockFrom,
+                              blockTo: detailBlockTo,
+                            }}
+                          );
+                        }}
+                      >
+                        {updateBlockMutation.isPending ? "Guardando..." : "Guardar cambios"}
+                      </Button>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Hasta</p>
-                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockTo}</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Desde</p>
+                        <p className="font-medium">{selectedOrder.maintenanceBlock.blockFrom}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Hasta</p>
+                        <p className="font-medium">{selectedOrder.maintenanceBlock.blockTo}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Bloqueado por</p>
+                        <p className="font-medium">{selectedOrder.maintenanceBlock.blockedBy}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Bloqueado por</p>
-                      <p className="font-medium">{selectedOrder.maintenanceBlock.blockedBy}</p>
-                    </div>
-                  </div>
+                  )}
                 </div>
               ) : selectedOrder.roomId ? (
                 <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
@@ -1932,9 +2027,9 @@ export default function MaintenancePage() {
               Reservas activas en esa habitación
             </DialogTitle>
             <DialogDescription>
-              {blockRoom
-                ? "Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas o cancelar para reubicar primero a los huéspedes."
-                : "La habitación tiene reservas activas. Informá a recepción antes de ingresar. Podés confirmar la orden de todas formas o cancelar."}
+              {pendingBlockAction?.type === "new_order"
+                ? "La habitación tiene reservas activas. Informá a recepción antes de ingresar. Podés confirmar la orden de todas formas o cancelar."
+                : "Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar de todas formas o cancelar para reubicar primero a los huéspedes."}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900">
@@ -1960,7 +2055,7 @@ export default function MaintenancePage() {
               onClick={() => pendingBlockAction && executeBlockAction(pendingBlockAction)}
               data-testid="button-conflict-confirm"
             >
-              {blockRoom ? "Confirmar bloqueo de todas formas" : "Crear orden de todas formas"}
+              {pendingBlockAction?.type === "new_order" ? "Crear orden de todas formas" : "Confirmar de todas formas"}
             </Button>
           </DialogFooter>
         </DialogContent>
