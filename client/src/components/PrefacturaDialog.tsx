@@ -727,12 +727,21 @@ export function PrefacturaDialog({
   // switch to the guest (or back) at any time.
   useEffect(() => {
     if (!reservation || !open) return;
-    const hasCompany = !!(reservation.companyId || (reservation as any).company?.id);
-    const hasAgency = !!(reservation.agencyId || (reservation as any).agency?.id);
+    // The reservation's own company/agency link takes priority (it's what
+    // reception explicitly chose for this stay), but falls back to whatever
+    // the guest's own profile has on file — otherwise a guest with a company
+    // set on their profile, but not re-picked when this particular reservation
+    // was created, would never see it offered here at all.
+    const g = reservation.guest as any;
+    const hasCompany = !!(reservation.companyId || (reservation as any).company?.id || g?.companyId);
+    const hasAgency = !!(reservation.agencyId || (reservation as any).agency?.id || g?.agencyId);
     const preferredTarget = hasCompany ? "company" : hasAgency ? "agency" : "guest";
     fillFromReservation(reservation, "init", preferredTarget);
+  // companies.length/agencies.length (not the array refs) re-run this once
+  // those lists finish loading, so a guest-profile company/agency picked up
+  // this way isn't lost to the fetch still being in flight on first render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reservation?.id, open]);
+  }, [reservation?.id, open, companies.length, agencies.length]);
 
   // Auto-suggest default POS. Falls back to billing_config.puntoVenta
   // whenever pos_configs no tiene filas activas para matchear — antes, ese
@@ -756,8 +765,10 @@ export function PrefacturaDialog({
     preferredTarget?: "guest" | "company" | "agency",
   ) {
     const g = res.guest as any;
-    const comp = res.company as any;
-    const ag = res.agency as any;
+    // Falls back to the guest's own profile company/agency when this
+    // particular reservation wasn't created with one explicitly linked.
+    const comp = (res.company as any) ?? (g?.companyId ? companies.find((c: any) => String(c.id) === String(g.companyId)) : undefined);
+    const ag = (res.agency as any) ?? (g?.agencyId ? agencies.find((a: any) => String(a.id) === String(g.agencyId)) : undefined);
 
     if (preferredTarget === "guest" && g) {
       const isJuridica = g.tipoPersona === "juridica";
@@ -1061,14 +1072,14 @@ export function PrefacturaDialog({
       : [];
 
   // A linked company/agency is a billing option, never a forced recipient:
-  // reception must still be able to issue the stay to the guest.
-  const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id);
-  const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id);
-  const allowedBillingTargets: Array<"guest" | "company" | "agency"> = hasReservationCompany
-    ? ["guest", "company"]
-    : hasReservationAgency
-      ? ["guest", "agency"]
-      : ["guest"];
+  // reception must still be able to issue the stay to the guest. And it's
+  // never the ONLY option either: some guests don't give their billing
+  // details until they're actually paying, so Empresa/Agencia stay pickable
+  // here even with nothing preloaded — reception just searches the right one.
+  const reservationGuest = reservation?.guest as any;
+  const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id || reservationGuest?.companyId);
+  const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id || reservationGuest?.agencyId);
+  const allowedBillingTargets: Array<"guest" | "company" | "agency"> = ["guest", "company", "agency"];
   const billingTargetLocked = false;
   const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
   // Factura T solo corresponde a un huésped extranjero (nunca a una empresa o
