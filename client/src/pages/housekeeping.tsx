@@ -1488,9 +1488,14 @@ export default function Housekeeping() {
   const [blockNotes, setBlockNotes] = useState("");
   type BlockConflictRes = { id: string; guestName: string; checkInDate: string; checkOutDate: string; status: string };
   const [blockConflicts, setBlockConflicts] = useState<BlockConflictRes[]>([]);
-  const [pendingBlockPayload, setPendingBlockPayload] = useState<{
-    roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null;
-  } | null>(null);
+  const [pendingBlockAction, setPendingBlockAction] = useState<
+    | { type: "add"; payload: { roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null } }
+    | { type: "edit"; payload: { blockId: string; blockFrom: string; blockTo: string } }
+    | null
+  >(null);
+  // Edición de fechas de un bloqueo ya existente (distinto de blockEnabled,
+  // que es para crear uno nuevo). Guarda el id del bloqueo en edición.
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
 
   const { data: rooms, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
@@ -1678,6 +1683,22 @@ export default function Housekeeping() {
     },
   });
 
+  const updateRoomBlockMutation = useMutation({
+    mutationFn: (payload: { blockId: string; blockFrom: string; blockTo: string }) =>
+      apiRequest("PATCH", `/api/maintenance/blocks/${payload.blockId}`, { blockFrom: payload.blockFrom, blockTo: payload.blockTo }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setEditingBlockId(null);
+      setBlockFrom("");
+      setBlockTo("");
+      toast({ title: "Bloqueo actualizado", description: "Las fechas del bloqueo fueron modificadas." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar el bloqueo.", variant: "destructive" });
+    },
+  });
+
   const removeRoomBlockMutation = useMutation({
     mutationFn: (blockId: string) => apiRequest("DELETE", `/api/maintenance/blocks/${blockId}`),
     onSuccess: () => {
@@ -1690,23 +1711,38 @@ export default function Housekeeping() {
     },
   });
 
-  // Verifica reservas activas antes de bloquear; si hay, pide confirmación.
-  const checkBlockConflictsAndProceed = async (payload: { roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }) => {
+  // Verifica reservas activas antes de bloquear/editar; si hay, pide confirmación.
+  const checkBlockConflictsAndProceed = async (
+    roomId: string,
+    from: string,
+    to: string,
+    action: NonNullable<typeof pendingBlockAction>,
+  ) => {
     try {
       const res = await fetch(
-        `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(payload.roomId)}&from=${encodeURIComponent(payload.blockFrom)}&to=${encodeURIComponent(payload.blockTo)}`,
+        `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(roomId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
         { credentials: "include" }
       );
       const conflicts: BlockConflictRes[] = await res.json();
       if (Array.isArray(conflicts) && conflicts.length > 0) {
         setBlockConflicts(conflicts);
-        setPendingBlockPayload(payload);
+        setPendingBlockAction(action);
       } else {
-        addRoomBlockMutation.mutate(payload);
+        executeBlockAction(action);
       }
     } catch {
-      addRoomBlockMutation.mutate(payload); // Si falla la verificación, se procede igual.
+      executeBlockAction(action); // Si falla la verificación, se procede igual.
     }
+  };
+
+  const executeBlockAction = (action: NonNullable<typeof pendingBlockAction>) => {
+    if (action.type === "add") {
+      addRoomBlockMutation.mutate(action.payload);
+    } else {
+      updateRoomBlockMutation.mutate(action.payload);
+    }
+    setBlockConflicts([]);
+    setPendingBlockAction(null);
   };
 
   const inspectTaskMutation = useMutation({
@@ -1811,6 +1847,8 @@ export default function Housekeeping() {
     const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
     setDetailNotes(existingNotes);
     setShowTaskSection(true);
+    setBlockEnabled(false);
+    setEditingBlockId(null);
     setDetailsDialogOpen(true);
   };
 
@@ -1820,6 +1858,8 @@ export default function Housekeeping() {
     const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
     setDetailNotes(existingNotes);
     setShowTaskSection(false);
+    setBlockEnabled(false);
+    setEditingBlockId(null);
     setDetailsDialogOpen(true);
   };
 
@@ -2628,25 +2668,87 @@ export default function Housekeeping() {
               {selectedRoomBlocks.length > 0 && (
                 <div className="space-y-2">
                   {selectedRoomBlocks.map(block => (
-                    <div key={block.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/50 p-2">
-                      <div className="text-xs">
-                        <p className="font-medium flex items-center gap-1">
-                          <Lock className="h-3 w-3 text-muted-foreground" />
-                          {block.blockFrom} — {block.blockTo}
-                        </p>
-                        <p className="text-muted-foreground">Bloqueado por {block.blockedBy}</p>
-                        {block.notes && <p className="text-muted-foreground">Motivo: {block.notes}</p>}
+                    <div key={block.id} className="rounded-md bg-muted/50 p-2 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-xs">
+                          <p className="font-medium flex items-center gap-1">
+                            <Lock className="h-3 w-3 text-muted-foreground" />
+                            {block.blockFrom} — {block.blockTo}
+                          </p>
+                          <p className="text-muted-foreground">Bloqueado por {block.blockedBy}</p>
+                          {block.notes && <p className="text-muted-foreground">Motivo: {block.notes}</p>}
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              if (editingBlockId === block.id) {
+                                setEditingBlockId(null);
+                              } else {
+                                setBlockFrom(block.blockFrom);
+                                setBlockTo(block.blockTo);
+                                setEditingBlockId(block.id);
+                              }
+                            }}
+                            data-testid="button-edit-room-block"
+                          >
+                            {editingBlockId === block.id ? "Cancelar" : "Editar"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => removeRoomBlockMutation.mutate(block.id)}
+                            disabled={removeRoomBlockMutation.isPending}
+                            data-testid="button-remove-room-block"
+                          >
+                            Eliminar
+                          </Button>
+                        </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive shrink-0"
-                        onClick={() => removeRoomBlockMutation.mutate(block.id)}
-                        disabled={removeRoomBlockMutation.isPending}
-                        data-testid="button-remove-room-block"
-                      >
-                        Eliminar
-                      </Button>
+                      {editingBlockId === block.id && (
+                        <div className="space-y-2 pt-1">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <Label className="text-xs text-muted-foreground mb-1 block">Desde</Label>
+                              <Input
+                                type="date"
+                                value={blockFrom}
+                                onChange={(e) => setBlockFrom(e.target.value)}
+                                data-testid="input-edit-block-from"
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs text-muted-foreground mb-1 block">Hasta</Label>
+                              <Input
+                                type="date"
+                                value={blockTo}
+                                onChange={(e) => setBlockTo(e.target.value)}
+                                min={blockFrom}
+                                data-testid="input-edit-block-to"
+                              />
+                            </div>
+                          </div>
+                          {blockFrom && blockTo && blockTo < blockFrom && (
+                            <p className="text-xs text-destructive">La fecha de fin debe ser posterior al inicio.</p>
+                          )}
+                          <Button
+                            size="sm"
+                            disabled={!blockFrom || !blockTo || blockTo < blockFrom || updateRoomBlockMutation.isPending}
+                            onClick={() => {
+                              if (!selectedRoomId) return;
+                              checkBlockConflictsAndProceed(selectedRoomId, blockFrom, blockTo, {
+                                type: "edit",
+                                payload: { blockId: block.id, blockFrom, blockTo },
+                              });
+                            }}
+                            data-testid="button-save-edit-room-block"
+                          >
+                            {updateRoomBlockMutation.isPending ? "Guardando..." : "Guardar cambios"}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2700,12 +2802,15 @@ export default function Housekeeping() {
                     disabled={!blockFrom || !blockTo || blockTo < blockFrom || addRoomBlockMutation.isPending}
                     onClick={() => {
                       if (!selectedRoomId) return;
-                      checkBlockConflictsAndProceed({
-                        roomId: selectedRoomId,
-                        blockFrom,
-                        blockTo,
-                        blockedBy: user?.username || "Sistema",
-                        notes: blockNotes.trim() || null,
+                      checkBlockConflictsAndProceed(selectedRoomId, blockFrom, blockTo, {
+                        type: "add",
+                        payload: {
+                          roomId: selectedRoomId,
+                          blockFrom,
+                          blockTo,
+                          blockedBy: user?.username || "Sistema",
+                          notes: blockNotes.trim() || null,
+                        },
                       });
                     }}
                     data-testid="button-apply-room-block"
@@ -2782,7 +2887,7 @@ export default function Housekeeping() {
       </Dialog>
 
       {/* Dialog de conflictos — se muestra cuando hay reservas activas en el rango a bloquear */}
-      <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockPayload(null); } }}>
+      <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockAction(null); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
@@ -2790,7 +2895,7 @@ export default function Housekeeping() {
               Reservas activas en esa habitación
             </DialogTitle>
             <DialogDescription>
-              Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas (avisá a recepción) o cancelar para reubicar primero a los huéspedes.
+              Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar de todas formas (avisá a recepción) o cancelar para reubicar primero a los huéspedes.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900">
@@ -2806,7 +2911,7 @@ export default function Housekeeping() {
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               variant="outline"
-              onClick={() => { setBlockConflicts([]); setPendingBlockPayload(null); }}
+              onClick={() => { setBlockConflicts([]); setPendingBlockAction(null); }}
               data-testid="button-block-conflict-cancel"
             >
               Cancelar
@@ -2814,13 +2919,11 @@ export default function Housekeeping() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (pendingBlockPayload) addRoomBlockMutation.mutate(pendingBlockPayload);
-                setBlockConflicts([]);
-                setPendingBlockPayload(null);
+                if (pendingBlockAction) executeBlockAction(pendingBlockAction);
               }}
               data-testid="button-block-conflict-confirm"
             >
-              Confirmar bloqueo de todas formas
+              Confirmar de todas formas
             </Button>
           </DialogFooter>
         </DialogContent>

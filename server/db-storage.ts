@@ -6208,6 +6208,14 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateMaintenanceBlock(
+    id: string,
+    updates: Partial<Pick<InsertMaintenanceBlock, "blockFrom" | "blockTo" | "notes">>,
+  ): Promise<MaintenanceBlock | undefined> {
+    const [updated] = await db.update(maintenanceBlocks).set(updates).where(eq(maintenanceBlocks.id, id)).returning();
+    return updated;
+  }
+
   async deleteMaintenanceBlock(id: string): Promise<boolean> {
     const result = await db.delete(maintenanceBlocks).where(eq(maintenanceBlocks.id, id));
     return (result.rowCount ?? 0) > 0;
