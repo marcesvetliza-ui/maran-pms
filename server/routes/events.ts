@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { eventPayments, salesInvoices } from "@shared/schema";
+import { eventPayments, salesInvoices, accountMovements } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
@@ -401,6 +401,7 @@ export function registerEventsRoutes(app: Express) {
             description: `Evento: ${evt?.name || req.params.eventId}`,
             amount: String(parseFloat(amount).toFixed(2)),
             area: "eventos",
+            reference: payment.id,
           });
         }
       }
@@ -433,6 +434,51 @@ export function registerEventsRoutes(app: Express) {
         const totalPaid = allPays.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
         await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
       }
+
+      // Revertir el cargo en Cuenta Corriente que se creó al registrar el
+      // pago (routes de arriba, "Si es cuenta corriente, crear movimiento
+      // en CC"), que hasta ahora quedaba de pie para siempre al anular.
+      if (pay.method === "cuenta_corriente") {
+        const voidReference = `void:${pay.id}`;
+        const [alreadyVoided] = await db.select().from(accountMovements)
+          .where(eq(accountMovements.reference, voidReference));
+        if (!alreadyVoided) {
+          const [originalCargo] = await db.select().from(accountMovements)
+            .where(and(eq(accountMovements.reference, pay.id), eq(accountMovements.type, "cargo")));
+          if (originalCargo) {
+            await storage.createAccountMovement({
+              entityType: originalCargo.entityType,
+              entityId: originalCargo.entityId,
+              date: getArgentinaOperationalDate(),
+              type: "ajuste",
+              description: `Anulación cargo CC evento — ${motivoAnulacion}`,
+              amount: String(-parseFloat(originalCargo.amount)),
+              area: "eventos",
+              reference: voidReference,
+            });
+          }
+        }
+      }
+
+      // Contraasiento en el folio del evento para que el saldo refleje la
+      // anulación (antes quedaba con el pago fantasma para siempre).
+      try {
+        const folio = await storage.getFolioByEntity("event", req.params.eventId);
+        if (folio) {
+          // El movimiento "payment" original se guarda en positivo (suma a
+          // totalPayments), así que su reversa debe ir en negativo — igual
+          // que voidReservationPaymentAtomic (server/db-storage.ts) — para
+          // restar de totalPayments y devolver el saldo a su valor previo.
+          await storage.addFolioAdjustment(
+            folio.id, "void", -parseFloat(pay.amount),
+            `Anulación pago evento — ${motivoAnulacion}`,
+            (req as any).user?.username, pay.id, motivoAnulacion,
+          );
+        }
+      } catch (voidErr) {
+        console.error("[Folio] Error anulando pago de evento:", voidErr);
+      }
+
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
