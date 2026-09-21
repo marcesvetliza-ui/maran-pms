@@ -66,6 +66,7 @@ export function registerInventoryRoutes(app: Express) {
       }
       res.json(items);
     } catch (error) {
+      console.error("[inventory/items] error:", error);
       res.status(500).json({ error: "Error fetching inventory items" });
     }
   });
