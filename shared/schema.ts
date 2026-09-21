@@ -1515,38 +1515,11 @@ export const inventoryItems = pgTable("inventory_items", {
   location: text("location"),
   isActive: text("is_active").default("true"),
   itemKind: text("item_kind").$type<ItemKind>().notNull().default("venta_directa"),
-  // DEPRECATED — migración en dos fases hacia inventory_item_suppliers (ver
-  // ese comentario y server/migrate.ts). No usar en código nuevo: usar
-  // inventoryItemSuppliers. Declarado acá solo para que el diff de esquema
-  // de despliegue no proponga borrarla todavía; se retira en la fase 2,
-  // después de confirmar en producción que el backfill migró los vínculos.
-  supplierId: varchar("supplier_id"),
 });
 
 export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true });
 export type InsertInventoryItem = z.infer<typeof insertInventoryItemSchema>;
 export type InventoryItem = typeof inventoryItems.$inferSelect;
-
-/**
- * DEPRECATED — reemplazada por inventoryItemSuppliers (proveedor contable
- * real, vía accounting_suppliers). Fase 1 de una migración en dos partes:
- * se restaura acá solo para que el diff de esquema de despliegue no la
- * proponga borrar todavía. server/migrate.ts ya no la usa para nada nuevo,
- * solo para leerla y backfillear inventory_item_suppliers antes de que se
- * retire en la fase 2. No usar en código nuevo.
- */
-export const suppliers = pgTable("suppliers", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  contactName: text("contact_name"),
-  phone: text("phone"),
-  email: text("email"),
-  address: text("address"),
-  cuit: text("cuit"),
-  paymentTermDays: integer("payment_term_days").default(30),
-  notes: text("notes"),
-  isActive: text("is_active").default("true"),
-});
 
 export type InventoryItemWithDetails = InventoryItem & {
   category?: ItemCategory;
