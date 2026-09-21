@@ -415,6 +415,7 @@ export interface IStorage {
   getGroup(id: string): Promise<GroupWithDetails | undefined>;
   createGroup(group: InsertGroup): Promise<Group>;
   updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined>;
+  updateGroupAtomic(id: string, input: AtomicGroupUpdateInput): Promise<AtomicGroupUpdateResult | undefined>;
   deleteGroup(id: string): Promise<boolean>;
   generateGroupCode(): string;
 
@@ -899,3 +900,13 @@ export interface IStorage {
   getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]>;
   generateVoucherCode(): Promise<string>;
 }
+
+export type AtomicGroupUpdateInput = {
+  patch: Partial<InsertGroup>;
+  roomReassignments?: Record<string, string | null>;
+  overrideTentativeGroupWarning?: boolean;
+  /** Test-only failure injection, never supplied by the HTTP route. */
+  failAfterFirstWrite?: boolean;
+};
+
+export type AtomicGroupUpdateResult = Group & { propagatedCount: number };

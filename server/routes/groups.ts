@@ -555,141 +555,18 @@ export function registerGroupsRoutes(app: Express) {
         updateData._inventoryOverrideTentativeGroupWarning = true;
       }
 
-      // 3.1: Date propagation — fetch current dates BEFORE update
-      // Normalize any date value (Date object or string) to "YYYY-MM-DD"
-      const toDateStr = (d: any): string | null => {
-        if (!d) return null;
-        if (typeof d === "string") return d.substring(0, 10);
-        if (d instanceof Date) return d.toISOString().substring(0, 10);
-        return String(d).substring(0, 10);
-      };
-      const currentGroup = await storage.getGroup(req.params.id);
-      const oldCheckIn = toDateStr(currentGroup?.checkInDate);
-      const oldCheckOut = toDateStr(currentGroup?.checkOutDate);
+      // All date propagation, room moves, cancellation and room/placeholder
+      // projections are performed by the storage transaction.  Keep this
+      // route free of side effects so a failed projection cannot leave a
+      // partially updated group.
+      const atomicGroup = await storage.updateGroupAtomic(req.params.id, {
+        patch: updateData as any,
+        roomReassignments: roomReassignments && typeof roomReassignments === "object" ? roomReassignments : undefined,
+        overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
+      });
+      if (!atomicGroup) return res.status(404).json({ error: "Group not found" });
+      return res.json(atomicGroup);
 
-      // Determine whether dates are changing before touching the database
-      const newCheckIn = updateData.checkInDate as string | undefined;
-      const newCheckOut = updateData.checkOutDate as string | undefined;
-      const datesChanged = (newCheckIn && newCheckIn !== oldCheckIn) || (newCheckOut && newCheckOut !== oldCheckOut);
-
-      // Guard: if dates are changing, reject if any linked reservation is currently checked_in
-      if (datesChanged) {
-        const linksForCheck = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        const linkedResIds = new Set(linksForCheck.map(l => l.reservationId));
-        const allResForCheck = await storage.getReservations();
-        const checkedInCount = allResForCheck.filter(r => linkedResIds.has(r.id) && r.status === "checked_in").length;
-        if (checkedInCount > 0) {
-          return res.status(409).json({
-            error: `No se pueden cambiar las fechas mientras hay huéspedes en casa. Hay ${checkedInCount} habitación${checkedInCount !== 1 ? "es" : ""} actualmente en check-in en este grupo.`,
-          });
-        }
-      }
-
-      const group = await storage.updateGroup(req.params.id, updateData);
-      if (!group) {
-        return res.status(404).json({ error: "Group not found" });
-      }
-
-      // 3.1: If dates changed, propagate to pending/confirmed reservations that had the old dates
-      let propagatedCount = 0;
-      if (datesChanged) {
-        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        for (const link of links) {
-          const [linked] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
-          if (!linked) continue;
-          if (!["pending", "confirmed"].includes(linked.status as string)) continue;
-          // Propagate group date changes to all pending/confirmed reservations.
-          // We update only the date dimension that changed in the group.
-          const patch: Record<string, unknown> = {};
-          if (newCheckIn) patch.checkInDate = newCheckIn;
-          if (newCheckOut) patch.checkOutDate = newCheckOut;
-          if (Object.keys(patch).length) {
-            await storage.updateReservation(linked.id, { ...patch, _inventoryContextGroupId: req.params.id } as any);
-            propagatedCount++;
-          }
-        }
-      }
-
-      // 6a: Apply room reassignments sent from the conflict-resolution dialog (with full server-side validation)
-      if (datesChanged && roomReassignments && typeof roomReassignments === 'object') {
-        // Build the set of reservation IDs that belong to this group for ownership validation
-        const groupLinks = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        const groupResIdSet = new Set(groupLinks.map(l => l.reservationId));
-
-        // Validate uniqueness: no two reservations can be reassigned to the same room
-        const targetRoomIds = Object.values(roomReassignments).filter(Boolean) as string[];
-        const uniqueTargets = new Set(targetRoomIds);
-        if (targetRoomIds.length !== uniqueTargets.size) {
-          return res.status(400).json({ error: "Dos reservas no pueden asignarse a la misma habitación." });
-        }
-
-        const ciToUse = newCheckIn || (newCheckOut ? group.checkInDate : null);
-        const coToUse = newCheckOut || (newCheckIn ? group.checkOutDate : null);
-
-        for (const [reservationId, newRoomId] of Object.entries(roomReassignments)) {
-          if (!newRoomId) continue;
-
-          // 1. Ownership: reservationId must belong to this group
-          if (!groupResIdSet.has(reservationId)) {
-            return res.status(403).json({ error: `Reserva ${reservationId} no pertenece a este grupo.` });
-          }
-
-          const [currentRes] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, reservationId)).limit(1);
-          if (!currentRes) continue;
-
-          const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, newRoomId as string)).limit(1);
-          if (!newRoom) return res.status(404).json({ error: `Habitación destino ${newRoomId} no encontrada.` });
-
-          // 2. Room type must match original reservation
-          if (newRoom.roomTypeId !== currentRes.roomTypeId) {
-            return res.status(400).json({ error: `La habitación ${newRoom.roomNumber} no es del mismo tipo que la original.` });
-          }
-
-          // 3. Recheck availability at commit time with new dates
-          const checkInForRecheck = ciToUse || currentRes.checkInDate;
-          const checkOutForRecheck = coToUse || currentRes.checkOutDate;
-          const hasConflict = await storage.checkOverbooking(newRoomId as string, checkInForRecheck, checkOutForRecheck, reservationId);
-          if (hasConflict) {
-            return res.status(409).json({ error: `La habitación ${newRoom.roomNumber} ya no está disponible en esas fechas. Recargá la página y volvé a intentarlo.` });
-          }
-
-          // All validations passed — apply the reassignment
-          if (currentRes.roomId) {
-            await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, currentRes.roomId));
-          }
-          await storage.updateReservation(reservationId, {
-            roomId: newRoomId as string, roomTypeId: newRoom.roomTypeId,
-            checkInDate: checkInForRecheck, checkOutDate: checkOutForRecheck,
-            _inventoryContextGroupId: req.params.id,
-          } as any);
-          await db.update(roomsTable).set({ status: 'occupied' }).where(eq(roomsTable.id, newRoomId as string));
-        }
-      }
-
-      // 2.2: Al cancelar el grupo, cancelar todas las reservas vinculadas (excepto las ya checked_out)
-      if (status === 'cancelled') {
-        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        for (const link of links) {
-          const [res] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
-          if (res && res.status !== 'checked_out' && res.status !== 'cancelled') {
-            await db.update(reservationsTable).set({ status: 'cancelled' }).where(eq(reservationsTable.id, res.id));
-            if (res.roomId) {
-              await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, res.roomId));
-            }
-          }
-        }
-      }
-
-      // Si el nombre cambió, sincronizar el guest placeholder que se usa en planning,
-      // rooming list, folio y cualquier otro lugar que muestra el nombre del grupo
-      if (name !== undefined) {
-        const placeholderCode = `GROUP-${req.params.id}`;
-        await db.update(guestsTable)
-          .set({ firstName: name, lastName: "" })
-          .where(eq(guestsTable.codigo, placeholderCode));
-      }
-
-      res.json({ ...group, propagatedCount });
     } catch (error: any) {
       console.error("Error updating group:", error?.message || error);
       res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating group", detail: error?.message });

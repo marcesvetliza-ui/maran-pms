@@ -40,7 +40,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "./db";
-import { IStorage } from "./storage";
+import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
   type User, type InsertUser,
   type Room, type InsertRoom,
@@ -2690,6 +2690,154 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateGroupAtomic(id: string, input: AtomicGroupUpdateInput): Promise<AtomicGroupUpdateResult | undefined> {
+    const reassignment = input.roomReassignments || {};
+    const override = input.overrideTentativeGroupWarning === true;
+    return db.transaction(async (tx) => {
+      // This lock is deliberately transaction-scoped: every inventory mutation
+      // (including room moves made by the group editor) serializes here.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('lodging-inventory-mutations'))`);
+      const [before] = await tx.select().from(groups).where(eq(groups.id, id)).for("update");
+      if (!before) return undefined;
+      const date = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : String(value || "").slice(0, 10);
+      const nextCheckIn = (input.patch.checkInDate as string | undefined) || date(before.checkInDate);
+      const nextCheckOut = (input.patch.checkOutDate as string | undefined) || date(before.checkOutDate);
+      if (nextCheckOut <= nextCheckIn) throw Object.assign(new Error("La fecha de check-out debe ser posterior al check-in."), { statusCode: 400 });
+
+      const links = await tx.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, id));
+      const reservationIds = links.map(link => link.reservationId);
+      const linked = reservationIds.length
+        ? await tx.select().from(reservations).where(inArray(reservations.id, reservationIds)).for("update")
+        : [];
+      const datesChanged = nextCheckIn !== date(before.checkInDate) || nextCheckOut !== date(before.checkOutDate);
+      if (datesChanged && linked.some(row => row.status === "checked_in")) {
+        throw Object.assign(new Error("No se pueden cambiar las fechas mientras hay huéspedes en casa."), { statusCode: 409 });
+      }
+
+      const targets = Object.entries(reassignment).filter(([, roomId]) => !!roomId) as Array<[string, string]>;
+      if (new Set(targets.map(([, roomId]) => roomId)).size !== targets.length) {
+        throw Object.assign(new Error("Dos reservas no pueden asignarse a la misma habitación."), { statusCode: 400 });
+      }
+      const roomsById = new Map((targets.length ? await tx.select().from(rooms).where(inArray(rooms.id, targets.map(([, roomId]) => roomId))) : []).map(room => [room.id, room]));
+      const linkedById = new Map(linked.map(row => [row.id, row]));
+      for (const [reservationId, roomId] of targets) {
+        const row = linkedById.get(reservationId);
+        if (!row) throw Object.assign(new Error(`Reserva ${reservationId} no pertenece a este grupo.`), { statusCode: 403 });
+        if (row.status === "checked_in") throw Object.assign(new Error("No se puede reasignar una reserva en check-in."), { statusCode: 409 });
+        const room = roomsById.get(roomId);
+        if (!room) throw Object.assign(new Error(`Habitación destino ${roomId} no encontrada.`), { statusCode: 404 });
+        if (room.roomTypeId !== row.roomTypeId) throw Object.assign(new Error(`La habitación ${room.roomNumber} no es del mismo tipo que la reserva.`), { statusCode: 400 });
+        if (!isOperationalInventoryRoom(room) || room.status === "maintenance" || room.status === "oos") {
+          throw Object.assign(new Error(`La habitación ${room.roomNumber} no está habilitada para asignaciones.`), {
+            statusCode: 409,
+            response: {
+              error: `La habitación ${room.roomNumber} no está habilitada para asignaciones.`,
+              code: "PHYSICAL_ROOM_UNAVAILABLE",
+              canOverride: false,
+            },
+          });
+        }
+      }
+      // Physical overlap is checked against the final room assignment, before
+      // the first write. Group reservations are allowed to move together.
+      const finalRoomByReservation = new Map(linked.map(row => [row.id, reassignment[row.id] || row.roomId]));
+      const active = linked.filter(row => !["cancelled", "checked_out", "no_show"].includes(row.status));
+      const finalRooms = active.map(row => finalRoomByReservation.get(row.id)).filter(Boolean);
+      if (new Set(finalRooms).size !== finalRooms.length) {
+        throw Object.assign(new Error("Dos reservas no pueden ocupar la misma habitación."), { statusCode: 409 });
+      }
+      const allOnRooms = active.length
+        ? await tx.select().from(reservations).where(inArray(reservations.roomId, [...new Set(active.map(row => finalRoomByReservation.get(row.id)).filter(Boolean) as string[])]))
+        : [];
+      for (const row of active) {
+        const roomId = finalRoomByReservation.get(row.id);
+        if (!roomId) continue;
+        const conflict = allOnRooms.some(other => other.id !== row.id
+          && other.roomId === roomId && !reservationIds.includes(other.id)
+          && !["cancelled", "checked_out", "no_show"].includes(other.status)
+          && other.checkInDate < nextCheckOut && other.checkOutDate > nextCheckIn);
+        if (conflict) throw Object.assign(new Error(`La habitación destino ya no está disponible en esas fechas.`), { statusCode: 409 });
+      }
+
+      // Validate group inventory from the same transaction snapshot.
+      const allGroups = await tx.select().from(groups);
+      const blocks = await tx.select().from(groupRoomBlocks);
+      const allReservations = await tx.select().from(reservations);
+      const allGroupLinks = await tx.select().from(groupReservationLinks);
+      const groupByReservation = new Map(allGroupLinks.map(link => [link.reservationId, link.groupId]));
+      for (const roomTypeId of [...new Set(blocks.filter(block => block.groupId === id).map(block => block.roomTypeId))]) {
+        const inventoryRooms = await tx.select({
+          id: rooms.id,
+          roomNumber: rooms.roomNumber,
+          isActive: rooms.isActive,
+          isVirtual: rooms.isVirtual,
+          status: rooms.status,
+        }).from(rooms).where(eq(rooms.roomTypeId, roomTypeId));
+        const roomCount = inventoryRooms.filter(room =>
+          isOperationalInventoryRoom(room) &&
+          room.status !== "maintenance" &&
+          room.status !== "oos"
+        ).length;
+        const isCancellingGroup = String(input.patch.status || "") === "cancelled";
+        const conflict = evaluateGroupInventory({
+          roomTypeId, checkIn: nextCheckIn, checkOut: nextCheckOut, operationalInventory: roomCount,
+          groups: allGroups.map(group => group.id === id ? { ...group, checkInDate: nextCheckIn, checkOutDate: nextCheckOut, status: String(input.patch.status || group.status) } : group) as any,
+          blocks,
+          reservations: allReservations.map(row => ({
+            ...row,
+            status: isCancellingGroup && reservationIds.includes(row.id) ? "cancelled" : row.status,
+            groupId: groupByReservation.get(row.id),
+          })) as any,
+          contextGroupId: id,
+        });
+        if (conflict && (!conflict.canOverride || !override)) {
+          throw Object.assign(new Error("El compromiso del grupo excede el inventario operativo."), { statusCode: 409, response: { error: "El compromiso del grupo excede el inventario operativo.", code: conflict.code, warning: conflict, canOverride: conflict.canOverride } });
+        }
+      }
+
+      const safePatch: Record<string, unknown> = { ...input.patch };
+      delete (safePatch as any)._inventoryOverrideTentativeGroupWarning;
+      delete (safePatch as any).id;
+      delete (safePatch as any).createdAt;
+      const [updated] = await tx.update(groups).set(safePatch as any).where(eq(groups.id, id)).returning();
+      if (!updated) return undefined;
+      let writes = 1;
+      if (input.failAfterFirstWrite) throw new Error("test-only atomic group failure");
+      let propagatedCount = 0;
+      for (const row of linked) {
+        if (["cancelled", "checked_out"].includes(row.status)) continue;
+        const patch: Record<string, unknown> = {};
+        if (datesChanged && row.status !== "checked_in") {
+          patch.checkInDate = nextCheckIn; patch.checkOutDate = nextCheckOut;
+        }
+        if (reassignment[row.id]) {
+          patch.roomId = reassignment[row.id]; patch.roomTypeId = roomsById.get(reassignment[row.id]!)!.roomTypeId;
+        }
+        if (String(input.patch.status) === "cancelled") patch.status = "cancelled";
+        if (Object.keys(patch).length) {
+          await tx.update(reservations).set(patch as any).where(eq(reservations.id, row.id));
+          propagatedCount++; writes++;
+        }
+      }
+      const affectedRooms = new Set<string>();
+      for (const row of linked) { if (row.roomId) affectedRooms.add(row.roomId); const next = reassignment[row.id]; if (next) affectedRooms.add(next); }
+      for (const roomId of affectedRooms) {
+        const [room] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for("update");
+        if (!room || ["maintenance", "oos"].includes(room.status)) continue;
+        const occupants = await tx.select({ id: reservations.id }).from(reservations)
+          .where(and(eq(reservations.roomId, roomId), not(inArray(reservations.status, ["cancelled", "checked_out", "no_show"]))));
+        const today = getArgentinaOperationalParts().date;
+        const inHouse = occupants.length > 0 && (await tx.select({ id: reservations.id }).from(reservations)
+          .where(and(eq(reservations.roomId, roomId), lte(reservations.checkInDate, today), gt(reservations.checkOutDate, today), not(inArray(reservations.status, ["cancelled", "checked_out", "no_show"]))))).length > 0;
+        await tx.update(rooms).set({ status: inHouse ? "occupied" : "available" }).where(eq(rooms.id, roomId));
+      }
+      if (input.patch.name !== undefined) {
+        await tx.update(guests).set({ firstName: String(input.patch.name), lastName: "" }).where(eq(guests.codigo, `GROUP-${id}`));
+      }
+      return { ...updated, propagatedCount };
+    });
+  }
+
   async updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined> {
     const overrideSoft = (group as any)._inventoryOverrideTentativeGroupWarning === true;
     const safeData: Record<string, any> = {};
@@ -2772,32 +2920,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createGroupBlock(block: InsertGroupRoomBlock, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock> {
-    const [created] = await db.insert(groupRoomBlocks).values(block as any).returning();
-    const group = await this.getGroup(created.groupId);
-    if (group && ["tentative", "blocked", "confirmed", "inhouse"].includes(group.status)) {
-      const conflict = await this.validateGroupInventory(created.groupId, group.status, created);
-      if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
-        await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, created.id));
-        throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409, response: { error: "El bloque grupal excede el inventario operativo", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" } });
-      }
-    }
-    return created;
-  }
-
-  async updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock | undefined> {
-    const [before] = await db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.id, id));
-    const [updated] = await db.update(groupRoomBlocks).set(block as any).where(eq(groupRoomBlocks.id, id)).returning();
-    if (updated) {
-      const group = await this.getGroup(updated.groupId);
+    return this.withInventoryMutationLock(async () => {
+      const [created] = await db.insert(groupRoomBlocks).values(block as any).returning();
+      const group = await this.getGroup(created.groupId);
       if (group && ["tentative", "blocked", "confirmed", "inhouse"].includes(group.status)) {
-        const conflict = await this.validateGroupInventory(updated.groupId, group.status, updated);
+        const conflict = await this.validateGroupInventory(created.groupId, group.status, created);
         if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
-          await db.update(groupRoomBlocks).set(before as any).where(eq(groupRoomBlocks.id, id));
+          await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, created.id));
           throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409, response: { error: "El bloque grupal excede el inventario operativo", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" } });
         }
       }
-    }
-    return updated;
+      return created;
+    });
+  }
+
+  async updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock | undefined> {
+    return this.withInventoryMutationLock(async () => {
+      const [before] = await db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.id, id));
+      const [updated] = await db.update(groupRoomBlocks).set(block as any).where(eq(groupRoomBlocks.id, id)).returning();
+      if (updated) {
+        const group = await this.getGroup(updated.groupId);
+        if (group && ["tentative", "blocked", "confirmed", "inhouse"].includes(group.status)) {
+          const conflict = await this.validateGroupInventory(updated.groupId, group.status, updated);
+          if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
+            await db.update(groupRoomBlocks).set(before as any).where(eq(groupRoomBlocks.id, id));
+            throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409, response: { error: "El bloque grupal excede el inventario operativo", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" } });
+          }
+        }
+      }
+      return updated;
+    });
   }
 
   async deleteGroupBlock(id: string): Promise<boolean> {
