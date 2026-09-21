@@ -107,6 +107,8 @@ function fmtMoney(n: string | number) {
   return `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
 }
 
+const HOTEL_NAME_HTML = "Maran Suites &amp; Towers";
+
 function printEntityStatement(entityName: string, entityType: string, movements: AccountMovement[]) {
   const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
   const today = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
@@ -166,7 +168,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -203,7 +205,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
@@ -265,7 +267,7 @@ function printDebtListing(
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -305,7 +307,7 @@ function printDebtListing(
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
