@@ -120,11 +120,19 @@ export default function NewReservationPage() {
     queryKey: ["/api/companies"],
   });
 
+  const { data: agencies } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies"],
+  });
+
   const handleGuestSelect = (guest: Guest) => {
     setSelectedGuest(guest);
     if (guest.companyId && companies) {
       const company = companies.find(c => c.id === guest.companyId);
       if (company) setSelectedCompany(company);
+    }
+    if (guest.agencyId && agencies) {
+      const agency = agencies.find(a => a.id === guest.agencyId);
+      if (agency) setSelectedAgency(agency);
     }
   };
 

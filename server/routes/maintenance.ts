@@ -207,6 +207,20 @@ export function registerMaintenanceRoutes(app: Express) {
     }
   });
 
+  app.patch("/api/maintenance/blocks/:id", requireAuth, async (req, res) => {
+    try {
+      const { blockFrom, blockTo, notes } = req.body;
+      if (blockFrom && blockTo && blockTo < blockFrom) {
+        return res.status(400).json({ error: "La fecha de fin debe ser posterior al inicio" });
+      }
+      const updated = await storage.updateMaintenanceBlock(req.params.id, { blockFrom, blockTo, notes });
+      if (!updated) return res.status(404).json({ error: "Bloqueo no encontrado" });
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating maintenance block" });
+    }
+  });
+
   app.delete("/api/maintenance/blocks/:id", requireAuth, async (req, res) => {
     try {
       await storage.deleteMaintenanceBlock(req.params.id);
