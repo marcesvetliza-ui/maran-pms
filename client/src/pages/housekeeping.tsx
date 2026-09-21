@@ -40,6 +40,7 @@ import {
   Ban,
   ShieldCheck,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,7 @@ import {
 } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -92,7 +94,7 @@ import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
-type TaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
+type TaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "maintenance_prep";
 type Priority = "low" | "normal" | "high" | "urgent";
 
 const statusConfig: Record<RoomStatus, { label: string; icon: typeof Sparkles; className: string; bgClass: string }> = {
@@ -119,7 +121,6 @@ const taskTypeLabels: Record<TaskType, string> = {
   stayover_clean: "Limpieza Estancia",
   deep_clean: "Limpieza Profunda",
   inspection: "Inspeccion",
-  turndown: "Turndown",
   maintenance_prep: "Prep. Mantenimiento",
 };
 
@@ -1473,6 +1474,20 @@ export default function Housekeeping() {
   const [notes, setNotes] = useState("");
   const [detailNotes, setDetailNotes] = useState("");
 
+  // ── Bloqueo de habitación por fechas (limpiezas de varios días) ──────────
+  // Reusa maintenance_blocks — la misma tabla y los mismos endpoints que ya
+  // usa Mantenimiento — para que Planning y disponibilidad respeten un
+  // bloqueo sin importar desde qué área se haya cargado.
+  const [blockEnabled, setBlockEnabled] = useState(false);
+  const [blockFrom, setBlockFrom] = useState("");
+  const [blockTo, setBlockTo] = useState("");
+  const [blockNotes, setBlockNotes] = useState("");
+  type BlockConflictRes = { id: string; guestName: string; checkInDate: string; checkOutDate: string; status: string };
+  const [blockConflicts, setBlockConflicts] = useState<BlockConflictRes[]>([]);
+  const [pendingBlockPayload, setPendingBlockPayload] = useState<{
+    roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null;
+  } | null>(null);
+
   const { data: rooms, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
   });
@@ -1636,6 +1651,60 @@ export default function Housekeeping() {
       toast({ title: "Error", description: "No se pudo crear la tarea.", variant: "destructive" });
     },
   });
+
+  const { data: selectedRoomBlocks = [] } = useQuery<Array<{ id: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }>>({
+    queryKey: ["/api/maintenance/blocks", selectedRoomId],
+    queryFn: () => fetch(`/api/maintenance/blocks?roomId=${encodeURIComponent(selectedRoomId!)}`, { credentials: "include" }).then(r => r.json()),
+    enabled: detailsDialogOpen && !!selectedRoomId,
+  });
+
+  const addRoomBlockMutation = useMutation({
+    mutationFn: (payload: { roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }) =>
+      apiRequest("POST", "/api/maintenance/blocks", payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      setBlockEnabled(false);
+      setBlockFrom("");
+      setBlockTo("");
+      setBlockNotes("");
+      toast({ title: "Bloqueo aplicado", description: "La habitación fue bloqueada en el planning." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo crear el bloqueo.", variant: "destructive" });
+    },
+  });
+
+  const removeRoomBlockMutation = useMutation({
+    mutationFn: (blockId: string) => apiRequest("DELETE", `/api/maintenance/blocks/${blockId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Bloqueo eliminado", description: "La habitación fue desbloqueada del planning." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo eliminar el bloqueo.", variant: "destructive" });
+    },
+  });
+
+  // Verifica reservas activas antes de bloquear; si hay, pide confirmación.
+  const checkBlockConflictsAndProceed = async (payload: { roomId: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }) => {
+    try {
+      const res = await fetch(
+        `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(payload.roomId)}&from=${encodeURIComponent(payload.blockFrom)}&to=${encodeURIComponent(payload.blockTo)}`,
+        { credentials: "include" }
+      );
+      const conflicts: BlockConflictRes[] = await res.json();
+      if (Array.isArray(conflicts) && conflicts.length > 0) {
+        setBlockConflicts(conflicts);
+        setPendingBlockPayload(payload);
+      } else {
+        addRoomBlockMutation.mutate(payload);
+      }
+    } catch {
+      addRoomBlockMutation.mutate(payload); // Si falla la verificación, se procede igual.
+    }
+  };
 
   const inspectTaskMutation = useMutation({
     mutationFn: (taskId: string) => apiRequest("POST", `/api/housekeeping/${taskId}/inspect`, { inspectedBy: "Supervisor" }),
@@ -2447,7 +2516,6 @@ export default function Housekeeping() {
                   <SelectItem value="stayover_clean">Limpieza Estancia</SelectItem>
                   <SelectItem value="deep_clean">Limpieza Profunda</SelectItem>
                   <SelectItem value="inspection">Inspeccion</SelectItem>
-                  <SelectItem value="turndown">Turndown</SelectItem>
                   <SelectItem value="maintenance_prep">Prep. Mantenimiento</SelectItem>
                 </SelectContent>
               </Select>
@@ -2549,6 +2617,99 @@ export default function Housekeeping() {
               </div>
             </div>
 
+            <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
+              {selectedRoomBlocks.length > 0 && (
+                <div className="space-y-2">
+                  {selectedRoomBlocks.map(block => (
+                    <div key={block.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/50 p-2">
+                      <div className="text-xs">
+                        <p className="font-medium flex items-center gap-1">
+                          <Lock className="h-3 w-3 text-muted-foreground" />
+                          {block.blockFrom} — {block.blockTo}
+                        </p>
+                        <p className="text-muted-foreground">Bloqueado por {block.blockedBy}</p>
+                        {block.notes && <p className="text-muted-foreground">Motivo: {block.notes}</p>}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive shrink-0"
+                        onClick={() => removeRoomBlockMutation.mutate(block.id)}
+                        disabled={removeRoomBlockMutation.isPending}
+                        data-testid="button-remove-room-block"
+                      >
+                        Eliminar
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm font-medium">Bloquear habitación por fechas</Label>
+                </div>
+                <Switch
+                  checked={blockEnabled}
+                  onCheckedChange={(v) => { setBlockEnabled(v); setBlockFrom(""); setBlockTo(""); setBlockNotes(""); }}
+                  data-testid="switch-block-room"
+                />
+              </div>
+              {blockEnabled && (
+                <div className="space-y-2 pt-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Desde</Label>
+                      <Input
+                        type="date"
+                        value={blockFrom}
+                        onChange={(e) => setBlockFrom(e.target.value)}
+                        data-testid="input-block-from"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Hasta</Label>
+                      <Input
+                        type="date"
+                        value={blockTo}
+                        onChange={(e) => setBlockTo(e.target.value)}
+                        min={blockFrom}
+                        data-testid="input-block-to"
+                      />
+                    </div>
+                  </div>
+                  {blockFrom && blockTo && blockTo < blockFrom && (
+                    <p className="text-xs text-destructive">La fecha de fin debe ser posterior al inicio.</p>
+                  )}
+                  <Textarea
+                    value={blockNotes}
+                    onChange={(e) => setBlockNotes(e.target.value)}
+                    placeholder="Motivo (ej: limpieza profunda de varios días)..."
+                    className="text-sm"
+                    data-testid="input-block-notes"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!blockFrom || !blockTo || blockTo < blockFrom || addRoomBlockMutation.isPending}
+                    onClick={() => {
+                      if (!selectedRoomId) return;
+                      checkBlockConflictsAndProceed({
+                        roomId: selectedRoomId,
+                        blockFrom,
+                        blockTo,
+                        blockedBy: user?.username || "Sistema",
+                        notes: blockNotes.trim() || null,
+                      });
+                    }}
+                    data-testid="button-apply-room-block"
+                  >
+                    <Lock className="mr-2 h-3.5 w-3.5" />
+                    {addRoomBlockMutation.isPending ? "Bloqueando..." : "Aplicar bloqueo"}
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {selectedRoomTasks.length > 0 && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Tareas de Hoy</Label>
@@ -2608,6 +2769,51 @@ export default function Housekeeping() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de conflictos — se muestra cuando hay reservas activas en el rango a bloquear */}
+      <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockPayload(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+              <AlertTriangle className="h-5 w-5" />
+              Reservas activas en esa habitación
+            </DialogTitle>
+            <DialogDescription>
+              Las siguientes reservas se superponen con el período de bloqueo. Podés confirmar el bloqueo de todas formas (avisá a recepción) o cancelar para reubicar primero a los huéspedes.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/30 divide-y divide-orange-100 dark:divide-orange-900">
+            {blockConflicts.map((c) => (
+              <div key={c.id} className="px-3 py-2">
+                <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
+                <p className="text-xs text-muted-foreground">
+                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => { setBlockConflicts([]); setPendingBlockPayload(null); }}
+              data-testid="button-block-conflict-cancel"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingBlockPayload) addRoomBlockMutation.mutate(pendingBlockPayload);
+                setBlockConflicts([]);
+                setPendingBlockPayload(null);
+              }}
+              data-testid="button-block-conflict-confirm"
+            >
+              Confirmar bloqueo de todas formas
             </Button>
           </DialogFooter>
         </DialogContent>
