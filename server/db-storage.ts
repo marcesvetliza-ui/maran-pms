@@ -6636,22 +6636,25 @@ export class DatabaseStorage implements IStorage {
       totalNightsSold += nights;
     }
 
-    const periodPayments = await db.select().from(payments)
-      .where(and(gte(payments.date, from), lte(payments.date, to)));
-    const totalRevenue = periodPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
-
+    // Room revenue on an accrual basis (the reservation's own rate), not raw
+    // payments — a folio payment can include restaurant/spa/minibar consumption
+    // charged to the room, which would otherwise double-count against those
+    // areas' own figures. Extras use the same accrual logic: charges actually
+    // posted in the period, by category, regardless of when/whether collected.
+    const accommodationRevenue = periodReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
     const periodCharges = await db.select().from(charges)
       .where(and(gte(charges.date, from), lte(charges.date, to)));
-    const accommodationCharges = periodCharges.filter(c => (c.category || "").toLowerCase().includes("aloj"));
-    const accommodationRevenue = accommodationCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const extrasRevenue = totalRevenue - accommodationRevenue;
+    const extrasRevenue = periodCharges
+      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
+      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+    const totalRevenue = accommodationRevenue + extrasRevenue;
 
     const daysInPeriod = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
     const occupiedRooms = roomsByStatus.occupied || 0;
     const availableRooms = roomsByStatus.available || 0;
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-    const adr = totalNightsSold > 0 ? Math.round(totalRevenue / totalNightsSold) : 0;
+    const adr = totalNightsSold > 0 ? Math.round(accommodationRevenue / totalNightsSold) : 0;
     const revpar = Math.round(adr * occupancyRate / 100);
 
     const byChannelMap = new Map<string, { reservations: number; revenue: number }>();
@@ -6677,16 +6680,20 @@ export class DatabaseStorage implements IStorage {
     const prevReservations = rawPrevReservations.filter(
       reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
     );
-    const prevPayments = await db.select().from(payments)
-      .where(and(gte(payments.date, prevFrom), lte(payments.date, prevTo)));
-    const prevTotalRevenue = prevPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+    const prevAccommodationRevenue = prevReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
+    const prevCharges = await db.select().from(charges)
+      .where(and(gte(charges.date, prevFrom), lte(charges.date, prevTo)));
+    const prevExtrasRevenue = prevCharges
+      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
+      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+    const prevTotalRevenue = prevAccommodationRevenue + prevExtrasRevenue;
     let prevNightsSold = 0;
     for (const r of prevReservations) {
       const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(prevFrom).getTime()));
       const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(prevTo).getTime()));
       prevNightsSold += Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
     }
-    const prevAdr = prevNightsSold > 0 ? Math.round(prevTotalRevenue / prevNightsSold) : 0;
+    const prevAdr = prevNightsSold > 0 ? Math.round(prevAccommodationRevenue / prevNightsSold) : 0;
     const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
     const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
 

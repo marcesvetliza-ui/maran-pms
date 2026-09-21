@@ -48,12 +48,16 @@ function pct(a: number, b: number): number {
 }
 
 // Query helpers
+// Room-only revenue, recognized on an accrual basis (same overlap window used for
+// occupancy) instead of summing raw folio payments — a folio payment can include
+// restaurant/spa/events consumption charged to the room, which is already booked
+// as revenue by those areas independently, so counting it again here would double it.
 async function ingresosAlojamiento(desde: string, hasta: string): Promise<number> {
   const r = await db.execute(sql`
-    SELECT COALESCE(SUM(p.amount::numeric), 0) AS total
-    FROM payments p
-    JOIN reservations r ON r.id = p.reservation_id
-    WHERE p.date BETWEEN ${desde} AND ${hasta}
+    SELECT COALESCE(SUM(total_room_amount::numeric), 0) AS total
+    FROM reservations
+    WHERE status IN ('checked_in','checked_out')
+      AND check_out_date > ${desde} AND check_in_date < ${hasta}
   `);
   return $n((r.rows[0] as any)?.total);
 }
@@ -259,14 +263,13 @@ export function registerReportsRoutes(app: Express) {
       `);
       const estanciaPromedio = Math.round($n((estanciaRes.rows[0] as any)?.avg_stay) * 10) / 10;
 
-      // Canal distribution
+      // Canal distribution — room-only revenue (see ingresosAlojamiento), not raw payments
       const canales = await db.execute(sql`
         SELECT
           COALESCE(NULLIF(r.source,''), 'Directo') AS canal,
           COUNT(*) AS reservas,
-          COALESCE(SUM(p.amount::numeric), 0) AS ingresos
+          COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos
         FROM reservations r
-        LEFT JOIN payments p ON p.reservation_id = r.id AND p.date BETWEEN ${desde} AND ${hasta}
         WHERE r.status IN ('checked_in','checked_out')
           AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
         GROUP BY COALESCE(NULLIF(r.source,''), 'Directo')
@@ -331,7 +334,8 @@ export function registerReportsRoutes(app: Express) {
       const desde = (req.query.desde as string) || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
       const hasta = (req.query.hasta as string) || new Date().toISOString().split("T")[0];
 
-      // Por día
+      // Por día — ingresos de alojamiento prorrateados por noche ocupada ese día
+      // (misma ventana que "ocupadas"), no pagos crudos del día
       const dayRows = await db.execute(sql`
         SELECT
           day_series::date AS fecha,
@@ -339,8 +343,13 @@ export function registerReportsRoutes(app: Express) {
            WHERE r.status IN ('checked_in','checked_out')
              AND r.check_in_date <= day_series::date
              AND r.check_out_date > day_series::date) AS ocupadas,
-          (SELECT COALESCE(SUM(p.amount::numeric),0) FROM payments p
-           WHERE p.date = day_series::date) AS ingresos
+          (SELECT COALESCE(SUM(COALESCE(
+             NULLIF(r.final_rate_per_night::numeric, 0),
+             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
+           )), 0) FROM reservations r
+           WHERE r.status IN ('checked_in','checked_out')
+             AND r.check_in_date <= day_series::date
+             AND r.check_out_date > day_series::date) AS ingresos
         FROM generate_series(${desde}::date, ${hasta}::date, '1 day'::interval) AS day_series
         ORDER BY day_series
       `);
@@ -440,15 +449,14 @@ export function registerReportsRoutes(app: Express) {
       const total = aloj + rest + spa + eventos;
       const prevTotal = prevAloj + prevRest + prevSpa + prevEventos;
 
-      // Alojamiento por tipo de habitación
+      // Alojamiento por tipo de habitación — room-only revenue, not raw payments
       const alojTipo = await db.execute(sql`
         SELECT rt.name AS tipo,
                COUNT(*) AS noches,
-               COALESCE(SUM(p.amount::numeric), 0) AS ingresos,
+               COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos,
                COALESCE(AVG(r.final_rate_per_night::numeric), 0) AS tarifa_media
         FROM reservations r
         JOIN room_types rt ON rt.id = r.room_type_id
-        LEFT JOIN payments p ON p.reservation_id = r.id AND p.date BETWEEN ${desde} AND ${hasta}
         WHERE r.status IN ('checked_in','checked_out')
           AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
         GROUP BY rt.name
@@ -469,11 +477,17 @@ export function registerReportsRoutes(app: Express) {
         LIMIT 10
       `);
 
-      // Por día
+      // Por día — alojamiento prorrateado por noche ocupada ese día, no pagos crudos
       const porDia = await db.execute(sql`
         SELECT
           day_series::date AS fecha,
-          COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.date = day_series::date), 0) AS alojamiento,
+          COALESCE((SELECT SUM(COALESCE(
+             NULLIF(r.final_rate_per_night::numeric, 0),
+             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
+           )) FROM reservations r
+           WHERE r.status IN ('checked_in','checked_out')
+             AND r.check_in_date <= day_series::date
+             AND r.check_out_date > day_series::date), 0) AS alojamiento,
           COALESCE((SELECT SUM(ro.total::numeric) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
           COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE DATE(sp.created_at) = day_series::date), 0) AS spa,
           COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos
