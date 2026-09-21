@@ -219,6 +219,7 @@ import {
   type GiftVoucherEvent,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import type { GroupInventoryConflict } from "@shared/group-inventory";
 
 export interface IStorage {
   // Users
@@ -300,6 +301,14 @@ export interface IStorage {
   getReservationsByGuest(guestId: string): Promise<ReservationWithDetails[]>;
   createReservation(reservation: InsertReservation): Promise<Reservation>;
   updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined>;
+  evaluateReservationInventory(input: {
+    roomTypeId: string;
+    checkInDate: string;
+    checkOutDate: string;
+    excludeReservationId?: string;
+    contextGroupId?: string;
+  }): Promise<GroupInventoryConflict | null>;
+  validateGroupInventory(groupId: string, proposedStatus?: string, blockOverride?: { id?: string; roomTypeId?: string; quantity?: number; blockCheckInDate?: string | null; blockCheckOutDate?: string | null }, proposedDates?: { checkInDate?: string; checkOutDate?: string }): Promise<GroupInventoryConflict | null>;
   deleteReservation(id: string): Promise<boolean>;
   generateReservationCode(): string;
 
@@ -399,7 +408,7 @@ export interface IStorage {
   getOTAReservationLog(id: string): Promise<OTAReservationLogWithChannel | undefined>;
   createOTAReservationLog(log: InsertOTAReservationLog): Promise<OTAReservationLog>;
   updateOTAReservationLog(id: string, log: Partial<InsertOTAReservationLog>): Promise<OTAReservationLog | undefined>;
-  syncOTAReservation(logId: string): Promise<Reservation | undefined>;
+  syncOTAReservation(logId: string, overrideTentativeGroupWarning?: boolean): Promise<Reservation | undefined>;
 
   // Groups
   getGroups(): Promise<GroupWithDetails[]>;
@@ -411,8 +420,8 @@ export interface IStorage {
 
   // Group Room Blocks
   getGroupBlocks(groupId: string): Promise<GroupRoomBlockWithDetails[]>;
-  createGroupBlock(block: InsertGroupRoomBlock): Promise<GroupRoomBlock>;
-  updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>): Promise<GroupRoomBlock | undefined>;
+  createGroupBlock(block: InsertGroupRoomBlock, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock>;
+  updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock | undefined>;
   deleteGroupBlock(id: string): Promise<boolean>;
 
   // Group Reservation Links

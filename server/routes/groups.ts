@@ -402,8 +402,8 @@ export function registerGroupsRoutes(app: Express) {
         createdBy: null,
       });
       res.status(201).json(group);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating group" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error creating group" });
     }
   });
 
@@ -551,6 +551,9 @@ export function registerGroupsRoutes(app: Express) {
       if (masterFolioConfig !== undefined) updateData.masterFolioConfig = masterFolioConfig;
       if (billingEntityType !== undefined) updateData.billingEntityType = nullIfEmpty(billingEntityType);
       if (billingEntityId !== undefined) updateData.billingEntityId = nullIfEmpty(billingEntityId);
+      if (req.body.overrideTentativeGroupWarning === true) {
+        updateData._inventoryOverrideTentativeGroupWarning = true;
+      }
 
       // 3.1: Date propagation — fetch current dates BEFORE update
       // Normalize any date value (Date object or string) to "YYYY-MM-DD"
@@ -601,7 +604,7 @@ export function registerGroupsRoutes(app: Express) {
           if (newCheckIn) patch.checkInDate = newCheckIn;
           if (newCheckOut) patch.checkOutDate = newCheckOut;
           if (Object.keys(patch).length) {
-            await db.update(reservationsTable).set(patch as any).where(eq(reservationsTable.id, linked.id));
+            await storage.updateReservation(linked.id, { ...patch, _inventoryContextGroupId: req.params.id } as any);
             propagatedCount++;
           }
         }
@@ -654,9 +657,11 @@ export function registerGroupsRoutes(app: Express) {
           if (currentRes.roomId) {
             await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, currentRes.roomId));
           }
-          await db.update(reservationsTable)
-            .set({ roomId: newRoomId as string, roomTypeId: newRoom.roomTypeId })
-            .where(eq(reservationsTable.id, reservationId));
+          await storage.updateReservation(reservationId, {
+            roomId: newRoomId as string, roomTypeId: newRoom.roomTypeId,
+            checkInDate: checkInForRecheck, checkOutDate: checkOutForRecheck,
+            _inventoryContextGroupId: req.params.id,
+          } as any);
           await db.update(roomsTable).set({ status: 'occupied' }).where(eq(roomsTable.id, newRoomId as string));
         }
       }
@@ -687,7 +692,7 @@ export function registerGroupsRoutes(app: Express) {
       res.json({ ...group, propagatedCount });
     } catch (error: any) {
       console.error("Error updating group:", error?.message || error);
-      res.status(500).json({ error: "Error updating group", detail: error?.message });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating group", detail: error?.message });
     }
   });
 
@@ -761,7 +766,7 @@ export function registerGroupsRoutes(app: Express) {
         agreedRate: agreedRate ? String(agreedRate) : null,
         blockCheckInDate: blockCheckInDate || null,
         blockCheckOutDate: blockCheckOutDate || null,
-      });
+      }, { overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true });
 
       // Auto-assign available rooms and create placeholder reservations
       const group = await storage.getGroup(req.params.groupId);
@@ -793,6 +798,7 @@ export function registerGroupsRoutes(app: Express) {
           // Use the group's placeholder guest so guestId is never null (schema constraint).
           const placeholderGuest = await getOrCreatePlaceholderGuest(group.id, group.name);
           const reservation = await storage.createReservation({
+            _inventoryContextGroupId: group.id,
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
             guestId: placeholderGuest.id,
             guestName: "",
@@ -828,20 +834,22 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       res.status(201).json(block);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating group block" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error creating group block" });
     }
   });
 
   app.patch("/api/group-blocks/:id", async (req, res) => {
     try {
-      const block = await storage.updateGroupBlock(req.params.id, req.body);
+      const block = await storage.updateGroupBlock(req.params.id, req.body, {
+        overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
+      });
       if (!block) {
         return res.status(404).json({ error: "Group block not found" });
       }
       res.json(block);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating group block" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating group block" });
     }
   });
 
@@ -948,6 +956,16 @@ export function registerGroupsRoutes(app: Express) {
       if (!currentRes) {
         return res.status(404).json({ error: "Reserva no encontrada" });
       }
+      const inventoryConflict = await storage.evaluateReservationInventory({
+        roomTypeId: roomTypeId || currentRes.roomTypeId,
+        checkInDate: currentRes.checkInDate,
+        checkOutDate: currentRes.checkOutDate,
+        excludeReservationId: reservationId,
+        contextGroupId: groupId,
+      });
+      if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE") {
+        return res.status(409).json({ error: "El bloque grupal excede el inventario operativo", code: "GROUP_BLOCK_SHORTAGE", canOverride: false });
+      }
 
       if (roomId) {
         if (roomId !== currentRes.roomId) {
@@ -994,12 +1012,10 @@ export function registerGroupsRoutes(app: Express) {
         guestName,
       });
 
-      // Direct DB update — bypass storage layer to avoid silent failures
-      const [updated] = await db
-        .update(reservationsTable)
-        .set(reservationUpdates)
-        .where(eq(reservationsTable.id, reservationId))
-        .returning();
+      const updated = await storage.updateReservation(reservationId, {
+        ...reservationUpdates,
+        _inventoryContextGroupId: groupId,
+      } as any);
 
       if (!updated) {
         console.error(`[passenger-assign] updateReservation devolvió vacío para ID ${reservationId}`);
@@ -1017,7 +1033,7 @@ export function registerGroupsRoutes(app: Express) {
       res.json(updated);
     } catch (error: any) {
       console.error("[passenger-assign] Error:", error?.message);
-      res.status(500).json({ error: error?.message || "Error al asignar pasajero" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: error?.message || "Error al asignar pasajero" });
     }
   });
 
@@ -1066,7 +1082,10 @@ export function registerGroupsRoutes(app: Express) {
       res.status(201).json(reservation);
     } catch (error: any) {
       const msg = error?.message || "Error assigning room to group";
-      res.status(400).json({ error: msg });
+      res.status(error?.statusCode || 400).json({
+        error: msg,
+        ...(error?.statusCode === 409 ? { code: "GROUP_BLOCK_SHORTAGE", canOverride: false } : {}),
+      });
     }
   });
 

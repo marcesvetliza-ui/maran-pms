@@ -31,6 +31,51 @@ export async function apiRequest(
   return res;
 }
 
+type GroupInventoryWarningPayload = {
+  code?: string;
+  error?: string;
+  canOverride?: boolean;
+  warning?: {
+    warnings?: Array<{ groupId: string; groupName?: string; date: string }>;
+  };
+};
+
+export function parseApiErrorPayload(err: unknown): GroupInventoryWarningPayload | null {
+  const raw = (err as any)?.message || "";
+  const match = raw.match(/^\d+:\s*([\s\S]+)$/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+export async function apiRequestWithGroupInventoryWarning(
+  method: "POST" | "PATCH",
+  url: string,
+  data: Record<string, unknown>,
+): Promise<Response> {
+  try {
+    return await apiRequest(method, url, data);
+  } catch (error) {
+    const payload = parseApiErrorPayload(error);
+    if (payload?.code !== "GROUP_BLOCK_WARNING" || payload.canOverride !== true) throw error;
+    const rows = payload.warning?.warnings ?? [];
+    const groups = [...new Set(rows.map(row => row.groupName || row.groupId))].join(", ");
+    const dates = [...new Set(rows.map(row => row.date))].sort();
+    const dateText = dates.length === 1 ? dates[0] : `${dates[0]} a ${dates[dates.length - 1]}`;
+    const message = [
+      "Esta operación consume disponibilidad comprometida para un grupo tentativo.",
+      groups ? `Grupo(s): ${groups}.` : "",
+      dates.length ? `Fecha(s): ${dateText}.` : "",
+      "¿Desea continuar de todos modos?",
+    ].filter(Boolean).join("\n");
+    if (!window.confirm(message)) throw error;
+    return apiRequest(method, url, { ...data, overrideTentativeGroupWarning: true });
+  }
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;

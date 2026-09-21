@@ -69,7 +69,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import type { GroupWithDetails, GroupStatus, InsertGroup, RoomType } from "@shared/schema";
 import { Trash2 as TrashIcon } from "lucide-react";
 
@@ -202,7 +202,7 @@ function GroupFormDialog({
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<InsertGroup>) =>
-      apiRequest("PATCH", `/api/groups/${group!.id}`, data).then(r => r.json()),
+      apiRequestWithGroupInventoryWarning("PATCH", `/api/groups/${group!.id}`, data as Record<string, unknown>).then(r => r.json()),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
       const count = data?.propagatedCount ?? 0;
@@ -443,7 +443,7 @@ function GroupFormDialog({
         if (!block.roomTypeId) continue;
         
         try {
-          await apiRequest("POST", `/api/groups/${groupId}/blocks`, {
+          await apiRequestWithGroupInventoryWarning("POST", `/api/groups/${groupId}/blocks`, {
             roomTypeId: block.roomTypeId,
             quantity: Number(block.quantity),
             ratePlanId: null,
@@ -1187,7 +1187,7 @@ export default function GroupsPage() {
 
   const updateStatusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
-      apiRequest("PATCH", `/api/groups/${id}`, { status }),
+      apiRequestWithGroupInventoryWarning("PATCH", `/api/groups/${id}`, { status }),
     onSuccess: (_data, { status }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
       // Invalidate planning so cancelled group blocks disappear immediately

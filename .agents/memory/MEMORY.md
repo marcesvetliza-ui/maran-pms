@@ -69,3 +69,4 @@
 - [Invoice payment-method detail](invoice-payment-method-detail.md) — invoice PDFs use persisted method+amount rows; keep the legacy single method only for compatibility.
 - [Restaurant breakfast navigation](restaurant-breakfast-navigation.md) — reuse the dashboard breakfast view in Restaurant as a button/dialog, not another main tab.
 - [Channex staging ACK](channex-staging-ack.md) — real staging ACK removes the revision from the pending feed while preserving only the local Channex inbox row.
+- [Group room inventory priority](group-room-inventory-priority.md) — confirmed/in-house blocks are hard capacity; tentative/blocked are overridable warnings; physical overlap never is.

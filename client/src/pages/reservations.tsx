@@ -119,7 +119,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
 import { GiftVoucherSelect } from "@/components/gift-voucher-select";
@@ -773,10 +773,10 @@ export function ReservationFormDialog({
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
       if (isEditing) {
-        const res = await apiRequest("PATCH", `/api/reservations/${reservation.id}`, data);
+        const res = await apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservation.id}`, data as Record<string, unknown>);
         return res.json();
       }
-      const res = await apiRequest("POST", "/api/reservations", {
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         ...data,
         reservationCode: data.reservationCode || generatedCode?.code || `RES-${Date.now()}`,
       });
@@ -5657,7 +5657,7 @@ export default function ReservationsPage() {
 
   const duplicateMutation = useMutation({
     mutationFn: async ({ id, checkInDate, checkOutDate }: { id: string; checkInDate: string; checkOutDate: string }) => {
-      return apiRequest("POST", `/api/reservations/${id}/duplicate`, { checkInDate, checkOutDate });
+      return apiRequestWithGroupInventoryWarning("POST", `/api/reservations/${id}/duplicate`, { checkInDate, checkOutDate });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });

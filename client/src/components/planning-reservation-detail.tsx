@@ -19,7 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import { getLocalToday, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
@@ -96,7 +96,7 @@ export function ReservationDetailModal({
 
   const updateReservationMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, data);
+      return apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });

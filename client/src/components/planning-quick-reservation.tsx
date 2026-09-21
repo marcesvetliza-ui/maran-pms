@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
@@ -191,7 +191,7 @@ export function QuickReservationDialog({
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/reservations", data);
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", data);
       return res.json();
     },
     onSuccess: () => {

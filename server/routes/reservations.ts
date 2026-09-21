@@ -33,6 +33,22 @@ import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 import { classifyReservationPaymentMethod } from "../payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { getReservationRateValidationError, normalizeZeroRateNotes } from "@shared/reservationRate";
+import { GROUP_BLOCK_SHORTAGE_CODE, GROUP_BLOCK_WARNING_CODE } from "@shared/group-inventory";
+
+async function assertGroupInventoryForReservation(input: {
+  roomTypeId: string; checkInDate: string; checkOutDate: string;
+  excludeReservationId?: string; contextGroupId?: string; override?: boolean;
+}) {
+  const conflict = await storage.evaluateReservationInventory(input);
+  if (!conflict || (conflict.code === GROUP_BLOCK_WARNING_CODE && input.override)) return;
+  const error = conflict.code === GROUP_BLOCK_WARNING_CODE
+    ? "La operación invade el cupo blando de un grupo."
+    : "La demanda confirmada excede el inventario operativo.";
+  throw Object.assign(new Error(error), {
+    statusCode: 409,
+    response: { error, code: conflict.code, warning: conflict, canOverride: conflict.code === GROUP_BLOCK_WARNING_CODE },
+  });
+}
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -246,6 +262,10 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/reservations", async (req, res) => {
     try {
+      const contextGroupId = req.body.contextGroupId as string | undefined;
+      const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      delete req.body.contextGroupId;
+      delete req.body.overrideTentativeGroupWarning;
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
         if (req.body[field] === "") {
@@ -290,6 +310,16 @@ export function registerReservationsRoutes(app: Express) {
             error: `La habitación ${room?.roomNumber || data.roomId} ya tiene una reserva en esas fechas.`,
           });
         }
+      }
+      if (data.roomTypeId && data.checkInDate && data.checkOutDate &&
+          !["cancelled", "checked_out", "no_show"].includes(data.status)) {
+        await assertGroupInventoryForReservation({
+          roomTypeId: data.roomTypeId,
+          checkInDate: data.checkInDate,
+          checkOutDate: data.checkOutDate,
+          contextGroupId,
+          override: overrideTentativeGroupWarning,
+        });
       }
 
       const reservation = await storage.createReservation(data);
@@ -353,12 +383,16 @@ export function registerReservationsRoutes(app: Express) {
     } catch (error: any) {
       const detail = error?.message || String(error);
       console.error("Error creating reservation:", detail);
-      res.status(500).json({ error: detail || "Error creating reservation" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: detail || "Error creating reservation" });
     }
   });
 
   app.patch("/api/reservations/:id", async (req, res) => {
     try {
+      const contextGroupId = req.body.contextGroupId as string | undefined;
+      const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      delete req.body.contextGroupId;
+      delete req.body.overrideTentativeGroupWarning;
       const existing = await storage.getReservation(req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
@@ -434,6 +468,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const finalRoomId = req.body.roomId || existing.roomId;
+      const finalRoomTypeId = req.body.roomTypeId || existing.roomTypeId;
       const finalCheckIn = req.body.checkInDate || existing.checkInDate;
       const finalCheckOut = req.body.checkOutDate || existing.checkOutDate;
 
@@ -443,6 +478,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const roomChanged = req.body.roomId && req.body.roomId !== existing.roomId;
+      const roomTypeChanged = req.body.roomTypeId && req.body.roomTypeId !== existing.roomTypeId;
       const datesChanged = (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) ||
                            (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate);
       if (roomChanged || datesChanged) {
@@ -459,6 +495,21 @@ export function registerReservationsRoutes(app: Express) {
           });
         }
       }
+      const finalStatus = req.body.status || existing.status;
+      const statusChanged = req.body.status && req.body.status !== existing.status;
+      if ((roomChanged || roomTypeChanged || datesChanged || statusChanged) &&
+          finalRoomTypeId && finalCheckIn && finalCheckOut &&
+          !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+        await assertGroupInventoryForReservation({
+          roomTypeId: finalRoomTypeId,
+          checkInDate: finalCheckIn,
+          checkOutDate: finalCheckOut,
+          excludeReservationId: req.params.id,
+          contextGroupId,
+          override: overrideTentativeGroupWarning,
+        });
+      }
+      if (contextGroupId) req.body._inventoryContextGroupId = contextGroupId;
 
       // Bloqueo adicional: no permitir mover una reserva checked_in a una habitación ocupada
       if (existing.status === "checked_in" && roomChanged) {
@@ -606,7 +657,7 @@ export function registerReservationsRoutes(app: Express) {
       res.json(reservation);
     } catch (error: any) {
       console.error("Error updating reservation:", error?.message || error);
-      res.status(500).json({ error: "Error updating reservation" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating reservation" });
     }
   });
 
@@ -669,6 +720,13 @@ export function registerReservationsRoutes(app: Express) {
           error: `La habitacion ${room?.roomNumber || finalRoomId} ya tiene una reserva en esas fechas`
         });
       }
+      const duplicateRoomTypeId = room?.roomTypeId || original.roomTypeId;
+      await assertGroupInventoryForReservation({
+        roomTypeId: duplicateRoomTypeId,
+        checkInDate: normalizedCheckIn,
+        checkOutDate: normalizedCheckOut,
+        override: req.body.overrideTentativeGroupWarning === true,
+      });
 
       const newCode = storage.generateReservationCode();
 
@@ -676,7 +734,7 @@ export function registerReservationsRoutes(app: Express) {
         reservationCode: newCode,
         guestId: original.guestId,
         companyId: original.companyId || null,
-        roomTypeId: room?.roomTypeId || original.roomTypeId,
+        roomTypeId: duplicateRoomTypeId,
         roomId: finalRoomId,
         ratePlanId: original.ratePlanId,
         checkInDate: normalizedCheckIn,

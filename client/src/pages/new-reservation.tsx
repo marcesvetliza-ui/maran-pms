@@ -28,7 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
 import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
@@ -273,7 +273,7 @@ export default function NewReservationPage() {
 
   const createReservationMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/reservations", {
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         reservationCode: "",
         guestId: selectedGuest!.id,
         companyId: selectedCompany?.id || null,

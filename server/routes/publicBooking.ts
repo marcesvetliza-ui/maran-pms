@@ -257,8 +257,7 @@ export function registerPublicBookingRoutes(app: Express) {
       const reservationCode = (codeResult.rows[0] as any).code || `WEB-${Date.now().toString(36).toUpperCase()}`;
 
       // 5) Create reservation — status "pending" until staff assigns room in admin
-      const [newReservation] = await db.insert(reservations).values({
-        id: randomUUID(),
+      const newReservation = await storage.createReservation({
         reservationCode,
         guestId: guest.id,
         roomId: freeRoom.id,          // pre-assigned, staff can change it
@@ -270,14 +269,13 @@ export function registerPublicBookingRoutes(app: Express) {
         numberOfGuests: data.adults,
         status: "pending",            // stays pending until receptionist confirms in admin
         source: "web" as any,
-        totalAmount: totalAmount.toFixed(2),
         totalRoomAmount: totalAmount.toFixed(2),
         baseRatePerNight: pricePerNight.toFixed(2),
         finalRatePerNight: pricePerNight.toFixed(2),
         notes: data.notes || null,
         bedTypeNotes: data.bedPreference || null,
         createdAt: new Date(),
-      } as any).returning();
+      } as any);
 
       // Get room type name for response
       const [rt] = await db.select().from(roomTypes).where(eq(roomTypes.id, freeRoom.roomTypeId));
@@ -298,7 +296,7 @@ export function registerPublicBookingRoutes(app: Express) {
         return res.status(400).json({ error: "Datos incompletos", details: error.errors });
       }
       console.error("Public booking confirm error:", error);
-      res.status(500).json({ error: "Error al confirmar la reserva. Intentá nuevamente." });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error al confirmar la reserva. Intentá nuevamente." });
     }
   });
 
@@ -362,19 +360,16 @@ export function registerPublicBookingRoutes(app: Express) {
       const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
       if (!room) return res.status(404).json({ error: "Habitación no encontrada" });
 
-      const [updated] = await db.update(reservations)
-        .set({
-          roomId,
-          roomTypeId: room.roomTypeId,
-          status: "confirmed",
-        } as any)
-        .where(eq(reservations.id, req.params.id))
-        .returning();
+      const updated = await storage.updateReservation(req.params.id, {
+        roomId, roomTypeId: room.roomTypeId, status: "confirmed",
+        ...(req.body.overrideTentativeGroupWarning === true ? { _inventoryOverrideTentativeGroupWarning: true } : {}),
+      } as any);
 
+      if (!updated) return res.status(404).json({ error: "Reserva no encontrada" });
       res.json(updated);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Assign room error:", error);
-      res.status(500).json({ error: "Error al asignar habitación" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error al asignar habitación" });
     }
   });
 
@@ -384,10 +379,7 @@ export function registerPublicBookingRoutes(app: Express) {
   // ──────────────────────────────────────────────────────────────────────
   app.post("/api/admin/booking-engine/reservations/:id/reject", async (req, res) => {
     try {
-      const [updated] = await db.update(reservations)
-        .set({ status: "cancelled" } as any)
-        .where(eq(reservations.id, req.params.id))
-        .returning();
+      const updated = await storage.updateReservation(req.params.id, { status: "cancelled" });
       if (!updated) return res.status(404).json({ error: "Reserva no encontrada" });
       res.json(updated);
     } catch (error) {

@@ -105,7 +105,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { recoverGroupFiscalCollection } from "@/lib/group-fiscal-collection-recovery";
 import {
   availableGroupInvoiceTotal,
@@ -270,7 +270,7 @@ function AddBlockDialog({
 
   const createMutation = useMutation({
     mutationFn: () =>
-      apiRequest("POST", `/api/groups/${groupId}/blocks`, {
+      apiRequestWithGroupInventoryWarning("POST", `/api/groups/${groupId}/blocks`, {
         roomTypeId,
         quantity: Number(quantity),
         ratePlanId: ratePlanId || null,
@@ -1334,7 +1334,7 @@ export default function GroupDetailPage() {
 
   const changeRoomMutation = useMutation({
     mutationFn: async ({ reservationId, roomId, roomTypeId }: { reservationId: string; roomId: string; roomTypeId: string }) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId });
+      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });

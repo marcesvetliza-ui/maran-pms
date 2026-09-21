@@ -53,7 +53,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { getBedConfigLabel } from "@/lib/planning-utils";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
 import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin, GuestPreference } from "@shared/schema";
@@ -356,7 +356,7 @@ export default function CheckInPage() {
       coDate.setDate(coDate.getDate() + nights);
       const checkOutDate = toArgentinaDateStr(coDate);
       
-      const res = await apiRequest("POST", "/api/reservations", {
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         reservationCode: "", 
         guestId: selectedGuest!.id,
         companyId: selectedCompany?.id || null,

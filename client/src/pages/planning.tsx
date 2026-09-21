@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
@@ -290,7 +290,7 @@ export default function PlanningPage() {
         const co = new Date(checkOutDate + "T12:00:00");
         payload.nights = String(Math.round((co.getTime() - ci.getTime()) / (1000 * 60 * 60 * 24)));
       }
-      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, payload);
+      const res = await apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, payload);
       return res.json();
     },
     onSuccess: () => {
