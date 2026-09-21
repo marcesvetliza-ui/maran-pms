@@ -158,9 +158,10 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   tarjeta_credito: "Crédito",
   tarjeta_debito: "Débito",
   transferencia: "Transferencia",
+  no_fiscal: "Sin cargo",
 };
 
-const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo"]);
+const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal"]);
 
 const AREA_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",

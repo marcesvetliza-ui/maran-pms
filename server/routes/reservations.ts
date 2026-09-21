@@ -7,7 +7,7 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import type { PoolClient } from "pg";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
@@ -1541,6 +1541,33 @@ export function registerReservationsRoutes(app: Express) {
               area: "recepcion",
             });
           }
+        }
+      }
+
+      // Reserva sin nada para facturar (tarifa $0, sin cargos): no hay pago ni
+      // comprobante que registrar, pero el check-out debe quedar igual
+      // visible en Caja para trazabilidad — un movimiento informativo de $0
+      // que no suma a ningún total (mismo mecanismo que ya usa Cuenta
+      // Corriente/voucher, ver ensureInformationalMovement).
+      if (roomTotal === 0 && chargesTotal === 0) {
+        try {
+          const [existingZeroMovement] = await db.select().from(cashMovements).where(and(
+            eq(cashMovements.sourceType, "reservation_checkout_no_charge"),
+            eq(cashMovements.sourceId, reservation.id),
+          ));
+          if (!existingZeroMovement) {
+            const guestNameNoCharge = reservation.guest
+              ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
+              : "Huésped";
+            const roomNumNoCharge = reservation.room?.roomNumber || reservation.roomId;
+            await storage.registerCashMovement(
+              "recepcion", "reservation_checkout_no_charge", reservation.id,
+              `Check-out sin cargos — Hab. ${roomNumNoCharge} — ${guestNameNoCharge}`,
+              "no_fiscal", "0.00", "informational", (req as any).user?.username,
+            );
+          }
+        } catch (e) {
+          console.error("[checkout] Error registrando salida no fiscal:", e);
         }
       }
 

@@ -84,7 +84,7 @@ const RESERVATION = {
   room: { roomNumber: "301" },
 } as any;
 
-function buildFetchMock(folio: typeof ZERO_RATE_FOLIO, checkoutStatus = 200) {
+function buildFetchMock(folio: any, checkoutStatus = 200) {
   return vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
     const strUrl = url.toString();
     const method = options?.method?.toUpperCase() ?? "GET";
