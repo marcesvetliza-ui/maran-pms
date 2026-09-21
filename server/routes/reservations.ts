@@ -7,9 +7,9 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import type { PoolClient } from "pg";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
-import { emitirFactura } from "../billing/invoiceService";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth } from "../auth";
@@ -425,7 +425,11 @@ export function registerReservationsRoutes(app: Express) {
         const newNights = Number(req.body.nights);
         const rate = parseFloat(existing.finalRatePerNight || "0");
         if (!isNaN(newNights) && newNights > 0 && rate > 0) {
-          req.body.totalRoomAmount = (rate * newNights).toFixed(2);
+          // El voucher descuenta una vez del total, no por noche — si la
+          // reserva ya tiene uno aplicado, el recálculo automático (drag &
+          // drop en planning) no debe hacerlo desaparecer del total.
+          const existingVoucherAmount = parseFloat(existing.voucherAppliedAmount || "0");
+          req.body.totalRoomAmount = Math.max(0, rate * newNights - existingVoucherAmount).toFixed(2);
         }
       }
 
@@ -1461,6 +1465,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.agencyId) {
               await storage.createAccountMovement({
@@ -1473,6 +1478,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.guestId) {
               await storage.createAccountMovement({
@@ -1485,6 +1491,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             }
           } catch (e) {
@@ -1518,6 +1525,7 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           } else if (ccPayment.billingTarget === "agency" && reservation.agencyId) {
             await storage.createAccountMovement({
@@ -1530,8 +1538,36 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           }
+        }
+      }
+
+      // Reserva sin nada para facturar (tarifa $0, sin cargos): no hay pago ni
+      // comprobante que registrar, pero el check-out debe quedar igual
+      // visible en Caja para trazabilidad — un movimiento informativo de $0
+      // que no suma a ningún total (mismo mecanismo que ya usa Cuenta
+      // Corriente/voucher, ver ensureInformationalMovement).
+      if (roomTotal === 0 && chargesTotal === 0) {
+        try {
+          const [existingZeroMovement] = await db.select().from(cashMovements).where(and(
+            eq(cashMovements.sourceType, "reservation_checkout_no_charge"),
+            eq(cashMovements.sourceId, reservation.id),
+          ));
+          if (!existingZeroMovement) {
+            const guestNameNoCharge = reservation.guest
+              ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
+              : "Huésped";
+            const roomNumNoCharge = reservation.room?.roomNumber || reservation.roomId;
+            await storage.registerCashMovement(
+              "recepcion", "reservation_checkout_no_charge", reservation.id,
+              `Check-out sin cargos — Hab. ${roomNumNoCharge} — ${guestNameNoCharge}`,
+              "no_fiscal", "0.00", "informational", (req as any).user?.username,
+            );
+          }
+        } catch (e) {
+          console.error("[checkout] Error registrando salida no fiscal:", e);
         }
       }
 
@@ -2806,6 +2842,7 @@ export function registerReservationsRoutes(app: Express) {
                 },
                 items: invoice.items ?? [],
                 facturaOriginalId: invoice.id,
+                comprobanteAsociado: buildComprobanteAsociado(invoice),
                 operador: user?.fullName || user?.username,
               } as any);
               await db.execute(sql`
@@ -3667,14 +3704,21 @@ async function handleConfirmationPdf(req: any, res: any) {
         .text(termLine, margin + 14, ty, { width: termTextWidth });
       ty += doc.heightOfString(termLine, { width: termTextWidth }) + 6;
     });
-    y = ty + 14;
+    // Deja un renglón de aire entre el borde inferior del recuadro de
+    // Términos y el saludo — sin esto ambos quedan pegados (ver reporte de
+    // usuario: el texto "choca" contra el recuadro de arriba).
+    y = ty + 14 + 14;
 
     // ── GREETING ─────────────────────────────────────────────────────────
     if (y < pageH - 88) {
+      const greetingText = `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`;
       doc.fillColor("#666666").fontSize(9).font("Helvetica")
+        .text(greetingText, margin, y, { width: contentW, align: "center" });
+      const greetingH = doc.heightOfString(greetingText, { width: contentW });
+      doc.fillColor("#8a8a8a").fontSize(7.5).font("Helvetica-Oblique")
         .text(
-          `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`,
-          margin, y, { width: contentW, align: "center" }
+          "Recomendamos no imprimir esta información por políticas de sustentabilidad.",
+          margin, y + greetingH + 6, { width: contentW, align: "center" }
         );
     }
     const _confTs = formatArgentinaDate(new Date());

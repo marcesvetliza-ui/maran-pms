@@ -9,6 +9,8 @@ import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import type { GiftVoucher } from "@shared/schema";
+import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -875,8 +877,7 @@ export default function RestaurantPage() {
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
   const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher">("__default__");
-  const [closeGiftVoucherCode, setCloseGiftVoucherCode] = useState("");
-  const [closeGiftVoucherData, setCloseGiftVoucherData] = useState<any>(null);
+  const [closeGiftVoucher, setCloseGiftVoucher] = useState<GiftVoucher | null>(null);
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
   // Clientes tab state
@@ -1744,8 +1745,7 @@ export default function RestaurantPage() {
       setCloseCcEntityId("");
       setBillingSearch("");
       setFbIsExento(false);
-      setCloseGiftVoucherCode("");
-      setCloseGiftVoucherData(null);
+      setCloseGiftVoucher(null);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       if (data?.invoiceId) {
@@ -5750,57 +5750,29 @@ export default function RestaurantPage() {
                         </div>
                       )}
 
-                      {/* ── VOUCHER DE REGALO: código ── */}
+                      {/* ── VOUCHER DE REGALO ── */}
                       {closePaymentSplits.some(s => s.method === "gift_voucher") && (
                         <div className="space-y-2 p-3 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-md">
                           <p className="text-xs font-semibold text-purple-800 dark:text-purple-200 flex items-center gap-1.5">
-                            <Tag className="h-3.5 w-3.5" />Código del Voucher de Regalo
+                            <Tag className="h-3.5 w-3.5" />Voucher de Regalo
                           </p>
-                          <div className="flex gap-2">
-                            <Input
-                              value={closeGiftVoucherCode}
-                              onChange={e => { setCloseGiftVoucherCode(e.target.value.toUpperCase()); setCloseGiftVoucherData(null); }}
-                              placeholder="VCHR-2024-XXXX"
-                              className="h-8 text-sm font-mono flex-1"
-                              data-testid="input-gift-voucher-code"
-                            />
-                            <Button size="sm" variant="outline" className="h-8 shrink-0"
-                              onClick={async () => {
-                                const code = closeGiftVoucherCode.trim();
-                                if (!code) return;
-                                try {
-                                  const res = await fetch(`/api/gift-vouchers?search=${encodeURIComponent(code)}&status=activo`);
-                                  const list = await res.json();
-                                  const found = Array.isArray(list) ? list.find((v: any) => v.voucherCode === code) : null;
-                                  if (found) {
-                                    setCloseGiftVoucherData(found);
-                                    if (found.valueType === "monetario" && found.valueAmount) {
-                                      const vAmt = parseFloat(found.valueAmount);
-                                      setClosePaymentSplits(prev => prev.map(s =>
-                                        s.method === "gift_voucher" && !parseFloat(s.amount || "0")
-                                          ? { ...s, amount: String(Math.min(vAmt, finalTotal).toFixed(2)) }
-                                          : s
-                                      ));
-                                    }
-                                  } else {
-                                    setCloseGiftVoucherData({ error: "Voucher no encontrado o inactivo" });
-                                  }
-                                } catch {
-                                  setCloseGiftVoucherData({ error: "Error al validar el voucher" });
-                                }
-                              }}
-                              data-testid="button-validate-voucher"
-                            >Validar</Button>
-                          </div>
-                          {closeGiftVoucherData && (
-                            closeGiftVoucherData.error
-                              ? <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><XCircle className="h-3.5 w-3.5 shrink-0" />{closeGiftVoucherData.error}</p>
-                              : <div className="text-xs bg-purple-100 dark:bg-purple-900/30 rounded px-2.5 py-1.5 space-y-0.5 text-purple-800 dark:text-purple-200">
-                                  <p className="font-medium flex items-center gap-1"><CheckCircle className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />{closeGiftVoucherData.beneficiaryName || closeGiftVoucherData.buyerName}</p>
-                                  {closeGiftVoucherData.valueType === "monetario" && <p>Valor: ${parseFloat(closeGiftVoucherData.valueAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>}
-                                  {closeGiftVoucherData.description && <p className="text-muted-foreground">{closeGiftVoucherData.description}</p>}
-                                </div>
-                          )}
+                          <GiftVoucherSelect
+                            area="restaurant"
+                            selectedVoucher={closeGiftVoucher}
+                            onSelect={(v) => {
+                              setCloseGiftVoucher(v);
+                              if (v?.valueType === "monetario" && v.valueAmount) {
+                                const vAmt = parseFloat(v.valueAmount);
+                                setClosePaymentSplits(prev => prev.map(s =>
+                                  s.method === "gift_voucher"
+                                    ? { ...s, amount: String(Math.min(vAmt, finalTotal).toFixed(2)) }
+                                    : s
+                                ));
+                              }
+                            }}
+                            label=""
+                            data-testid="select-close-gift-voucher"
+                          />
                         </div>
                       )}
 
@@ -6465,8 +6437,7 @@ export default function RestaurantPage() {
                 setShowAlternateClientSearch(false);
                 setCloseNonFiscalOverride("__default__");
                 setClosePaymentSplits([{ id: "1", method: "efectivo", amount: "" }]);
-                setCloseGiftVoucherCode("");
-                setCloseGiftVoucherData(null);
+                setCloseGiftVoucher(null);
               }}
               className="w-full sm:w-auto"
             >
@@ -6558,8 +6529,8 @@ export default function RestaurantPage() {
                   puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
                   reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
-                  voucherCode: hasGiftVoucher ? (closeGiftVoucherData?.voucherCode || closeGiftVoucherCode || undefined) : undefined,
-                  voucherId: hasGiftVoucher ? (closeGiftVoucherData?.id || undefined) : undefined,
+                  voucherCode: hasGiftVoucher ? (closeGiftVoucher?.voucherCode || undefined) : undefined,
+                  voucherId: hasGiftVoucher ? (closeGiftVoucher?.id || undefined) : undefined,
                 });
               };
               return (

@@ -17,6 +17,7 @@ export interface ARCAInvoiceData {
   cliente: {
     cuit?: string;
     dni?: string;
+    documentType?: string;
     condicionIva: string;
   };
 }
@@ -70,6 +71,7 @@ export async function callARCA(invoiceData: ARCAInvoiceData): Promise<ARCAResult
       montoNoGravado: invoiceData.montoNoGravado,
       clienteCuit: invoiceData.cliente.cuit,
       clienteDni: invoiceData.cliente.dni,
+      clienteDocumentType: invoiceData.cliente.documentType,
       clienteCondicionIva: invoiceData.cliente.condicionIva,
       fecha,
     },

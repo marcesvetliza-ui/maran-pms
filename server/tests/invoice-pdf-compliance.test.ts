@@ -52,12 +52,30 @@ describe("ARCA invoice PDF compliance", () => {
       .toEqual({ tipo: 96, numero: "12345678" });
   });
 
-  it("keeps A and B enabled while blocking unsupported C and tourism sales", () => {
+  it("identifies a Factura T recipient by passport (AFIP DocTipo 94), not DNI", () => {
+    expect(resolveFiscalRecipientDocument({ dni: "AB123456", documentType: "passport" }))
+      .toEqual({ tipo: 94, numero: "123456" });
+    expect(resolveFiscalRecipientDocument({ dni: "AB123456", documentType: "pasaporte" }))
+      .toEqual({ tipo: 94, numero: "123456" });
+    // A CUIT always wins, even if the client also sent documentType: "passport".
+    expect(resolveFiscalRecipientDocument({ cuit: "30-12345678-9", dni: "AB123456", documentType: "passport" }))
+      .toEqual({ tipo: 80, numero: "30123456789" });
+    // Without documentType: "passport", the same value is treated as a DNI.
+    expect(resolveFiscalRecipientDocument({ dni: "AB123456" }))
+      .toEqual({ tipo: 96, numero: "123456" });
+    expect(getInvoiceRecipientDocument({ cliente_dni: "AB123456", cliente_document_type: "passport" }))
+      .toEqual({ tipoDocRec: 94, nroDocRec: 123456 });
+  });
+
+  it("keeps A, B and T (turismo) enabled while blocking unsupported C", () => {
     expect(isUnsupportedSaleType("FA")).toBe(false);
     expect(isUnsupportedSaleType("FB")).toBe(false);
+    expect(isUnsupportedSaleType("FT")).toBe(false);
+    expect(isUnsupportedSaleType("NCT")).toBe(false);
+    expect(isUnsupportedSaleType("NDT")).toBe(false);
     expect(isUnsupportedSaleType("FC")).toBe(true);
-    expect(isUnsupportedSaleType("FT")).toBe(true);
-    expect(isUnsupportedSaleType("NCT")).toBe(true);
+    expect(isUnsupportedSaleType("NCC")).toBe(true);
+    expect(isUnsupportedSaleType("NDC")).toBe(true);
   });
 
   it("preserves separate WSFE bases for mixed 21% and 10.5% VAT", () => {

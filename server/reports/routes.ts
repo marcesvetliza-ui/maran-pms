@@ -48,12 +48,16 @@ function pct(a: number, b: number): number {
 }
 
 // Query helpers
+// Room-only revenue, recognized on an accrual basis (same overlap window used for
+// occupancy) instead of summing raw folio payments — a folio payment can include
+// restaurant/spa/events consumption charged to the room, which is already booked
+// as revenue by those areas independently, so counting it again here would double it.
 async function ingresosAlojamiento(desde: string, hasta: string): Promise<number> {
   const r = await db.execute(sql`
-    SELECT COALESCE(SUM(p.amount::numeric), 0) AS total
-    FROM payments p
-    JOIN reservations r ON r.id = p.reservation_id
-    WHERE p.date BETWEEN ${desde} AND ${hasta}
+    SELECT COALESCE(SUM(total_room_amount::numeric), 0) AS total
+    FROM reservations
+    WHERE status IN ('checked_in','checked_out')
+      AND check_out_date > ${desde} AND check_in_date < ${hasta}
   `);
   return $n((r.rows[0] as any)?.total);
 }
@@ -84,6 +88,55 @@ async function ingresosEventos(desde: string, hasta: string): Promise<number> {
     WHERE DATE(created_at) BETWEEN ${desde} AND ${hasta}
   `);
   return $n((r.rows[0] as any)?.total);
+}
+
+// Room-charged consumption that isn't restaurant/spa (minibar, otros) — a real
+// charge on the folio, but with nowhere else to be counted since it doesn't
+// have its own operational sales table like restaurant/spa/events do.
+async function ingresosOtros(desde: string, hasta: string): Promise<number> {
+  const r = await db.execute(sql`
+    SELECT COALESCE(SUM(amount::numeric), 0) AS total
+    FROM charges
+    WHERE category IN ('otros', 'minibar')
+      AND (status IS NULL OR status = 'active')
+      AND date BETWEEN ${desde} AND ${hasta}
+  `);
+  return $n((r.rows[0] as any)?.total);
+}
+
+type IngresoAccount = { id: string; codigo: string; nombre: string; area: string };
+
+// The real plan de cuentas is the source of truth for which income accounts
+// exist and what they're called — mirrors how "Costos por Departamento" reads
+// accounting_accounts for the expense side, so renaming/adding an account via
+// the admin screen is reflected here without a code change.
+async function getIngresoAccounts(): Promise<IngresoAccount[]> {
+  const r = await db.execute(sql`
+    SELECT id, codigo, nombre, area FROM accounting_accounts
+    WHERE tipo = 'ingreso' AND activo = true AND area IS NOT NULL
+    ORDER BY codigo
+  `);
+  return r.rows as IngresoAccount[];
+}
+
+// How each area's revenue is actually computed still depends on where that
+// area's data lives (reservations, restaurant_orders, spa_payments,
+// event_payments, charges) — adding a new income account alone doesn't teach
+// the system a new data source, it just needs a matching entry here.
+const AREA_REVENUE_FN: Record<string, (desde: string, hasta: string) => Promise<number>> = {
+  recepcion: ingresosAlojamiento,
+  restaurant: ingresosRestaurant,
+  spa: ingresosSpa,
+  eventos: ingresosEventos,
+  otros: ingresosOtros,
+};
+
+async function ingresosPorCuentas(desde: string, hasta: string): Promise<{ account: IngresoAccount; total: number }[]> {
+  const accounts = await getIngresoAccounts();
+  return Promise.all(accounts.map(async account => ({
+    account,
+    total: (await AREA_REVENUE_FN[account.area]?.(desde, hasta)) ?? 0,
+  })));
 }
 
 async function costosCompras(desde: string, hasta: string): Promise<any[]> {
@@ -122,11 +175,13 @@ export function registerReportsRoutes(app: Express) {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
 
-      const [aloj, rest, spa] = await Promise.all([
-        ingresosAlojamiento(desde, hasta),
-        ingresosRestaurant(desde, hasta),
-        ingresosSpa(desde, hasta),
-      ]);
+      const ingresosCuentas = await ingresosPorCuentas(desde, hasta);
+      const porArea = Object.fromEntries(ingresosCuentas.map(({ account, total }) => [account.area, total]));
+      const aloj = porArea.recepcion ?? 0;
+      const rest = porArea.restaurant ?? 0;
+      const spa = porArea.spa ?? 0;
+      const eventos = porArea.eventos ?? 0;
+      const otrosServicios = porArea.otros ?? 0;
 
       const costos = await costosCompras(desde, hasta);
       const gastosCaja = await gastosAdminCash(desde, hasta);
@@ -163,7 +218,7 @@ export function registerReportsRoutes(app: Express) {
       const totalGastosOp = personal + honorarios + luz + gas + telefono + cablevideo +
         mantenimiento + publicidad + gastosBancarios + gastosComerciales + gastosGenerales + otrosGastos;
 
-      const totalIngresos = aloj + rest + spa;
+      const totalIngresos = aloj + rest + spa + eventos + otrosServicios;
       const utilidadBruta = totalIngresos - totalCostos;
       const ebitda = utilidadBruta - totalGastosOp;
 
@@ -178,7 +233,7 @@ export function registerReportsRoutes(app: Express) {
         periodo,
         desde,
         hasta,
-        ingresos: { alojamiento: aloj, restaurant: rest, spa, otrosServicios: 0, totalIngresos },
+        ingresos: { alojamiento: aloj, restaurant: rest, spa, eventos, otrosServicios, totalIngresos },
         costosMercaderia: { alimentosYBebidas, housekeeping, totalCostos },
         utilidadBruta,
         margenBruto: pct(utilidadBruta, totalIngresos),
@@ -259,14 +314,13 @@ export function registerReportsRoutes(app: Express) {
       `);
       const estanciaPromedio = Math.round($n((estanciaRes.rows[0] as any)?.avg_stay) * 10) / 10;
 
-      // Canal distribution
+      // Canal distribution — room-only revenue (see ingresosAlojamiento), not raw payments
       const canales = await db.execute(sql`
         SELECT
           COALESCE(NULLIF(r.source,''), 'Directo') AS canal,
           COUNT(*) AS reservas,
-          COALESCE(SUM(p.amount::numeric), 0) AS ingresos
+          COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos
         FROM reservations r
-        LEFT JOIN payments p ON p.reservation_id = r.id AND p.date BETWEEN ${desde} AND ${hasta}
         WHERE r.status IN ('checked_in','checked_out')
           AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
         GROUP BY COALESCE(NULLIF(r.source,''), 'Directo')
@@ -331,7 +385,8 @@ export function registerReportsRoutes(app: Express) {
       const desde = (req.query.desde as string) || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
       const hasta = (req.query.hasta as string) || new Date().toISOString().split("T")[0];
 
-      // Por día
+      // Por día — ingresos de alojamiento prorrateados por noche ocupada ese día
+      // (misma ventana que "ocupadas"), no pagos crudos del día
       const dayRows = await db.execute(sql`
         SELECT
           day_series::date AS fecha,
@@ -339,8 +394,13 @@ export function registerReportsRoutes(app: Express) {
            WHERE r.status IN ('checked_in','checked_out')
              AND r.check_in_date <= day_series::date
              AND r.check_out_date > day_series::date) AS ocupadas,
-          (SELECT COALESCE(SUM(p.amount::numeric),0) FROM payments p
-           WHERE p.date = day_series::date) AS ingresos
+          (SELECT COALESCE(SUM(COALESCE(
+             NULLIF(r.final_rate_per_night::numeric, 0),
+             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
+           )), 0) FROM reservations r
+           WHERE r.status IN ('checked_in','checked_out')
+             AND r.check_in_date <= day_series::date
+             AND r.check_out_date > day_series::date) AS ingresos
         FROM generate_series(${desde}::date, ${hasta}::date, '1 day'::interval) AS day_series
         ORDER BY day_series
       `);
@@ -425,30 +485,24 @@ export function registerReportsRoutes(app: Express) {
       const prevP = prevPeriodo(periodo);
       const { desde: prevDesde, hasta: prevHasta } = periodoToRange(prevP);
 
-      const [aloj, rest, spa, eventos, prevAloj, prevRest, prevSpa, prevEventos] = await Promise.all([
-        ingresosAlojamiento(desde, hasta),
-        ingresosRestaurant(desde, hasta),
-        ingresosSpa(desde, hasta),
-        ingresosEventos(desde, hasta),
-        ingresosAlojamiento(prevDesde, prevHasta),
-        ingresosRestaurant(prevDesde, prevHasta),
-        ingresosSpa(prevDesde, prevHasta),
-        ingresosEventos(prevDesde, prevHasta),
+      const [ingresosCuentas, prevIngresosCuentas] = await Promise.all([
+        ingresosPorCuentas(desde, hasta),
+        ingresosPorCuentas(prevDesde, prevHasta),
       ]);
+      const prevPorArea = Object.fromEntries(prevIngresosCuentas.map(({ account, total }) => [account.area, total]));
 
       const varPct = (actual: number, prev: number) => prev > 0 ? Math.round(((actual - prev) / prev) * 1000) / 10 : 0;
-      const total = aloj + rest + spa + eventos;
-      const prevTotal = prevAloj + prevRest + prevSpa + prevEventos;
+      const total = ingresosCuentas.reduce((s, { total: t }) => s + t, 0);
+      const prevTotal = prevIngresosCuentas.reduce((s, { total: t }) => s + t, 0);
 
-      // Alojamiento por tipo de habitación
+      // Alojamiento por tipo de habitación — room-only revenue, not raw payments
       const alojTipo = await db.execute(sql`
         SELECT rt.name AS tipo,
                COUNT(*) AS noches,
-               COALESCE(SUM(p.amount::numeric), 0) AS ingresos,
+               COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos,
                COALESCE(AVG(r.final_rate_per_night::numeric), 0) AS tarifa_media
         FROM reservations r
         JOIN room_types rt ON rt.id = r.room_type_id
-        LEFT JOIN payments p ON p.reservation_id = r.id AND p.date BETWEEN ${desde} AND ${hasta}
         WHERE r.status IN ('checked_in','checked_out')
           AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
         GROUP BY rt.name
@@ -469,26 +523,42 @@ export function registerReportsRoutes(app: Express) {
         LIMIT 10
       `);
 
-      // Por día
+      // Por día — alojamiento prorrateado por noche ocupada ese día, no pagos crudos
       const porDia = await db.execute(sql`
         SELECT
           day_series::date AS fecha,
-          COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.date = day_series::date), 0) AS alojamiento,
+          COALESCE((SELECT SUM(COALESCE(
+             NULLIF(r.final_rate_per_night::numeric, 0),
+             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
+           )) FROM reservations r
+           WHERE r.status IN ('checked_in','checked_out')
+             AND r.check_in_date <= day_series::date
+             AND r.check_out_date > day_series::date), 0) AS alojamiento,
           COALESCE((SELECT SUM(ro.total::numeric) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
           COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE DATE(sp.created_at) = day_series::date), 0) AS spa,
-          COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos
+          COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos,
+          COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.category IN ('otros','minibar') AND (c.status IS NULL OR c.status = 'active') AND c.date = day_series::date), 0) AS otros
         FROM generate_series(${desde}::date, ${hasta}::date, '1 day'::interval) AS day_series
         ORDER BY day_series
       `);
 
+      const AREA_COLORS: Record<string, string> = {
+        recepcion: "#3B82F6",
+        restaurant: "#F59E0B",
+        spa: "#10B981",
+        eventos: "#8B5CF6",
+        otros: "#6B7280",
+      };
+
       res.json({
         periodo,
-        areas: [
-          { nombre: "Alojamiento", ingresos: aloj, porcentaje: pct(aloj, total), variacionMesAnterior: varPct(aloj, prevAloj), color: "#3B82F6" },
-          { nombre: "Restaurant", ingresos: rest, porcentaje: pct(rest, total), variacionMesAnterior: varPct(rest, prevRest), color: "#F59E0B" },
-          { nombre: "Spa", ingresos: spa, porcentaje: pct(spa, total), variacionMesAnterior: varPct(spa, prevSpa), color: "#10B981" },
-          { nombre: "Eventos", ingresos: eventos, porcentaje: pct(eventos, total), variacionMesAnterior: varPct(eventos, prevEventos), color: "#8B5CF6" },
-        ],
+        areas: ingresosCuentas.map(({ account, total: monto }) => ({
+          nombre: account.nombre,
+          ingresos: monto,
+          porcentaje: pct(monto, total),
+          variacionMesAnterior: varPct(monto, prevPorArea[account.area] ?? 0),
+          color: AREA_COLORS[account.area] ?? "#6B7280",
+        })),
         totalIngresos: total,
         variacionTotal: varPct(total, prevTotal),
         alojamientoPorTipo: (alojTipo.rows as any[]).map(r => ({
@@ -509,7 +579,8 @@ export function registerReportsRoutes(app: Express) {
           restaurant: $n(r.restaurant),
           spa: $n(r.spa),
           eventos: $n(r.eventos),
-          total: $n(r.alojamiento) + $n(r.restaurant) + $n(r.spa) + $n(r.eventos),
+          otros: $n(r.otros),
+          total: $n(r.alojamiento) + $n(r.restaurant) + $n(r.spa) + $n(r.eventos) + $n(r.otros),
         })),
       });
     } catch (e: any) {
@@ -687,12 +758,10 @@ export function registerReportsRoutes(app: Express) {
             return { mes: mesesNombre[m], ocupacion: null, revpar: null, ingresoTotal: null, costoTotal: null, ebitda: null, margenEbitda: null };
           }
 
-          const [aloj, rest, spa] = await Promise.all([
-            ingresosAlojamiento(desde, hasta),
-            ingresosRestaurant(desde, hasta),
-            ingresosSpa(desde, hasta),
-          ]);
-          const ingresoTotal = aloj + rest + spa;
+          const ingresosCuentas = await ingresosPorCuentas(desde, hasta);
+          const porArea = Object.fromEntries(ingresosCuentas.map(({ account, total }) => [account.area, total]));
+          const aloj = porArea.recepcion ?? 0;
+          const ingresoTotal = ingresosCuentas.reduce((s, { total }) => s + total, 0);
 
           const costos = await costosCompras(desde, hasta);
           const costoTotal = costos.reduce((s, c) => s + $n(c.total), 0) + await gastosAdminCash(desde, hasta);

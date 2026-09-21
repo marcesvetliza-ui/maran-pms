@@ -11,7 +11,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,9 +24,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const today = () => getArgentinaToday();
 const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
@@ -91,6 +94,26 @@ function isRiOrExento(condicionIva: string): boolean {
   return normalized === "responsable_inscripto" || normalized === "exento";
 }
 
+// companies.condicionIva / agencies.condicionIva store the machine IvaCondition
+// code (shared/schema.ts, e.g. "responsable_inscripto"), while the Select here
+// uses CONDICION_IVA_OPTIONS' Title Case labels as both value and display text.
+// Setting the raw DB value straight into state left the Select matching no
+// SelectItem — blank, same failure mode as the tipo-select bug above.
+const CONDICION_IVA_DB_TO_LABEL: Record<string, string> = {
+  responsable_inscripto: "Responsable Inscripto",
+  consumidor_final: "Consumidor Final",
+  monotributo: "Monotributista",
+  monotributista: "Monotributista",
+  exento: "Exento",
+  no_responsable: "Consumidor Final",
+};
+function normalizeCondicionIvaLabel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (CONDICION_IVA_OPTIONS.includes(raw)) return raw;
+  const key = String(raw).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CONDICION_IVA_DB_TO_LABEL[key] ?? null;
+}
+
 const AREA_LABELS: Record<string, { label: string; color: string }> = {
   recepcion: { label: "Recepción", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
   restaurant: { label: "Restaurant", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
@@ -118,6 +141,11 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
 const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+
+// cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
+// and the Centro de Comprobantes) uses "events" while pos_configs.area (see
+// pos-configs.tsx) uses the Spanish "eventos" — everything else matches as-is.
+const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
@@ -561,6 +589,13 @@ type Item = {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
+   * permite registrar la venta como turno vendido pendiente de agendar. */
+  spaTreatmentId?: string;
+  /** Presente solo si este tratamiento se compra para regalar — crea un
+   * gift voucher "por prestación" vinculado a la venta, a nombre de este
+   * beneficiario. Solo aplica a ítems con spaTreatmentId. */
+  giftBeneficiaryName?: string;
 };
 
 export type EmitirFacturaInitialValues = {
@@ -604,7 +639,39 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
+/**
+ * Renders EmitirFacturaDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `children` is touched.
+ */
+function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="emitir-factura-embedded">
+        <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -663,6 +730,16 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   skipReview?: boolean;
   /** Explicit identity for a mounted dialog that can switch between operations. */
   operationKey?: string;
+  /**
+   * When true, render the form content inline (no <Dialog>/<DialogContent> chrome)
+   * so it can be embedded directly inside a host page's own layout — e.g. the
+   * unified Centro de Comprobantes. Same content, same handlers, same fiscal
+   * logic as the modal version; only the outer wrapper changes. The three
+   * secondary confirmation dialogs (showCloseWarning/showRecipientChangeWarning/
+   * showEntityChangeWarning) and the duplicate-amount AlertDialog still render
+   * as real overlays in both modes.
+   */
+  embedded?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -678,6 +755,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
+  const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
   const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
   const originalDomicilioRef = useRef<string>("");
@@ -702,9 +783,43 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const originalRecipientRef = useRef<Record<string, string>>({});
   const saveRecipientOnEmitRef = useRef(false);
   const initializedOperationRef = useRef<string | null>(null);
+  const pvAutoSelectedForRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+
+  // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
+  // fuentes siempre, sin importar cashArea: una factura de recepción a
+  // menudo también lleva un consumo de restaurant o un tratamiento de spa
+  // (y viceversa), así que restringir por área solo obligaba a cargarlos a
+  // mano. Agrupado por origen para que quede claro de dónde sale cada ítem.
+  const { data: menuItemsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/restaurant/menu/items"],
+    enabled: open,
+  });
+  const { data: spaTreatmentsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/spa/treatments"],
+    enabled: open,
+  });
+  type CatalogItem = { id: string; descripcion: string; precioUnitario: number; spaTreatmentId?: string };
+  const catalogGroups: { label: string; options: CatalogItem[] }[] = [
+    { label: "Alojamiento", options: [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
+    {
+      label: "Restaurant (Café Justo)",
+      options: menuItemsData
+        .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
+        .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0 })),
+    },
+    {
+      label: "Spa",
+      // spaTreatmentId (no solo id, que acá coincide) deja explícito que esta
+      // es la única fuente del catálogo que registra "turno vendido" al elegirse.
+      options: spaTreatmentsData
+        .filter((t: any) => t.isActive !== "false")
+        .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
+    },
+  ].filter(g => g.options.length > 0);
+  const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
 
   const entityResults: any[] = entitySearch.length >= 2
     ? [
@@ -798,10 +913,35 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dialogOperationKey]);
 
+  // Pre-select the Punto de Venta for the operation's área (e.g. Recepción)
+  // when there's exactly one active electronic PV configured for it, instead
+  // of always leaving it on the generic "PV por defecto" placeholder. Waits
+  // for posConfigsData to load and never overrides a value already set
+  // (auto or manual) for this same operation.
+  useEffect(() => {
+    if (!open || !cashArea) return;
+    if (pvAutoSelectedForRef.current === dialogOperationKey) return;
+    if (posConfigsData.length === 0) return; // wait for the PV list to load, retry next render
+    // Decide once per operation — resetForm() above always clears
+    // puntoVentaNum first, so this never fights a value it hasn't set itself;
+    // reading puntoVentaNum here would race that same-commit reset.
+    pvAutoSelectedForRef.current = dialogOperationKey;
+    const pvArea = CASH_AREA_TO_PV_AREA[cashArea] ?? cashArea;
+    const matches = posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico" && p.area === pvArea);
+    if (matches.length > 0) {
+      // Varios hoteles tienen más de un PV activo para la misma área (uno
+      // "principal" y otros para casos puntuales, p. ej. Factura T). Ante
+      // esa ambigüedad, siempre se elige el mismo de forma predecible: el de
+      // menor número, en vez de dejarlo sin elegir.
+      const preferred = [...matches].sort((a: any, b: any) => Number(a.numero) - Number(b.numero))[0];
+      setPuntoVentaNum(String(preferred.numero));
+    }
+  }, [open, cashArea, posConfigsData, dialogOperationKey]);
+
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
-    const condVal = entity.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    const condVal = normalizeCondicionIvaLabel(entity.condicionIva) || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
     const domVal = entity.domicilio || entity.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
@@ -857,6 +997,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
+      if (it.giftBeneficiaryName !== undefined && !it.giftBeneficiaryName.trim()) {
+        errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
+      }
     });
     if (cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
       errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : ccEntityType === "agency" ? "una agencia" : "un huésped"}`;
@@ -886,29 +1029,56 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }));
   }
 
+  // Shared by updateItem (one field at a time) and addCatalogItem (a whole
+  // item at once) so both stay in sync with the same FA/FC/FB rounding rules.
+  function computeItemTotals(item: Item): Item {
+    const base = item.cantidad * item.precioUnitario;
+    const fa = tipo === "FA";
+    const fc = tipo === "FC";
+    const next = { ...item };
+    if (fc) {
+      // Factura C no discrimina IVA: el importe ingresado es el total final.
+      next.alicuotaIva = "no_gravado";
+      next.subtotalNeto = base; next.subtotal = base;
+    } else if (!fa) {
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    } else {
+      // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    }
+    return next;
+  }
+
   function updateItem(idx: number, field: keyof Item, value: any) {
     setItems(prev => {
       const updated = [...prev];
-      const item = { ...updated[idx], [field]: value };
-      const base = item.cantidad * item.precioUnitario;
-      const fa = tipo === "FA";
-      const fc = tipo === "FC";
-      if (fc) {
-        // Factura C no discrimina IVA: el importe ingresado es el total final.
-        item.alicuotaIva = "no_gravado";
-        item.subtotalNeto = base; item.subtotal = base;
-      } else if (!fa) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      } else {
-        // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      }
-      updated[idx] = item;
+      updated[idx] = computeItemTotals({ ...updated[idx], [field]: value });
       return updated;
+    });
+  }
+
+  // Elegir un ítem del catálogo (alojamiento fijo / carta de restaurant / tratamientos
+  // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
+  // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
+  // elige del catálogo sin haber tocado nada todavía.
+  function addCatalogItem(descripcion: string, precioUnitario: number, spaTreatmentId?: string) {
+    const built = computeItemTotals({
+      descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
+      alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
+      subtotalNeto: 0, subtotal: 0,
+    });
+    setItems(prev => {
+      const emptyIdx = prev.findIndex(it => !it.descripcion.trim() && it.precioUnitario === 0);
+      if (emptyIdx >= 0) {
+        const updated = [...prev];
+        updated[emptyIdx] = built;
+        return updated;
+      }
+      return [...prev, built];
     });
   }
 
@@ -1158,7 +1328,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   });
 
   function resetForm() {
-    setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
+    // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
+    // locking a single tipo already chosen in its selector) instead of always
+    // forcing FB — FB may not even be an allowed option, which left the
+    // Select with a tipo value that matched no SelectItem (blank dropdown).
+    setTipo(tipos.includes("FB") ? "FB" : tipos[0]); setRazonSocial(""); setCuit(""); setDni("");
     setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
     setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
@@ -1169,6 +1343,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
+    setRetencionTipo("iibb"); setRetencionMonto("");
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1388,9 +1563,22 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             ...(cashArea ? { cashArea } : {}),
             cashFormaPago,
               ...(cashArea ? {
-              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
+              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}${
+                parseFloat(retencionMonto) > 0
+                  ? ` — Ret. ${retencionTipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(retencionMonto)}`
+                  : ""
+              }`,
             } : {}),
               ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              // La retención impositiva no cambia el total facturado ni el
+              // monto de caja — es referencia (mismo criterio que ya usa
+              // PrefacturaDialog: la parte retenida se considera cubierta sin
+              // ser dinero recibido). cashFormaPagoDetalle ya existe en el
+              // comprobante como metadata informativa; no altera el registro
+              // de caja, que sigue usando cashFormaPago/cashArea tal cual.
+              ...(parseFloat(retencionMonto) > 0
+                ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
+                : {}),
           }
         : {}),
     });
@@ -1415,9 +1603,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
   return (
     <>
-    <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+    <FacturaFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={o => { if (!o) handleClose(); }}
+      title={linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}
+    >
 
         {linkPending ? (
           <div className="space-y-4 py-2">
@@ -1645,6 +1836,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         ) : (
         <>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
           <Select value={tipo} onValueChange={v => {
@@ -1749,6 +1941,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
           </div>
         )}
+        </div>
 
         <Separator />
 
@@ -1860,7 +2053,60 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
-             {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            <div className="flex gap-2">
+              {!hideAddItems && !lockItems && catalogOptions.length > 0 && (
+                <Popover open={catalogPickerOpen} onOpenChange={(o) => { setCatalogPickerOpen(o); if (!o) setCatalogSearch(""); }}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" data-testid="btn-add-item-from-catalog">
+                      <BookOpen className="w-3.5 h-3.5 mr-1" /> Agregar desde catálogo
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="end">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Buscar en el catálogo..."
+                        value={catalogSearch}
+                        onValueChange={setCatalogSearch}
+                        data-testid="input-catalog-search"
+                      />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados.</CommandEmpty>
+                        {catalogGroups.map(group => {
+                          const term = catalogSearch.trim().toLowerCase();
+                          const matches = term
+                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term))
+                            : group.options;
+                          if (matches.length === 0) return null;
+                          return (
+                            <CommandGroup key={group.label} heading={group.label}>
+                              {matches.slice(0, 50).map(o => (
+                                <CommandItem
+                                  key={o.id}
+                                  value={o.id}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onSelect={() => {
+                                    addCatalogItem(o.descripcion, o.precioUnitario, o.spaTreatmentId);
+                                    setCatalogPickerOpen(false);
+                                    setCatalogSearch("");
+                                  }}
+                                  data-testid={`catalog-item-${o.id}`}
+                                >
+                                  <span className="flex-1">{o.descripcion}</span>
+                                  {o.precioUnitario > 0 && (
+                                    <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                  )}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          );
+                        })}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              )}
+              {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            </div>
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
@@ -1895,6 +2141,31 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                     )}
                   </div>
                 </div>
+                {item.spaTreatmentId && (
+                  <div className="space-y-1.5 border-t pt-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`item-is-gift-${idx}`}
+                        data-testid={`checkbox-item-is-gift-${idx}`}
+                        checked={item.giftBeneficiaryName !== undefined}
+                        onCheckedChange={(checked) => updateItem(idx, "giftBeneficiaryName", checked ? "" : undefined)}
+                      />
+                      <Label htmlFor={`item-is-gift-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
+                        <Gift className="w-3.5 h-3.5" /> Es un regalo — genera un voucher por prestación
+                      </Label>
+                    </div>
+                    {item.giftBeneficiaryName !== undefined && (
+                      <Input
+                        data-testid={`item-gift-beneficiary-${idx}`}
+                        value={item.giftBeneficiaryName}
+                        onChange={e => updateItem(idx, "giftBeneficiaryName", e.target.value)}
+                        placeholder="Nombre del beneficiario"
+                        className={fieldErrors[`gift_beneficiary_${idx}`] ? "border-red-500" : ""}
+                      />
+                    )}
+                    {fieldErrors[`gift_beneficiary_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`gift_beneficiary_${idx}`]}</p>}
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {isFA
@@ -1909,6 +2180,51 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             ))}
           </div>
         </div>
+
+        {(cashArea || showPaymentMethod) && cashFormaPago !== "cuenta_corriente" && (
+          <div className="space-y-1">
+            <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                {parseFloat(retencionMonto) > 0 && (
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-5 w-5 p-0 text-amber-700"
+                    onClick={() => setRetencionMonto("")}
+                    data-testid="btn-remove-retencion"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs mb-1 block">Tipo</Label>
+                  <Select value={retencionTipo} onValueChange={v => setRetencionTipo(v as "iibb" | "ganancias")}>
+                    <SelectTrigger className="h-7 text-xs" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Monto retenido</Label>
+                  <Input
+                    type="number" step="0.01" min="0" value={retencionMonto}
+                    onChange={e => setRetencionMonto(e.target.value)}
+                    placeholder="0.00" className="h-7 text-xs"
+                    data-testid="input-retencion-monto"
+                  />
+                </div>
+              </div>
+              {parseFloat(retencionMonto) > 0 && (
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"} ${fPeso(retencionMonto)} — se registra como referencia junto al cobro, no cambia el total facturado.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
           {isFC ? (
@@ -1932,8 +2248,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         </DialogFooter>
         </>
         )}
-      </DialogContent>
-    </Dialog>
+      </FacturaFormShell>
 
     <Dialog open={showCloseWarning} onOpenChange={o => { if (!o) setShowCloseWarning(false); }}>
       <DialogContent className="max-w-sm">

@@ -308,6 +308,7 @@ const TIPO_OPTIONS = [
   { value: "FA",  label: "Factura A",           fiscal: true },
   { value: "FB",  label: "Factura B",           fiscal: true },
   { value: "FM",  label: "Factura MiPyme A",    fiscal: true },
+  { value: "FT",  label: "Factura T (Turismo)", fiscal: true },
   // NC/ND types are intentionally excluded here — use the dedicated Nota de Crédito/Débito
   // buttons in the folio view. Showing them in this selector caused accidental NC creation.
   // "ticket" is also excluded — it belongs to restaurant/spa flows, not folio billing.
@@ -506,6 +507,15 @@ export function PrefacturaDialog({
   const [saleCondition, setSaleCondition] = useState<SaleCondition>("contado");
   const [doCheckout, setDoCheckout] = useState(true);
 
+  // Step 1: agregar un cargo sin salir del check-out (antes había que cerrar
+  // el diálogo y abrir el folio de la reserva aparte).
+  const [showAddCharge, setShowAddCharge] = useState(false);
+  const [addChargePresetId, setAddChargePresetId] = useState("manual");
+  const [addChargeDescription, setAddChargeDescription] = useState("");
+  const [addChargeAmount, setAddChargeAmount] = useState("");
+  const [addChargeCategory, setAddChargeCategory] = useState("otros");
+  const [isAddingCharge, setIsAddingCharge] = useState(false);
+
   // Step 2: payments
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" },
@@ -573,6 +583,10 @@ export function PrefacturaDialog({
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
+  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
+    queryKey: ["/api/charge-types"],
+    enabled: open,
+  });
 
   // Emitted fiscal invoices for this reservation (for NC flow)
   const { data: emittedInvoices = [], isLoading: invoicesLoading, refetch: refetchEmittedInvoices } = useQuery<any[]>({
@@ -706,24 +720,41 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folio?.balance, open, invoicesLoading, safeEmittedInvoices]);
 
-  // When reservation loads: auto-fill client data
+  // When reservation loads: auto-fill client data. A linked company/agency
+  // is the natural starting point (reception shouldn't have to re-pick and
+  // re-type data the reservation already has) — but it's still just the
+  // initial guess, never locked: handleBillingTargetChange lets reception
+  // switch to the guest (or back) at any time.
   useEffect(() => {
     if (!reservation || !open) return;
-    // A linked company/agency is an available billing target, not the forced
-    // recipient. Start from the guest so reception can explicitly choose the
-    // linked entity when needed.
-    fillFromReservation(reservation, "init", "guest");
+    // The reservation's own company/agency link takes priority (it's what
+    // reception explicitly chose for this stay), but falls back to whatever
+    // the guest's own profile has on file — otherwise a guest with a company
+    // set on their profile, but not re-picked when this particular reservation
+    // was created, would never see it offered here at all.
+    const g = reservation.guest as any;
+    const hasCompany = !!(reservation.companyId || (reservation as any).company?.id || g?.companyId);
+    const hasAgency = !!(reservation.agencyId || (reservation as any).agency?.id || g?.agencyId);
+    const preferredTarget = hasCompany ? "company" : hasAgency ? "agency" : "guest";
+    fillFromReservation(reservation, "init", preferredTarget);
+  // companies.length/agencies.length (not the array refs) re-run this once
+  // those lists finish loading, so a guest-profile company/agency picked up
+  // this way isn't lost to the fetch still being in flight on first render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reservation?.id, open]);
+  }, [reservation?.id, open, companies.length, agencies.length]);
 
-  // Auto-suggest default POS
+  // Auto-suggest default POS. Falls back to billing_config.puntoVenta
+  // whenever pos_configs no tiene filas activas para matchear — antes, ese
+  // fallback solo se probaba si pos_configs estaba vacía del todo, así que
+  // con filas inactivas o sin match quedaba en blanco para siempre.
   useEffect(() => {
-    if (posConfigs.length > 0 && !puntoVenta) {
-      const activePos = posConfigs.filter((p: any) => p.activo !== false);
-      const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
-      const defaultPos = configuredPos || activePos[0];
-      if (defaultPos) setPuntoVenta(String(defaultPos.numero));
-    } else if (!puntoVenta && billingConfig?.puntoVenta) {
+    if (puntoVenta) return;
+    const activePos = posConfigs.filter((p: any) => p.activo !== false);
+    const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
+    const defaultPos = configuredPos || activePos[0];
+    if (defaultPos) {
+      setPuntoVenta(String(defaultPos.numero));
+    } else if (billingConfig?.puntoVenta) {
       setPuntoVenta(String(billingConfig.puntoVenta));
     }
   }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
@@ -734,8 +765,10 @@ export function PrefacturaDialog({
     preferredTarget?: "guest" | "company" | "agency",
   ) {
     const g = res.guest as any;
-    const comp = res.company as any;
-    const ag = res.agency as any;
+    // Falls back to the guest's own profile company/agency when this
+    // particular reservation wasn't created with one explicitly linked.
+    const comp = (res.company as any) ?? (g?.companyId ? companies.find((c: any) => String(c.id) === String(g.companyId)) : undefined);
+    const ag = (res.agency as any) ?? (g?.agencyId ? agencies.find((a: any) => String(a.id) === String(g.agencyId)) : undefined);
 
     if (preferredTarget === "guest" && g) {
       const isJuridica = g.tipoPersona === "juridica";
@@ -831,6 +864,48 @@ export function PrefacturaDialog({
     if (entity) applyEntity(entity, entityType);
   }
 
+  const addChargePresets = [
+    ...chargeTypesData.map(ct => ({ id: ct.id, label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
+    { id: "manual", label: "Cargo editable", description: "", amount: "", category: "otros", allowPriceEdit: true },
+  ];
+
+  function handleAddChargePresetSelect(id: string) {
+    setAddChargePresetId(id);
+    const preset = addChargePresets.find(p => p.id === id);
+    if (!preset) return;
+    setAddChargeDescription(preset.description || preset.label);
+    setAddChargeAmount(preset.amount);
+    setAddChargeCategory(preset.category);
+  }
+
+  async function handleAddCharge() {
+    if (!addChargeDescription.trim() || !addChargeAmount || parseFloat(addChargeAmount) <= 0) {
+      toast({ title: "Completá la descripción y un monto mayor a 0", variant: "destructive" });
+      return;
+    }
+    setIsAddingCharge(true);
+    try {
+      await apiRequest("POST", "/api/charges", {
+        description: addChargeDescription.trim(),
+        amount: addChargeAmount,
+        category: addChargeCategory,
+        reservationId,
+        date: getLocalToday(),
+      });
+      await refetchFolio();
+      toast({ title: "Cargo agregado", description: "Se sumó al folio de esta habitación." });
+      setShowAddCharge(false);
+      setAddChargePresetId("manual");
+      setAddChargeDescription("");
+      setAddChargeAmount("");
+      setAddChargeCategory("otros");
+    } catch (err: any) {
+      toast({ title: parseApiError(err), variant: "destructive" });
+    } finally {
+      setIsAddingCharge(false);
+    }
+  }
+
   // Clear the split-balance warning whenever rows drop to a single entry,
   // regardless of which action caused the transition (removeRow, method change, etc.)
   useEffect(() => {
@@ -877,12 +952,21 @@ export function PrefacturaDialog({
     originalBillableItems,
     invoicedAmountsByCharge,
   );
-  const selectedItems = folio
+  // Factura T (turismo, Decreto 1043/2016): a un huésped extranjero se le
+  // cobra el neto de IVA — no la misma tarifa con el 21% incluido que paga un
+  // huésped local — y así lo tiene que reflejar el comprobante ("alcanzada
+  // por el beneficio de reintegro del IVA"). Es la única excepción sancionada
+  // al principio de arriba ("changing the fiscal recipient cannot change the
+  // amount"): acá lo que cambia el monto es el tipo de comprobante exigido
+  // por ley, no a quién se le factura.
+  const applyFacturaTNetAmount = (items: SelectedFolioItem[]): SelectedFolioItem[] =>
+    tipo === "FT" ? items.map(item => ({ ...item, amount: Number((item.amount / 1.21).toFixed(2)) })) : items;
+  const selectedItems = applyFacturaTNetAmount(folio
     ? getSelectedFolioItems(selectedIds, folio, itemDescriptions, remainingAmountsByCharge)
-    : [];
-  const allBillableItems = folio
+    : []);
+  const allBillableItems = applyFacturaTNetAmount(folio
     ? getAllBillableFolioItems(folio, itemDescriptions, remainingAmountsByCharge)
-    : [];
+    : []);
   const availableAdvancePayments = getAvailableReservationAdvancePayments(
     folio?.payments || [],
     safeEmittedInvoices,
@@ -950,11 +1034,24 @@ export function PrefacturaDialog({
   // Cash settlement does not mean fiscal settlement: a fully paid folio with
   // an unbilled advance must still allow an invoice. Only block a new invoice
   // when every billable source has no amount left to invoice.
+  //
+  // This also covers a reservation with nothing to invoice in the first
+  // place (e.g. a $0 room rate and no extra charges): originalBillableItems
+  // is empty, .every() on it is vacuously true, and operationalBalance is
+  // already 0 — so the same "nothing left to do but check out" path applies.
+  // `!!folio` keeps this false while the folio query is still loading (both
+  // originalBillableItems and operationalBalance default to empty/0 before
+  // data arrives), so the "Dar check-out" button never flashes enabled for a
+  // reservation that turns out to actually have charges.
   const operationalBalance = folio?.financialSummary?.operationalFolioBalance
     ?? Math.max(0, Number(folio?.balance || 0));
-  const alreadyPaidAndInvoiced = originalBillableItems.length > 0
+  const alreadyPaidAndInvoiced = !!folio
     && operationalBalance <= 0.01
     && originalBillableItems.every((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01);
+  // Distinguishes the two situations the banner/copy below needs to tell
+  // apart: "there was something to bill and it's already settled" vs.
+  // "there was never anything to bill" (e.g. a $0 room rate, no charges).
+  const hasNothingToInvoice = !!folio && originalBillableItems.length === 0;
 
   // A source remains selectable after a partial invoice. It is disabled only
   // when its remaining amount reaches zero.
@@ -977,21 +1074,37 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, safeEmittedInvoices]);
 
+  // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
+  // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
+  // se ofrece igual el PV único de billing_config en vez de dejarlo vacío.
+  const activePosConfigs = posConfigs.filter((p: any) => p.activo !== false);
+  const posOptions = activePosConfigs.length > 0
+    ? activePosConfigs
+    : billingConfig?.puntoVenta
+      ? [{ id: "default-pv", numero: billingConfig.puntoVenta, nombre: "" }]
+      : [];
+
   // A linked company/agency is a billing option, never a forced recipient:
-  // reception must still be able to issue the stay to the guest.
-  const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id);
-  const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id);
-  const allowedBillingTargets: Array<"guest" | "company" | "agency"> = hasReservationCompany
-    ? ["guest", "company"]
-    : hasReservationAgency
-      ? ["guest", "agency"]
-      : ["guest"];
+  // reception must still be able to issue the stay to the guest. And it's
+  // never the ONLY option either: some guests don't give their billing
+  // details until they're actually paying, so Empresa/Agencia stay pickable
+  // here even with nothing preloaded — reception just searches the right one.
+  const reservationGuest = reservation?.guest as any;
+  const hasReservationCompany = !!(reservation?.companyId || (reservation as any)?.company?.id || reservationGuest?.companyId);
+  const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id || reservationGuest?.agencyId);
+  const allowedBillingTargets: Array<"guest" | "company" | "agency"> = ["guest", "company", "agency"];
   const billingTargetLocked = false;
   const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
-  // Comprobante availability is based on the recipient. Factura T remains
-  // disabled until its tourism-specific fiscal payload is fully implemented.
+  // Factura T solo corresponde a un huésped extranjero (nunca a una empresa o
+  // agencia) facturando alojamiento — la misma condición que ya exige el
+  // servidor en POST /api/billing/invoices.
+  const canOfferFacturaT = billingTarget === "guest"
+    && hasSelectedAccommodation
+    && !isArgentineNationality(nationality, nationalityCode);
+  // Comprobante availability is based on the recipient.
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
+    if (opt.value === "FT") return canOfferFacturaT;
     if (["Responsable Inscripto", "Exento"].includes(condicionIva)) return ["FA", "FM"].includes(opt.value);
     return opt.value === "FB";
   });
@@ -1170,6 +1283,7 @@ export function PrefacturaDialog({
             razonSocial: razonSocial || "Consumidor Final",
             cuit: cuit || undefined,
             dni: dni || undefined,
+            documentType: documentType || undefined,
             condicionIva,
             domicilio: domicilio || undefined,
           },
@@ -1454,6 +1568,13 @@ export function PrefacturaDialog({
           {/* ── Prefactura (cargos + cobro en una sola pantalla) ──────────── */}
           {step < 3 && (
           <div className="space-y-4">
+            {/* Notas de la reserva — visibles al hacer el check-out (ej. quién abona) */}
+            {mode === "checkout" && reservationData?.notes && (
+              <div className="text-sm bg-muted/30 rounded-md p-3" data-testid="prefactura-reservation-notes">
+                <div className="text-muted-foreground mb-1">Notas de la reserva:</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{reservationData.notes}</div>
+              </div>
+            )}
             {/* Alerts for checkout mode */}
             {mode === "checkout" && reservation && (reservation as any).status !== "checked_in" && (
               <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-4 py-3">
@@ -1467,13 +1588,22 @@ export function PrefacturaDialog({
                 <p className="text-sm text-amber-800 dark:text-amber-300">Cierre histórico — salida programada: {formatDateAR(reservationData?.checkOutDate)}.</p>
               </div>
             )}
-            {/* Already-paid-and-invoiced: block new invoice, only allow checkout */}
+            {/* Already-paid-and-invoiced (or nothing to bill at all): block a new invoice, only allow checkout */}
             {alreadyPaidAndInvoiced && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
                 <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                 <div className="text-sm text-green-800 dark:text-green-300 space-y-0.5">
-                  <p className="font-semibold">Esta reserva ya está cobrada y facturada.</p>
-                  <p>El saldo es $0 y ya existe un comprobante emitido. No se puede generar una nueva factura — solo podés dar el check-out.</p>
+                  {hasNothingToInvoice ? (
+                    <>
+                      <p className="font-semibold">Esta reserva no tiene nada para facturar.</p>
+                      <p>Tarifa y cargos en $0 — no hay ningún comprobante que emitir. Solo podés dar el check-out.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold">Esta reserva ya está cobrada y facturada.</p>
+                      <p>El saldo es $0 y ya existe un comprobante emitido. No se puede generar una nueva factura — solo podés dar el check-out.</p>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -1481,6 +1611,79 @@ export function PrefacturaDialog({
               <div className="flex items-start gap-3 rounded-lg border border-orange-300 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/40 px-4 py-3">
                 <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-orange-800 dark:text-orange-300">Salida anticipada — la salida programada era {formatDateAR(reservationData?.checkOutDate)}.</p>
+              </div>
+            )}
+
+            {/* Agregar cargo sin salir del check-out */}
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Cargos de la habitación</Label>
+              {!showAddCharge && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddCharge(true)}
+                  data-testid="button-open-add-charge"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  Agregar cargo
+                </Button>
+              )}
+            </div>
+            {showAddCharge && (
+              <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Tipo</Label>
+                    <Select value={addChargePresetId} onValueChange={handleAddChargePresetSelect}>
+                      <SelectTrigger className="h-8 text-sm" data-testid="select-add-charge-preset"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {addChargePresets.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
+                    <Input
+                      type="number"
+                      className="h-8 text-sm"
+                      value={addChargeAmount}
+                      onChange={(e) => setAddChargeAmount(e.target.value)}
+                      data-testid="input-add-charge-amount"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Descripción</Label>
+                  <Input
+                    className="h-8 text-sm"
+                    value={addChargeDescription}
+                    onChange={(e) => setAddChargeDescription(e.target.value)}
+                    data-testid="input-add-charge-description"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowAddCharge(false); setAddChargePresetId("manual"); setAddChargeDescription(""); setAddChargeAmount(""); }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isAddingCharge}
+                    onClick={handleAddCharge}
+                    data-testid="button-confirm-add-charge"
+                  >
+                    {isAddingCharge ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
+                    Agregar
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -1605,7 +1808,12 @@ export function PrefacturaDialog({
                  <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
                    <div className="text-right rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/20">
                       <div className="font-medium text-xs text-blue-700 dark:text-blue-300">Importe a facturar</div>
-                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200">${fmtMoney(totalSelected)}</div>
+                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
+                     {tipo === "FT" && (
+                       <div className="text-[11px] text-blue-700/80 dark:text-blue-300/80" data-testid="text-factura-t-reintegro-note">
+                         Ya sin el 21% de IVA — reintegro turismo (Decreto 1043/2016)
+                       </div>
+                     )}
                   </div>
                   <div className="text-right">
                      <div className="text-muted-foreground text-xs">Crédito liberado disponible en la reserva</div>
@@ -1801,7 +2009,7 @@ export function PrefacturaDialog({
                   <Select value={puntoVenta} onValueChange={setPuntoVenta}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger>
                     <SelectContent>
-                      {posConfigs.filter((p: any) => p.activo !== false).map((p: any) => (
+                      {posOptions.map((p: any) => (
                         <SelectItem key={p.id} value={String(p.numero)}>
                           PV {String(p.numero).padStart(4, "0")} {p.nombre ? `— ${p.nombre}` : ""}
                         </SelectItem>

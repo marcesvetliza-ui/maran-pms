@@ -162,7 +162,7 @@ function NationalityCombobox({
             </div>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-full p-0" align="start">
+        <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
           <Command shouldFilter={false}>
             <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
             <CommandList>
@@ -247,7 +247,14 @@ export function GuestFormDialog({
 
   const [formData, setFormData] = useState<Partial<InsertGuest>>(() => buildFormData(guest));
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [companySearch, setCompanySearch] = useState("");
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  const filteredCompanies = companies?.filter(c => {
+    const q = companySearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${c.razonSocial} ${c.nombreFantasia || ""}`.toLowerCase().includes(q);
+  });
 
   const tipoPersona = (formData as any).tipoPersona || "fisica";
   const isJuridica = tipoPersona === "juridica";
@@ -508,23 +515,23 @@ export function GuestFormDialog({
               {/* Empresa asociada */}
               <div className="grid gap-2">
                 <Label>Empresa asociada en el sistema</Label>
-                <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                <Popover open={companyOpen} onOpenChange={(o) => { setCompanyOpen(o); if (!o) setCompanySearch(""); }}>
                   <PopoverTrigger asChild>
                     <Button variant="outline" role="combobox" aria-expanded={companyOpen} className="w-full justify-between font-normal" data-testid="select-company">
                       {formData.companyId ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia || companies?.find(c => c.id === formData.companyId)?.razonSocial || "Empresa") : "Sin empresa"}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-full p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Buscar empresa..." />
+                  <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput placeholder="Buscar empresa..." value={companySearch} onValueChange={setCompanySearch} />
                       <CommandList>
                         <CommandEmpty>Sin resultados.</CommandEmpty>
                         <CommandGroup>
                           <CommandItem value="__none__" onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
                             <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
                           </CommandItem>
-                          {companies?.map(c => (
+                          {filteredCompanies?.map(c => (
                             <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
                               <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
                               {c.nombreFantasia || c.razonSocial}
@@ -737,23 +744,23 @@ export function GuestFormDialog({
               {/* Empresa asociada */}
               <div className="grid gap-2">
                 <Label>Empresa asociada</Label>
-                <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                <Popover open={companyOpen} onOpenChange={(o) => { setCompanyOpen(o); if (!o) setCompanySearch(""); }}>
                   <PopoverTrigger asChild>
                     <Button variant="outline" role="combobox" aria-expanded={companyOpen} className="w-full justify-between font-normal" data-testid="select-company">
                       {formData.companyId ? (companies?.find(c => c.id === formData.companyId)?.nombreFantasia || companies?.find(c => c.id === formData.companyId)?.razonSocial || "Empresa") : "Sin empresa"}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-full p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Buscar empresa..." />
+                  <PopoverContent className="w-full p-0 z-[100] pointer-events-auto" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput placeholder="Buscar empresa..." value={companySearch} onValueChange={setCompanySearch} />
                       <CommandList>
                         <CommandEmpty>Sin resultados.</CommandEmpty>
                         <CommandGroup>
                           <CommandItem value="__none__" onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: null }); setCompanyOpen(false); }}>
                             <Check className={`mr-2 h-4 w-4 ${!formData.companyId ? "opacity-100" : "opacity-0"}`} />Sin empresa
                           </CommandItem>
-                          {companies?.map(c => (
+                          {filteredCompanies?.map(c => (
                             <CommandItem key={c.id} value={`${c.razonSocial} ${c.nombreFantasia || ""}`} onMouseDown={(e) => e.preventDefault()} onSelect={() => { setFormData({ ...formData, companyId: c.id }); setCompanyOpen(false); }}>
                               <Check className={`mr-2 h-4 w-4 ${formData.companyId === c.id ? "opacity-100" : "opacity-0"}`} />
                               {c.nombreFantasia || c.razonSocial}

@@ -16,6 +16,7 @@ import {
   Tag,
   Package,
   Globe,
+  Satellite,
   Users,
   Star,
   User,
@@ -52,6 +53,7 @@ import {
   Gift,
   CreditCard,
   FileWarning,
+  Receipt,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -78,31 +80,34 @@ import type { SystemNotification } from "@shared/schema";
 
 // ─── Permisos por rol (según matriz aprobada) ────────────────────────────────
 // Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
-//   events, reception, resp_deposito, resp_administracion, jefe_recepcion, comercial
+//   events, reception, resp_deposito, resp_administracion, responsable_area,
+//   jefe_recepcion, comercial
 
-const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
-const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","jefe_recepcion","comercial"];
-const CORE_RECEPCION    = ["admin","reception","jefe_recepcion","comercial"];
-const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","jefe_recepcion","comercial"];
-const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
-const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","jefe_recepcion","comercial"];
-const HUESPEDES_ROLES   = ["admin","events","reception","jefe_recepcion","comercial"];
-const PAQUETES_ROLES    = ["admin","spa","reception","jefe_recepcion","comercial"];
-const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
-const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","jefe_recepcion","comercial"];
-const RECETAS_ROLES     = ["admin","manager","ama_de_llaves","events","resp_deposito"];
-const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","jefe_recepcion","comercial"];
-const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa"];
-const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","jefe_recepcion","comercial"];
-const HK_MODULE_ROLES   = ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
-const MANT_MODULE_ROLES = ["admin","manager","ama_de_llaves","housekeeping","reception","jefe_recepcion","comercial"];
-const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposito","resp_administracion"];
-const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","jefe_recepcion","comercial"];
-const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","jefe_recepcion","comercial"];
-const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","jefe_recepcion"];
-const CC_ROLES          = ["admin","manager","resp_administracion","jefe_recepcion","comercial"];
-const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","jefe_recepcion","comercial"];
-const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","jefe_recepcion","comercial"];
+const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const CORE_RECEPCION    = ["admin","reception","responsable_area","jefe_recepcion","comercial"];
+const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","responsable_area","jefe_recepcion","comercial"];
+const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
+const REPORTES_RECEPCION_ROLES = [...HABITACIONES_ROLES, "spa"];
+const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const HUESPEDES_ROLES   = ["admin","events","reception","responsable_area","jefe_recepcion","comercial"];
+const PAQUETES_ROLES    = ["admin","spa","reception","responsable_area","jefe_recepcion","comercial"];
+const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","responsable_area","jefe_recepcion","comercial"];
+const RECETAS_ROLES     = ["admin","manager","ama_de_llaves","events","resp_deposito","responsable_area"];
+const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","responsable_area","jefe_recepcion","comercial"];
+const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa","responsable_area"];
+const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const HK_MODULE_ROLES   = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
+const MANT_MODULE_ROLES = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
+const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposito","resp_administracion","responsable_area"];
+const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","responsable_area","jefe_recepcion","comercial"];
+const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","responsable_area","jefe_recepcion","comercial"];
+const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","responsable_area","jefe_recepcion"];
+const CC_ROLES          = ["admin","manager","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const EMITIR_COMPROBANTE_ROLES = ["admin","manager","reception","restaurant","spa","events","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
@@ -123,10 +128,10 @@ const menuSections = [
       {
         label: "Reportes",
         icon: FileBarChart2,
-        roles: HABITACIONES_ROLES,
+        roles: REPORTES_RECEPCION_ROLES,
         subItems: [
-          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: HABITACIONES_ROLES },
-          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: HABITACIONES_ROLES },
+          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: REPORTES_RECEPCION_ROLES },
+          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: REPORTES_RECEPCION_ROLES },
           { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        roles: ADMIN_MOD_ROLES },
         ],
       },
@@ -141,6 +146,7 @@ const menuSections = [
     items: [
       { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: CORE_RECEPCION },
       { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: CORE_RECEPCION },
+      { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              roles: CORE_RECEPCION },
       { label: "Grupos",            icon: Users,             href: "/groups",               roles: CORE_RECEPCION },
       { label: "Empresas",          icon: Building2,         href: "/companies",            roles: CORE_RECEPCION },
       { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: CORE_RECEPCION },
@@ -169,6 +175,7 @@ const menuSections = [
       { label: "Mantenimiento", icon: Wrench,  href: "/maintenance",  roles: MANT_MODULE_ROLES },
       { label: "Inventario",    icon: Package, href: "/inventory",    roles: INVENTARIO_ROLES },
       { label: "Recetas y Costos", icon: ChefHat, href: "/restaurant/recetas", roles: RECETAS_ROLES },
+      { label: "Emitir Comprobante", icon: Receipt, href: "/operaciones/emitir-comprobante", roles: EMITIR_COMPROBANTE_ROLES },
     ],
   },
 
@@ -189,9 +196,9 @@ const menuSections = [
       { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
       { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
       { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
-      { label: "Plan de Cuentas",    icon: BookOpen,   href: "/admin/accounting-accounts", roles: ["admin","resp_administracion"] },
-      { label: "Centros de Costo",   icon: Tag,        href: "/admin/cost-centers", roles: ["admin","resp_administracion"] },
-      { label: "Revisión fiscal SPA", icon: FileWarning, href: "/admin/spa-fiscal-review", roles: ["admin","manager","resp_administracion"] },
+      { label: "Plan de Cuentas",    icon: BookOpen,   href: "/admin/accounting-accounts", roles: ["admin","resp_administracion","responsable_area"] },
+      { label: "Centros de Costo",   icon: Tag,        href: "/admin/cost-centers", roles: ["admin","resp_administracion","responsable_area"] },
+      { label: "Revisión fiscal SPA", icon: FileWarning, href: "/admin/spa-fiscal-review", roles: ["admin","manager","resp_administracion","responsable_area"] },
     ],
   },
 

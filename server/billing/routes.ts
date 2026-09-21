@@ -3,9 +3,9 @@ import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters, folioMovements, charges } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
-import { calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -254,6 +254,91 @@ async function reconcileReservationCreditNote(
       `);
     }
 
+    // Crediting a Factura T reverses its tourism VAT waiver too: the 21% that
+    // was subtracted from the Folio when the FT was emitted no longer applies
+    // to the credited portion — it must be owed again, since whatever
+    // replaces this invoice (if anything) will not carry the same Decreto
+    // 1043/2016 benefit.
+    if (String(invoiceValue(original, "tipo_comprobante", "tipoComprobante")) === "FT") {
+      for (const [sourceId, amount] of Object.entries(sourceChargeAmounts)) {
+        const reintegroReversal = Number((amount * 0.21).toFixed(2));
+        if (reintegroReversal <= 0.009) continue;
+        const reintegroMarker = `[ft-nc:${ncId}:${sourceId}]`;
+        await tx.execute(sql`
+          INSERT INTO charges (
+            reservation_id, description, amount, date, category, created_by, status
+          )
+          SELECT
+            ${originalReservationId},
+            ${`Reverso reintegro turismo — NC ${ncType} ${String(ncPoint).padStart(4, "0")}-${String(ncNumber).padStart(8, "0")} (Decreto 1043/2016) ${reintegroMarker}`},
+            ${String(reintegroReversal)},
+            ${today},
+            'adjustment',
+            ${operator},
+            'active'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM charges
+            WHERE reservation_id = ${originalReservationId}
+              AND description LIKE ${`%${reintegroMarker}%`}
+          )
+        `);
+      }
+    }
+
+    // The uncovered settlement of this invoice may have been charged to a
+    // company/agency/guest's cuenta corriente (a 'cargo' row in
+    // account_movements, tagged with this invoice's own reference at
+    // issuance). That cargo doesn't know the fiscal document was credited —
+    // left alone, the account keeps showing debt that no longer matches the
+    // invoice. Credit it back by the NC total, capped at what this cargo
+    // still has un-reversed, so repeated partial NCs on the same invoice
+    // never push the account past zero.
+    const originalTipoComprobante = String(invoiceValue(original, "tipo_comprobante", "tipoComprobante"));
+    const originalNroFacReal = `${originalTipoComprobante}-${String(invoiceValue(original, "numero", "numero")).padStart(8, "0")}`;
+    const ccCargoResult = await tx.execute(sql`
+      SELECT id, entity_type, entity_id, amount
+      FROM account_movements
+      WHERE reservation_id = ${originalReservationId}
+        AND type = 'cargo'
+        AND reference = ${originalNroFacReal}
+      LIMIT 1
+    `);
+    const ccCargo = ccCargoResult.rows[0] as any;
+    if (ccCargo) {
+      const reversalMarker = `[nc:${ncId}]`;
+      const alreadyReversedResult = await tx.execute(sql`
+        SELECT COALESCE(SUM(amount::numeric), 0) AS total
+        FROM account_movements
+        WHERE reservation_id = ${originalReservationId}
+          AND type = 'pago'
+          AND description LIKE ${`%s/ factura ${originalNroFacReal}%`}
+      `);
+      const alreadyReversed = Math.abs(Number((alreadyReversedResult.rows[0] as any)?.total || 0));
+      const cargoAmount = Number(ccCargo.amount) || 0;
+      const reversalAmount = Number(Math.min(ncTotal, Math.max(0, cargoAmount - alreadyReversed)).toFixed(2));
+      if (reversalAmount > 0.009) {
+        await tx.execute(sql`
+          INSERT INTO account_movements (
+            entity_type, entity_id, date, type, description, amount, reservation_id, reference
+          )
+          SELECT
+            ${ccCargo.entity_type},
+            ${ccCargo.entity_id},
+            ${today},
+            'pago',
+            ${`Nota de crédito ${ncType} ${String(ncPoint).padStart(4, "0")}-${String(ncNumber).padStart(8, "0")} s/ factura ${originalNroFacReal} ${reversalMarker}`},
+            ${String(-reversalAmount)},
+            ${originalReservationId},
+            ${`${ncType}-${String(ncNumber).padStart(8, "0")}`}
+          WHERE NOT EXISTS (
+            SELECT 1 FROM account_movements
+            WHERE reservation_id = ${originalReservationId}
+              AND description LIKE ${`%${reversalMarker}%`}
+          )
+        `);
+      }
+    }
+
     await tx.execute(sql`
       UPDATE sales_invoices
       SET reconciliation_status = 'conciliada',
@@ -292,11 +377,13 @@ async function resumeReservationCreditNote(
         razonSocial: invoiceValue(original, "cliente_razon_social", "clienteRazonSocial"),
         cuit: invoiceValue(original, "cliente_cuit", "clienteCuit") || undefined,
         dni: invoiceValue(original, "cliente_dni", "clienteDni") || undefined,
+        documentType: invoiceValue(original, "cliente_document_type", "clienteDocumentType") || undefined,
         condicionIva: invoiceValue(original, "cliente_condicion_iva", "clienteCondicionIva"),
         domicilio: invoiceValue(original, "cliente_domicilio", "clienteDomicilio") || undefined,
       },
       items,
       facturaOriginalId: Number(invoiceValue(original, "id", "id")),
+      comprobanteAsociado: buildComprobanteAsociado(original),
       operador: user?.fullName || user?.username,
       puntoVentaOverride: Number(invoiceValue(nc, "punto_venta", "puntoVenta")),
       reservaId: String(invoiceValue(original, "reserva_id", "reservaId")),
@@ -1183,6 +1270,7 @@ export function registerBillingRoutes(app: Express) {
                   razonSocial: previous.cliente_razon_social,
                   cuit: previous.cliente_cuit || undefined,
                   dni: previous.cliente_dni || undefined,
+                  documentType: previous.cliente_document_type || undefined,
                   condicionIva: previous.cliente_condicion_iva,
                   domicilio: previous.cliente_domicilio || undefined,
                 },
@@ -1411,6 +1499,7 @@ export function registerBillingRoutes(app: Express) {
               razonSocial: existing.cliente_razon_social,
               cuit: existing.cliente_cuit || undefined,
               dni: existing.cliente_dni || undefined,
+              documentType: existing.cliente_document_type || undefined,
               condicionIva: existing.cliente_condicion_iva,
               domicilio: existing.cliente_domicilio || undefined,
             };
@@ -1533,6 +1622,7 @@ export function registerBillingRoutes(app: Express) {
               razonSocial: existing.cliente_razon_social,
               cuit: existing.cliente_cuit || undefined,
               dni: existing.cliente_dni || undefined,
+              documentType: existing.cliente_document_type || undefined,
               condicionIva: existing.cliente_condicion_iva,
               domicilio: existing.cliente_domicilio || undefined,
             };
@@ -1576,6 +1666,100 @@ export function registerBillingRoutes(app: Express) {
               }
             : undefined,
         } as NewInvoiceData);
+        // "Turnos vendidos": si algún ítem viene de "Agregar desde catálogo" ▸
+        // Spa, quedó marcado con spaTreatmentId — se vendió el tratamiento
+        // aunque todavía no exista (o no haga falta) un turno agendado. Se
+        // registra por índice de ítem, idempotente ante un reintento.
+        if (Array.isArray(persistedItems)) {
+          for (const [index, item] of persistedItems.entries()) {
+            const treatmentId = (item as any)?.spaTreatmentId;
+            if (!treatmentId) continue;
+            const quantity = Number((item as any)?.cantidad) || 0;
+            if (quantity <= 0) continue;
+            await db.execute(sql`
+              INSERT INTO spa_treatment_sales (
+                sales_invoice_id, invoice_item_index, treatment_id, buyer_name,
+                quantity_purchased, unit_price_frozen
+              )
+              SELECT
+                ${emitted.id}, ${index}, ${treatmentId}, ${persistedCliente?.razonSocial},
+                ${quantity}, ${Number((item as any)?.precioUnitario) || 0}
+              WHERE NOT EXISTS (
+                SELECT 1 FROM spa_treatment_sales
+                WHERE sales_invoice_id = ${emitted.id} AND invoice_item_index = ${index}
+              )
+            `);
+
+            // "Voucher por prestación": el ítem se marcó como regalo — crea un
+            // gift voucher descriptivo vinculado a esta venta, a nombre del
+            // beneficiario cargado. Idempotente ante un reintento (chequea si
+            // ya existe un voucher para esta venta antes de crear otro).
+            const beneficiaryName = String((item as any)?.giftBeneficiaryName || "").trim();
+            if (beneficiaryName) {
+              const saleRows = await db.execute(sql`
+                SELECT id FROM spa_treatment_sales
+                WHERE sales_invoice_id = ${emitted.id} AND invoice_item_index = ${index}
+              `);
+              const saleId = (saleRows.rows[0] as any)?.id;
+              if (saleId) {
+                const existingVoucher = await db.execute(sql`
+                  SELECT id FROM gift_vouchers WHERE linked_treatment_sale_id = ${saleId}
+                `);
+                if (existingVoucher.rows.length === 0) {
+                  const treatmentRows = await db.execute(sql`
+                    SELECT name FROM spa_treatments WHERE id = ${treatmentId}
+                  `);
+                  const treatmentName = (treatmentRows.rows[0] as any)?.name || "Tratamiento SPA";
+                  const code = await storage.generateVoucherCode();
+                  await storage.createGiftVoucher({
+                    voucherCode: code,
+                    area: "spa",
+                    description: treatmentName,
+                    valueType: "descriptivo",
+                    buyerName: persistedCliente?.razonSocial || "—",
+                    beneficiaryName,
+                    pricePaid: ((Number((item as any)?.precioUnitario) || 0) * quantity).toFixed(2),
+                    saleInvoiceId: emitted.id,
+                    linkedTreatmentSaleId: saleId,
+                    createdBy: user?.fullName || user?.username || null,
+                  } as InsertGiftVoucher);
+                }
+              }
+            }
+          }
+        }
+        // Factura T (turismo, Decreto 1043/2016) ya cobra el neto de IVA — no la
+        // misma tarifa con el 21% incluido que paga un huésped local (ver el
+        // ÷1.21 aplicado en PrefacturaDialog). El cargo original del Folio
+        // (reservation.totalRoomAmount, otros cargos) sigue en el bruto, así
+        // que sin este ajuste el Folio arrastra para siempre un "saldo
+        // pendiente" fantasma igual al 21% reintegrado — que ya no se debe,
+        // fue condonado por ley, no es algo que falte cobrar o facturar.
+        if (reservationId && tipoComprobante === "FT") {
+          for (const [sourceId, amount] of Object.entries(sanitizedSourceChargeAmounts)) {
+            const reintegro = Number((Number(amount) * 0.21).toFixed(2));
+            if (reintegro <= 0.009) continue;
+            const marker = `[ft:${emitted.id}:${sourceId}]`;
+            await db.execute(sql`
+              INSERT INTO charges (
+                reservation_id, description, amount, date, category, created_by, status
+              )
+              SELECT
+                ${reservationId},
+                ${`Reintegro turismo — Factura T ${String(emitted.puntoVenta).padStart(4, "0")}-${String(emitted.numero).padStart(8, "0")} (Decreto 1043/2016) ${marker}`},
+                ${String(-reintegro)},
+                ${getArgentinaToday()},
+                'adjustment',
+                ${user?.fullName || user?.username || null},
+                'active'
+              WHERE NOT EXISTS (
+                SELECT 1 FROM charges
+                WHERE reservation_id = ${reservationId}
+                  AND description LIKE ${`%${marker}%`}
+              )
+            `);
+          }
+        }
         if (reservationId && creditIntent) {
           try {
             await reconcileReservationCreditInvoice(Number(emitted.id));
@@ -1638,38 +1822,70 @@ export function registerBillingRoutes(app: Express) {
           const reservationForSettlement = reservationId
             ? await storage.getReservation(reservationId)
             : null;
-          if (!reservationForSettlement) {
+          if (reservationId && !reservationForSettlement) {
             throw new FolioInvoiceValidationError("No se encontró la reserva para registrar la liquidación CC", 409);
           }
-          await storage.createReservationPaymentWithLedger({
-            payment: {
-              reservationId,
-              amount: total.toFixed(2),
-              method: "cuenta_corriente",
-              date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
-              reference: nroFac,
-              notes: cashLabelBody || nroFac,
-              invoiceRef: JSON.stringify({
-                id: factura.id,
-                tipoComprobante: factura.tipoComprobante,
-                puntoVenta: factura.puntoVenta,
-                numero: factura.numero,
-                cae: factura.cae,
-                total: factura.montoTotal,
-              }),
-            } as any,
-            sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${nroFac}`,
-            registeredBy: user?.username,
-            receiptType: factura.tipoComprobante,
-            accountSettlement: {
-              entityType: ccEntityType,
-              entityId: ccEntityId,
-              description: cashLabelBody || nroFac,
-              reference: nroFac,
-              createdBy: user?.id || null,
-              invoiceId: Number(factura.id),
-            },
-          });
+          if (reservationForSettlement) {
+            await storage.createReservationPaymentWithLedger({
+              payment: {
+                reservationId,
+                amount: total.toFixed(2),
+                method: "cuenta_corriente",
+                date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+                reference: nroFac,
+                notes: cashLabelBody || nroFac,
+                invoiceRef: JSON.stringify({
+                  id: factura.id,
+                  tipoComprobante: factura.tipoComprobante,
+                  puntoVenta: factura.puntoVenta,
+                  numero: factura.numero,
+                  cae: factura.cae,
+                  total: factura.montoTotal,
+                }),
+              } as any,
+              sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${nroFac}`,
+              registeredBy: user?.username,
+              receiptType: factura.tipoComprobante,
+              accountSettlement: {
+                entityType: ccEntityType,
+                entityId: ccEntityId,
+                description: cashLabelBody || nroFac,
+                reference: nroFac,
+                createdBy: user?.id || null,
+                invoiceId: Number(factura.id),
+              },
+            });
+          } else {
+            // Liquidación CC sin reserva vinculada (p. ej. una empresa o agencia
+            // facturada directamente desde el Centro de Comprobantes): el cargo
+            // va directo contra la cuenta corriente de la entidad, sin folio ni
+            // pago de reserva — el mismo mecanismo que ya usa el cobro CC de
+            // comandas de restaurante sin reserva (server/routes/restaurant.ts).
+            const existingCargos = await storage.getAccountMovements(ccEntityType, ccEntityId);
+            const alreadyCharged = existingCargos.some((m) => m.type === "cargo" && m.reference === nroFac);
+            if (!alreadyCharged) {
+              // cashArea ya identifica desde qué área se está facturando (Centro
+              // de Comprobantes de restaurant/spa/eventos/recepción); se traduce
+              // 1 a 1 al área de la cuenta corriente en vez de adivinarla.
+              const CASH_AREA_TO_ACCOUNT_AREA: Record<string, AccountMovementArea> = {
+                reception: "recepcion",
+                restaurant: "restaurant",
+                spa: "spa",
+                event: "eventos",
+              };
+              await storage.createAccountMovement({
+                entityType: ccEntityType,
+                entityId: ccEntityId,
+                date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
+                type: "cargo",
+                description: cashLabelBody || nroFac,
+                amount: total.toFixed(2),
+                reference: nroFac,
+                createdBy: user?.id || null,
+                area: CASH_AREA_TO_ACCOUNT_AREA[String(cashArea || "")] || "otros",
+              } as any);
+            }
+          }
         }
       } else if (!reusedExistingClaim && !groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área
@@ -1735,6 +1951,7 @@ export function registerBillingRoutes(app: Express) {
               razonSocial: invoice.cliente_razon_social,
               cuit: invoice.cliente_cuit || undefined,
               dni: invoice.cliente_dni || undefined,
+              documentType: invoice.cliente_document_type || undefined,
               condicionIva: invoice.cliente_condicion_iva,
               domicilio: invoice.cliente_domicilio || undefined,
             },
@@ -2506,11 +2723,13 @@ export function registerBillingRoutes(app: Express) {
           razonSocial: original.cliente_razon_social,
           cuit: original.cliente_cuit,
           dni: original.cliente_dni,
+          documentType: original.cliente_document_type,
           condicionIva: original.cliente_condicion_iva,
           domicilio: original.cliente_domicilio,
         },
         items: persistedNcItems,
         facturaOriginalId: original.id,
+        comprobanteAsociado: buildComprobanteAsociado(original),
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
         reservaId: original.reserva_id || undefined,
@@ -2921,12 +3140,14 @@ export function registerBillingRoutes(app: Express) {
                   razonSocial: pendingDebit.cliente_razon_social,
                   cuit: pendingDebit.cliente_cuit,
                   dni: pendingDebit.cliente_dni,
+                  documentType: pendingDebit.cliente_document_type,
                   condicionIva: pendingDebit.cliente_condicion_iva,
                   domicilio: pendingDebit.cliente_domicilio,
                 },
                 items: parseJson(pendingDebit.items),
                 reservaId: pendingDebit.reserva_id,
                 facturaOriginalId: nc.id,
+                comprobanteAsociado: buildComprobanteAsociado(nc),
                 operador: pendingDebit.operador,
                 puntoVentaOverride: pendingDebit.punto_venta,
                 cashFormaPago: pendingDebit.cash_forma_pago,
@@ -3005,12 +3226,14 @@ export function registerBillingRoutes(app: Express) {
               razonSocial: sourceInvoice.cliente_razon_social,
               cuit: sourceInvoice.cliente_cuit,
               dni: sourceInvoice.cliente_dni,
+              documentType: sourceInvoice.cliente_document_type,
               condicionIva: sourceInvoice.cliente_condicion_iva,
               domicilio: sourceInvoice.cliente_domicilio,
             },
             items: ndItems,
             reservaId: sourceInvoice.reserva_id,
             facturaOriginalId: nc.id,
+            comprobanteAsociado: buildComprobanteAsociado(nc),
             operador: user?.fullName || user?.username,
             puntoVentaOverride: sourceInvoice.punto_venta,
             cashFormaPago: sourceInvoice.cash_forma_pago,
@@ -3093,6 +3316,7 @@ export function registerBillingRoutes(app: Express) {
           razonSocial: original.cliente_razon_social,
           cuit: original.cliente_cuit,
           dni: original.cliente_dni,
+          documentType: original.cliente_document_type,
           condicionIva: original.cliente_condicion_iva,
           domicilio: original.cliente_domicilio,
         },
@@ -3101,6 +3325,7 @@ export function registerBillingRoutes(app: Express) {
         groupId: groupId || undefined,
         folioId: original.folio_id || undefined,
         facturaOriginalId: original.id,
+        comprobanteAsociado: buildComprobanteAsociado(original),
         operador: user?.fullName || user?.username,
         puntoVentaOverride: original.punto_venta,
         sourceChargeIds: groupDebitSourceId ? [groupDebitSourceId] : undefined,

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { buildInventorySupplierUpdate } from "@/lib/inventory-supplier-association";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,7 +86,7 @@ interface Invoice {
   subtipoRetencion?: string;
 }
 
-interface Supplier {
+export interface Supplier {
   id: number;
   razonSocial: string;
   cuit: string;
@@ -96,7 +97,7 @@ interface Supplier {
   cuentaContableId?: number;
 }
 
-interface AccountingAccount {
+export interface AccountingAccount {
   id: number;
   codigo: string;
   nombre: string;
@@ -132,6 +133,10 @@ const TIPOS = [
   { value: "RECIBO-B", label: "Recibo B" },
   { value: "RECIBO-C", label: "Recibo C" },
 ];
+
+// Solo para el layout unificado del Centro de Comprobantes — el asistente
+// original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
+const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }];
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },
@@ -272,18 +277,75 @@ function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
 }
 
-function InvoiceDialog({
+/**
+ * Renders InvoiceDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `header`/`children` is touched.
+ */
+function InvoiceFormShell({ embedded, open, onOpenChange, title, headerExtra, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Plain text/node — rendered as a real Radix DialogTitle in modal mode, or a plain heading when embedded (DialogTitle requires a real <Dialog> ancestor and throws otherwise). */
+  title: React.ReactNode;
+  /** Non-title header content (e.g. the step indicator) — rendered the same way in both modes. */
+  headerExtra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="invoice-form-embedded">
+        <div>
+          <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+          {headerExtra}
+        </div>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-2xl max-h-[92vh] overflow-y-auto"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {headerExtra}
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function InvoiceDialog({
   open,
   onClose,
   suppliers,
   accounts,
   editingInvoice,
+  embedded,
+  unifiedLayout,
 }: {
   open: boolean;
   onClose: () => void;
   suppliers: Supplier[];
   accounts: AccountingAccount[];
   editingInvoice?: Invoice | null;
+  embedded?: boolean;
+  /**
+   * Renders the same form as one continuous page (Tipo/Condición → Datos del
+   * emisor → Artículos → Impuestos y totales) matching EmitirFacturaDialog's
+   * layout, instead of the original 5-step wizard. Same state, validation and
+   * submit as the wizard — only the JSX arrangement differs. Used by the
+   * Centro de Comprobantes; the standalone Facturas de Compra page keeps the
+   * wizard unchanged.
+   */
+  unifiedLayout?: boolean;
 }) {
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm());
@@ -429,7 +491,7 @@ function InvoiceDialog({
 
   const { data: existingInvItems = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/items"],
-    enabled: open && step === 4,
+    enabled: open && (unifiedLayout || step === 4),
   });
 
   const handleSupplierChange = (id: string) => {
@@ -471,7 +533,8 @@ function InvoiceDialog({
           const itemRes = await apiRequest("POST", "/api/inventory/items", {
             name: row.name.trim(),
             categoryId: row.categoryId || undefined,
-            supplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
+            accountingSupplierIds: form.supplierId ? [parseInt(form.supplierId)] : [],
+            preferredAccountingSupplierId: form.supplierId ? parseInt(form.supplierId) : null,
             unit: row.unit,
             costPrice: row.costPrice,
             currentStock: row.quantity,
@@ -517,12 +580,16 @@ function InvoiceDialog({
               sourceType: "purchase_invoice",
               sourceId: String(invoice.id),
             });
-            // Update cost price on the item if provided
-            if (parseFloat(row.costPrice) > 0) {
-              await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
-                costPrice: row.costPrice,
-              });
-            }
+          }
+
+          const existingItem = existingInvItems.find((item) => item.id === row.existingItemId);
+          const supplierUpdate = buildInventorySupplierUpdate(
+            existingItem?.suppliers ?? [],
+            form.supplierId ? parseInt(form.supplierId) : null,
+            row.costPrice,
+          );
+          if (Object.keys(supplierUpdate).length > 0) {
+            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, supplierUpdate);
           }
           inventoryCount++;
         } catch (e) {
@@ -601,6 +668,10 @@ function InvoiceDialog({
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
+  // Remito: solo existe en el layout unificado — llega mercadería sin datos de
+  // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
+  // los datos del emisor y los artículos recibidos.
+  const isRemito = form.tipoComprobante === "REMITO";
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
   const isImporteUnico = isFacturaC || isRetencion;
@@ -617,31 +688,663 @@ function InvoiceDialog({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
-      <DialogContent
-        className="max-w-2xl max-h-[92vh] overflow-y-auto"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>{isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}</DialogTitle>
-          {/* Step indicator */}
-          <div className="flex gap-1 mt-2">
-            {steps.map((s, i) => (
-              <div key={i} className="flex items-center">
-                <button
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
-                  onClick={() => i < step && setStep(i)}
-                >
-                  {i + 1}. {s}
-                </button>
-                {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
-              </div>
-            ))}
-          </div>
-        </DialogHeader>
-
+    <InvoiceFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={(v) => { if (!v) resetDialog(); }}
+      title={isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
+      headerExtra={
+        unifiedLayout ? undefined : (
+        <div className="flex gap-1 mt-2">
+          {steps.map((s, i) => (
+            <div key={i} className="flex items-center">
+              <button
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+                onClick={() => i < step && setStep(i)}
+              >
+                {i + 1}. {s}
+              </button>
+              {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
+            </div>
+          ))}
+        </div>
+        )
+      }
+    >
         <div className="py-2 space-y-4">
+          {unifiedLayout ? (
+          <>
+          <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Tipo de Comprobante</Label>
+                  <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
+                    // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
+                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
+                      setForm((p) => ({
+                        ...p,
+                        tipoComprobante: v,
+                        alicuotaIva: "0",
+                        cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
+                        subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
+                        ...ALL_IVA_FIELDS,
+                      }));
+                    } else if (v === "REMITO") {
+                      // Remito: no lleva impuestos ni totales — limpiar cualquier importe
+                      // cargado antes de cambiar de tipo para no enviarlo oculto.
+                      setForm((p) => ({
+                        ...p,
+                        tipoComprobante: v,
+                        montoNeto: "",
+                        montoExento: "",
+                        montoNoGravado: "",
+                        impuestosInternos: "",
+                        ley25413: "",
+                        percepcionIibb: "",
+                        percepcionIva: "",
+                        percepcionGanancias: "",
+                        retencionIibb: "",
+                        retencionGanancias: "",
+                        retencionIva: "",
+                        retencionSuss: "",
+                        subtipoRetencion: "",
+                        ...ALL_IVA_FIELDS,
+                      }));
+                      setNetoLines([emptyNetoLine()]);
+                    } else {
+                      f("tipoComprobante", v);
+                    }
+                  }}>
+                    <SelectTrigger data-testid="select-tipo-comprobante">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIPOS_UNIFIED.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Condición de Pago</Label>
+                  <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
+                    <SelectTrigger data-testid="select-condicion-pago">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contado">Contado</SelectItem>
+                      <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+          </div>
+              {isRetencion && (
+                <div>
+                  <Label>Tipo de Retención</Label>
+                  <Select value={form.subtipoRetencion || undefined} onValueChange={(v) => f("subtipoRetencion", v)}>
+                    <SelectTrigger data-testid="select-subtipo-retencion">
+                      <SelectValue placeholder="Seleccionar tipo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="municipal">Municipal</SelectItem>
+                      <SelectItem value="iibb">Ingresos Brutos (IIBB)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                      <SelectItem value="iva">IVA</SelectItem>
+                      <SelectItem value="suss">SUSS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+          <Separator />
+
+          <div className="space-y-3">
+            <Label className="text-sm font-semibold">Datos del emisor</Label>
+            <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label>Proveedor</Label>
+                  <div className="flex gap-2 items-center">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        placeholder="Buscar proveedor..."
+                        value={supplierDropdownOpen
+                          ? supplierSearch
+                          : form.supplierId === "manual"
+                          ? "— Ingreso manual —"
+                          : form.supplierId
+                          ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
+                          : ""}
+                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        data-testid="select-supplier"
+                        autoComplete="off"
+                      />
+                      {supplierDropdownOpen && (
+                        <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
+                          <div
+                            className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                            onMouseDown={() => { handleSupplierChange("manual"); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                          >
+                            <Check className={`h-4 w-4 shrink-0 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
+                            — Ingresar manual —
+                          </div>
+                          {[...suppliers]
+                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
+                            .slice(0, 60)
+                            .map((s) => (
+                              <div
+                                key={s.id}
+                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
+                                  <span className="truncate">{s.razonSocial}</span>
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
+                              </div>
+                            ))}
+                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onMouseDown={(e) => { e.preventDefault(); setSupplierDropdownOpen(false); setQuickCreateOpen(true); }}
+                      title="Crear nuevo proveedor"
+                      data-testid="btn-quick-create-supplier"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                {(form.supplierId === "manual" || !form.supplierId) && (
+                  <>
+                    <div>
+                      <Label>Razón Social</Label>
+                      <Input value={form.proveedorNombre} onChange={(e) => f("proveedorNombre", e.target.value)} data-testid="input-proveedor-nombre" />
+                    </div>
+                    <div>
+                      <Label>CUIT</Label>
+                      <Input value={form.proveedorCuit} onChange={(e) => f("proveedorCuit", e.target.value)} data-testid="input-proveedor-cuit" />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <Label>Punto de Venta</Label>
+                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
+                </div>
+                <div>
+                  <Label>Número</Label>
+                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" data-testid="input-numero-comprobante" />
+                </div>
+                <div>
+                  <Label>Fecha de Emisión</Label>
+                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} data-testid="input-fecha-emision" />
+                </div>
+                <div>
+                  <Label>Período</Label>
+                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" data-testid="input-periodo" />
+                </div>
+                <div className="col-span-2">
+                  <Label>{isRetencion ? "Cuenta Contable de Activo" : "Cuenta Contable de Gasto"}</Label>
+                  <Select
+                    value={form.cuentaContableId || "__none__"}
+                    disabled={isRetencion}
+                    onValueChange={(v) => f("cuentaContableId", v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger data-testid="select-cuenta-contable">
+                      <SelectValue placeholder="Seleccionar cuenta..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
+                      {accounts
+                        .filter((a) => a.id && (
+                          isRetencion
+                            ? a.tipo === "activo" && a.codigo.startsWith("1.1.")
+                            : a.tipo === "egreso"
+                        ))
+                        .map((a) => (
+                          <SelectItem key={a.id} value={String(a.id)}>
+                            {a.codigo} — {a.nombre}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isRetencion
+                      ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".'}
+                  </p>
+                </div>
+                <div className="col-span-2">
+                  <Label>Centro de Costo</Label>
+                  <Select value={form.centroCosto || "__none__"} onValueChange={(v) => f("centroCosto", v === "__none__" ? "" : v)}>
+                    <SelectTrigger data-testid="select-centro-costo">
+                      <SelectValue placeholder="Seleccionar área..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
+                      {costCenters.map((c) => <SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Informativo. El reporte "Costos por Departamento" agrupa por la Cuenta Contable de Gasto, no por este campo.
+                  </p>
+                </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {!isEditing && (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Artículos</Label>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
+                <Package className="h-4 w-4 shrink-0" />
+                <span>Opcional — Agregá los productos recibidos. Podés sumar stock a artículos existentes o crear artículos nuevos.</span>
+              </div>
+
+              {invItems.length > 0 && (
+                <div className="space-y-3">
+                  {invItems.map((row, i) => (
+                    <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
+                      {/* Mode toggle */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-md border overflow-hidden text-xs">
+                          <button
+                            type="button"
+                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "existing" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                            onClick={() => toggleInvRowMode(i, "existing")}
+                            data-testid={`btn-mode-existing-${i}`}
+                          >
+                            Artículo existente
+                          </button>
+                          <button
+                            type="button"
+                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "new" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                            onClick={() => toggleInvRowMode(i, "new")}
+                            data-testid={`btn-mode-new-${i}`}
+                          >
+                            Artículo nuevo
+                          </button>
+                        </div>
+                        <div className="flex-1" />
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+
+                      {/* Article selector / name */}
+                      {row.mode === "existing" ? (
+                        <div>
+                          <Label className="text-xs mb-1 block">Artículo del inventario</Label>
+                          <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                className="w-full justify-between font-normal h-8 text-sm"
+                                data-testid={`select-existing-item-${i}`}
+                              >
+                                <span className="truncate">
+                                  {row.existingItemId
+                                    ? (existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.name || "Seleccionar artículo..."
+                                    : "Seleccionar artículo..."}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[340px] p-0" align="start">
+                              <Command>
+                                <CommandInput placeholder="Buscar artículo..." />
+                                <CommandList>
+                                  <CommandEmpty>No se encontraron artículos</CommandEmpty>
+                                  <CommandGroup>
+                                    {[...existingInvItems]
+                                      .sort((a: any, b: any) => a.name.localeCompare(b.name, "es"))
+                                      .map((item: any) => (
+                                        <CommandItem
+                                          key={item.id}
+                                          value={item.name}
+                                          onMouseDown={(e) => e.preventDefault()}
+                                          onSelect={() => {
+                                            updateInvRow(i, "existingItemId", String(item.id));
+                                            setExistingItemOpen((p) => ({ ...p, [i]: false }));
+                                          }}
+                                        >
+                                          <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+                                          <span className="flex-1">{item.name}</span>
+                                          <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
+                                        </CommandItem>
+                                      ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs mb-1 block">Nombre del artículo *</Label>
+                              <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
+                            </div>
+                            <div>
+                              <Label className="text-xs mb-1 block">Categoría</Label>
+                              <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
+                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">— Sin categoría —</SelectItem>
+                                  {(() => {
+                                    const cats = (itemCategories as any[]);
+                                    const groups = cats.filter((c: any) => c.isGroup);
+                                    const leafCats = cats.filter((c: any) => !c.isGroup && c.id);
+                                    const result: JSX.Element[] = [];
+                                    for (const g of groups) {
+                                      const children = leafCats.filter((c: any) => c.parentId === g.id);
+                                      if (!children.length) continue;
+                                      result.push(
+                                        <SelectGroup key={g.id}>
+                                          <SelectLabel>{g.name}</SelectLabel>
+                                          {children.map((cat: any) => (
+                                            <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
+                                          ))}
+                                        </SelectGroup>
+                                      );
+                                    }
+                                    const ungrouped = leafCats.filter((c: any) => !c.parentId);
+                                    if (ungrouped.length) {
+                                      if (result.length) result.push(<SelectSeparator key="sep" />);
+                                      ungrouped.forEach((cat: any) => result.push(
+                                        <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
+                                      ));
+                                    }
+                                    return result;
+                                  })()}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <Label className="text-xs mb-1 block">Tipo de artículo</Label>
+                              <Select value={row.itemKind || "materia_prima"} onValueChange={(v) => updateInvRow(i, "itemKind", v)}>
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-kind-${i}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
+                                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
+                                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div>
+                              <Label className="text-xs mb-1 block">Stock mínimo</Label>
+                              <Input type="number" min="0" step="1" value={row.minStock} onChange={(e) => updateInvRow(i, "minStock", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-minstock-${i}`} />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Quantity, unit, cost */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs mb-1 block">Cantidad</Label>
+                          <Input type="number" min="0" step="0.001" value={row.quantity} onChange={(e) => updateInvRow(i, "quantity", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-qty-${i}`} />
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">Unidad</Label>
+                          <Select value={row.unit} onValueChange={(v) => updateInvRow(i, "unit", v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">Costo unit. ($)</Label>
+                          <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
+                        </div>
+                      </div>
+
+                      {/* Warehouse selector */}
+                      {invWarehouses.length > 0 && (
+                        <div>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Sin depósito (stock general)" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— Sin depósito —</SelectItem>
+                              {(invWarehouses as any[]).filter((w: any) => w.id).map((wh: any) => (
+                                <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <Button type="button" variant="outline" size="sm" onClick={addInvRow} data-testid="btn-add-inv-item">
+                <Plus className="h-4 w-4 mr-2" />Agregar artículo
+              </Button>
+
+              {invItems.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin artículos — el comprobante se registrará sin modificar el inventario.
+                </p>
+              )}
+            </div>
+            </div>
+          )}
+
+          {isRemito && (
+            <p className="text-xs text-muted-foreground text-center py-2" data-testid="text-remito-sin-impuestos">
+              Remito — no lleva impuestos ni total, solo suma los artículos al inventario.
+            </p>
+          )}
+
+          {!isRemito && (
+          <>
+          <Separator />
+
+          <div className="space-y-4">
+            <Label className="text-sm font-semibold">Impuestos y totales</Label>
+              {/* ── Netos gravados — multi-línea ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">
+                    {isImporteUnico ? "Importe" : "Netos Gravados"}
+                    {isResumen && !isImporteUnico && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
+                  </Label>
+                  {!isImporteUnico && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={addNetoLine}
+                      data-testid="btn-add-neto-line"
+                    >
+                      <Plus className="h-3 w-3" /> Agregar línea
+                    </Button>
+                  )}
+                </div>
+
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs">{isImporteUnico ? "Importe total $" : "Neto gravado $"}</th>
+                        {!isImporteUnico && <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>}
+                        {!isImporteUnico && <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>}
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {netoLines.map((line, i) => {
+                        const n = parseFloat(line.neto) || 0;
+                        const entry = IVA_MAP[line.alicuota];
+                        const ivaCalc = !isImporteUnico && entry && n > 0 ? n * entry.rate / 100 : 0;
+                        return (
+                          <tr key={i} className="bg-background">
+                            <td className="px-2 py-1.5">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="0.00"
+                                value={line.neto}
+                                onChange={e => updateNetoLine(i, "neto", e.target.value)}
+                                className="h-8 text-sm"
+                                data-testid={`input-neto-line-${i}`}
+                              />
+                            </td>
+                            {!isImporteUnico && (
+                              <td className="px-2 py-1.5">
+                                <Select
+                                  value={line.alicuota}
+                                  onValueChange={v => updateNetoLine(i, "alicuota", v)}
+                                >
+                                  <SelectTrigger className="h-8 text-sm" data-testid={`select-alicuota-line-${i}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="5">5%</SelectItem>
+                                    <SelectItem value="10.5">10.5%</SelectItem>
+                                    <SelectItem value="21">21%</SelectItem>
+                                    <SelectItem value="25">2.5%</SelectItem>
+                                    <SelectItem value="27">27%</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                            )}
+                            {!isImporteUnico && (
+                              <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
+                                {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
+                              </td>
+                            )}
+                            <td className="px-1 py-1.5 text-center">
+                              {netoLines.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeNetoLine(i)}
+                                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 mx-auto"
+                                  data-testid={`btn-remove-neto-line-${i}`}
+                                  title="Quitar línea"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="border-t bg-muted/30">
+                      <tr>
+                        <td colSpan={2} className="px-3 py-2 text-xs text-muted-foreground">
+                          {isImporteUnico ? "Total:" : "Total neto:"} <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
+                        </td>
+                        {!isImporteUnico && (
+                          <td className="px-3 py-2 text-xs text-right text-muted-foreground">
+                            Total IVA: <span className="font-bold text-foreground font-mono">
+                              ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
+                            </span>
+                          </td>
+                        )}
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* IVA desagregado — solo se muestra si hay importes */}
+                {($n(form.montoIva21) > 0 || $n(form.montoIva105) > 0 || $n(form.montoIva27) > 0 || $n(form.montoIva5) > 0 || $n(form.montoIva25) > 0) && (
+                  <div className="rounded-md bg-blue-50 border border-blue-100 dark:bg-blue-950/20 dark:border-blue-900 px-3 py-2 space-y-1">
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">IVA desagregado por alícuota</p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
+                      {$n(form.montoIva21)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 21%</span><span className="font-mono font-medium">${fmt(form.montoIva21)}</span></div>}
+                      {$n(form.montoIva105) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 10.5%</span><span className="font-mono font-medium">${fmt(form.montoIva105)}</span></div>}
+                      {$n(form.montoIva27)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 27%</span><span className="font-mono font-medium">${fmt(form.montoIva27)}</span></div>}
+                      {$n(form.montoIva5)   > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 5%</span><span className="font-mono font-medium">${fmt(form.montoIva5)}</span></div>}
+                      {$n(form.montoIva25)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 2.5%</span><span className="font-mono font-medium">${fmt(form.montoIva25)}</span></div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Otros conceptos ── */}
+              {!isRetencion && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>Exento</Label><Input type="number" step="0.01" value={form.montoExento} onChange={(e) => f("montoExento", e.target.value)} data-testid="input-exento" /></div>
+                  <div><Label>No Gravado</Label><Input type="number" step="0.01" value={form.montoNoGravado} onChange={(e) => f("montoNoGravado", e.target.value)} data-testid="input-no-gravado" /></div>
+                  <div><Label>Imp. Internos</Label><Input type="number" step="0.01" value={form.impuestosInternos} onChange={(e) => f("impuestosInternos", e.target.value)} data-testid="input-imp-internos" /></div>
+                  <div><Label>Ley 25.413</Label><Input type="number" step="0.01" value={form.ley25413} onChange={(e) => f("ley25413", e.target.value)} data-testid="input-ley25413" /></div>
+                </div>
+              )}
+              {isRetencion ? (
+                <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  Una retención recibida ya representa el crédito fiscal final. No lleva percepciones ni retenciones adicionales.
+                </div>
+              ) : (
+                <>
+              <p className="text-sm font-semibold text-muted-foreground">Percepciones (DEBE)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Percep. IIBB</Label><Input type="number" step="0.01" value={form.percepcionIibb} onChange={(e) => f("percepcionIibb", e.target.value)} data-testid="input-percep-iibb" /></div>
+                <div><Label>Percep. IVA</Label><Input type="number" step="0.01" value={form.percepcionIva} onChange={(e) => f("percepcionIva", e.target.value)} data-testid="input-percep-iva" /></div>
+                <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
+              </div>
+              <Separator />
+              <p className="text-sm font-semibold text-muted-foreground">
+                {isLiquidacionTarjeta
+                  ? "Retenciones sufridas (DEBE — suman al total)"
+                  : "Retenciones (HABER — descuentan el pago)"}
+              </p>
+              {isLiquidacionTarjeta && (
+                <p className="text-xs text-muted-foreground">
+                  Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
+                </p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
+                <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
+                <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
+                <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
+              </div>
+                </>
+              )}
+                <div className="col-span-2">
+                  <Label>Observaciones</Label>
+                  <Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} data-testid="input-observaciones" />
+                </div>
+              {/* Total preview */}
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="pt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold">Total Comprobante</span>
+                    <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Condición: {form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}
+                  </div>
+                </CardContent>
+              </Card>
+          </div>
+          </>
+          )}
+          </>
+          ) : (
+          <>
           {/* STEP 0: Encabezado */}
           {step === 0 && (
             <>
@@ -668,6 +1371,12 @@ function InvoiceDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {/* Un Remito solo se crea desde el Centro de Comprobantes (layout
+                          unificado) — esta opción no se ofrece acá, solo se muestra si
+                          se está editando uno ya existente para no dejar el select en blanco. */}
+                      {isEditing && form.tipoComprobante === "REMITO" && (
+                        <SelectItem value="REMITO">Remito</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1245,7 +1954,22 @@ function InvoiceDialog({
               )}
             </div>
           )}
+          </>
+          )}
 
+          {unifiedLayout ? (
+        <DialogFooter>
+          <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={createMut.isPending || patchMut.isPending}
+            data-testid="btn-submit-invoice"
+          >
+            {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+            {isEditing ? "Guardar cambios" : isRemito ? "Registrar remito" : "Factura completa"}
+          </Button>
+        </DialogFooter>
+          ) : (
         <DialogFooter className="flex items-center justify-between">
           <div>
             {step > 0 && (
@@ -1268,10 +1992,9 @@ function InvoiceDialog({
             )}
           </div>
         </DialogFooter>
+          )}
         </div>
-      </DialogContent>
-
-    </Dialog>
+    </InvoiceFormShell>
 
     {/* Quick-create supplier dialog — rendered OUTSIDE main Dialog to avoid Radix nesting issues */}
     <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>

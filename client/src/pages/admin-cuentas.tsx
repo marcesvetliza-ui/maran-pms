@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -65,8 +66,29 @@ type AccountMovement = {
   reference?: string | null;
   paymentMethod?: string | null;
   saldoPendiente?: number;
+  area?: string | null;
   createdAt: string;
 };
+
+// Solo hacia adelante: los movimientos creados antes de este campo quedan en
+// null, se muestran como "Sin clasificar" en vez de adivinar el área.
+const AREA_LABELS: Record<string, string> = {
+  recepcion: "Recepción",
+  restaurant: "Restaurant",
+  eventos: "Eventos",
+  spa: "SPA",
+  grupos: "Grupos",
+  otros: "Otros",
+};
+const AREA_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "Todas las áreas" },
+  { value: "recepcion", label: "Recepción" },
+  { value: "restaurant", label: "Restaurant" },
+  { value: "eventos", label: "Eventos" },
+  { value: "spa", label: "SPA" },
+  { value: "grupos", label: "Grupos" },
+  { value: "sin_clasificar", label: "Sin clasificar" },
+];
 
 const TYPE_LABELS: Record<string, string> = {
   company: "Empresa",
@@ -84,6 +106,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
 function fmtMoney(n: string | number) {
   return `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
 }
+
+const HOTEL_NAME_HTML = "Maran Suites &amp; Towers";
 
 function printEntityStatement(entityName: string, entityType: string, movements: AccountMovement[]) {
   const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
@@ -144,7 +168,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -181,7 +205,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
@@ -243,7 +267,7 @@ function printDebtListing(
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -283,7 +307,7 @@ function printDebtListing(
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
@@ -358,6 +382,7 @@ function EntityMovementsInline({
           <tr className="bg-muted/50 text-muted-foreground">
             <th className="text-left px-3 py-1.5 font-medium">Fecha</th>
             <th className="text-left px-3 py-1.5 font-medium">Tipo</th>
+            <th className="text-left px-3 py-1.5 font-medium">Área</th>
             <th className="text-left px-3 py-1.5 font-medium">Descripción</th>
             <th className="text-left px-3 py-1.5 font-medium">Reserva / Ref.</th>
             <th className="text-right px-3 py-1.5 font-medium">Importe</th>
@@ -414,6 +439,9 @@ function EntityMovementsInline({
                     </Badge>
                   )}
                 </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {m.area ? (AREA_LABELS[m.area] ?? m.area) : (m.type === "cargo" ? "Sin clasificar" : "—")}
+                </td>
                 <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">
                   {m.reservationCode ? (
@@ -453,7 +481,7 @@ function EntityMovementsInline({
         </tbody>
         <tfoot>
           <tr className="bg-muted/50 font-semibold">
-            <td colSpan={4} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
+            <td colSpan={5} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
             <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${balance > 0 ? "text-red-600" : "text-green-600"}`}>
               {fmtMoney(balance)}
             </td>
@@ -479,8 +507,9 @@ const AGING_BUCKETS: AgingBucket[] = [
   { label: "+90 días",   days: [91, Infinity], color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800" },
 ];
 
-function AgingReportSection({ accountSummary }: {
-  accountSummary: { companies: { id: string; name: string; balance: number }[]; agencies: { id: string; name: string; balance: number }[]; guests: { id: string; name: string; balance: number }[] }
+function AgingReportSection({ accountSummary, areaFilter }: {
+  accountSummary: { companies: { id: string; name: string; balance: number }[]; agencies: { id: string; name: string; balance: number }[]; guests: { id: string; name: string; balance: number }[] };
+  areaFilter: string;
 }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -494,11 +523,12 @@ function AgingReportSection({ accountSummary }: {
 
   // Fetch all movements without date filter to calculate aging from oldest unpaid charge
   const { data: allMovementsRaw, isLoading } = useQuery<AccountMovement[]>({
-    queryKey: ["/api/account-movements/report-aging"],
+    queryKey: ["/api/account-movements/report-aging", areaFilter],
     queryFn: async () => {
       const from = "2000-01-01";
       const to = getArgentinaToday();
-      const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}`);
+      const areaParam = areaFilter !== "all" ? `&area=${areaFilter}` : "";
+      const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}${areaParam}`);
       return res.json();
     },
   });
@@ -605,6 +635,7 @@ export default function AdminCuentasPage() {
   const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
   const [expandedEntityId, setExpandedEntityId] = useState<string | null>(null);
   const [expandedEntityType, setExpandedEntityType] = useState<string | null>(null);
+  const [areaFilter, setAreaFilter] = useState<string>("all");
 
   const toggleEntityDetail = (type: string, id: string) => {
     if (expandedEntityId === id && expandedEntityType === type) {
@@ -670,7 +701,12 @@ export default function AdminCuentasPage() {
     agencies: { id: string; name: string; balance: number }[];
     guests: { id: string; name: string; balance: number }[];
   }>({
-    queryKey: ["/api/account-summary"],
+    queryKey: ["/api/account-summary", areaFilter],
+    queryFn: async () => {
+      const params = areaFilter !== "all" ? `?area=${areaFilter}` : "";
+      const res = await apiRequest("GET", `/api/account-summary${params}`);
+      return res.json();
+    },
   });
 
   type ReceiptMovement = AccountMovement & { entityName: string; entityTypeName: string };
@@ -727,6 +763,26 @@ export default function AdminCuentasPage() {
           </h1>
           <p className="text-muted-foreground text-sm">Empresas, Agencias y Clientes — saldos pendientes y movimientos</p>
         </div>
+      </div>
+
+      {/* Filtro por área de origen */}
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground shrink-0">Área:</span>
+        <Select value={areaFilter} onValueChange={setAreaFilter}>
+          <SelectTrigger className="w-56" data-testid="select-area-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AREA_FILTER_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {areaFilter !== "all" && (
+          <p className="text-xs text-muted-foreground">
+            Solo movimientos creados desde que se agregó este filtro — el historial anterior no se reclasificó.
+          </p>
+        )}
       </div>
 
       {/* Resumen de deuda — cards clickeables */}
@@ -1120,7 +1176,7 @@ export default function AdminCuentasPage() {
 
       {/* Reporte de Antigüedad de Deuda */}
       {accountSummary && (totalCompaniesDebt > 0 || totalAgenciesDebt > 0 || totalGuestsDebt > 0) && (
-        <AgingReportSection accountSummary={accountSummary} />
+        <AgingReportSection accountSummary={accountSummary} areaFilter={areaFilter} />
       )}
 
       {/* Reconciliación de pagos CC existentes */}

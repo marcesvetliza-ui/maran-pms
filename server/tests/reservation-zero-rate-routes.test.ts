@@ -34,7 +34,15 @@ vi.mock("../db", () => ({
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
 vi.mock("../auth", () => ({ requireAuth: (_req: any, _res: any, next: () => void) => next() }));
-vi.mock("../billing/invoiceService", () => ({ emitirFactura: vi.fn() }));
+vi.mock("../billing/invoiceService", () => ({
+  emitirFactura: vi.fn(),
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
+}));
 vi.mock("../billing/invoicePdf", () => ({ generarResumenCuentaPDF: vi.fn() }));
 vi.mock("../billing/billingConfig", () => ({ getBillingConfig: vi.fn() }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));

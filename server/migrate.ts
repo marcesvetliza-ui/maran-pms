@@ -1,7 +1,12 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
-import { sql } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
+import { channexConnections, type FolioEntityType } from "@shared/schema";
+import { encryptChannexApiKey } from "./channex/credentials";
+
+const FOLIO_ENTITY_TYPES: readonly FolioEntityType[] =
+  ["reservation", "restaurant_order", "spa_account", "group", "event", "company", "agency"];
 
 /**
  * Serializes catalog-check + DDL batches across concurrently starting app
@@ -31,6 +36,664 @@ export function createIndexWithoutRerunNotice(indexName: string, createIndexSql:
 
 function escapeSqlLiteral(value: string): string {
   return value.replaceAll("'", "''");
+}
+
+export const COMPANY_OPENING_BALANCES_2026_09_18 = [
+  { code: "11749", name: "ASOCIACION MUTUAL MODELO DE ENTRE RIOS", amount: "1254500.16", aliases: ["ASOCIACION MUTUAL MODELO DE ENTRE RIOS"] },
+  { code: "111177", name: "B GAMING S.A.", amount: "268000.00", aliases: ["B GAMING S.A."] },
+  { code: "11891", name: "BANCO DE SANTA CRUZ SA", amount: "535500.00", aliases: ["BANCO DE SANTA CRUZ SA"] },
+  { code: "11135809", name: "CAMARA DE INDUSTRIA Y COMERCIO ARGENTINO", amount: "1679450.00", aliases: ["CAMARA DE INDUSTRIA Y COMERCIO ARGENTINO"] },
+  { code: "111901", name: "CLUB DE VOLANTES ENTRERRIANOS", amount: "4417187.00", aliases: ["CLUB DE VOLANTES ENTRERRIANOS"] },
+  { code: "112094", name: "CONSEJO PROF. DE CS ECON. ENTRE RIOS", amount: "250000.00", aliases: ["CONSEJO PROF. DE CS ECON. ENTRE RIOS", "CONSEJO PROFESIONAL DE CS ECO DE ER"] },
+  { code: "112519", name: "DESPEGAR.COM.AR SA", amount: "2198632.60", aliases: ["DESPEGAR.COM.AR SA"] },
+  { code: "112973", name: "ENER SA", amount: "2396000.13", aliases: ["ENER SA"] },
+  { code: "113029", name: "ERIOCHEM S.A.", amount: "1053000.00", aliases: ["ERIOCHEM S.A.", "ERIOCHEM SA"] },
+  { code: "113195", name: "F.A.D.R.A", amount: "1306500.00", aliases: ["F.A.D.R.A"] },
+  { code: "11124128", name: "FGPC SRL", amount: "168500.00", aliases: ["FGPC SRL"] },
+  { code: "11136329", name: "FONDO INTERNACIONAL DE DESARROLLO AGRICOLA", amount: "418840.00", aliases: ["FONDO INTERNACIONAL DE DESARROLLO AGRICOLA"] },
+  { code: "11133146", name: "FUNDACION MIRADORTEC - PARQUE TECNOLOGICO", amount: "4351700.04", aliases: ["FUNDACION MIRADORTEC - PARQUE TECNOLOGICO", "FUNDACION MIRADORTEC PARQUE TECNOLOGICO"] },
+  { code: "113651", name: "FUNDACION UNIVERSIDAD CATOLICA ARGENTINA", amount: "608000.00", aliases: ["FUNDACION UNIVERSIDAD CATOLICA ARGENTINA", "UNIVERSIDAD CATOLICA ARGENTINA SEDE PARANA"] },
+  { code: "113800", name: "GBT II ARGENTINA S.R.L", amount: "1338500.00", aliases: ["GBT II ARGENTINA S.R.L"] },
+  { code: "114082", name: "GRUPO SAN MARCOS SRL", amount: "546000.00", aliases: ["GRUPO SAN MARCOS SRL"] },
+  { code: "114529", name: "INSTITUTO AUTARQUICO PROV. DEL SEGURO", amount: "6211500.11", aliases: ["INSTITUTO AUTARQUICO PROV. DEL SEGURO", "IAPSER"] },
+  { code: "114331", name: "ITS INTERNATIONAL SERVICES SA", amount: "814000.00", aliases: ["ITS INTERNATIONAL SERVICES SA"] },
+  { code: "114705", name: "JOHNSON ACERO S.A.", amount: "2425200.10", aliases: ["JOHNSON ACERO S.A.", "JOHNSON ACERO SA"] },
+  { code: "11126237", name: "MEDIA SERVICIOS S.A.", amount: "6240000.00", aliases: ["MEDIA SERVICIOS S.A."] },
+  { code: "11134775", name: "MINISTERIO DE TURISMO DE URUGUAY", amount: "1566500.00", aliases: ["MINISTERIO DE TURISMO DE URUGUAY"] },
+  { code: "1182734", name: "MONTI CARLOS NORBERTO", amount: "160500.00", aliases: ["MONTI CARLOS NORBERTO"] },
+  { code: "116261", name: "NUEVO BANCO DE ENTRE RIOS SA", amount: "2745600.04", aliases: ["NUEVO BANCO DE ENTRE RIOS SA"] },
+  { code: "116409", name: "OSDE ORGANIZACION DE SERVICIOS DIRECTOS", amount: "275000.00", aliases: ["OSDE ORGANIZACION DE SERVICIOS DIRECTOS", "OSDE ORGANIZACION DE SERVICIOS DIRECTOS EMPRESARIOS"] },
+  { code: "116527", name: "PAPELERA ENTRE RIOS S.A", amount: "983400.06", aliases: ["PAPELERA ENTRE RIOS S.A", "PAPELERA ER SA"] },
+  { code: "1198703", name: "PARACIMA PRODUCCIONES SAS", amount: "377300.00", aliases: ["PARACIMA PRODUCCIONES SAS"] },
+  { code: "116942", name: "PUNTO TURISTICO SA", amount: "1693000.00", aliases: ["PUNTO TURISTICO SA"] },
+  { code: "117623", name: "SECAR SECURITY ARGENTINA S.A.", amount: "728000.00", aliases: ["SECAR SECURITY ARGENTINA S.A.", "SECAR SECURITY ARGENTINA SA"] },
+  { code: "115911", name: "Secretaria De Trabajo De La Provincia De Entre Rios", amount: "316000.00", aliases: ["Secretaria De Trabajo De La Provincia De Entre Rios"] },
+  { code: "1174120", name: "UNER", amount: "134000.00", aliases: ["UNER"] },
+] as const;
+
+const companyOpeningBalanceValuesSql = COMPANY_OPENING_BALANCES_2026_09_18.map((row) => {
+  if (!/^\d+$/.test(row.code) || !/^\d+\.\d{2}$/.test(row.amount)) {
+    throw new Error(`Saldo inicial de empresa inválido: ${row.code}`);
+  }
+  const aliasesSql = row.aliases
+    .map((alias) => `'${escapeSqlLiteral(alias)}'`)
+    .join(", ");
+  return `('${row.code}', '${escapeSqlLiteral(row.name)}', ${row.amount}::numeric, ARRAY[${aliasesSql}]::text[])`;
+}).join(",\n        ");
+
+export const COMPANY_OPENING_BALANCES_2026_09_18_SQL = serializeIncrementalDdl(`
+  SET LOCAL lock_timeout = '8s';
+  SET LOCAL statement_timeout = '30s';
+
+  DO $migration$
+  DECLARE
+    opening record;
+    matched_company_id varchar;
+    matched_count integer;
+    imported_count integer := 0;
+    imported_total numeric := 0;
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM audit_logs
+      WHERE action = 'IMPORT_OPENING_BALANCES'
+        AND module = 'cuenta_corriente'
+        AND details LIKE '%OPENING-COMPANY-2026-09-18%'
+    ) THEN
+      RETURN;
+    END IF;
+
+    LOCK TABLE companies, account_movements, account_movement_allocations
+      IN ACCESS EXCLUSIVE MODE;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${companyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      IF matched_count > 1 THEN
+        RAISE EXCEPTION
+          'Importación de saldos detenida: la empresa % tiene % coincidencias',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      IF matched_count = 0 THEN
+        INSERT INTO companies (
+          razon_social,
+          nombre_fantasia,
+          cuil_cuit,
+          pais,
+          condicion_iva,
+          payment_term_days,
+          condicion_venta_predeterminada,
+          regimen_hospedaje,
+          notes,
+          is_active,
+          created_at
+        ) VALUES (
+          opening.company_name,
+          opening.company_name,
+          '',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          'Creada desde saldo inicial; cuenta legacy ' || opening.legacy_code,
+          'true',
+          now()
+        )
+        RETURNING id INTO matched_company_id;
+      END IF;
+    END LOOP;
+
+    DELETE FROM account_movement_allocations allocation
+    WHERE EXISTS (
+      SELECT 1 FROM account_movements movement
+      WHERE movement.id = allocation.pago_id
+        AND movement.entity_type = 'company'
+    )
+    OR EXISTS (
+      SELECT 1 FROM account_movements movement
+      WHERE movement.id = allocation.cargo_id
+        AND movement.entity_type = 'company'
+    );
+
+    DELETE FROM account_movements WHERE entity_type = 'company';
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${companyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Importación de saldos detenida: la empresa % tiene % coincidencias al insertar',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      INSERT INTO account_movements (
+        entity_type,
+        entity_id,
+        date,
+        type,
+        description,
+        amount,
+        reference,
+        created_by,
+        created_at
+      ) VALUES (
+        'company',
+        matched_company_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-COMPANY-2026-09-18',
+        'system-import',
+        now()
+      );
+
+      imported_count := imported_count + 1;
+      imported_total := imported_total + opening.amount;
+    END LOOP;
+
+    IF imported_count <> 30 OR imported_total <> 47460310.24::numeric THEN
+      RAISE EXCEPTION
+        'Importación de saldos detenida: resultado % empresas, total %',
+        imported_count,
+        imported_total;
+    END IF;
+
+    IF EXISTS (
+      SELECT entity_id
+      FROM account_movements
+      WHERE entity_type = 'company'
+      GROUP BY entity_id
+      HAVING count(*) <> 1
+    ) OR (
+      SELECT count(*) FROM account_movements WHERE entity_type = 'company'
+    ) <> 30 THEN
+      RAISE EXCEPTION 'Importación de saldos detenida: movimientos duplicados o residuales';
+    END IF;
+
+    INSERT INTO audit_logs (
+      user_name,
+      action,
+      module,
+      entity_type,
+      description,
+      details,
+      "timestamp"
+    ) VALUES (
+      'system-import',
+      'IMPORT_OPENING_BALANCES',
+      'cuenta_corriente',
+      'company',
+      'Importación de saldos iniciales de empresas',
+      'OPENING-COMPANY-2026-09-18; 30 empresas; fecha 18/09/2026; total 47460310.24',
+      now()
+    );
+  END
+  $migration$;
+`);
+
+export async function importCompanyOpeningBalances20260918() {
+  try {
+    await db.execute(sql.raw(COMPANY_OPENING_BALANCES_2026_09_18_SQL));
+    const { rows } = await db.execute(sql`
+      SELECT
+        count(*)::int AS count,
+        coalesce(sum(amount), 0)::numeric(14,2)::text AS total,
+        EXISTS (
+          SELECT 1 FROM audit_logs
+          WHERE action = 'REALLOCATE_OPENING_BALANCES'
+            AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+        ) AS reallocated
+      FROM account_movements
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    `);
+    const count = Number((rows[0] as any)?.count ?? 0);
+    const total = String((rows[0] as any)?.total ?? "0");
+    const reallocated = Boolean((rows[0] as any)?.reallocated);
+    const expectedCount = reallocated ? 25 : 30;
+    const expectedTotal = reallocated ? "40870177.64" : "47460310.24";
+    if (count !== expectedCount || total !== expectedTotal) {
+      throw new Error(`verificación posterior inválida: ${count} movimientos, total ${total}`);
+    }
+    logger.info(`Saldos iniciales de empresas verificados: ${count} movimientos, total ${total}.`);
+  } catch (cause: any) {
+    throw Object.assign(
+      new Error(`No se pudieron importar los saldos iniciales de empresas: ${cause?.message ?? cause}`),
+      {
+        code: "COMPANY_OPENING_BALANCE_IMPORT_FAILED",
+        cause,
+      },
+    );
+  }
+}
+
+export const AGENCY_OPENING_BALANCES_2026_09_18 = [
+  { companyName: "GBT II ARGENTINA S.R.L", agencyName: "GBT II ARGENTINA S.R.L", tradeName: "GLOBAL BUSINESS TRAVEL", cuit: "30714466603", amount: "1338500.00" },
+  { companyName: "GRUPO SAN MARCOS SRL", agencyName: "GRUPO SAN MARCOS SRL", tradeName: "KEEPERS TRAVEL", cuit: "30714516546", amount: "546000.00" },
+  { companyName: "DESPEGAR.COM.AR SA", agencyName: "DESPEGAR.COM.AR SA", tradeName: "DESPEGAR", cuit: "30701307115", amount: "2198632.60" },
+  { companyName: "ITS INTERNATIONAL SERVICES SA", agencyName: "ITS INTERNATIONAL SERVICES SA", tradeName: "PEZZATTI", cuit: "30676757917", amount: "814000.00" },
+  { companyName: "PUNTO TURISTICO SA", agencyName: "PUNTO TURISTICO SA", tradeName: "PUNTO TURISTICO", cuit: "30698479252", amount: "1693000.00" },
+] as const;
+
+const agencyCompanyNames = new Set<string>(
+  AGENCY_OPENING_BALANCES_2026_09_18.map((row) => row.companyName),
+);
+const remainingCompanyOpeningBalanceValuesSql = COMPANY_OPENING_BALANCES_2026_09_18
+  .filter((row) => !agencyCompanyNames.has(row.name))
+  .map((row) => {
+    const aliasesSql = row.aliases
+      .map((alias) => `'${escapeSqlLiteral(alias)}'`)
+      .join(", ");
+    return `('${row.code}', '${escapeSqlLiteral(row.name)}', ${row.amount}::numeric, ARRAY[${aliasesSql}]::text[])`;
+  })
+  .join(",\n        ");
+const agencyOpeningBalanceValuesSql = AGENCY_OPENING_BALANCES_2026_09_18
+  .map((row) => `('${escapeSqlLiteral(row.companyName)}', '${escapeSqlLiteral(row.agencyName)}', '${escapeSqlLiteral(row.tradeName)}', '${row.cuit}', ${row.amount}::numeric)`)
+  .join(",\n        ");
+
+export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL = serializeIncrementalDdl(`
+  SET LOCAL lock_timeout = '8s';
+  SET LOCAL statement_timeout = '30s';
+
+  DO $migration$
+  DECLARE
+    opening record;
+    matched_company_id varchar;
+    matched_agency_id varchar;
+    matched_count integer;
+    company_count integer := 0;
+    company_total numeric := 0;
+    agency_count integer := 0;
+    agency_total numeric := 0;
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM audit_logs
+      WHERE action = 'REALLOCATE_OPENING_BALANCES'
+        AND module = 'cuenta_corriente'
+        AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+    ) THEN
+      RETURN;
+    END IF;
+
+    LOCK TABLE
+      companies,
+      agencies,
+      guests,
+      reservations,
+      payments,
+      events,
+      account_movements,
+      account_movement_allocations
+      IN ACCESS EXCLUSIVE MODE;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${remainingCompanyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la empresa % tiene % coincidencias',
+          opening.company_name,
+          matched_count;
+      END IF;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT count(*), min(c.id)
+      INTO matched_count, matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+      IF matched_count <> 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la empresa-agencia % tiene % fichas de empresa',
+          opening.company_name,
+          matched_count;
+      END IF;
+
+      SELECT count(*), min(a.id)
+      INTO matched_count, matched_agency_id
+      FROM agencies a
+      WHERE regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+      IF matched_count > 1 THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: la agencia % tiene % coincidencias',
+          opening.agency_name,
+          matched_count;
+      END IF;
+
+      IF matched_count = 0 THEN
+        INSERT INTO agencies (
+          razon_social,
+          nombre_fantasia,
+          cuil_cuit,
+          notes,
+          is_active,
+          created_at
+        ) VALUES (
+          opening.agency_name,
+          opening.trade_name,
+          opening.cuit,
+          'Creada al reclasificar saldo inicial desde Empresas',
+          'true',
+          now()
+        )
+        RETURNING id INTO matched_agency_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM guests
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) OR EXISTS (
+        SELECT 1 FROM reservations
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) OR EXISTS (
+        SELECT 1 FROM payments
+        WHERE company_id = matched_company_id
+          AND agency_id IS NOT NULL
+          AND agency_id <> matched_agency_id
+      ) THEN
+        RAISE EXCEPTION
+          'Reasignación detenida: % tiene referencias con otra agencia',
+          opening.company_name;
+      END IF;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT min(c.id), min(a.id)
+      INTO matched_company_id, matched_agency_id
+      FROM companies c
+      CROSS JOIN agencies a
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        AND regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+
+      UPDATE guests
+      SET company_id = NULL, agency_id = matched_agency_id
+      WHERE company_id = matched_company_id;
+
+      UPDATE reservations
+      SET company_id = NULL, agency_id = matched_agency_id
+      WHERE company_id = matched_company_id;
+
+      UPDATE payments
+      SET
+        company_id = NULL,
+        agency_id = matched_agency_id,
+        billing_target = CASE WHEN billing_target = 'company' THEN 'agency' ELSE billing_target END
+      WHERE company_id = matched_company_id;
+
+      UPDATE events
+      SET company_id = NULL
+      WHERE company_id = matched_company_id;
+    END LOOP;
+
+    DELETE FROM account_movement_allocations;
+    DELETE FROM account_movements;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${remainingCompanyOpeningBalanceValuesSql}
+      ) AS source(legacy_code, company_name, amount, aliases)
+    LOOP
+      SELECT min(c.id)
+      INTO matched_company_id
+      FROM companies c
+      WHERE regexp_replace(lower(translate(coalesce(c.razon_social, ''), 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (
+          SELECT regexp_replace(lower(translate(alias, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          FROM unnest(opening.aliases) AS alias
+        );
+
+      INSERT INTO account_movements (
+        entity_type, entity_id, date, type, description, amount, reference, created_by, created_at
+      ) VALUES (
+        'company',
+        matched_company_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-COMPANY-2026-09-18',
+        'system-import',
+        now()
+      );
+      company_count := company_count + 1;
+      company_total := company_total + opening.amount;
+    END LOOP;
+
+    FOR opening IN
+      SELECT *
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+    LOOP
+      SELECT min(a.id)
+      INTO matched_agency_id
+      FROM agencies a
+      WHERE regexp_replace(lower(translate(a.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(opening.agency_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g');
+
+      INSERT INTO account_movements (
+        entity_type, entity_id, date, type, description, amount, reference, created_by, created_at
+      ) VALUES (
+        'agency',
+        matched_agency_id,
+        DATE '2026-09-18',
+        'cargo',
+        'Saldo inicial al 18/09/2026',
+        opening.amount,
+        'OPENING-AGENCY-2026-09-18',
+        'system-import',
+        now()
+      );
+      agency_count := agency_count + 1;
+      agency_total := agency_total + opening.amount;
+    END LOOP;
+
+    IF company_count <> 25 OR company_total <> 40870177.64::numeric
+       OR agency_count <> 5 OR agency_total <> 6590132.60::numeric THEN
+      RAISE EXCEPTION
+        'Reasignación detenida: empresas %/% agencias %/%',
+        company_count, company_total, agency_count, agency_total;
+    END IF;
+
+    DELETE FROM companies c
+    WHERE EXISTS (
+      SELECT 1
+      FROM (VALUES
+        ${agencyOpeningBalanceValuesSql}
+      ) AS source(company_name, agency_name, trade_name, cuit, amount)
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+          = regexp_replace(lower(translate(source.company_name, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+    );
+
+    IF (SELECT count(*) FROM account_movements WHERE entity_type = 'company') <> 25
+       OR (SELECT coalesce(sum(amount), 0) FROM account_movements WHERE entity_type = 'company') <> 40870177.64::numeric
+       OR (SELECT count(*) FROM account_movements WHERE entity_type = 'agency') <> 5
+       OR (SELECT coalesce(sum(amount), 0) FROM account_movements WHERE entity_type = 'agency') <> 6590132.60::numeric
+       OR EXISTS (SELECT 1 FROM account_movements WHERE entity_type = 'guest') THEN
+      RAISE EXCEPTION 'Reasignación detenida: los saldos finales no coinciden';
+    END IF;
+
+    INSERT INTO audit_logs (
+      user_name, action, module, entity_type, description, details, "timestamp"
+    ) VALUES (
+      'system-import',
+      'REALLOCATE_OPENING_BALANCES',
+      'cuenta_corriente',
+      'company_agency_guest',
+      'Reasignación de saldos iniciales de empresas a agencias y limpieza de clientes',
+      'OPENING-CC-REALLOCATION-2026-09-18; empresas 25/40870177.64; agencias 5/6590132.60; clientes 0',
+      now()
+    );
+  END
+  $migration$;
+`);
+
+export const CURRENT_ACCOUNT_REALLOCATION_2026_09_18_POSTCHECK_SQL = `
+  SELECT
+    count(*) FILTER (
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    )::int AS company_count,
+    coalesce(sum(amount) FILTER (
+      WHERE entity_type = 'company'
+        AND reference = 'OPENING-COMPANY-2026-09-18'
+    ), 0)::numeric(14,2)::text AS company_total,
+    count(*) FILTER (
+      WHERE entity_type = 'agency'
+        AND reference = 'OPENING-AGENCY-2026-09-18'
+    )::int AS agency_count,
+    coalesce(sum(amount) FILTER (
+      WHERE entity_type = 'agency'
+        AND reference = 'OPENING-AGENCY-2026-09-18'
+    ), 0)::numeric(14,2)::text AS agency_total,
+    (
+      SELECT count(*)::int
+      FROM companies c
+      WHERE regexp_replace(lower(translate(c.razon_social, 'áéíóúüñ.', 'aeiouun')), '[^a-z0-9]+', '', 'g')
+        = ANY (ARRAY[
+          'gbtiiargentinasrl',
+          'gruposanmarcossrl',
+          'despegarcomarsa',
+          'itsinternationalservicessa',
+          'puntoturisticosa'
+        ])
+    ) AS duplicate_company_count,
+    EXISTS (
+      SELECT 1 FROM audit_logs
+      WHERE action = 'REALLOCATE_OPENING_BALANCES'
+        AND details LIKE '%OPENING-CC-REALLOCATION-2026-09-18%'
+    ) AS audit_exists
+  FROM account_movements
+`;
+
+export function assertCurrentAccountReallocationPostcheck(result: any) {
+  if (
+    Number(result?.company_count) !== 25
+    || String(result?.company_total) !== "40870177.64"
+    || Number(result?.agency_count) !== 5
+    || String(result?.agency_total) !== "6590132.60"
+    || Number(result?.duplicate_company_count) !== 0
+    || result?.audit_exists !== true
+  ) {
+    throw new Error(`verificación posterior inválida: ${JSON.stringify(result)}`);
+  }
+}
+
+export async function reallocateCurrentAccountOpeningBalances20260918() {
+  try {
+    await db.execute(sql.raw(CURRENT_ACCOUNT_REALLOCATION_2026_09_18_SQL));
+    const { rows } = await db.execute(
+      sql.raw(CURRENT_ACCOUNT_REALLOCATION_2026_09_18_POSTCHECK_SQL),
+    );
+    const result = rows[0] as any;
+    assertCurrentAccountReallocationPostcheck(result);
+    logger.info(
+      "Cuentas corrientes verificadas: empresas 25/$40870177.64, agencias 5/$6590132.60, clientes $0.",
+    );
+  } catch (cause: any) {
+    throw Object.assign(
+      new Error(`No se pudieron reasignar los saldos de cuentas corrientes: ${cause?.message ?? cause}`),
+      {
+        code: "CURRENT_ACCOUNT_REALLOCATION_FAILED",
+        cause,
+      },
+    );
+  }
+}
+
+/**
+ * PostgreSQL's native DROP ... IF EXISTS always emits a NOTICE when the
+ * object is absent — unlike CREATE ... IF NOT EXISTS, this has no "quiet"
+ * native form. A retired legacy object (e.g. a constraint replaced by a
+ * partial index) stays absent on every future startup, so the native form
+ * would log a misleading "does not exist, skipping" notice on every run
+ * forever, not just once.
+ */
+export function dropConstraintWithoutRerunNotice(tableName: string, constraintName: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = '${escapeSqlLiteral(constraintName)}'
+          AND conrelid = '${escapeSqlLiteral(tableName)}'::regclass
+      ) THEN
+        EXECUTE 'ALTER TABLE ${escapeSqlLiteral(tableName)} DROP CONSTRAINT ${escapeSqlLiteral(constraintName)}';
+      END IF;
+    END $$
+  `);
+}
+
+export function dropIndexWithoutRerunNotice(indexName: string): string {
+  return serializeIncrementalDdl(`
+    DO $$
+    BEGIN
+      IF to_regclass('${escapeSqlLiteral(indexName)}') IS NOT NULL THEN
+        EXECUTE 'DROP INDEX ${escapeSqlLiteral(indexName)}';
+      END IF;
+    END $$
+  `);
 }
 
 export function createTableWithoutRerunNotice(tableName: string, createTableSql: string): string {
@@ -332,6 +995,37 @@ export const SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL = serializeIncremen
   $$
 `);
 
+// Added later, alongside the resource_treatment_id columns themselves (see
+// the "SPA circuit treatment resources" incremental block near the end of
+// this file) — kept separate from SPA_CIRCUIT_RESOURCE_FOREIGN_KEYS_MIGRATION_SQL
+// above so a brand-new database never runs a constraint before the column it
+// references exists (that constant runs immediately after the original
+// CREATE TABLE, long before resource_treatment_id is added).
+export const SPA_TREATMENT_RESOURCE_KIND_FOREIGN_KEYS_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_treatment_resources_resource_treatment_fk'
+        AND conrelid = 'spa_treatment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_treatment_resources
+      ADD CONSTRAINT spa_treatment_resources_resource_treatment_fk
+      FOREIGN KEY (resource_treatment_id) REFERENCES spa_treatments(id) ON DELETE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'spa_appointment_resources_resource_treatment_fk'
+        AND conrelid = 'spa_appointment_resources'::regclass
+    ) THEN
+      ALTER TABLE spa_appointment_resources
+      ADD CONSTRAINT spa_appointment_resources_resource_treatment_fk
+      FOREIGN KEY (resource_treatment_id) REFERENCES spa_treatments(id) ON DELETE RESTRICT;
+    END IF;
+  END
+  $$
+`);
+
 export const RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL = serializeIncrementalDdl(`
   DO $$ BEGIN
     IF NOT EXISTS (
@@ -345,6 +1039,71 @@ export const RESERVATION_COMPANIONS_GUEST_FK_MIGRATION_SQL = serializeIncrementa
         FOREIGN KEY (guest_id) REFERENCES guests(id) ON DELETE SET NULL;
     END IF;
   END $$;
+`);
+
+/**
+ * getOrCreateFolio() used to be a plain check-then-insert: two nearly
+ * simultaneous charges to the same entity (e.g. two fire-and-forget SPA
+ * account charges posted back to back) could both miss the other's folio
+ * and each create their own, splitting that entity's balance across two
+ * rows. Before enforcing the one-folio-per-entity invariant, merge any
+ * duplicates already on disk: re-parent their folio_movements onto the
+ * earliest folio for that (entity_type, entity_id), recompute its totals,
+ * and drop the now-empty duplicates — no financial data is lost.
+ */
+export const FOLIOS_ENTITY_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF to_regclass('folios_entity_type_entity_id_unique') IS NULL THEN
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id, entity_type, entity_id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      ),
+      duplicate_folios AS (
+        SELECT f.id AS duplicate_id, c.id AS canonical_id
+        FROM folios f
+        JOIN canonical c ON c.entity_type = f.entity_type AND c.entity_id = f.entity_id
+        WHERE f.id <> c.id
+      )
+      UPDATE folio_movements fm
+      SET folio_id = d.canonical_id
+      FROM duplicate_folios d
+      WHERE fm.folio_id = d.duplicate_id;
+
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      ),
+      totals AS (
+        SELECT
+          folio_id,
+          COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('charge','transfer_in')), 0) AS total_charges,
+          COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('payment','advance','discount','transfer_out','void')), 0) AS total_payments
+        FROM folio_movements
+        WHERE folio_id IN (SELECT id FROM canonical)
+        GROUP BY folio_id
+      )
+      UPDATE folios f
+      SET total_charges = t.total_charges,
+          total_payments = t.total_payments,
+          balance = t.total_charges - t.total_payments
+      FROM totals t
+      WHERE f.id = t.folio_id;
+
+      WITH canonical AS (
+        SELECT DISTINCT ON (entity_type, entity_id) id
+        FROM folios
+        ORDER BY entity_type, entity_id, created_at ASC, id ASC
+      )
+      DELETE FROM folios
+      WHERE id NOT IN (SELECT id FROM canonical);
+
+      CREATE UNIQUE INDEX folios_entity_type_entity_id_unique
+        ON folios (entity_type, entity_id);
+    END IF;
+  END $$
 `);
 
 // Wraps a migration in a timeout so a hung DDL lock never kills the startup
@@ -2270,11 +3029,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ADD COLUMN group_payment_id varchar,
         ADD COLUMN group_payment_intent jsonb;
     `)));
+    // The constraint/index below are retired, superseded by the partial
+    // index that follows (salesInvoicesGroupPaymentId). Both stay absent on
+    // every startup from here on, so the native DROP ... IF EXISTS form
+    // would log a "does not exist, skipping" notice on every single run —
+    // not just once — on any database that already completed this migration.
     return db.execute(sql`
       ${sql.raw(incrementalIndexSql("salesInvoicesGroupId"))};
-      ALTER TABLE sales_invoices
-        DROP CONSTRAINT IF EXISTS sales_invoices_group_payment_id_unique;
-      DROP INDEX IF EXISTS sales_invoices_group_payment_id_unique;
+      ${sql.raw(dropConstraintWithoutRerunNotice("sales_invoices", "sales_invoices_group_payment_id_unique"))};
+      ${sql.raw(dropIndexWithoutRerunNotice("sales_invoices_group_payment_id_unique"))};
       ${sql.raw(incrementalIndexSql("salesInvoicesGroupPaymentId"))};
     `);
   });
@@ -2614,6 +3377,621 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ON CONFLICT (codigo) DO UPDATE
       SET tipo = EXCLUDED.tipo,
           activo = true
+    `)
+  );
+
+  // Unify inventory suppliers with the accounting supplier master. This one
+  // must fail startup instead of being swallowed: application code requires
+  // the junction table as soon as the process begins serving requests.
+  await db.execute(sql.raw(serializeIncrementalDdl(`
+    DO $migration$
+    DECLARE
+      unexpected_legacy_ids text;
+      purchase_supplier_type text;
+      purchase_orders_have_rows boolean;
+      legacy_supplier record;
+      matched_accounting_supplier_id integer;
+      legacy_supplier_has_items boolean;
+    BEGIN
+      IF to_regclass('public.suppliers') IS NOT NULL THEN
+        EXECUTE $query$
+          SELECT string_agg(id::text, ', ' ORDER BY id::text)
+          FROM suppliers
+          WHERE id::text NOT IN ('sup1', 'sup2', 'sup3')
+        $query$ INTO unexpected_legacy_ids;
+        IF unexpected_legacy_ids IS NOT NULL THEN
+          RAISE EXCEPTION
+            'Migración detenida: suppliers contiene IDs no reconocidos: %',
+            unexpected_legacy_ids;
+        END IF;
+      END IF;
+
+      -- Antes de tirar inventory_items.supplier_id (y la tabla suppliers que
+      -- le da sentido), preservar cada vínculo item->proveedor en la tabla
+      -- puente nueva. Matchea por CUIT contra accounting_suppliers, que es
+      -- único; si un proveedor legacy con artículos asignados no tiene CUIT
+      -- o no coincide con ningún accounting_suppliers existente, se detiene
+      -- la migración en vez de perder el vínculo o inventar un proveedor
+      -- contable — mismo criterio que el chequeo de IDs no reconocidos de
+      -- arriba.
+      IF to_regclass('public.suppliers') IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'inventory_items' AND column_name = 'supplier_id'
+         ) THEN
+        IF to_regclass('public.inventory_item_suppliers') IS NULL THEN
+          EXECUTE $ddl$
+            CREATE TABLE inventory_item_suppliers (
+              item_id varchar NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+              accounting_supplier_id integer NOT NULL REFERENCES accounting_suppliers(id) ON DELETE RESTRICT,
+              is_preferred boolean NOT NULL DEFAULT false,
+              PRIMARY KEY (item_id, accounting_supplier_id)
+            )
+          $ddl$;
+        END IF;
+
+        FOR legacy_supplier IN EXECUTE $query$
+          SELECT id::text AS id, name, cuit FROM suppliers
+        $query$ LOOP
+          matched_accounting_supplier_id := NULL;
+          IF legacy_supplier.cuit IS NOT NULL AND btrim(regexp_replace(legacy_supplier.cuit, '\\D', '', 'g')) <> '' THEN
+            -- suppliers.cuit guarda guiones ("30-71234567-8"); accounting_suppliers.cuit
+            -- se guarda sin formato en todo el resto del código (ver server/billing/*.ts).
+            -- Comparar solo dígitos evita un falso "no matchea" por formato. \\D (no \D):
+            -- esto vive dentro de un template literal de JS, que se come una barra sola.
+            EXECUTE 'SELECT id FROM accounting_suppliers WHERE regexp_replace(cuit, ''\\D'', '''', ''g'') = $1'
+              INTO matched_accounting_supplier_id USING regexp_replace(legacy_supplier.cuit, '\\D', '', 'g');
+          END IF;
+
+          IF matched_accounting_supplier_id IS NULL THEN
+            EXECUTE 'SELECT EXISTS (SELECT 1 FROM inventory_items WHERE supplier_id = $1)'
+              INTO legacy_supplier_has_items USING legacy_supplier.id;
+            IF legacy_supplier_has_items THEN
+              RAISE EXCEPTION
+                'Migración detenida: el proveedor legacy % (%) tiene artículos de inventario asignados pero no coincide por CUIT con ningún accounting_suppliers -- vinculá o creá ese proveedor en Contabilidad antes de reintentar',
+                legacy_supplier.id, legacy_supplier.name;
+            END IF;
+            CONTINUE;
+          END IF;
+
+          EXECUTE $ins$
+            INSERT INTO inventory_item_suppliers (item_id, accounting_supplier_id, is_preferred)
+            SELECT id, $1, true FROM inventory_items WHERE supplier_id = $2
+            ON CONFLICT (item_id, accounting_supplier_id) DO NOTHING
+          $ins$ USING matched_accounting_supplier_id, legacy_supplier.id;
+        END LOOP;
+      END IF;
+
+      IF to_regclass('public.purchase_orders') IS NOT NULL THEN
+        SELECT data_type INTO purchase_supplier_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'purchase_orders'
+          AND column_name = 'supplier_id';
+
+        IF purchase_supplier_type IS NOT NULL
+          AND purchase_supplier_type <> 'integer' THEN
+          EXECUTE 'SELECT EXISTS (SELECT 1 FROM purchase_orders)'
+            INTO purchase_orders_have_rows;
+          IF purchase_orders_have_rows THEN
+            RAISE EXCEPTION
+              'Migración detenida: purchase_orders contiene órdenes con proveedor legacy';
+          END IF;
+          EXECUTE 'ALTER TABLE purchase_orders DROP COLUMN supplier_id';
+          purchase_supplier_type := NULL;
+        END IF;
+
+        IF purchase_supplier_type IS NULL THEN
+          EXECUTE 'ALTER TABLE purchase_orders ADD COLUMN supplier_id integer';
+        END IF;
+      END IF;
+
+      -- Fase 2 (pendiente, NO hacer todavía): una vez que producción confirme
+      -- que el backfill de más abajo migró los 12 vínculos reales a
+      -- inventory_item_suppliers, retomar acá:
+      --   EXECUTE 'ALTER TABLE inventory_items DROP COLUMN supplier_id';
+      --   EXECUTE 'DROP TABLE suppliers';
+      -- y sacar suppliers/inventoryItems.supplierId de shared/schema.ts
+      -- para que el próximo diff de despliegue sí las proponga borrar.
+
+      IF to_regclass('public.inventory_item_suppliers') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE TABLE inventory_item_suppliers (
+            item_id varchar NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            accounting_supplier_id integer NOT NULL REFERENCES accounting_suppliers(id) ON DELETE RESTRICT,
+            is_preferred boolean NOT NULL DEFAULT false,
+            PRIMARY KEY (item_id, accounting_supplier_id)
+          )
+        $ddl$;
+      END IF;
+
+      IF to_regclass('public.inventory_item_suppliers_supplier_idx') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE INDEX inventory_item_suppliers_supplier_idx
+          ON inventory_item_suppliers (accounting_supplier_id)
+        $ddl$;
+      END IF;
+
+      IF to_regclass('public.inventory_item_suppliers_preferred_idx') IS NULL THEN
+        EXECUTE $ddl$
+          CREATE UNIQUE INDEX inventory_item_suppliers_preferred_idx
+          ON inventory_item_suppliers (item_id) WHERE is_preferred = true
+        $ddl$;
+      END IF;
+    END
+    $migration$;
+
+    DO $migration$
+    BEGIN
+      IF to_regclass('public.purchase_orders') IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'purchase_orders_supplier_id_accounting_suppliers_fk'
+            AND conrelid = 'public.purchase_orders'::regclass
+        ) THEN
+        ALTER TABLE purchase_orders
+          ADD CONSTRAINT purchase_orders_supplier_id_accounting_suppliers_fk
+          FOREIGN KEY (supplier_id) REFERENCES accounting_suppliers(id);
+      END IF;
+    END
+    $migration$;
+  `)));
+
+  // Factura T (turismo): el receptor puede identificarse con pasaporte en vez
+  // de DNI/CUIT. Se persiste el tipo de documento para poder mandarle a ARCA
+  // el DocTipo correcto (94 = Pasaporte) y para que un reintento/recuperación
+  // de un comprobante pendiente lo recupere igual que cuit/dni.
+  await withTimeout("sales_invoices.cliente_document_type", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cliente_document_type text`)))
+  );
+
+  // "Turnos vendidos": puente entre una línea de comprobante que vendió un
+  // tratamiento y el/los turnos que después la consumen — ver spaTreatmentSales
+  // en shared/schema.ts.
+  await withTimeout("spa_treatment_sales", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE spa_treatment_sales (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        sales_invoice_id integer NOT NULL,
+        invoice_item_index integer NOT NULL,
+        treatment_id varchar NOT NULL REFERENCES spa_treatments(id) ON DELETE RESTRICT,
+        buyer_name text NOT NULL,
+        quantity_purchased integer NOT NULL,
+        quantity_scheduled integer NOT NULL DEFAULT 0,
+        quantity_used integer NOT NULL DEFAULT 0,
+        unit_price_frozen numeric(10,2) NOT NULL,
+        status text NOT NULL DEFAULT 'pendiente',
+        notes text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("spa_treatment_sales_invoice_item_unique", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "spa_treatment_sales_invoice_item_unique",
+      "CREATE UNIQUE INDEX spa_treatment_sales_invoice_item_unique ON spa_treatment_sales (sales_invoice_id, invoice_item_index)",
+    )))
+  );
+
+  // "Agregar Cargo" en el folio SPA distingue conceptos del hotel (cochera,
+  // media pensión — sin stock) de productos que vende el SPA (cremas,
+  // bebidas). Un producto queda vinculado a su artículo de inventario para
+  // poder descontarle stock al venderse.
+  await withTimeout("spa_account_items.inventory_item_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_account_items ADD COLUMN inventory_item_id varchar`)))
+  );
+
+  // Tarifa convenio (mayorista/minorista) de empresas y agencias — distinto
+  // de regimen_hospedaje, que describe qué incluye la tarifa.
+  await withTimeout("companies.tarifa_convenio", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE companies ADD COLUMN tarifa_convenio text`)))
+  );
+  await withTimeout("agencies.tarifa_convenio", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE agencies ADD COLUMN tarifa_convenio text`)))
+  );
+
+  // Vouchers de regalo: pasan de un solo campo de estado editado a mano a un
+  // circuito con aplicaciones (evita doble uso) y auditoría estructurada.
+  await withTimeout("gift_vouchers.lifecycle_fields", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE gift_vouchers
+        ADD COLUMN sale_invoice_id integer REFERENCES sales_invoices(id),
+        ADD COLUMN cancelled_at timestamp,
+        ADD COLUMN cancelled_by text,
+        ADD COLUMN cancel_reason text
+    `)))
+  );
+  await withTimeout("gift_vouchers.status_usado_to_utilizado", T, () =>
+    db.execute(sql`UPDATE gift_vouchers SET status = 'utilizado' WHERE status = 'usado'`)
+  );
+
+  await withTimeout("gift_voucher_applications.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE gift_voucher_applications (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_id varchar NOT NULL REFERENCES gift_vouchers(id),
+        target_type text NOT NULL,
+        target_id varchar NOT NULL,
+        amount numeric(10,2) NOT NULL,
+        status text NOT NULL DEFAULT 'reservado',
+        created_by text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        consumed_at timestamp,
+        released_at timestamp,
+        released_by text,
+        release_reason text
+      )
+    `)))
+  );
+  // Como mucho una aplicación viva (reservado/utilizado) por voucher a la
+  // vez — segunda barrera contra doble uso a nivel de base, además del
+  // SELECT ... FOR UPDATE que hace la transacción de aplicación.
+  await withTimeout("gift_voucher_applications_active_unique", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_applications_active_unique",
+      "CREATE UNIQUE INDEX gift_voucher_applications_active_unique ON gift_voucher_applications (voucher_id) WHERE status <> 'liberado'",
+    )))
+  );
+  await withTimeout("gift_voucher_applications_target_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_applications_target_idx",
+      "CREATE INDEX gift_voucher_applications_target_idx ON gift_voucher_applications (target_type, target_id)",
+    )))
+  );
+
+  await withTimeout("gift_voucher_events.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE gift_voucher_events (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        voucher_id varchar NOT NULL REFERENCES gift_vouchers(id),
+        event_type text NOT NULL,
+        from_status text,
+        to_status text,
+        field_changed text,
+        old_value text,
+        new_value text,
+        reason text,
+        performed_by text,
+        performed_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("gift_voucher_events_voucher_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "gift_voucher_events_voucher_idx",
+      "CREATE INDEX gift_voucher_events_voucher_idx ON gift_voucher_events (voucher_id)",
+    )))
+  );
+
+  await withTimeout("reservations.voucher_link", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE reservations
+        ADD COLUMN voucher_id varchar,
+        ADD COLUMN voucher_applied_amount numeric(10,2)
+    `)))
+  );
+  await withTimeout("spa_payments.voucher_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE spa_payments ADD COLUMN voucher_id varchar`)))
+  );
+
+  // "Turnos vendidos" nunca cerraba el círculo: no había forma de saber, al
+  // completarse un turno, de qué venta anticipada venía — quantity_used
+  // quedaba en 0 para siempre. Guarda el vínculo al reclamar la unidad.
+  await withTimeout("spa_appointments.sold_treatment_sale_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_appointments
+        ADD COLUMN sold_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
+    `)))
+  );
+
+  // getOrCreateFolio() had a check-then-insert race: two near-simultaneous
+  // charges to the same entity could each miss the other's folio and create
+  // a duplicate, splitting that entity's balance in two. Merges any existing
+  // duplicates and guards the invariant going forward (see storage.ts fix).
+  await withTimeout("folios.entity_unique", T, () =>
+    db.execute(sql.raw(FOLIOS_ENTITY_UNIQUE_MIGRATION_SQL))
+  );
+
+  // "Voucher por prestación": un voucher regalo puede nacer vinculado a una
+  // venta anticipada de tratamiento SPA en vez de ser un monto libre. Su
+  // estado lo dicta esa venta (ver routes/spa.ts), no la acción manual de
+  // "Marcar como utilizado".
+  await withTimeout("gift_vouchers.linked_treatment_sale_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE gift_vouchers
+        ADD COLUMN linked_treatment_sale_id varchar REFERENCES spa_treatment_sales(id)
+    `)))
+  );
+
+  // One-time cutover from the fictitious company current-account ledger to
+  // the externally reconciled balances dated 18/09/2026. The audit marker
+  // makes reruns a no-op; any ambiguous company match aborts the transaction
+  // before existing movements are removed.
+  await importCompanyOpeningBalances20260918();
+  await reallocateCurrentAccountOpeningBalances20260918();
+
+  // Channex (channel manager) — fase 1: conexión (demo primero), mapeo de
+  // catálogo Channex -> PMS y bandeja de reservas. Ninguna acción de esta
+  // fase crea filas en `reservations` — ver comentario en schema.ts. (No es
+  // estrictamente "solo lectura": el sync sí le confirma a Channex el ack
+  // de cada booking_revision que persiste, lo cual es una escritura del
+  // lado de Channex, aunque no toque nada de la operación real del PMS.)
+  await withTimeout("channex_connections.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_connections (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        label text NOT NULL,
+        environment text NOT NULL DEFAULT 'demo',
+        channex_property_id text NOT NULL,
+        api_key text,
+        api_key_encrypted text,
+        base_url text NOT NULL DEFAULT 'https://staging.channex.io/api/v1',
+        is_active boolean NOT NULL DEFAULT true,
+        last_catalog_sync_at timestamp,
+        last_booking_sync_at timestamp,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_connections.encrypted_api_key", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE channex_connections
+        ADD COLUMN api_key_encrypted text
+    `)))
+  );
+  await withTimeout("channex_connections.legacy_api_key_nullable", T, () =>
+    db.execute(sql.raw(`
+      ALTER TABLE channex_connections
+        ALTER COLUMN api_key DROP NOT NULL
+    `))
+  );
+
+  // Backfill fail-closed: si hay claves históricas en texto plano, la
+  // migración exige la clave maestra, cifra cada una y recién entonces borra
+  // el valor legible. Una instalación sin conexiones Channex no necesita el
+  // secreto hasta que cree la primera.
+  const legacyChannexCredentials = await db
+    .select({ id: channexConnections.id, apiKey: channexConnections.apiKey })
+    .from(channexConnections)
+    .where(isNotNull(channexConnections.apiKey));
+  for (const connection of legacyChannexCredentials) {
+    if (!connection.apiKey) continue;
+    await db
+      .update(channexConnections)
+      .set({
+        apiKeyEncrypted: encryptChannexApiKey(connection.apiKey),
+        apiKey: null,
+      })
+      .where(eq(channexConnections.id, connection.id));
+  }
+
+  await withTimeout("channex_room_type_mappings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_room_type_mappings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_room_type_id text NOT NULL,
+        channex_room_type_title text NOT NULL,
+        room_type_id varchar REFERENCES room_types(id),
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_room_type_mappings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_room_type_mappings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_room_type_mappings_connection_channex_id_idx ON channex_room_type_mappings (connection_id, channex_room_type_id)",
+    )))
+  );
+
+  await withTimeout("channex_rate_plan_mappings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_rate_plan_mappings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_rate_plan_id text NOT NULL,
+        channex_rate_plan_title text NOT NULL,
+        channex_room_type_id text NOT NULL,
+        rate_plan_id varchar REFERENCES rate_plans(id),
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_rate_plan_mappings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_rate_plan_mappings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_rate_plan_mappings_connection_channex_id_idx ON channex_rate_plan_mappings (connection_id, channex_rate_plan_id)",
+    )))
+  );
+
+  await withTimeout("channex_bookings.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE channex_bookings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+        channex_booking_id text NOT NULL,
+        channex_revision_id text,
+        status text NOT NULL DEFAULT 'new',
+        ota_name text,
+        guest_name text,
+        guest_email text,
+        guest_phone text,
+        arrival_date date,
+        departure_date date,
+        adults integer,
+        children integer,
+        infants integer,
+        currency text,
+        total_amount numeric(10,2),
+        commission_amount numeric(10,2),
+        net_amount numeric(10,2),
+        channex_room_type_id text,
+        channex_rate_plan_id text,
+        is_mapped boolean NOT NULL DEFAULT false,
+        raw_payload jsonb,
+        error_message text,
+        imported_at timestamp,
+        imported_by varchar,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("channex_bookings_connection_channex_id_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_bookings_connection_channex_id_idx",
+      "CREATE UNIQUE INDEX channex_bookings_connection_channex_id_idx ON channex_bookings (connection_id, channex_booking_id)",
+    )))
+  );
+  await withTimeout("channex_bookings_status_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "channex_bookings_status_idx",
+      "CREATE INDEX channex_bookings_status_idx ON channex_bookings (connection_id, status)",
+    )))
+  );
+
+  // Confirmación selectiva de revisiones de Channex (#542): antes, "Sincronizar
+  // y confirmar" volvía a pedirle a Channex todo lo pendiente en ese momento y
+  // confirmaba el lote entero, así que una revisión nueva aparecida entre el
+  // preview y la confirmación se confirmaba sin que nadie la hubiera visto.
+  // Con esta columna, confirmar opera solo sobre lo ya persistido por un
+  // preview previo.
+  await withTimeout("channex_bookings.acknowledged_revision_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE channex_bookings
+        ADD COLUMN acknowledged_revision_id text,
+        ADD COLUMN acknowledged_at timestamp
+    `)))
+  );
+
+  // ── SPA circuit resources: allow a plain treatment (e.g. a massage) as one
+  // of a circuit's bundled resources, not only a gabinete ──────────────────
+  // A circuit's resource row was cabin-only (Sauna/Hidromasaje). Reception
+  // needs to bundle an actual treatment too — e.g. "masaje" alongside
+  // "sauna" and "hidromasaje" inside the same circuito. Both resource
+  // template rows and their booked instances become cabin-xor-treatment:
+  // default_cabin_id/cabin_id turn nullable, and a new resource_treatment_id
+  // column carries the treatment when that's what the resource is.
+  await withTimeout("spa_treatment_resources.default_cabin_id_nullable", T, () =>
+    db.execute(sql`ALTER TABLE spa_treatment_resources ALTER COLUMN default_cabin_id DROP NOT NULL`)
+  );
+  await withTimeout("spa_treatment_resources.resource_treatment_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_treatment_resources
+      ADD COLUMN resource_treatment_id varchar
+    `)))
+  );
+  await withTimeout("spa_appointment_resources.cabin_id_nullable", T, () =>
+    db.execute(sql`ALTER TABLE spa_appointment_resources ALTER COLUMN cabin_id DROP NOT NULL`)
+  );
+  await withTimeout("spa_appointment_resources.resource_treatment_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE spa_appointment_resources
+      ADD COLUMN resource_treatment_id varchar
+    `)))
+  );
+  await withTimeout("spa treatment resource kind foreign keys", T, async () => {
+    await db.execute(sql.raw(SPA_TREATMENT_RESOURCE_KIND_FOREIGN_KEYS_MIGRATION_SQL));
+  });
+
+  // ── Caja fuerte: registro de apertura/reseteo de código ───────────────────
+  // Reemplaza la planilla en papel que llevaba recepción (fecha, habitación,
+  // quién abrió, quién solicitó) por un log simple en Housekeeping.
+  await withTimeout("safe_box_openings (create)", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE safe_box_openings (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        room_id varchar NOT NULL,
+        date date NOT NULL,
+        opened_by text NOT NULL,
+        requested_by text NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("safe_box_openings foreign key", T, () =>
+    db.execute(sql.raw(serializeIncrementalDdl(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'safe_box_openings_room_fk'
+            AND conrelid = 'safe_box_openings'::regclass
+        ) THEN
+          ALTER TABLE safe_box_openings
+          ADD CONSTRAINT safe_box_openings_room_fk
+          FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE RESTRICT;
+        END IF;
+      END
+      $$
+    `)))
+  );
+  await withTimeout("safe_box_openings index", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "idx_safe_box_openings_room_date",
+      "CREATE INDEX idx_safe_box_openings_room_date ON safe_box_openings (room_id, date DESC)",
+    )))
+  );
+
+  // ── Cuentas corrientes: área de origen del cargo ──────────────────────────
+  // Deja filtrar la deuda de una empresa/agencia por el área que la generó
+  // (Recepción, Restaurant, Eventos, Grupos). Solo hacia adelante: los
+  // movimientos existentes quedan en null ("Sin clasificar"), no se infiere
+  // retroactivamente.
+  await withTimeout("account_movements.area", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE account_movements
+      ADD COLUMN area text
+    `)))
+  );
+
+  // generateFolioCodigo() used to derive the numeric suffix from COUNT(*) —
+  // two concurrent first-charges to the same (brand-new) entity could both
+  // count the same prior total and build the identical codigo, tripping
+  // folios_codigo_unique before the entity-level ON CONFLICT guard ever got
+  // a chance to run (see folio-entity-unique.pg.test.ts). One sequence per
+  // entity type makes the number atomic; the setval below is safe to rerun
+  // every boot since GREATEST only ever advances it, seeded past both the
+  // sequence's own progress and any legacy count-based codigo already on disk.
+  await withTimeout("folios.codigo_sequences", T, async () => {
+    for (const entityType of FOLIO_ENTITY_TYPES) {
+      const seqName = `folio_seq_${entityType}`;
+      await db.execute(sql.raw(createSequenceWithoutRerunNotice(seqName)));
+      await db.execute(sql`
+        SELECT setval(
+          ${seqName},
+          GREATEST(
+            COALESCE((SELECT last_value FROM pg_sequences WHERE sequencename = ${seqName}), 0) + 1,
+            (SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo, '\\D', '', 'g'), '')::integer), 0)
+             FROM folios WHERE entity_type = ${entityType}) + 1
+          ),
+          false
+        )
+      `);
+    }
+  });
+
+  // ── Plan de cuentas: cuentas de ingreso por área ──────────────────────────
+  // accounting_accounts ya se usaba del lado de costos (cuenta_contable_id en
+  // purchase_invoices); esto le da un lado de ingresos, para que los informes
+  // de ventas por área agrupen por cuenta real en vez de por un array
+  // hardcodeado — mismo criterio que "Costos por Departamento" ya usa del lado
+  // de gastos. area conecta cada cuenta con la misma clasificación que ya usa
+  // Cuentas Corrientes (account_movements.area).
+  await withTimeout("accounting_accounts.area", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE accounting_accounts ADD COLUMN area text
+    `)))
+  );
+  await withTimeout("accounting_accounts.seed_ingresos", T, () =>
+    db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo, nivel, activo, area) VALUES
+        ('4.1.1.06.01', 'Ventas Alojamiento', 'ingreso', 4, true, 'recepcion'),
+        ('4.1.1.06.02', 'Ventas Restaurant', 'ingreso', 4, true, 'restaurant'),
+        ('4.1.1.06.03', 'Ventas Spa', 'ingreso', 4, true, 'spa'),
+        ('4.1.1.06.04', 'Ventas Eventos', 'ingreso', 4, true, 'eventos'),
+        ('4.1.1.06.05', 'Otros Ingresos', 'ingreso', 4, true, 'otros')
+      ON CONFLICT (codigo) DO NOTHING
     `)
   );
 

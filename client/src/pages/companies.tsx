@@ -16,11 +16,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText } from "lucide-react";
+import { Plus, Search, Building2, Pencil, Loader2, Trash2, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText, Ban, CheckCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { insertCompanySchema, type Company, type AccountMovement, type Guest, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
+import { isOverdue } from "@/lib/account-aging";
 
 const companyFormSchema = insertCompanySchema.extend({
   razonSocial: z.string().min(1, "Razón social requerida"),
@@ -156,6 +159,15 @@ export default function CompaniesPage() {
     queryKey: ["/api/companies"],
   });
 
+  const { data: accountSummary } = useQuery<{
+    companies: { id: string; balance: number; daysOverdue: number | null }[];
+  }>({
+    queryKey: ["/api/account-summary"],
+  });
+  const agingByCompanyId = new Map(
+    (accountSummary?.companies || []).map(c => [c.id, c])
+  );
+
   const { data: accountData, refetch: refetchAccount, isError: accountError, error: accountErrorObj } = useQuery<{
     movements: AccountMovement[];
     balance: number;
@@ -213,6 +225,7 @@ export default function CompaniesPage() {
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
       regimenHospedaje: "",
+      tarifaConvenio: "",
       notes: "",
     },
   });
@@ -263,6 +276,19 @@ export default function CompaniesPage() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: string }) => {
+      const res = await apiRequest("PATCH", `/api/companies/${id}`, { isActive });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+    },
+    onError: () => {
+      toast({ title: "Error al actualizar el estado de la empresa", variant: "destructive" });
+    },
+  });
+
   const handleDelete = (company: Company) => {
     if (window.confirm(`¿Estás seguro de eliminar "${company.razonSocial}"?`)) {
       deleteMutation.mutate(company.id);
@@ -298,6 +324,7 @@ export default function CompaniesPage() {
       paymentTermDays: company.paymentTermDays || 30,
       condicionVentaPredeterminada: (company as any).condicionVentaPredeterminada || "contado",
       regimenHospedaje: (company as any).regimenHospedaje || "",
+      tarifaConvenio: company.tarifaConvenio || "",
       notes: company.notes || "",
     });
     setShowForm(true);
@@ -331,6 +358,7 @@ export default function CompaniesPage() {
       paymentTermDays: 30,
       condicionVentaPredeterminada: "contado",
       regimenHospedaje: "",
+      tarifaConvenio: "",
       notes: "",
     });
     setShowForm(true);
@@ -378,11 +406,11 @@ export default function CompaniesPage() {
               <TableRow>
                 <TableHead>Razón Social</TableHead>
                 <TableHead>Nombre Fantasía</TableHead>
-                <TableHead>CUIT</TableHead>
-                <TableHead>Cond. IVA</TableHead>
                 <TableHead>Contacto</TableHead>
-                <TableHead>Teléfono</TableHead>
-                <TableHead className="w-[140px]">Acciones</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Tarifa convenio</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="w-[160px]">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -417,17 +445,26 @@ export default function CompaniesPage() {
                       </div>
                     </TableCell>
                     <TableCell>{company.nombreFantasia || "-"}</TableCell>
-                    <TableCell>{company.cuilCuit || "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {company.condicionIva === "responsable_inscripto" ? "Resp. Inscripto" :
-                         company.condicionIva === "monotributo" ? "Monotributo" :
-                         company.condicionIva === "exento" ? "Exento" :
-                         company.condicionIva || "-"}
-                      </Badge>
-                    </TableCell>
                     <TableCell>{company.contactName || "-"}</TableCell>
-                    <TableCell>{company.telefono || "-"}</TableCell>
+                    <TableCell>{company.contactEmail || "-"}</TableCell>
+                    <TableCell>
+                      {company.tarifaConvenio
+                        ? <Badge variant="outline">{TARIFA_CONVENIO_SHORT[company.tarifaConvenio] || company.tarifaConvenio}</Badge>
+                        : "-"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={company.isActive === "false" ? "destructive" : "default"}>
+                        {company.isActive === "false" ? "Cortada" : "Activa"}
+                      </Badge>
+                      {isOverdue(agingByCompanyId.get(company.id)?.daysOverdue) && (
+                        <div
+                          className="text-[10px] font-medium text-red-600 mt-0.5"
+                          title={`Deuda vencida desde hace ${agingByCompanyId.get(company.id)?.daysOverdue} días`}
+                        >
+                          Vencida ({agingByCompanyId.get(company.id)?.daysOverdue}d)
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Button
@@ -447,6 +484,17 @@ export default function CompaniesPage() {
                           data-testid={`button-account-company-${company.id}`}
                         >
                           <Receipt className="h-4 w-4 text-blue-600" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleActiveMutation.mutate({ id: company.id, isActive: company.isActive === "false" ? "true" : "false" })}
+                          title={company.isActive === "false" ? "Marcar como Activa" : "Marcar como Cortada"}
+                          data-testid={`button-toggle-active-company-${company.id}`}
+                        >
+                          {company.isActive === "false"
+                            ? <CheckCircle className="h-4 w-4 text-green-600" />
+                            : <Ban className="h-4 w-4 text-red-600" />}
                         </Button>
                         <Button
                           variant="ghost"
@@ -607,6 +655,23 @@ export default function CompaniesPage() {
                       <FormMessage />
                     </FormItem>
                   )} />
+                  <FormField control={form.control} name="tarifaConvenio" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tarifa Convenio</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || undefined}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-company-tarifa-convenio">
+                            <SelectValue placeholder="Sin definir" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="mayorista">{TARIFA_CONVENIO_LABEL.mayorista}</SelectItem>
+                          <SelectItem value="minorista">{TARIFA_CONVENIO_LABEL.minorista}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
                 </div>
                 <FormField control={form.control} name="condicionVentaPredeterminada" render={({ field }) => (
                   <FormItem>
@@ -711,13 +776,13 @@ export default function CompaniesPage() {
                       <TableCell className="text-sm">{mov.date}</TableCell>
                       <TableCell>
                         <div>
-                          <p className="text-sm">{mov.description}</p>
+                          <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>
                           {mov.guestName && (
                             <p className="text-xs text-muted-foreground">{mov.guestName}</p>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{mov.reference || "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground font-mono">{mov.reservationCode || mov.reference || "—"}</TableCell>
                       <TableCell className={`text-right font-medium tabular-nums ${
                         parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
                       }`}>

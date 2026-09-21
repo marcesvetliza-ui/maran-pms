@@ -15,7 +15,6 @@ import {
   menuCategories,
   menuItems,
   itemCategories,
-  suppliers,
   inventoryItems,
   spaCabins,
   spaTreatmentCategories,
@@ -294,25 +293,18 @@ export async function seedDatabase() {
     { id: "ic5", name: "Manteleria", description: "Sabanas, toallas, manteles", parentId: null, isActive: "true" },
   ]);
 
-  console.log("Seeding suppliers...");
-  await db.insert(suppliers).values([
-    { id: "sup1", name: "Distribuidora Norte S.A.", contactName: "Juan Perez", phone: "+54 343 456-7890", email: "ventas@distnorte.com", address: "Ruta 14 Km 5", cuit: "30-71234567-8", paymentTermDays: 30, notes: null, isActive: "true" },
-    { id: "sup2", name: "Bebidas Premium", contactName: "Maria Garcia", phone: "+54 343 567-8901", email: "pedidos@bebidaspremium.com", address: "Av. Ramirez 1500", cuit: "30-70987654-3", paymentTermDays: 15, notes: "Solo bebidas", isActive: "true" },
-    { id: "sup3", name: "Limpieza Total S.R.L.", contactName: "Carlos Lopez", phone: "+54 343 678-9012", email: "ventas@limpiezatotal.com", address: "Zona Industrial", cuit: "30-65432198-7", paymentTermDays: 30, notes: null, isActive: "true" },
-  ]);
-
   console.log("Seeding inventory items...");
   const inventorySeedItems = [
-    { id: "inv1", sku: "ALI-001", name: "Cafe en grano", description: "Cafe colombiano premium", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "8500.00", minStock: "5", maxStock: "20", currentStock: "12", location: "Deposito A", isActive: "true" },
-    { id: "inv2", sku: "ALI-002", name: "Azucar", description: "Azucar comun", categoryId: "ic1", supplierId: "sup1", unit: "kg", costPrice: "1200.00", minStock: "10", maxStock: "50", currentStock: "25", location: "Deposito A", isActive: "true" },
-    { id: "inv3", sku: "BEB-001", name: "Agua Mineral 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "4800.00", minStock: "10", maxStock: "50", currentStock: "8", location: "Deposito B", isActive: "true" },
-    { id: "inv4", sku: "BEB-002", name: "Coca-Cola 500ml", description: "Pack x24", categoryId: "ic2", supplierId: "sup2", unit: "caja", costPrice: "7200.00", minStock: "8", maxStock: "40", currentStock: "15", location: "Deposito B", isActive: "true" },
-    { id: "inv5", sku: "BEB-003", name: "Vino Malbec Reserva", description: "Bodega Luigi Bosca", categoryId: "ic2", supplierId: "sup2", unit: "unidad", costPrice: "12000.00", minStock: "12", maxStock: "48", currentStock: "24", location: "Bodega", isActive: "true" },
-    { id: "inv6", sku: "LIM-001", name: "Detergente Industrial", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "3500.00", minStock: "5", maxStock: "20", currentStock: "3", location: "Deposito C", isActive: "true" },
-    { id: "inv7", sku: "LIM-002", name: "Desinfectante", description: "Bidon 5L", categoryId: "ic3", supplierId: "sup3", unit: "unidad", costPrice: "4200.00", minStock: "5", maxStock: "20", currentStock: "8", location: "Deposito C", isActive: "true" },
-    { id: "inv8", sku: "AME-001", name: "Shampoo Individual", description: "Sachet 30ml x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "6500.00", minStock: "10", maxStock: "50", currentStock: "5", location: "Deposito D", isActive: "true" },
-    { id: "inv9", sku: "AME-002", name: "Jabon Individual", description: "Pastilla 20g x100", categoryId: "ic4", supplierId: "sup3", unit: "paquete", costPrice: "5000.00", minStock: "10", maxStock: "50", currentStock: "35", location: "Deposito D", isActive: "true" },
-    { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", supplierId: "sup1", unit: "unidad", costPrice: "4500.00", minStock: "50", maxStock: "200", currentStock: "120", location: "Lavanderia", isActive: "true" },
+    { id: "inv1", sku: "ALI-001", name: "Cafe en grano", description: "Cafe colombiano premium", categoryId: "ic1", unit: "kg", costPrice: "8500.00", minStock: "5", maxStock: "20", currentStock: "12", location: "Deposito A", isActive: "true" },
+    { id: "inv2", sku: "ALI-002", name: "Azucar", description: "Azucar comun", categoryId: "ic1", unit: "kg", costPrice: "1200.00", minStock: "10", maxStock: "50", currentStock: "25", location: "Deposito A", isActive: "true" },
+    { id: "inv3", sku: "BEB-001", name: "Agua Mineral 500ml", description: "Pack x24", categoryId: "ic2", unit: "caja", costPrice: "4800.00", minStock: "10", maxStock: "50", currentStock: "8", location: "Deposito B", isActive: "true" },
+    { id: "inv4", sku: "BEB-002", name: "Coca-Cola 500ml", description: "Pack x24", categoryId: "ic2", unit: "caja", costPrice: "7200.00", minStock: "8", maxStock: "40", currentStock: "15", location: "Deposito B", isActive: "true" },
+    { id: "inv5", sku: "BEB-003", name: "Vino Malbec Reserva", description: "Bodega Luigi Bosca", categoryId: "ic2", unit: "unidad", costPrice: "12000.00", minStock: "12", maxStock: "48", currentStock: "24", location: "Bodega", isActive: "true" },
+    { id: "inv6", sku: "LIM-001", name: "Detergente Industrial", description: "Bidon 5L", categoryId: "ic3", unit: "unidad", costPrice: "3500.00", minStock: "5", maxStock: "20", currentStock: "3", location: "Deposito C", isActive: "true" },
+    { id: "inv7", sku: "LIM-002", name: "Desinfectante", description: "Bidon 5L", categoryId: "ic3", unit: "unidad", costPrice: "4200.00", minStock: "5", maxStock: "20", currentStock: "8", location: "Deposito C", isActive: "true" },
+    { id: "inv8", sku: "AME-001", name: "Shampoo Individual", description: "Sachet 30ml x100", categoryId: "ic4", unit: "paquete", costPrice: "6500.00", minStock: "10", maxStock: "50", currentStock: "5", location: "Deposito D", isActive: "true" },
+    { id: "inv9", sku: "AME-002", name: "Jabon Individual", description: "Pastilla 20g x100", categoryId: "ic4", unit: "paquete", costPrice: "5000.00", minStock: "10", maxStock: "50", currentStock: "35", location: "Deposito D", isActive: "true" },
+    { id: "inv10", sku: "MAN-001", name: "Toallas Blancas", description: "Toalla 70x140cm", categoryId: "ic5", unit: "unidad", costPrice: "4500.00", minStock: "50", maxStock: "200", currentStock: "120", location: "Lavanderia", isActive: "true" },
   ] satisfies Array<typeof inventoryItems.$inferInsert>;
   for (const item of inventorySeedItems) {
     await db.insert(inventoryItems).values(item);

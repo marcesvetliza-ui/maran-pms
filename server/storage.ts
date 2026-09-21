@@ -108,8 +108,7 @@ import {
   // Inventory
   type ItemCategory,
   type InsertItemCategory,
-  type Supplier,
-  type InsertSupplier,
+  type AccountingSupplier,
   type InventoryItem,
   type InsertInventoryItem,
   type InventoryItemWithDetails,
@@ -212,8 +211,12 @@ import {
   type AccountRetention,
   type AccountMovementAllocation,
   type OrphanedCashPaymentLink,
+  type DuplicateCashPaymentLinkGroup,
   type GiftVoucher,
   type InsertGiftVoucher,
+  type GiftVoucherApplication,
+  type GiftVoucherApplicationTargetType,
+  type GiftVoucherEvent,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -587,19 +590,12 @@ export interface IStorage {
   updateItemCategory(id: string, category: Partial<InsertItemCategory>): Promise<ItemCategory | undefined>;
   deleteItemCategory(id: string): Promise<boolean>;
 
-  // Suppliers
-  getSuppliers(): Promise<Supplier[]>;
-  getSupplier(id: string): Promise<Supplier | undefined>;
-  createSupplier(supplier: InsertSupplier): Promise<Supplier>;
-  updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined>;
-  deleteSupplier(id: string): Promise<boolean>;
-
   // Inventory Items
   getInventoryItems(): Promise<InventoryItemWithDetails[]>;
   getInventoryItem(id: string): Promise<InventoryItemWithDetails | undefined>;
   getInventoryItemsBelowMinStock(): Promise<InventoryItem[]>;
-  createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
-  updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined>;
+  createInventoryItem(item: InsertInventoryItem & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem>;
+  updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined>;
   deleteInventoryItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }>;
 
   // Stock Movements
@@ -663,6 +659,7 @@ export interface IStorage {
   createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply>;
   deleteTreatmentSupply(id: string): Promise<boolean>;
   deductStockFromSpaAccount(accountId: string): Promise<void>;
+  deductStockForSoldSpaProduct(inventoryItemId: string, quantity: number, accountItemId: string): Promise<void>;
 
   // ==================== EVENTS ====================
   // Event Rooms
@@ -846,6 +843,8 @@ export interface IStorage {
   getShiftDetail(shiftId: string): Promise<any>;
   getCashMovements(shiftId: string): Promise<any[]>;
   getOrphanedCashPaymentLinks(): Promise<OrphanedCashPaymentLink[]>;
+  getDuplicateCashPaymentLinks(): Promise<DuplicateCashPaymentLinkGroup[]>;
+  resolveDuplicateCashPaymentLink(movementId: string, motivo: string, operator: string): Promise<any>;
   createCashMovement(data: any): Promise<any>;
   registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType?: string, registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<any>;
   getCashSummary(area?: string, from?: string, to?: string): Promise<any[]>;
@@ -854,9 +853,10 @@ export interface IStorage {
   getAccountMovementsByReservation(reservationId: string): Promise<AccountMovement[]>;
   getAccountBalance(entityType: AccountEntityType, entityId: string): Promise<number>;
   createAccountMovement(data: InsertAccountMovement): Promise<AccountMovement>;
-  getAccountSummary(): Promise<{
-    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
+  getAccountSummary(area?: string | null): Promise<{
+    companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
   }>;
   getPendingCharges(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente: number })[]>;
   createPaymentWithAllocations(
@@ -871,9 +871,22 @@ export interface IStorage {
   getGiftVouchers(filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]>;
   getGiftVoucher(id: string): Promise<GiftVoucher | undefined>;
   getGiftVoucherByCode(code: string): Promise<GiftVoucher | undefined>;
+  getAvailableGiftVouchers(area: GiftVoucher["area"]): Promise<GiftVoucher[]>;
   createGiftVoucher(data: InsertGiftVoucher): Promise<GiftVoucher>;
-  updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined>;
-  markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined>;
-  deleteGiftVoucher(id: string): Promise<boolean>;
+  updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>, performedBy?: string): Promise<GiftVoucher | undefined>;
+  cancelGiftVoucher(id: string, performedBy: string, reason: string): Promise<GiftVoucher | undefined>;
+  markGiftVoucherUsedManually(id: string, performedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined>;
+  applyGiftVoucher(
+    voucherId: string,
+    targetType: GiftVoucherApplicationTargetType,
+    targetId: string,
+    requestedAmount: number,
+    performedBy: string,
+  ): Promise<{ application: GiftVoucherApplication; voucher: GiftVoucher }>;
+  releaseGiftVoucherApplication(applicationId: string, performedBy: string, reason?: string): Promise<GiftVoucherApplication | undefined>;
+  consumeGiftVoucherApplication(applicationId: string, performedBy: string): Promise<GiftVoucherApplication | undefined>;
+  getGiftVoucherApplicationsForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication[]>;
+  getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]>;
+  getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]>;
   generateVoucherCode(): Promise<string>;
 }

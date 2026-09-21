@@ -42,6 +42,12 @@ vi.mock("../db", () => ({
 vi.mock("../billing/invoiceService", () => ({
   emitirFactura: mockEmitirFactura,
   calcularMontos: vi.fn(),
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
 }));
 vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(),

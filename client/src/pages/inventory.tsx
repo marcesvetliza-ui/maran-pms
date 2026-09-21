@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { Link } from "wouter";
@@ -14,6 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -22,7 +24,6 @@ import {
   Plus, 
   Package, 
   AlertTriangle, 
-  Building2,
   Loader2,
   Search,
   TrendingDown,
@@ -51,6 +52,8 @@ import {
   X,
   Layers,
   FolderOpen,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -63,17 +66,11 @@ type ItemCategory = {
   isGroup: boolean;
 };
 
-type Supplier = {
-  id: string;
-  name: string;
-  contactName: string | null;
-  phone: string | null;
-  email: string | null;
-  address: string | null;
-  cuit: string | null;
-  paymentTermDays: number | null;
-  notes: string | null;
-  isActive: string | null;
+type AccountingSupplier = {
+  id: number;
+  razon_social: string;
+  cuit: string;
+  activo: boolean | null;
 };
 
 type InventoryItem = {
@@ -82,7 +79,6 @@ type InventoryItem = {
   name: string;
   description: string | null;
   categoryId: string | null;
-  supplierId: string | null;
   unit: "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
   costPrice: string;
   minStock: number;
@@ -92,7 +88,7 @@ type InventoryItem = {
   isActive: string | null;
   itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
   category?: ItemCategory;
-  supplier?: Supplier;
+  suppliers?: Array<{ id: number; razonSocial: string; cuit: string; isPreferred: boolean }>;
 };
 
 type StockMovement = {
@@ -191,6 +187,53 @@ const motivoLabels: Record<string, string> = {
   otro: "Otro",
 };
 
+function printInternalVoucher(movement: InternalMovement & { items: InternalMovementItem[] }) {
+  const motLabel = motivoLabels[movement.motivo] || movement.motivo;
+  const totalCost = (movement.items || []).reduce((s, i) =>
+    s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
+  const html = `<!DOCTYPE html><html><head><title>Movimiento Interno — ${motLabel}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:24px;max-width:700px;margin:0 auto;font-size:13px}
+  h1{font-size:18px;margin:0 0 4px}
+  .meta{color:#555;margin-bottom:16px;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th,td{border:1px solid #ccc;padding:7px 10px;text-align:left}
+  th{background:#f0f0f0;font-weight:600}
+  td.num{text-align:right}
+  .total{font-weight:bold;background:#e8e8e8}
+  .footer{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #ccc;padding-top:10px}
+</style>
+</head><body>
+<h1>Comprobante de Movimiento Interno</h1>
+<div class="meta">
+  Fecha: ${new Date(movement.date + "T12:00:00").toLocaleDateString("es-AR")} &nbsp;|&nbsp;
+  Motivo: <strong>${motLabel}</strong> &nbsp;|&nbsp;
+  ${movement.descripcion ? `Descripción: <strong>${movement.descripcion}</strong>` : ""}
+  ${movement.notes ? `<br>Observaciones: ${movement.notes}` : ""}
+</div>
+<table>
+  <thead><tr><th>Artículo</th><th>Unidad</th><th class="num">Cantidad</th><th class="num">Costo Unit.</th><th class="num">Costo Total</th></tr></thead>
+  <tbody>
+${(movement.items || []).map(i => `    <tr>
+      <td>${i.item_name}</td>
+      <td>${i.unit}</td>
+      <td class="num">${parseFloat(i.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
+      <td class="num">$${parseFloat(i.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+    </tr>`).join("\n")}
+    <tr class="total">
+      <td colspan="4" style="text-align:right">COSTO TOTAL</td>
+      <td class="num">$${totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+    </tr>
+  </tbody>
+</table>
+<div class="footer">Generado: ${formatHotelDateTime(new Date())} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
+<script>window.onload=function(){window.print()}<\/script>
+</body></html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 const motivoColors: Record<string, string> = {
   desayuno: "bg-amber-100 text-amber-800",
   evento: "bg-blue-100 text-blue-800",
@@ -216,6 +259,418 @@ const movementTypeLabels: Record<string, string> = {
   transferencia: "Transferencia",
   consumo: "Consumo",
 };
+
+/**
+ * Selector de artículo con buscador (Popover + Command), en vez de un
+ * <Select> con todo el catálogo listado — para catálogos grandes escribir
+ * dos letras filtra por nombre o SKU en vez de tener que scrollear una
+ * lista larga. Usado por TransferForm y por cada fila de InternalMovementForm.
+ */
+function ItemCombobox({ items, value, onChange, placeholder = "Artículo...", testId, className = "h-9 text-sm" }: {
+  items: InventoryItem[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+  testId: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const activeItems = items.filter(i => i.id && i.isActive !== "false");
+  const term = search.trim().toLowerCase();
+  const filtered = term
+    ? activeItems.filter(i =>
+        i.name.toLowerCase().includes(term) || (i.sku || "").toLowerCase().includes(term))
+    : activeItems;
+  const selected = activeItems.find(i => i.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSearch(""); }}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={`w-full justify-between font-normal px-2 ${className}`}
+          data-testid={testId}
+        >
+          <span className={`truncate text-left ${selected ? "" : "text-muted-foreground"}`}>
+            {selected ? `${selected.name}${selected.sku ? ` (${selected.sku})` : ""}` : placeholder}
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0 z-[100] pointer-events-auto" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Buscar por nombre o SKU..."
+            value={search}
+            onValueChange={setSearch}
+            data-testid={`${testId}-search`}
+          />
+          <CommandList>
+            <CommandEmpty>Sin resultados.</CommandEmpty>
+            <CommandGroup>
+              {filtered.slice(0, 50).map(i => (
+                <CommandItem
+                  key={i.id}
+                  value={i.id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onSelect={() => { onChange(i.id); setOpen(false); setSearch(""); }}
+                  data-testid={`${testId}-option-${i.id}`}
+                >
+                  <Check className={`mr-2 h-4 w-4 ${value === i.id ? "opacity-100" : "opacity-0"}`} />
+                  <span className="flex-1">{i.name}{i.sku ? ` (${i.sku})` : ""}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Formulario de "Nuevo Movimiento Interno", extraído de InventoryPage para
+ * poder reutilizarse embebido en el Centro de Comprobantes, con el mismo
+ * patrón de shell (Dialog vs <div> plano) que ya usan EmitirFacturaDialog e
+ * InvoiceDialog. A diferencia de esos dos, este formulario no era un
+ * componente aparte — vivía dentro de InventoryPage compartiendo su estado
+ * por clausura — así que acá se volvió autosuficiente: trae sus propios
+ * datos (artículos, recetas) y maneja su propio estado, en vez de recibirlos
+ * como props. La lógica de negocio (cálculo de cantidades desde receta,
+ * merma, mutación de alta) es exactamente la misma que tenía antes.
+ */
+export function InternalMovementForm({ embedded, open, onClose, initialMotivo }: {
+  embedded?: boolean;
+  open: boolean;
+  onClose: () => void;
+  /** Motivo preseleccionado (ej. cuando ya se eligió "Desperdicio" en un paso anterior). Por defecto "desayuno", igual que antes. */
+  initialMotivo?: string;
+}) {
+  const { toast } = useToast();
+  const today = getArgentinaToday();
+
+  const [imDate, setImDate] = useState(today);
+  const [imMotivo, setImMotivo] = useState(initialMotivo || "desayuno");
+  const [imDescripcion, setImDescripcion] = useState("");
+  const [imNotes, setImNotes] = useState("");
+  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([]);
+  const [showRecipeLoader, setShowRecipeLoader] = useState(false);
+  const [imRecipeId, setImRecipeId] = useState("");
+  const [imPorciones, setImPorciones] = useState("1");
+  const [imRecipeLoading, setImRecipeLoading] = useState(false);
+
+  const resetInternalMov = () => {
+    setImDate(today);
+    setImMotivo(initialMotivo || "desayuno");
+    setImDescripcion("");
+    setImNotes("");
+    setImItems([]);
+    setShowRecipeLoader(false);
+    setImRecipeId("");
+    setImPorciones("1");
+  };
+
+  // Resetea el formulario cada vez que se vuelve a abrir, tal como hacía
+  // openInternalMov() en InventoryPage antes de setIsInternalMovOpen(true).
+  useEffect(() => {
+    if (open) resetInternalMov();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const { data: items = [] } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/inventory/items"],
+  });
+
+  const { data: allRecipes = [] } = useQuery<RecipeForIM[]>({
+    queryKey: ["/api/restaurant/recipes"],
+    enabled: open,
+  });
+
+  const addImItem = () => setImItems(prev => [...prev, { itemId: "", quantity: "1", notes: "" }]);
+  const removeImItem = (idx: number) => setImItems(prev => prev.filter((_, i) => i !== idx));
+  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes", value: string) =>
+    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+
+  const loadFromRecipe = async () => {
+    if (!imRecipeId) return;
+    setImRecipeLoading(true);
+    try {
+      const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
+      const porciones = parseFloat(imPorciones) || 1;
+      const newRows: Array<{ itemId: string; quantity: string; notes: string }> = [];
+      for (const ing of ingredients) {
+        if (!ing.inventoryItemId) continue;
+        const merma = parseFloat(ing.merma || "0");
+        const baseQty = parseFloat(ing.quantity || "0");
+        const grossQty = merma > 0 ? baseQty / (1 - merma / 100) : baseQty;
+        const totalQty = (grossQty * porciones).toFixed(3);
+        // merge with existing row if same item
+        const existing = newRows.find(r => r.itemId === ing.inventoryItemId);
+        if (existing) {
+          existing.quantity = (parseFloat(existing.quantity) + parseFloat(totalQty)).toFixed(3);
+        } else {
+          newRows.push({ itemId: ing.inventoryItemId, quantity: totalQty, notes: "" });
+        }
+      }
+      // merge into imItems (append, dedup)
+      setImItems(prev => {
+        const merged = [...prev];
+        for (const row of newRows) {
+          const ex = merged.find(r => r.itemId === row.itemId);
+          if (ex) {
+            ex.quantity = (parseFloat(ex.quantity) + parseFloat(row.quantity)).toFixed(3);
+          } else {
+            merged.push(row);
+          }
+        }
+        return merged;
+      });
+      setShowRecipeLoader(false);
+      setImRecipeId("");
+      setImPorciones("1");
+      toast({ title: `${newRows.length} ingrediente(s) cargados desde la receta` });
+    } catch {
+      toast({ title: "Error al cargar receta", variant: "destructive" });
+    } finally {
+      setImRecipeLoading(false);
+    }
+  };
+
+  const createInternalMovMutation = useMutation({
+    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string }> }) => {
+      const res = await apiRequest("POST", "/api/inventory/internal-movements", data);
+      return res.json();
+    },
+    onSuccess: (movement) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-movements"] });
+      onClose();
+      printInternalVoucher(movement);
+      toast({ title: "Movimiento registrado", description: `${movement.items?.length || 0} artículo(s) descontados del stock.` });
+    },
+    onError: (e: any) => toast({ title: "Error al registrar", description: e?.message, variant: "destructive" }),
+  });
+
+  const confirmInternalMov = () => {
+    const validItems = imItems.filter(it => it.itemId && parseFloat(it.quantity) > 0);
+    if (validItems.length === 0) {
+      toast({ title: "Agregá al menos un artículo con cantidad", variant: "destructive" });
+      return;
+    }
+    createInternalMovMutation.mutate({
+      date: imDate,
+      motivo: imMotivo,
+      descripcion: imDescripcion || undefined,
+      notes: imNotes || undefined,
+      items: validItems.map(it => ({ itemId: it.itemId, quantity: parseFloat(it.quantity), notes: it.notes || undefined })),
+    });
+  };
+
+  const formBody = (
+    <div className="space-y-4 py-2">
+      {/* Cabecera */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <Label>Fecha *</Label>
+          <Input type="date" value={imDate} onChange={e => setImDate(e.target.value)} data-testid="input-im-date" />
+        </div>
+        <div className="space-y-1">
+          <Label>Motivo *</Label>
+          <Select value={imMotivo} onValueChange={setImMotivo}>
+            <SelectTrigger data-testid="select-im-motivo"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desayuno">🍳 Desayuno</SelectItem>
+              <SelectItem value="evento">🎉 Evento</SelectItem>
+              <SelectItem value="desperdicio">🗑️ Desperdicio</SelectItem>
+              <SelectItem value="otro">📋 Otro</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Descripción <span className="text-muted-foreground font-normal">(opcional — ej: "Evento casamiento 50 pax")</span></Label>
+        <Input value={imDescripcion} onChange={e => setImDescripcion(e.target.value)} placeholder="Descripción del movimiento..." data-testid="input-im-desc" />
+      </div>
+
+      {/* Carga desde receta */}
+      <div className="border rounded-lg p-3 bg-muted/30">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            Cargar desde receta
+          </p>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowRecipeLoader(v => !v)}>
+            {showRecipeLoader ? "Ocultar" : "Expandir"}
+          </Button>
+        </div>
+        {showRecipeLoader && (
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="flex-1 min-w-48 space-y-1">
+              <Label className="text-xs">Receta / Plato</Label>
+              <Select value={imRecipeId || "__none__"} onValueChange={v => setImRecipeId(v === "__none__" ? "" : v)}>
+                <SelectTrigger data-testid="select-im-recipe"><SelectValue placeholder="Seleccionar receta..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— Elegir receta —</SelectItem>
+                  {allRecipes.filter(r => r.id).sort((a, b) => (a.name || a.menuItem?.name || "").localeCompare(b.name || b.menuItem?.name || "", "es")).map(r => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name || r.menuItem?.name || `Receta ${r.id.slice(0, 6)}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-28 space-y-1">
+              <Label className="text-xs">Porciones</Label>
+              <Input type="number" min={0.1} step="0.5" value={imPorciones} onChange={e => setImPorciones(e.target.value)} data-testid="input-im-porciones" />
+            </div>
+            <Button size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
+              {imRecipeLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Utensils className="h-4 w-4 mr-1" />}
+              Cargar ingredientes
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Tabla de ítems */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>Artículos a descargar</Label>
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
+            <Plus className="h-3 w-3 mr-1" />Agregar ítem
+          </Button>
+        </div>
+
+        {imItems.length === 0 ? (
+          <div className="border rounded-lg p-6 text-center text-muted-foreground text-sm">
+            <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            Usá "Cargar desde receta" o "Agregar ítem" para agregar artículos
+          </div>
+        ) : (
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="p-2 text-left font-medium">Artículo</th>
+                  <th className="p-2 text-right font-medium w-28">Cantidad</th>
+                  <th className="p-2 text-left font-medium">Nota (opcional)</th>
+                  <th className="p-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {imItems.map((row, idx) => {
+                  const item = items.find(i => i.id === row.itemId);
+                  return (
+                    <tr key={idx} className="border-t">
+                      <td className="p-1.5">
+                        <ItemCombobox
+                          items={items}
+                          value={row.itemId}
+                          onChange={v => updateImItem(idx, "itemId", v)}
+                          testId={`select-im-item-${idx}`}
+                          className="h-8 text-xs"
+                        />
+                      </td>
+                      <td className="p-1.5">
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number" min={0.001} step="0.001"
+                            value={row.quantity}
+                            onChange={e => updateImItem(idx, "quantity", e.target.value)}
+                            className="h-8 text-xs text-right w-20"
+                            data-testid={`input-im-qty-${idx}`}
+                          />
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">{item?.unit || ""}</span>
+                        </div>
+                      </td>
+                      <td className="p-1.5">
+                        <Input
+                          value={row.notes}
+                          onChange={e => updateImItem(idx, "notes", e.target.value)}
+                          placeholder="Nota..."
+                          className="h-8 text-xs"
+                          data-testid={`input-im-note-${idx}`}
+                        />
+                      </td>
+                      <td className="p-1.5">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeImItem(idx)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Costo estimado */}
+        {imItems.length > 0 && (() => {
+          const total = imItems.reduce((s, row) => {
+            const item = items.find(i => i.id === row.itemId);
+            if (!item) return s;
+            return s + parseFloat(row.quantity || "0") * parseFloat(item.costPrice || "0");
+          }, 0);
+          return (
+            <div className="flex justify-end">
+              <p className="text-sm text-muted-foreground">
+                Costo estimado: <span className="font-semibold text-foreground">${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+              </p>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+
+  const footer = (
+    <>
+      <Button variant="outline" onClick={onClose}>Cancelar</Button>
+      <Button
+        onClick={confirmInternalMov}
+        disabled={createInternalMovMutation.isPending || imItems.filter(it => it.itemId).length === 0}
+        data-testid="btn-confirm-internal-mov"
+      >
+        {createInternalMovMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+        <ArrowDownToLine className="h-4 w-4 mr-2" />
+        Confirmar y descargar stock
+      </Button>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="internal-movement-embedded">
+        <h2 className="text-lg font-semibold leading-none tracking-tight flex items-center gap-2">
+          <ArrowDownToLine className="h-5 w-5" />
+          Nuevo Movimiento Interno
+        </h2>
+        {formBody}
+        <div className="flex justify-end gap-2 pt-4">{footer}</div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowDownToLine className="h-5 w-5" />
+            Nuevo Movimiento Interno
+          </DialogTitle>
+        </DialogHeader>
+        {formBody}
+        <DialogFooter>{footer}</DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function InventoryPage() {
   const { toast } = useToast();
@@ -263,17 +718,10 @@ export default function InventoryPage() {
   const [whDescription, setWhDescription] = useState("");
   const [whArea, setWhArea] = useState("general");
 
-  // Movimiento Interno state
+  // Movimiento Interno state — el formulario en sí (fecha, motivo, ítems,
+  // etc.) vive en InternalMovementForm; acá solo se controla si el diálogo
+  // está abierto.
   const [isInternalMovOpen, setIsInternalMovOpen] = useState(false);
-  const [imDate, setImDate] = useState(today);
-  const [imMotivo, setImMotivo] = useState("desayuno");
-  const [imDescripcion, setImDescripcion] = useState("");
-  const [imNotes, setImNotes] = useState("");
-  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([]);
-  const [showRecipeLoader, setShowRecipeLoader] = useState(false);
-  const [imRecipeId, setImRecipeId] = useState("");
-  const [imPorciones, setImPorciones] = useState("1");
-  const [imRecipeLoading, setImRecipeLoading] = useState(false);
   const [internosFrom, setInternosFrom] = useState(today);
   const [internosTo, setInternosTo] = useState(today);
   const [expandedMovId, setExpandedMovId] = useState<string | null>(null);
@@ -288,8 +736,8 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/categories"],
   });
 
-  const { data: suppliers = [] } = useQuery<Supplier[]>({
-    queryKey: ["/api/inventory/suppliers"],
+  const { data: accountingSuppliers = [] } = useQuery<AccountingSupplier[]>({
+    queryKey: ["/api/accounting-suppliers"],
   });
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<InventoryItem[]>({
@@ -333,12 +781,6 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/items", priceHistoryItemId, "price-history"],
     queryFn: () => fetch(`/api/inventory/items/${priceHistoryItemId}/price-history`, { credentials: "include" }).then(r => r.json()),
     enabled: !!priceHistoryItemId && isPriceHistoryOpen,
-  });
-
-  // Recipes (para carga desde receta en Movimiento Interno)
-  const { data: allRecipes = [] } = useQuery<RecipeForIM[]>({
-    queryKey: ["/api/restaurant/recipes"],
-    enabled: isInternalMovOpen,
   });
 
   // Movimientos Internos
@@ -490,151 +932,10 @@ export default function InventoryPage() {
     onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
   });
 
-  // ---- Movimiento Interno helpers ----
-  const resetInternalMov = () => {
-    setImDate(today);
-    setImMotivo("desayuno");
-    setImDescripcion("");
-    setImNotes("");
-    setImItems([]);
-    setShowRecipeLoader(false);
-    setImRecipeId("");
-    setImPorciones("1");
-  };
-
-  const addImItem = () => setImItems(prev => [...prev, { itemId: "", quantity: "1", notes: "" }]);
-  const removeImItem = (idx: number) => setImItems(prev => prev.filter((_, i) => i !== idx));
-  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes", value: string) =>
-    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
-
-  const loadFromRecipe = async () => {
-    if (!imRecipeId) return;
-    setImRecipeLoading(true);
-    try {
-      const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
-      const porciones = parseFloat(imPorciones) || 1;
-      const newRows: Array<{ itemId: string; quantity: string; notes: string }> = [];
-      for (const ing of ingredients) {
-        if (!ing.inventoryItemId) continue;
-        const merma = parseFloat(ing.merma || "0");
-        const baseQty = parseFloat(ing.quantity || "0");
-        const grossQty = merma > 0 ? baseQty / (1 - merma / 100) : baseQty;
-        const totalQty = (grossQty * porciones).toFixed(3);
-        // merge with existing row if same item
-        const existing = newRows.find(r => r.itemId === ing.inventoryItemId);
-        if (existing) {
-          existing.quantity = (parseFloat(existing.quantity) + parseFloat(totalQty)).toFixed(3);
-        } else {
-          newRows.push({ itemId: ing.inventoryItemId, quantity: totalQty, notes: "" });
-        }
-      }
-      // merge into imItems (append, dedup)
-      setImItems(prev => {
-        const merged = [...prev];
-        for (const row of newRows) {
-          const ex = merged.find(r => r.itemId === row.itemId);
-          if (ex) {
-            ex.quantity = (parseFloat(ex.quantity) + parseFloat(row.quantity)).toFixed(3);
-          } else {
-            merged.push(row);
-          }
-        }
-        return merged;
-      });
-      setShowRecipeLoader(false);
-      setImRecipeId("");
-      setImPorciones("1");
-      toast({ title: `${newRows.length} ingrediente(s) cargados desde la receta` });
-    } catch {
-      toast({ title: "Error al cargar receta", variant: "destructive" });
-    } finally {
-      setImRecipeLoading(false);
-    }
-  };
-
-  const printInternalVoucher = (movement: InternalMovement & { items: InternalMovementItem[] }) => {
-    const motLabel = motivoLabels[movement.motivo] || movement.motivo;
-    const totalCost = (movement.items || []).reduce((s, i) =>
-      s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
-    const html = `<!DOCTYPE html><html><head><title>Movimiento Interno — ${motLabel}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:24px;max-width:700px;margin:0 auto;font-size:13px}
-  h1{font-size:18px;margin:0 0 4px}
-  .meta{color:#555;margin-bottom:16px;font-size:12px}
-  table{width:100%;border-collapse:collapse;margin:12px 0}
-  th,td{border:1px solid #ccc;padding:7px 10px;text-align:left}
-  th{background:#f0f0f0;font-weight:600}
-  td.num{text-align:right}
-  .total{font-weight:bold;background:#e8e8e8}
-  .footer{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #ccc;padding-top:10px}
-</style>
-</head><body>
-<h1>Comprobante de Movimiento Interno</h1>
-<div class="meta">
-  Fecha: ${new Date(movement.date + "T12:00:00").toLocaleDateString("es-AR")} &nbsp;|&nbsp;
-  Motivo: <strong>${motLabel}</strong> &nbsp;|&nbsp;
-  ${movement.descripcion ? `Descripción: <strong>${movement.descripcion}</strong>` : ""}
-  ${movement.notes ? `<br>Observaciones: ${movement.notes}` : ""}
-</div>
-<table>
-  <thead><tr><th>Artículo</th><th>Unidad</th><th class="num">Cantidad</th><th class="num">Costo Unit.</th><th class="num">Costo Total</th></tr></thead>
-  <tbody>
-${(movement.items || []).map(i => `    <tr>
-      <td>${i.item_name}</td>
-      <td>${i.unit}</td>
-      <td class="num">${parseFloat(i.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
-      <td class="num">$${parseFloat(i.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-    </tr>`).join("\n")}
-    <tr class="total">
-      <td colspan="4" style="text-align:right">COSTO TOTAL</td>
-      <td class="num">$${totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-    </tr>
-  </tbody>
-</table>
-<div class="footer">Generado: ${formatHotelDateTime(new Date())} &nbsp;|&nbsp; ${movement.created_by || "sistema"} &nbsp;|&nbsp; ID: ${movement.id}</div>
-<script>window.onload=function(){window.print()}<\/script>
-</body></html>`;
-    const w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); }
-  };
-
-  const createInternalMovMutation = useMutation({
-    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string }> }) => {
-      const res = await apiRequest("POST", "/api/inventory/internal-movements", data);
-      return res.json();
-    },
-    onSuccess: (movement) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-movements"] });
-      setIsInternalMovOpen(false);
-      resetInternalMov();
-      printInternalVoucher(movement);
-      toast({ title: "Movimiento registrado", description: `${movement.items?.length || 0} artículo(s) descontados del stock.` });
-    },
-    onError: (e: any) => toast({ title: "Error al registrar", description: e?.message, variant: "destructive" }),
-  });
-
-  const openInternalMov = () => {
-    resetInternalMov();
-    setIsInternalMovOpen(true);
-  };
-
-  const confirmInternalMov = () => {
-    const validItems = imItems.filter(it => it.itemId && parseFloat(it.quantity) > 0);
-    if (validItems.length === 0) {
-      toast({ title: "Agregá al menos un artículo con cantidad", variant: "destructive" });
-      return;
-    }
-    createInternalMovMutation.mutate({
-      date: imDate,
-      motivo: imMotivo,
-      descripcion: imDescripcion || undefined,
-      notes: imNotes || undefined,
-      items: validItems.map(it => ({ itemId: it.itemId, quantity: parseFloat(it.quantity), notes: it.notes || undefined })),
-    });
-  };
+  // El resto de la lógica de Movimiento Interno (reset, ítems, receta,
+  // mutación de alta) vive ahora en InternalMovementForm — acá solo hace
+  // falta abrir el diálogo.
+  const openInternalMov = () => setIsInternalMovOpen(true);
 
   const openCategoryDialog = (cat?: ItemCategory) => {
     setEditingCategory(cat || null);
@@ -740,7 +1041,7 @@ ${(movement.items || []).map(i => `    <tr>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Inventario</h1>
-          <p className="text-muted-foreground">Gestiona stock, proveedores y movimientos</p>
+          <p className="text-muted-foreground">Gestiona stock, artículos y movimientos</p>
         </div>
         <div className="flex gap-2">
           <Link href="/purchase-invoices">
@@ -781,15 +1082,6 @@ ${(movement.items || []).map(i => `    <tr>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
-            <CardTitle className="text-sm font-medium">Proveedores</CardTitle>
-            <Building2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{suppliers.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
             <CardTitle className="text-sm font-medium">Valor Total</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -814,10 +1106,6 @@ ${(movement.items || []).map(i => `    <tr>
           <TabsTrigger value="movements" data-testid="tab-movements">
             <History className="h-4 w-4 mr-2" />
             Movimientos
-          </TabsTrigger>
-          <TabsTrigger value="suppliers" data-testid="tab-suppliers">
-            <Building2 className="h-4 w-4 mr-2" />
-            Proveedores
           </TabsTrigger>
           <TabsTrigger value="categorias" data-testid="tab-categorias">
             <Tag className="h-4 w-4 mr-2" />
@@ -1161,60 +1449,6 @@ ${(movement.items || []).map(i => `    <tr>
               </div>
             );
           })()}
-        </TabsContent>
-
-        <TabsContent value="suppliers" className="space-y-4">
-          <div className="flex items-center justify-end">
-            <Button data-testid="button-add-supplier">
-              <Plus className="h-4 w-4 mr-2" />
-              Nuevo Proveedor
-            </Button>
-          </div>
-          {suppliers.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <Building2 className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Sin proveedores</h3>
-                <p className="text-muted-foreground mb-4">Agrega proveedores para gestionar compras</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {suppliers.map((supplier) => (
-                <Card key={supplier.id} data-testid={`supplier-${supplier.id}`}>
-                  <CardHeader>
-                    <CardTitle className="text-base">{supplier.name}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    {supplier.contactName && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Contacto:</span>
-                        <span>{supplier.contactName}</span>
-                      </div>
-                    )}
-                    {supplier.phone && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Telefono:</span>
-                        <span>{supplier.phone}</span>
-                      </div>
-                    )}
-                    {supplier.email && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Email:</span>
-                        <span className="truncate ml-2">{supplier.email}</span>
-                      </div>
-                    )}
-                    {supplier.cuit && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">CUIT:</span>
-                        <span>{supplier.cuit}</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
         </TabsContent>
 
         <TabsContent value="categorias" className="space-y-6">
@@ -2034,188 +2268,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       </Dialog>
 
       {/* ==================== MOVIMIENTO INTERNO DIALOG ==================== */}
-      <Dialog open={isInternalMovOpen} onOpenChange={(open) => { setIsInternalMovOpen(open); if (!open) resetInternalMov(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ArrowDownToLine className="h-5 w-5" />
-              Nuevo Movimiento Interno
-            </DialogTitle>
-          </DialogHeader>
+      <InternalMovementForm open={isInternalMovOpen} onClose={() => setIsInternalMovOpen(false)} />
 
-          <div className="space-y-4 py-2">
-            {/* Cabecera */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Fecha *</Label>
-                <Input type="date" value={imDate} onChange={e => setImDate(e.target.value)} data-testid="input-im-date" />
-              </div>
-              <div className="space-y-1">
-                <Label>Motivo *</Label>
-                <Select value={imMotivo} onValueChange={setImMotivo}>
-                  <SelectTrigger data-testid="select-im-motivo"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="desayuno">🍳 Desayuno</SelectItem>
-                    <SelectItem value="evento">🎉 Evento</SelectItem>
-                    <SelectItem value="desperdicio">🗑️ Desperdicio</SelectItem>
-                    <SelectItem value="otro">📋 Otro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Descripción <span className="text-muted-foreground font-normal">(opcional — ej: "Evento casamiento 50 pax")</span></Label>
-              <Input value={imDescripcion} onChange={e => setImDescripcion(e.target.value)} placeholder="Descripción del movimiento..." data-testid="input-im-desc" />
-            </div>
-
-            {/* Carga desde receta */}
-            <div className="border rounded-lg p-3 bg-muted/30">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  Cargar desde receta
-                </p>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setShowRecipeLoader(v => !v)}>
-                  {showRecipeLoader ? "Ocultar" : "Expandir"}
-                </Button>
-              </div>
-              {showRecipeLoader && (
-                <div className="flex items-end gap-3 flex-wrap">
-                  <div className="flex-1 min-w-48 space-y-1">
-                    <Label className="text-xs">Receta / Plato</Label>
-                    <Select value={imRecipeId || "__none__"} onValueChange={v => setImRecipeId(v === "__none__" ? "" : v)}>
-                      <SelectTrigger data-testid="select-im-recipe"><SelectValue placeholder="Seleccionar receta..." /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">— Elegir receta —</SelectItem>
-                        {allRecipes.filter(r => r.id).sort((a, b) => (a.name || a.menuItem?.name || "").localeCompare(b.name || b.menuItem?.name || "", "es")).map(r => (
-                          <SelectItem key={r.id} value={r.id}>
-                            {r.name || r.menuItem?.name || `Receta ${r.id.slice(0, 6)}`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-28 space-y-1">
-                    <Label className="text-xs">Porciones</Label>
-                    <Input type="number" min={0.1} step="0.5" value={imPorciones} onChange={e => setImPorciones(e.target.value)} data-testid="input-im-porciones" />
-                  </div>
-                  <Button size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
-                    {imRecipeLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Utensils className="h-4 w-4 mr-1" />}
-                    Cargar ingredientes
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* Tabla de ítems */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Artículos a descargar</Label>
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
-                  <Plus className="h-3 w-3 mr-1" />Agregar ítem
-                </Button>
-              </div>
-
-              {imItems.length === 0 ? (
-                <div className="border rounded-lg p-6 text-center text-muted-foreground text-sm">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                  Usá "Cargar desde receta" o "Agregar ítem" para agregar artículos
-                </div>
-              ) : (
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50">
-                      <tr>
-                        <th className="p-2 text-left font-medium">Artículo</th>
-                        <th className="p-2 text-right font-medium w-28">Cantidad</th>
-                        <th className="p-2 text-left font-medium">Nota (opcional)</th>
-                        <th className="p-2 w-8" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {imItems.map((row, idx) => {
-                        const item = items.find(i => i.id === row.itemId);
-                        return (
-                          <tr key={idx} className="border-t">
-                            <td className="p-1.5">
-                              <Select value={row.itemId || "__none__"} onValueChange={v => updateImItem(idx, "itemId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-im-item-${idx}`}>
-                                  <SelectValue placeholder="Artículo..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">— Seleccionar —</SelectItem>
-                                  {items.filter(i => i.id && i.isActive !== "false").map(i => (
-                                    <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="p-1.5">
-                              <div className="flex items-center gap-1">
-                                <Input
-                                  type="number" min={0.001} step="0.001"
-                                  value={row.quantity}
-                                  onChange={e => updateImItem(idx, "quantity", e.target.value)}
-                                  className="h-8 text-xs text-right w-20"
-                                  data-testid={`input-im-qty-${idx}`}
-                                />
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">{item?.unit || ""}</span>
-                              </div>
-                            </td>
-                            <td className="p-1.5">
-                              <Input
-                                value={row.notes}
-                                onChange={e => updateImItem(idx, "notes", e.target.value)}
-                                placeholder="Nota..."
-                                className="h-8 text-xs"
-                                data-testid={`input-im-note-${idx}`}
-                              />
-                            </td>
-                            <td className="p-1.5">
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeImItem(idx)}>
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Costo estimado */}
-              {imItems.length > 0 && (() => {
-                const total = imItems.reduce((s, row) => {
-                  const item = items.find(i => i.id === row.itemId);
-                  if (!item) return s;
-                  return s + parseFloat(row.quantity || "0") * parseFloat(item.costPrice || "0");
-                }, 0);
-                return (
-                  <div className="flex justify-end">
-                    <p className="text-sm text-muted-foreground">
-                      Costo estimado: <span className="font-semibold text-foreground">${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                    </p>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsInternalMovOpen(false); resetInternalMov(); }}>Cancelar</Button>
-            <Button
-              onClick={confirmInternalMov}
-              disabled={createInternalMovMutation.isPending || imItems.filter(it => it.itemId).length === 0}
-              data-testid="btn-confirm-internal-mov"
-            >
-              {createInternalMovMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              <ArrowDownToLine className="h-4 w-4 mr-2" />
-              Confirmar y descargar stock
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Price History Dialog */}
       <Dialog open={isPriceHistoryOpen} onOpenChange={setIsPriceHistoryOpen}>
@@ -2282,7 +2336,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </DialogHeader>
           <NewItemForm
             categories={categories}
-            suppliers={suppliers}
+            suppliers={accountingSuppliers}
             existingItems={items}
             onSubmit={(data) => createItemMutation.mutate(data)}
             isPending={createItemMutation.isPending}
@@ -2453,7 +2507,7 @@ function NewItemForm({
   onCancel,
 }: {
   categories: ItemCategory[];
-  suppliers: Supplier[];
+  suppliers: AccountingSupplier[];
   existingItems: InventoryItem[];
   onSubmit: (data: Partial<InventoryItem>) => void;
   isPending: boolean;
@@ -2461,7 +2515,9 @@ function NewItemForm({
 }) {
   const [name, setName] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierIds, setSupplierIds] = useState<number[]>([]);
+  const [preferredSupplierId, setPreferredSupplierId] = useState("");
+  const [supplierSearch, setSupplierSearch] = useState("");
   const [unit, setUnit] = useState<string>("unidad");
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState(0);
@@ -2531,19 +2587,48 @@ function NewItemForm({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Proveedor</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger data-testid="select-supplier">
-              <SelectValue placeholder="Seleccionar proveedor" />
-            </SelectTrigger>
-            <SelectContent>
-              {suppliers.filter(sup => sup.id).map((sup) => (
-                <SelectItem key={sup.id} value={sup.id}>
-                  {sup.name}
-                </SelectItem>
+          <Label>Proveedores contables</Label>
+          <Input
+            value={supplierSearch}
+            onChange={(event) => setSupplierSearch(event.target.value)}
+            placeholder="Buscar por razón social o CUIT..."
+            data-testid="input-accounting-supplier-search"
+          />
+          <div className="max-h-32 overflow-y-auto rounded-md border p-2 space-y-1" data-testid="select-accounting-suppliers">
+            {suppliers
+              .filter(sup => sup.activo !== false)
+              .filter((sup) => {
+                const query = supplierSearch.trim().toLowerCase();
+                return !query
+                  || sup.razon_social.toLowerCase().includes(query)
+                  || sup.cuit.toLowerCase().includes(query);
+              })
+              .map((sup) => (
+              <label key={sup.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={supplierIds.includes(sup.id)}
+                  onChange={(event) => {
+                    setSupplierIds(current => event.target.checked ? [...current, sup.id] : current.filter(id => id !== sup.id));
+                    if (!event.target.checked && preferredSupplierId === String(sup.id)) setPreferredSupplierId("");
+                  }}
+                />
+                <span>{sup.razon_social} ({sup.cuit})</span>
+              </label>
               ))}
-            </SelectContent>
-          </Select>
+          </div>
+          {supplierIds.length > 0 && (
+            <Select value={preferredSupplierId} onValueChange={setPreferredSupplierId}>
+              <SelectTrigger data-testid="select-preferred-supplier">
+                <SelectValue placeholder="Proveedor preferido (opcional)" />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliers.filter(sup => supplierIds.includes(sup.id)).map(sup => (
+                  <SelectItem key={sup.id} value={String(sup.id)}>{sup.razon_social}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
       <div className="space-y-2">
@@ -2606,7 +2691,8 @@ function NewItemForm({
             onSubmit({
               name,
               categoryId: categoryId || undefined,
-              supplierId: supplierId || undefined,
+              accountingSupplierIds: supplierIds,
+              preferredAccountingSupplierId: preferredSupplierId ? Number(preferredSupplierId) : null,
               unit: unit as any,
               costPrice,
               minStock,
@@ -2647,18 +2733,26 @@ function TransferForm({
   const [quantity, setQuantity] = useState<number>(1);
   const [notes, setNotes] = useState("");
 
+  const { data: itemWarehouseStock = [] } = useQuery<{ warehouse_id: string; current_stock: string }[]>({
+    queryKey: ["/api/inventory/items", itemId, "warehouses"],
+    enabled: !!itemId,
+  });
+  const stockDisponible = fromWarehouseId
+    ? parseFloat(itemWarehouseStock.find(r => r.warehouse_id === fromWarehouseId)?.current_stock || "0")
+    : null;
+  const excedeStock = stockDisponible !== null && quantity > stockDisponible;
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
         <Label>Artículo *</Label>
-        <Select value={itemId} onValueChange={setItemId}>
-          <SelectTrigger data-testid="select-transfer-item"><SelectValue placeholder="Seleccionar artículo..." /></SelectTrigger>
-          <SelectContent>
-            {items.filter(i => i.id && i.isActive !== "false").map(i => (
-              <SelectItem key={i.id} value={i.id}>{i.name} {i.sku ? `(${i.sku})` : ""}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ItemCombobox
+          items={items}
+          value={itemId}
+          onChange={setItemId}
+          placeholder="Seleccionar artículo..."
+          testId="select-transfer-item"
+        />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
@@ -2671,6 +2765,11 @@ function TransferForm({
               ))}
             </SelectContent>
           </Select>
+          {itemId && fromWarehouseId && (
+            <p className={`text-xs ${excedeStock ? "text-destructive" : "text-muted-foreground"}`} data-testid="text-stock-disponible">
+              Disponible: {stockDisponible ?? 0}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <Label>Hacia *</Label>
@@ -2687,6 +2786,9 @@ function TransferForm({
       <div className="space-y-1">
         <Label>Cantidad *</Label>
         <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-transfer-qty" />
+        {excedeStock && (
+          <p className="text-xs text-destructive">La cantidad supera el stock disponible en el depósito origen.</p>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Notas (opcional)</Label>
@@ -2696,7 +2798,7 @@ function TransferForm({
         <Button variant="outline" onClick={onCancel}>Cancelar</Button>
         <Button
           onClick={() => onSubmit({ itemId, fromWarehouseId, toWarehouseId, quantity, notes: notes || undefined })}
-          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0}
+          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0 || excedeStock}
           data-testid="btn-confirm-transfer"
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -2705,6 +2807,81 @@ function TransferForm({
         </Button>
       </DialogFooter>
     </div>
+  );
+}
+
+/**
+ * Envoltorio autosuficiente de TransferForm (propio query de depósitos/ítems
+ * y propia mutation) para usarlo fuera de la pestaña Depósitos — el motor de
+ * Transferencia entre depósitos del Centro de Comprobantes. Mismo endpoint
+ * (/api/inventory/transfer) y misma validación que ya usa el diálogo de
+ * Depósitos, solo cambia el envoltorio (Dialog vs. div embebido).
+ */
+export function TransferStockForm({ embedded, open, onClose }: {
+  embedded?: boolean;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const { data: warehouses = [] } = useQuery<InventoryWarehouse[]>({
+    queryKey: ["/api/inventory/warehouses"],
+    enabled: open,
+  });
+  const { data: items = [] } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/inventory/items"],
+    enabled: open,
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: async (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => {
+      const res = await apiRequest("POST", "/api/inventory/transfer", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      toast({ title: "Transferencia registrada correctamente" });
+      onClose();
+    },
+    onError: (e: any) => toast({ title: "Error en transferencia", description: e?.message, variant: "destructive" }),
+  });
+
+  const form = (
+    <TransferForm
+      warehouses={warehouses}
+      items={items}
+      preselectedItem={null}
+      preselectedFromWarehouse={null}
+      onSubmit={(data) => transferMutation.mutate(data)}
+      isPending={transferMutation.isPending}
+      onCancel={onClose}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="transfer-stock-embedded">
+        <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+          <ArrowLeftRight className="h-5 w-5" />
+          Transferir Stock entre Depósitos
+        </h2>
+        {form}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowLeftRight className="h-5 w-5" />
+            Transferir Stock entre Depósitos
+          </DialogTitle>
+        </DialogHeader>
+        {form}
+      </DialogContent>
+    </Dialog>
   );
 }
 

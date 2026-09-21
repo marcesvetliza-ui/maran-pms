@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -140,6 +140,7 @@ export const companies = pgTable("companies", {
   montoBaseFce: text("monto_base_fce"),
   condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
   regimenHospedaje: text("regimen_hospedaje"),
+  tarifaConvenio: text("tarifa_convenio").$type<"mayorista" | "minorista">(),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
@@ -171,6 +172,7 @@ export const agencies = pgTable("agencies", {
   paymentTermDays: integer("payment_term_days").default(30),
   notes: text("notes"),
   condicionVentaPredeterminada: text("condicion_venta_predeterminada").default("contado"),
+  tarifaConvenio: text("tarifa_convenio").$type<"mayorista" | "minorista">(),
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at"),
 });
@@ -296,6 +298,11 @@ export const reservations = pgTable("reservations", {
   notes: text("notes"),
   voucherCode: text("voucher_code"),
   voucherNotes: text("voucher_notes"),
+  // Vínculo real al voucher aplicado (ver gift_voucher_applications para el
+  // registro transaccional). voucherCode queda como caché de solo lectura
+  // para no tener que resolver el join en cada listado.
+  voucherId: varchar("voucher_id"),
+  voucherAppliedAmount: decimal("voucher_applied_amount", { precision: 10, scale: 2 }),
   isUpgrade: boolean("is_upgrade").default(false),
   originalRoomTypeId: varchar("original_room_type_id"),
   movedFromRoomNumber: text("moved_from_room_number"),
@@ -575,6 +582,127 @@ export type OTAChannelWithStats = OTAChannel & {
 
 export type OTAReservationLogWithChannel = OTAReservationLog & {
   channel: OTAChannel;
+};
+
+// Channex (channel manager) — conexión, mapeo de catálogo y bandeja de reservas.
+// Fase 1: aislada de la operación real (no "solo lectura" en sentido estricto —
+// confirmarle a Channex el feed de reservas sí es una escritura del lado de
+// Channex). El status "imported" y el endpoint /import (ver server/routes/channex.ts)
+// conservan ese nombre por motivos históricos: la UI lo muestra como "Aceptar" y
+// nunca escribe en `reservations` — es una marca de revisión, no una reserva real.
+export type ChannexEnvironment = "demo" | "real";
+export type ChannexBookingStatus = "new" | "needs_review" | "imported" | "modified" | "cancelled" | "error";
+
+export const channexConnections = pgTable("channex_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  label: text("label").notNull(),
+  environment: text("environment").$type<ChannexEnvironment>().notNull().default("demo"),
+  channexPropertyId: text("channex_property_id").notNull(),
+  // apiKey queda nullable sólo para migrar instalaciones que todavía tengan
+  // la credencial histórica en texto plano. Las escrituras nuevas usan
+  // apiKeyEncrypted y la migración deja apiKey en NULL.
+  apiKey: text("api_key"),
+  apiKeyEncrypted: text("api_key_encrypted"),
+  baseUrl: text("base_url").notNull().default("https://staging.channex.io/api/v1"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastCatalogSyncAt: timestamp("last_catalog_sync_at"),
+  lastBookingSyncAt: timestamp("last_booking_sync_at"),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export const insertChannexConnectionSchema = z.object({
+  label: z.string().trim().min(1),
+  environment: z.enum(["demo", "real"]).default("demo"),
+  channexPropertyId: z.string().trim().min(1),
+  apiKey: z.string().trim().min(1),
+  baseUrl: z.string().url().default("https://staging.channex.io/api/v1"),
+  isActive: z.boolean().default(true),
+});
+export type InsertChannexConnection = z.infer<typeof insertChannexConnectionSchema>;
+export type ChannexConnection = typeof channexConnections.$inferSelect;
+export type ChannexConnectionPublic = Omit<ChannexConnection, "apiKey" | "apiKeyEncrypted">;
+
+export const channexRoomTypeMappings = pgTable("channex_room_type_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexRoomTypeId: text("channex_room_type_id").notNull(),
+  channexRoomTypeTitle: text("channex_room_type_title").notNull(),
+  roomTypeId: varchar("room_type_id"),
+  createdAt: timestamp("created_at").notNull(),
+}, (table) => ({
+  connectionChannexRoomTypeUnique: uniqueIndex("channex_room_type_mappings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexRoomTypeId),
+}));
+
+export const insertChannexRoomTypeMappingSchema = createInsertSchema(channexRoomTypeMappings).omit({ id: true, createdAt: true });
+export type InsertChannexRoomTypeMapping = z.infer<typeof insertChannexRoomTypeMappingSchema>;
+export type ChannexRoomTypeMapping = typeof channexRoomTypeMappings.$inferSelect;
+
+export const channexRatePlanMappings = pgTable("channex_rate_plan_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexRatePlanId: text("channex_rate_plan_id").notNull(),
+  channexRatePlanTitle: text("channex_rate_plan_title").notNull(),
+  channexRoomTypeId: text("channex_room_type_id").notNull(),
+  ratePlanId: varchar("rate_plan_id"),
+  createdAt: timestamp("created_at").notNull(),
+}, (table) => ({
+  connectionChannexRatePlanUnique: uniqueIndex("channex_rate_plan_mappings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexRatePlanId),
+}));
+
+export const insertChannexRatePlanMappingSchema = createInsertSchema(channexRatePlanMappings).omit({ id: true, createdAt: true });
+export type InsertChannexRatePlanMapping = z.infer<typeof insertChannexRatePlanMappingSchema>;
+export type ChannexRatePlanMapping = typeof channexRatePlanMappings.$inferSelect;
+
+export const channexBookings = pgTable("channex_bookings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connectionId: varchar("connection_id").notNull(),
+  channexBookingId: text("channex_booking_id").notNull(),
+  channexRevisionId: text("channex_revision_id"),
+  status: text("status").$type<ChannexBookingStatus>().notNull().default("new"),
+  otaName: text("ota_name"),
+  guestName: text("guest_name"),
+  guestEmail: text("guest_email"),
+  guestPhone: text("guest_phone"),
+  arrivalDate: date("arrival_date"),
+  departureDate: date("departure_date"),
+  adults: integer("adults"),
+  children: integer("children"),
+  infants: integer("infants"),
+  currency: text("currency"),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
+  commissionAmount: decimal("commission_amount", { precision: 10, scale: 2 }),
+  netAmount: decimal("net_amount", { precision: 10, scale: 2 }),
+  channexRoomTypeId: text("channex_room_type_id"),
+  channexRatePlanId: text("channex_rate_plan_id"),
+  isMapped: boolean("is_mapped").notNull().default(false),
+  rawPayload: jsonb("raw_payload"),
+  errorMessage: text("error_message"),
+  importedAt: timestamp("imported_at"),
+  importedBy: varchar("imported_by"),
+  // Confirmación selectiva (#542): mientras acknowledgedRevisionId sea distinto
+  // de channexRevisionId (o nulo), esta fila está pendiente de confirmar a
+  // Channex. Confirmar solo opera sobre filas ya persistidas por un preview
+  // previo — nunca sobre lo que devuelva un fetch nuevo — así una revisión
+  // que apareció después del preview no puede confirmarse sin haberla visto.
+  acknowledgedRevisionId: text("acknowledged_revision_id"),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+}, (table) => ({
+  connectionChannexBookingUnique: uniqueIndex("channex_bookings_connection_channex_id_idx")
+    .on(table.connectionId, table.channexBookingId),
+}));
+
+export const insertChannexBookingSchema = createInsertSchema(channexBookings).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertChannexBooking = z.infer<typeof insertChannexBookingSchema>;
+export type ChannexBooking = typeof channexBookings.$inferSelect;
+
+export type ChannexBookingWithMappingNames = ChannexBooking & {
+  channexRoomTypeTitle: string | null;
+  channexRatePlanTitle: string | null;
+  mappedRoomTypeName: string | null;
 };
 
 // Groups (Grupos de reservas)
@@ -1365,24 +1493,6 @@ export const insertItemCategorySchema = createInsertSchema(itemCategories).omit(
 export type InsertItemCategory = z.infer<typeof insertItemCategorySchema>;
 export type ItemCategory = typeof itemCategories.$inferSelect;
 
-// Suppliers (Proveedores)
-export const suppliers = pgTable("suppliers", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  contactName: text("contact_name"),
-  phone: text("phone"),
-  email: text("email"),
-  address: text("address"),
-  cuit: text("cuit"),
-  paymentTermDays: integer("payment_term_days").default(30),
-  notes: text("notes"),
-  isActive: text("is_active").default("true"),
-});
-
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true });
-export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
-export type Supplier = typeof suppliers.$inferSelect;
-
 // Inventory Items (Articulos)
 export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
 
@@ -1397,7 +1507,6 @@ export const inventoryItems = pgTable("inventory_items", {
   name: text("name").notNull(),
   description: text("description"),
   categoryId: varchar("category_id"),
-  supplierId: varchar("supplier_id"),
   unit: text("unit").$type<UnitType>().notNull().default("unidad"),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).default("0"),
   minStock: decimal("min_stock", { precision: 10, scale: 3 }).default("0"),
@@ -1414,7 +1523,7 @@ export type InventoryItem = typeof inventoryItems.$inferSelect;
 
 export type InventoryItemWithDetails = InventoryItem & {
   category?: ItemCategory;
-  supplier?: Supplier;
+  suppliers?: Array<Pick<AccountingSupplier, "id" | "razonSocial" | "cuit"> & { isPreferred: boolean }>;
 };
 
 // Stock Movements (Movimientos de Stock)
@@ -1499,7 +1608,7 @@ export type PurchaseOrderStatus = "draft" | "sent" | "partial" | "received" | "c
 export const purchaseOrders = pgTable("purchase_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderNumber: text("order_number").notNull(),
-  supplierId: varchar("supplier_id").notNull(),
+  supplierId: integer("supplier_id").references(() => accountingSuppliers.id),
   status: text("status").$type<PurchaseOrderStatus>().notNull().default("draft"),
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).default("0"),
   tax: decimal("tax", { precision: 12, scale: 2 }).default("0"),
@@ -1530,7 +1639,7 @@ export type InsertPurchaseOrderItem = z.infer<typeof insertPurchaseOrderItemSche
 export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;
 
 export type PurchaseOrderWithDetails = PurchaseOrder & {
-  supplier: Supplier;
+  supplier: AccountingSupplier;
   items: (PurchaseOrderItem & { item: InventoryItem })[];
 };
 
@@ -1581,10 +1690,15 @@ export type SpaTreatment = typeof spaTreatments.$inferSelect;
 
 // Default resource slots required by a circuit. Staff may adjust the cabin
 // and time when booking, while duration and ordering come from this template.
+// Each row is exactly one kind of resource: a gabinete (defaultCabinId) or a
+// plain treatment bundled into the circuit, like a massage (resourceTreatmentId)
+// — never both. Which kind a row is gets fixed here at template time; only the
+// specific cabin/treatment and its time may change when actually booking.
 export const spaTreatmentResources = pgTable("spa_treatment_resources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   treatmentId: varchar("treatment_id").notNull().references(() => spaTreatments.id, { onDelete: "cascade" }),
-  defaultCabinId: varchar("default_cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  defaultCabinId: varchar("default_cabin_id").references(() => spaCabins.id, { onDelete: "restrict" }),
+  resourceTreatmentId: varchar("resource_treatment_id").references(() => spaTreatments.id, { onDelete: "restrict" }),
   durationMinutes: integer("duration_minutes").notNull().default(30),
   sortOrder: integer("sort_order").notNull().default(0),
 });
@@ -1649,6 +1763,10 @@ export const spaAppointments = pgTable("spa_appointments", {
   status: text("status").$type<SpaAppointmentStatus>().notNull().default("pending"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
+  // Presente solo cuando el turno se generó reclamando una unidad de una
+  // venta anticipada ("Turnos vendidos") — permite avisarle a esa venta
+  // cuando el turno efectivamente se presta (ver quantityUsed).
+  soldTreatmentSaleId: varchar("sold_treatment_sale_id").references(() => spaTreatmentSales.id),
 });
 
 export const insertSpaAppointmentSchema = createInsertSchema(spaAppointments).omit({ id: true });
@@ -1657,10 +1775,14 @@ export type SpaAppointment = typeof spaAppointments.$inferSelect;
 
 // Concrete resource reservations created for a circuit appointment.
 // They do not create charges: the parent appointment remains the financial source.
+// Same cabin-xor-treatment shape as spaTreatmentResources above; a treatment
+// resource (e.g. a massage bundled into the circuit) has no cabinId, since it
+// isn't a room booking and today carries no staff-availability check either.
 export const spaAppointmentResources = pgTable("spa_appointment_resources", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   appointmentId: varchar("appointment_id").notNull().references(() => spaAppointments.id, { onDelete: "cascade" }),
-  cabinId: varchar("cabin_id").notNull().references(() => spaCabins.id, { onDelete: "restrict" }),
+  cabinId: varchar("cabin_id").references(() => spaCabins.id, { onDelete: "restrict" }),
+  resourceTreatmentId: varchar("resource_treatment_id").references(() => spaTreatments.id, { onDelete: "restrict" }),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   durationMinutes: integer("duration_minutes").notNull(),
@@ -1714,6 +1836,10 @@ export const spaAccountItems = pgTable("spa_account_items", {
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   itemType: text("item_type").notNull().default("treatment"),
+  // Solo presente cuando itemType es "product" (un artículo de venta_directa
+  // del inventario del SPA, como cremas o bebidas) — a diferencia de un
+  // concepto (cochera, media pensión), un producto descuenta stock al venderse.
+  inventoryItemId: varchar("inventory_item_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
 });
@@ -1721,6 +1847,32 @@ export const spaAccountItems = pgTable("spa_account_items", {
 export const insertSpaAccountItemSchema = createInsertSchema(spaAccountItems).omit({ id: true });
 export type InsertSpaAccountItem = z.infer<typeof insertSpaAccountItemSchema>;
 export type SpaAccountItem = typeof spaAccountItems.$inferSelect;
+
+// "Turnos vendidos": un comprobante puede vender un tratamiento antes de que
+// exista un turno (venta anticipada, regalo, paquete). Este registro es el
+// puente entre esa línea del comprobante y el/los turnos que después se
+// generen para consumirla — spa_accounts sigue exigiendo un appointmentId,
+// así que la venta vive acá hasta que se le asigna uno.
+export type SpaTreatmentSaleStatus = "pendiente" | "parcial" | "programado" | "utilizado" | "vencido" | "cancelado";
+
+export const spaTreatmentSales = pgTable("spa_treatment_sales", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salesInvoiceId: integer("sales_invoice_id").notNull(),
+  invoiceItemIndex: integer("invoice_item_index").notNull(),
+  treatmentId: varchar("treatment_id").notNull().references(() => spaTreatments.id, { onDelete: "restrict" }),
+  buyerName: text("buyer_name").notNull(),
+  quantityPurchased: integer("quantity_purchased").notNull(),
+  quantityScheduled: integer("quantity_scheduled").notNull().default(0),
+  quantityUsed: integer("quantity_used").notNull().default(0),
+  unitPriceFrozen: decimal("unit_price_frozen", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").$type<SpaTreatmentSaleStatus>().notNull().default("pendiente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSpaTreatmentSaleSchema = createInsertSchema(spaTreatmentSales).omit({ id: true, createdAt: true });
+export type InsertSpaTreatmentSale = z.infer<typeof insertSpaTreatmentSaleSchema>;
+export type SpaTreatmentSale = typeof spaTreatmentSales.$inferSelect;
 
 export const treatmentSupplies = pgTable("treatment_supplies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1736,7 +1888,9 @@ export const insertTreatmentSupplySchema = createInsertSchema(treatmentSupplies)
 export type InsertTreatmentSupply = z.infer<typeof insertTreatmentSupplySchema>;
 export type TreatmentSupply = typeof treatmentSupplies.$inferSelect;
 
-export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente";
+// "venta_previa": el tratamiento ya fue facturado y cobrado antes de existir
+// el turno (ver "Turnos vendidos"/spa_treatment_sales) — no es un cobro nuevo.
+export type SpaPaymentMethod = "cash" | "debit_card" | "credit_card" | "transfer" | "mercadopago" | "room_charge" | "cuenta_corriente" | "venta_previa" | "gift_voucher";
 
 export const spaPayments = pgTable("spa_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1746,6 +1900,10 @@ export const spaPayments = pgTable("spa_payments", {
   isAdvance: text("is_advance").default("false"),
   appointmentId: varchar("appointment_id"),
   reservationId: varchar("reservation_id"),
+  // Solo presente cuando method es "gift_voucher" — permite liberar la
+  // aplicación exacta si este pago puntual se anula, en vez de asumir que
+  // hay una sola aplicación viva contra la cuenta.
+  voucherId: varchar("voucher_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull(),
   status: text("status").notNull().default("active"),
@@ -1835,7 +1993,7 @@ export type MaintenanceBlock = typeof maintenanceBlocks.$inferSelect;
 // ============== ADMINISTRATION MODULE ==============
 
 // System User Roles (extends existing UserRole with admin roles)
-export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "jefe_recepcion" | "comercial";
+export type SystemUserRole = "admin" | "manager" | "ama_de_llaves" | "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "events" | "resp_deposito" | "resp_administracion" | "responsable_area" | "jefe_recepcion" | "comercial";
 
 // System Users (Usuarios del Sistema)
 export const systemUsers = pgTable("system_users", {
@@ -1972,7 +2130,7 @@ export type PackageWithDetails = Package & {
 };
 
 // System Notifications (base for chatbot + web check-in)
-export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert";
+export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert" | "gift_voucher_expiring";
 export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
 export type NotificationStatus = "pendiente" | "en_proceso" | "completado" | "rechazado";
@@ -2188,6 +2346,35 @@ export type OrphanedCashPaymentLink = {
   createdAt: Date | null;
 };
 
+// Legacy Caja data may have more than one cash_movements row linked to the
+// same reservation payment (the bug CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL
+// guards against — it simply skips creating the unique index while this
+// exists, rather than failing startup). Grouped by the shared paymentId so
+// an admin can compare the movements side by side and choose which one to
+// unlink — never automatic, never touches the underlying payment/folio.
+export type DuplicateCashPaymentLinkMovement = {
+  movementId: string;
+  area: string;
+  amount: string;
+  paymentMethod: string;
+  movementType: string;
+  shiftId: string | null;
+  registeredBy: string | null;
+  anulado: boolean;
+  motivoAnulacion: string | null;
+  anuladoPor: string | null;
+  createdAt: Date | null;
+};
+
+export type DuplicateCashPaymentLinkGroup = {
+  paymentId: string;
+  reservationCode: string | null;
+  guestName: string | null;
+  paymentAmount: string | null;
+  paymentDate: string | null;
+  movements: DuplicateCashPaymentLinkMovement[];
+};
+
 export const cashClosingSummaries = pgTable("cash_closing_summaries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   shiftId: varchar("shift_id").notNull(),
@@ -2216,6 +2403,12 @@ export type CashClosingSummary = typeof cashClosingSummaries.$inferSelect;
 export type AccountMovementType = "cargo" | "pago" | "nota_credito" | "ajuste";
 export type AccountEntityType = "company" | "agency" | "guest";
 
+// Qué área del hotel generó el movimiento. Se completa desde ahora en
+// adelante en cada punto que crea un cargo; los movimientos históricos
+// (de antes de este campo) quedan en null — se muestran como "Sin
+// clasificar" en vez de adivinar, no se migran retroactivamente.
+export type AccountMovementArea = "recepcion" | "restaurant" | "eventos" | "spa" | "grupos" | "otros";
+
 export type AccountRetention = { concepto: string; monto: number };
 
 export const accountMovements = pgTable("account_movements", {
@@ -2235,6 +2428,7 @@ export const accountMovements = pgTable("account_movements", {
   // permitted deletions keep the current-account ledger in lockstep.
   groupPaymentId: varchar("group_payment_id").references(() => groupPayments.id),
   retentions: jsonb("retentions").$type<AccountRetention[]>(),
+  area: text("area").$type<AccountMovementArea>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -2259,7 +2453,7 @@ export type AccountMovementAllocation = typeof accountMovementAllocations.$infer
 // MÓDULO CONTABLE / ADMINISTRATIVO
 // ============================================================
 
-// Proveedores contables (separado de suppliers del inventario)
+// Maestro único de proveedores para Contabilidad, Compras e Inventario
 export const accountingSuppliers = pgTable("accounting_suppliers", {
   id: serial("id").primaryKey(),
   razonSocial: text("razon_social").notNull(),
@@ -2283,6 +2477,21 @@ export const insertAccountingSupplierSchema = createInsertSchema(accountingSuppl
 export type InsertAccountingSupplier = z.infer<typeof insertAccountingSupplierSchema>;
 export type AccountingSupplier = typeof accountingSuppliers.$inferSelect;
 
+export const inventoryItemSuppliers = pgTable("inventory_item_suppliers", {
+  itemId: varchar("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
+  accountingSupplierId: integer("accounting_supplier_id").notNull().references(() => accountingSuppliers.id, { onDelete: "restrict" }),
+  isPreferred: boolean("is_preferred").notNull().default(false),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.itemId, table.accountingSupplierId] }),
+  preferredItemIdx: uniqueIndex("inventory_item_suppliers_preferred_idx")
+    .on(table.itemId)
+    .where(sql`${table.isPreferred} = true`),
+  supplierIdx: index("inventory_item_suppliers_supplier_idx").on(table.accountingSupplierId),
+}));
+
+export type InventoryItemSupplier = typeof inventoryItemSuppliers.$inferSelect;
+export type InsertInventoryItemSupplier = typeof inventoryItemSuppliers.$inferInsert;
+
 // Plan de Cuentas Contables
 export const accountingAccounts = pgTable("accounting_accounts", {
   id: serial("id").primaryKey(),
@@ -2291,6 +2500,11 @@ export const accountingAccounts = pgTable("accounting_accounts", {
   tipo: text("tipo").notNull(),
   nivel: integer("nivel").default(1),
   activo: boolean("activo").default(true),
+  // Only meaningful for tipo="ingreso" today: which area's revenue this account
+  // represents (recepcion/restaurant/spa/eventos/otros), so the income reports
+  // can group by the real plan de cuentas instead of a hardcoded area list —
+  // the same relationship account_movements.area already gives Cuentas Corrientes.
+  area: text("area").$type<AccountMovementArea>(),
 });
 
 export const insertAccountingAccountSchema = createInsertSchema(accountingAccounts).omit({ id: true });
@@ -2527,6 +2741,10 @@ export const salesInvoices = pgTable("sales_invoices", {
   clienteRazonSocial: text("cliente_razon_social").notNull(),
   clienteCuit: text("cliente_cuit"),
   clienteDni: text("cliente_dni"),
+  // Tipo de documento del receptor (ej. "passport") — determina si clienteDni
+  // se manda a ARCA como DocTipo 94 (Pasaporte) en vez de 96 (DNI). Solo
+  // relevante hoy para Factura T (turismo), receptores extranjeros.
+  clienteDocumentType: text("cliente_document_type"),
   clienteCondicionIva: text("cliente_condicion_iva").notNull(),
   clienteDomicilio: text("cliente_domicilio"),
   montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull(),
@@ -2662,6 +2880,23 @@ export const insertLostFoundSchema = createInsertSchema(lostFoundItems).omit({
 });
 export type InsertLostFound = z.infer<typeof insertLostFoundSchema>;
 export type LostFoundItem = typeof lostFoundItems.$inferSelect;
+
+// Registro de apertura/reseteo del código de la caja fuerte por habitación —
+// reemplaza la planilla en papel que llevaba recepción a mano.
+export const safeBoxOpenings = pgTable("safe_box_openings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "restrict" }),
+  date: date("date").notNull(),
+  openedBy: text("opened_by").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSafeBoxOpeningSchema = createInsertSchema(safeBoxOpenings).omit({
+  id: true, createdAt: true,
+});
+export type InsertSafeBoxOpening = z.infer<typeof insertSafeBoxOpeningSchema>;
+export type SafeBoxOpening = typeof safeBoxOpenings.$inferSelect;
 
 // ==================== SYSTEM INCIDENTS ====================
 export type IncidentSeverity = "baja" | "media" | "alta" | "critica";
@@ -3036,7 +3271,10 @@ export type ItemLoanWithItem = ItemLoan & { loanItem: LoanItem };
 
 // ── Gift Vouchers ──────────────────────────────────────────────────────────────
 export type GiftVoucherArea = "alojamiento" | "restaurant" | "spa" | "otro";
-export type GiftVoucherStatus = "activo" | "usado" | "vencido" | "cancelado";
+// reservado: aplicado a una operación (reserva, pedido) que todavía no se completó —
+// no es definitivo, se libera si esa operación se cancela.
+// utilizado: la operación a la que se aplicó ya se completó/facturó.
+export type GiftVoucherStatus = "activo" | "activo_facturado" | "reservado" | "utilizado" | "vencido" | "cancelado";
 export type GiftVoucherValueType = "monetario" | "descriptivo";
 
 export const giftVouchers = pgTable("gift_vouchers", {
@@ -3058,6 +3296,19 @@ export const giftVouchers = pgTable("gift_vouchers", {
   usedNotes: text("used_notes"),
   pricePaid: decimal("price_paid", { precision: 10, scale: 2 }),
   paymentMethod: text("payment_method"),
+  // Comprobante fiscal de la VENTA del voucher (si corresponde) — separado del
+  // comprobante de la operación donde luego se lo consume, que vive en la
+  // aplicación (gift_voucher_applications), no acá.
+  saleInvoiceId: integer("sale_invoice_id").references(() => salesInvoices.id),
+  // Presente solo en un voucher "por prestación" (regalar un tratamiento SPA
+  // concreto, no un monto): la venta anticipada de la que nació. Mientras
+  // esté seteado, el estado del voucher lo dicta el turno vendido — agendar
+  // lo pasa a "reservado", completarlo a "utilizado" (ver routes/spa.ts) —
+  // en vez de la acción manual de "Marcar como utilizado".
+  linkedTreatmentSaleId: varchar("linked_treatment_sale_id").references(() => spaTreatmentSales.id),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledBy: text("cancelled_by"),
+  cancelReason: text("cancel_reason"),
   notes: text("notes"),
   createdBy: text("created_by"),
 });
@@ -3065,6 +3316,56 @@ export const giftVouchers = pgTable("gift_vouchers", {
 export const insertGiftVoucherSchema = createInsertSchema(giftVouchers).omit({ id: true, issuedAt: true, usedAt: true });
 export type InsertGiftVoucher = z.infer<typeof insertGiftVoucherSchema>;
 export type GiftVoucher = typeof giftVouchers.$inferSelect;
+
+// Cada vez que un voucher se aplica a una operación real (reserva, pedido de
+// restaurant). Es la fuente de verdad de "dónde está usado" un voucher — evita
+// depender de un solo campo de estado y permite bloquear el doble uso con un
+// SELECT ... FOR UPDATE sobre estas filas dentro de una transacción.
+export type GiftVoucherApplicationTargetType = "reservation" | "restaurant_order" | "spa_account";
+export type GiftVoucherApplicationStatus = "reservado" | "utilizado" | "liberado";
+
+export const giftVoucherApplications = pgTable("gift_voucher_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  voucherId: varchar("voucher_id").notNull().references(() => giftVouchers.id),
+  targetType: text("target_type").$type<GiftVoucherApplicationTargetType>().notNull(),
+  targetId: varchar("target_id").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").$type<GiftVoucherApplicationStatus>().notNull().default("reservado"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  consumedAt: timestamp("consumed_at"),
+  releasedAt: timestamp("released_at"),
+  releasedBy: text("released_by"),
+  releaseReason: text("release_reason"),
+});
+
+export const insertGiftVoucherApplicationSchema = createInsertSchema(giftVoucherApplications).omit({ id: true, createdAt: true });
+export type InsertGiftVoucherApplication = z.infer<typeof insertGiftVoucherApplicationSchema>;
+export type GiftVoucherApplication = typeof giftVoucherApplications.$inferSelect;
+
+// Auditoría estructurada de un voucher: cada cambio de estado o de campo
+// editable queda registrado acá, no solo en un texto libre.
+export type GiftVoucherEventType =
+  | "emitido" | "facturado" | "reservado" | "liberado" | "utilizado"
+  | "cancelado" | "reactivado" | "vencido" | "editado";
+
+export const giftVoucherEvents = pgTable("gift_voucher_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  voucherId: varchar("voucher_id").notNull().references(() => giftVouchers.id),
+  eventType: text("event_type").$type<GiftVoucherEventType>().notNull(),
+  fromStatus: text("from_status").$type<GiftVoucherStatus>(),
+  toStatus: text("to_status").$type<GiftVoucherStatus>(),
+  fieldChanged: text("field_changed"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  reason: text("reason"),
+  performedBy: text("performed_by"),
+  performedAt: timestamp("performed_at").notNull().defaultNow(),
+});
+
+export const insertGiftVoucherEventSchema = createInsertSchema(giftVoucherEvents).omit({ id: true, performedAt: true });
+export type InsertGiftVoucherEvent = z.infer<typeof insertGiftVoucherEventSchema>;
+export type GiftVoucherEvent = typeof giftVoucherEvents.$inferSelect;
 
 // ==================== TOMA DE INVENTARIO ====================
 export const inventoryCounts = pgTable("inventory_counts", {

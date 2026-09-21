@@ -25,6 +25,7 @@ const CheckInPage = lazy(() => import("@/pages/check-in"));
 const CheckOutPage = lazy(() => import("@/pages/check-out"));
 const RatePlansPage = lazy(() => import("@/pages/rate-plans"));
 const OTAChannelsPage = lazy(() => import("@/pages/ota-channels"));
+const ChannexPage = lazy(() => import("@/pages/channex"));
 const NewReservationPage = lazy(() => import("@/pages/new-reservation"));
 const GroupsPage = lazy(() => import("@/pages/groups"));
 const GroupDetailPage = lazy(() => import("@/pages/group-detail"));
@@ -32,6 +33,7 @@ const ReviewsPage = lazy(() => import("@/pages/reviews"));
 const HousekeepingPage = lazy(() => import("@/pages/housekeeping"));
 const RestaurantPage = lazy(() => import("@/pages/restaurant"));
 const InventoryPage = lazy(() => import("@/pages/inventory"));
+const EmitirComprobantePage = lazy(() => import("@/pages/emitir-comprobante"));
 const SpaPage = lazy(() => import("@/pages/spa"));
 const EventsPage = lazy(() => import("@/pages/events"));
 const MaintenancePage = lazy(() => import("@/pages/maintenance"));
@@ -76,6 +78,7 @@ const CostCentersAbmPage = lazy(() => import("@/pages/cost-centers-abm"));
 const SeguridadPage = lazy(() => import("@/pages/seguridad"));
 const SurveyPage = lazy(() => import("@/pages/survey"));
 const HelpChat = lazy(() => import("@/components/help-chat"));
+const GroupFiscalCollectionWatcher = lazy(() => import("@/components/group-fiscal-collection-watcher"));
 const MozoPage = lazy(() => import("@/pages/mozo"));
 const RecetasCostosPage = lazy(() => import("@/pages/recetas-costos"));
 const AdminIndecPage = lazy(() => import("@/pages/admin-indec"));
@@ -219,6 +222,7 @@ function Router() {
         <Route path="/check-out" component={CheckOutPage} />
         <Route path="/rate-plans" component={RatePlansPage} />
         <Route path="/ota-channels" component={OTAChannelsPage} />
+        <Route path="/channex" component={ChannexPage} />
         <Route path="/reviews" component={ReviewsPage} />
         <Route path="/housekeeping" component={HousekeepingPage} />
         <Route path="/presupuestos" component={PresupuestosPage} />
@@ -226,6 +230,9 @@ function Router() {
         <Route path="/restaurant" component={RestaurantPage} />
         <Route path="/restaurant/recetas" component={RecetasCostosPage} />
         <Route path="/inventory" component={InventoryPage} />
+        <Route path="/operaciones/emitir-comprobante">
+          {() => <RoleRoute component={EmitirComprobantePage} roles={["admin", "manager", "reception", "restaurant", "spa", "events", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"]} />}
+        </Route>
         <Route path="/spa" component={SpaPage} />
         <Route path="/spa-clients" component={SpaClientsPage} />
         <Route path="/gift-vouchers" component={GiftVouchersPage} />
@@ -378,6 +385,9 @@ function AppLayout() {
       </div>
       <Suspense fallback={null}>
         <HelpChat />
+      </Suspense>
+      <Suspense fallback={null}>
+        <GroupFiscalCollectionWatcher />
       </Suspense>
     </SidebarProvider>
   );

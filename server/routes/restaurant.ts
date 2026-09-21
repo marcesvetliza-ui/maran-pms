@@ -351,6 +351,28 @@ export function registerRestaurantRoutes(app: Express) {
         finalTotal = Math.max(0, finalTotal - advanceCredit);
       }
 
+      // Aplicar y consumir el voucher de regalo ANTES de cerrar el pedido: si
+      // no está disponible (ya usado, vencido, área equivocada), el pedido no
+      // debe quedar cerrado con un pago que en realidad no se cubrió.
+      let giftVoucherApplicationId: string | null = null;
+      if (voucherId) {
+        const giftVoucherSplit = Array.isArray(paymentSplits) ? paymentSplits.find((s: any) => s.method === "gift_voucher") : null;
+        const giftVoucherAmount = giftVoucherSplit
+          ? parseFloat(giftVoucherSplit.amount || "0")
+          : (effectivePrimaryMethod === "gift_voucher" ? finalTotal : 0);
+        if (giftVoucherAmount > 0) {
+          try {
+            const actor = (req as any).user?.username || "sistema";
+            const { application } = await storage.applyGiftVoucher(
+              voucherId, "restaurant_order", req.params.id, giftVoucherAmount, actor,
+            );
+            giftVoucherApplicationId = application.id;
+          } catch (e: any) {
+            return res.status(400).json({ error: e?.message || "Error al aplicar el voucher de regalo" });
+          }
+        }
+      }
+
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
         status: "closed",
         closedAt: new Date(),
@@ -476,6 +498,7 @@ export function registerRestaurantRoutes(app: Express) {
           type: "cargo",
           description: label,
           amount: String(finalTotal.toFixed(2)),
+          area: "restaurant",
         });
       }
 
@@ -607,16 +630,14 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      // Marcar voucher de regalo como usado (si aplica)
-      if (voucherId) {
+      // Consumir la aplicación del voucher — el pedido de restaurant se paga
+      // y se cierra en el mismo momento, así que reservado→utilizado ocurre
+      // sin un estado intermedio visible.
+      if (giftVoucherApplicationId) {
         try {
-          await storage.markGiftVoucherUsed(
-            voucherId,
-            (req as any).user?.username || "sistema",
-            `Aplicado al pedido ${order.orderNumber}${voucherCode ? ` — código ${voucherCode}` : ""}`
-          );
+          await storage.consumeGiftVoucherApplication(giftVoucherApplicationId, (req as any).user?.username || "sistema");
         } catch (e) {
-          console.error("[GiftVoucher] Error al marcar voucher como usado:", e);
+          console.error("[GiftVoucher] Error al consumir la aplicación del voucher:", e);
         }
       }
 
@@ -1090,6 +1111,7 @@ export function registerRestaurantRoutes(app: Express) {
           amount,
           reference: `Orden: ${order.orderNumber}`,
           createdBy: (req as any).user?.id || null,
+          area: "restaurant",
         } as any);
       }
 
