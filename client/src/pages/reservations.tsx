@@ -235,6 +235,16 @@ export function ReservationFormDialog({
     enabled: open,
   });
 
+  const { data: companiesForAutofill = [] } = useQuery<Company[]>({
+    queryKey: ["/api/companies"],
+    enabled: open,
+  });
+
+  const { data: agenciesForAutofill = [] } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies"],
+    enabled: open,
+  });
+
   const { data: allReservationsForFilter = [] } = useQuery<any[]>({
     queryKey: ["/api/reservations"],
     enabled: open,
@@ -995,6 +1005,20 @@ export function ReservationFormDialog({
               onSelect={(guest) => {
                 setSelectedGuest(guest);
                 setFormData((prev) => ({ ...prev, guestId: guest.id }));
+                if (guest.companyId) {
+                  const company = companiesForAutofill.find((c) => c.id === guest.companyId);
+                  if (company) {
+                    setSelectedCompany(company);
+                    setFormData((prev) => ({ ...prev, companyId: company.id }));
+                  }
+                }
+                if (guest.agencyId) {
+                  const agency = agenciesForAutofill.find((a) => a.id === guest.agencyId);
+                  if (agency) {
+                    setSelectedAgency(agency);
+                    setFormData((prev) => ({ ...prev, agencyId: agency.id }));
+                  }
+                }
               }}
               onCreateNew={(guest) => createGuestMutation.mutate(guest)}
               onClear={() => {
