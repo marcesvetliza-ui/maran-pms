@@ -2527,6 +2527,11 @@ export const accountingAccounts = pgTable("accounting_accounts", {
   tipo: text("tipo").notNull(),
   nivel: integer("nivel").default(1),
   activo: boolean("activo").default(true),
+  // Only meaningful for tipo="ingreso" today: which area's revenue this account
+  // represents (recepcion/restaurant/spa/eventos/otros), so the income reports
+  // can group by the real plan de cuentas instead of a hardcoded area list —
+  // the same relationship account_movements.area already gives Cuentas Corrientes.
+  area: text("area").$type<AccountMovementArea>(),
 });
 
 export const insertAccountingAccountSchema = createInsertSchema(accountingAccounts).omit({ id: true });

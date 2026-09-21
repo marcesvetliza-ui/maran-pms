@@ -3971,6 +3971,30 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // ── Plan de cuentas: cuentas de ingreso por área ──────────────────────────
+  // accounting_accounts ya se usaba del lado de costos (cuenta_contable_id en
+  // purchase_invoices); esto le da un lado de ingresos, para que los informes
+  // de ventas por área agrupen por cuenta real en vez de por un array
+  // hardcodeado — mismo criterio que "Costos por Departamento" ya usa del lado
+  // de gastos. area conecta cada cuenta con la misma clasificación que ya usa
+  // Cuentas Corrientes (account_movements.area).
+  await withTimeout("accounting_accounts.area", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE accounting_accounts ADD COLUMN area text
+    `)))
+  );
+  await withTimeout("accounting_accounts.seed_ingresos", T, () =>
+    db.execute(sql`
+      INSERT INTO accounting_accounts (codigo, nombre, tipo, nivel, activo, area) VALUES
+        ('4.1.1.06.01', 'Ventas Alojamiento', 'ingreso', 4, true, 'recepcion'),
+        ('4.1.1.06.02', 'Ventas Restaurant', 'ingreso', 4, true, 'restaurant'),
+        ('4.1.1.06.03', 'Ventas Spa', 'ingreso', 4, true, 'spa'),
+        ('4.1.1.06.04', 'Ventas Eventos', 'ingreso', 4, true, 'eventos'),
+        ('4.1.1.06.05', 'Otros Ingresos', 'ingreso', 4, true, 'otros')
+      ON CONFLICT (codigo) DO NOTHING
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
