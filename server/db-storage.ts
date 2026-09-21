@@ -8123,9 +8123,13 @@ export class DatabaseStorage implements IStorage {
       agency: "AG",
     };
     const prefix = prefixes[entityType] ?? "FL";
-    const [row] = await db.select({ cnt: sql<number>`count(*)` }).from(folios)
-      .where(eq(folios.entityType, entityType));
-    const seq = (Number(row?.cnt ?? 0) + 1).toString().padStart(6, "0");
+    // entityType is a closed union (not user input), so it's safe to fold into
+    // the sequence name. A DB sequence (see migrate.ts) makes this atomic under
+    // concurrency — the previous COUNT(*)+1 scheme let two racing inserts compute
+    // the same number (see folio-entity-unique.pg.test.ts).
+    const seqName = `folio_seq_${entityType}`;
+    const r = await db.execute(sql.raw(`SELECT nextval('${seqName}') AS seq`));
+    const seq = Number((r.rows[0] as any)?.seq ?? 1).toString().padStart(6, "0");
     return `${prefix}-${seq}`;
   }
 
@@ -8139,17 +8143,26 @@ export class DatabaseStorage implements IStorage {
     // having seen no existing folio. ON CONFLICT DO NOTHING plus a fallback
     // re-select (guarded by the folios_entity_type_entity_id_unique index —
     // see migrate.ts) makes the loser return the winner's row instead of
-    // creating a second folio that splits the entity's balance in two.
-    const [created] = await db.insert(folios).values({
-      codigo,
-      entityType,
-      entityId,
-      status: "open",
-      totalCharges: "0",
-      totalPayments: "0",
-      balance: "0",
-    }).onConflictDoNothing({ target: [folios.entityType, folios.entityId] }).returning();
-    if (created) return created;
+    // creating a second folio that splits the entity's balance in two. The
+    // try/catch below is a second line of defense: if the insert instead trips
+    // any other unique constraint (e.g. codigo, in the unlikely case the
+    // per-type sequence was ever out of sync), that still means someone else
+    // just won the race, so fall through to the same re-select rather than
+    // letting the raw DB error escape.
+    try {
+      const [created] = await db.insert(folios).values({
+        codigo,
+        entityType,
+        entityId,
+        status: "open",
+        totalCharges: "0",
+        totalPayments: "0",
+        balance: "0",
+      }).onConflictDoNothing({ target: [folios.entityType, folios.entityId] }).returning();
+      if (created) return created;
+    } catch (err: any) {
+      if (err?.code !== "23505") throw err;
+    }
     const [winner] = await db.select().from(folios)
       .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
     if (!winner) throw new Error(`No se pudo crear ni recuperar el folio para ${entityType}:${entityId}`);

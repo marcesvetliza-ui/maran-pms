@@ -2,8 +2,11 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
 import { eq, isNotNull, sql } from "drizzle-orm";
-import { channexConnections } from "@shared/schema";
+import { channexConnections, type FolioEntityType } from "@shared/schema";
 import { encryptChannexApiKey } from "./channex/credentials";
+
+const FOLIO_ENTITY_TYPES: readonly FolioEntityType[] =
+  ["reservation", "restaurant_order", "spa_account", "group", "event", "company", "agency"];
 
 /**
  * Serializes catalog-check + DDL batches across concurrently starting app
@@ -3941,6 +3944,32 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ADD COLUMN area text
     `)))
   );
+
+  // generateFolioCodigo() used to derive the numeric suffix from COUNT(*) —
+  // two concurrent first-charges to the same (brand-new) entity could both
+  // count the same prior total and build the identical codigo, tripping
+  // folios_codigo_unique before the entity-level ON CONFLICT guard ever got
+  // a chance to run (see folio-entity-unique.pg.test.ts). One sequence per
+  // entity type makes the number atomic; the setval below is safe to rerun
+  // every boot since GREATEST only ever advances it, seeded past both the
+  // sequence's own progress and any legacy count-based codigo already on disk.
+  await withTimeout("folios.codigo_sequences", T, async () => {
+    for (const entityType of FOLIO_ENTITY_TYPES) {
+      const seqName = `folio_seq_${entityType}`;
+      await db.execute(sql.raw(createSequenceWithoutRerunNotice(seqName)));
+      await db.execute(sql`
+        SELECT setval(
+          ${seqName},
+          GREATEST(
+            COALESCE((SELECT last_value FROM pg_sequences WHERE sequencename = ${seqName}), 0) + 1,
+            (SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo, '\\D', '', 'g'), '')::integer), 0)
+             FROM folios WHERE entity_type = ${entityType}) + 1
+          ),
+          false
+        )
+      `);
+    }
+  });
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
