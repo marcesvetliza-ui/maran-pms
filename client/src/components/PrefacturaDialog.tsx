@@ -1034,11 +1034,24 @@ export function PrefacturaDialog({
   // Cash settlement does not mean fiscal settlement: a fully paid folio with
   // an unbilled advance must still allow an invoice. Only block a new invoice
   // when every billable source has no amount left to invoice.
+  //
+  // This also covers a reservation with nothing to invoice in the first
+  // place (e.g. a $0 room rate and no extra charges): originalBillableItems
+  // is empty, .every() on it is vacuously true, and operationalBalance is
+  // already 0 — so the same "nothing left to do but check out" path applies.
+  // `!!folio` keeps this false while the folio query is still loading (both
+  // originalBillableItems and operationalBalance default to empty/0 before
+  // data arrives), so the "Dar check-out" button never flashes enabled for a
+  // reservation that turns out to actually have charges.
   const operationalBalance = folio?.financialSummary?.operationalFolioBalance
     ?? Math.max(0, Number(folio?.balance || 0));
-  const alreadyPaidAndInvoiced = originalBillableItems.length > 0
+  const alreadyPaidAndInvoiced = !!folio
     && operationalBalance <= 0.01
     && originalBillableItems.every((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01);
+  // Distinguishes the two situations the banner/copy below needs to tell
+  // apart: "there was something to bill and it's already settled" vs.
+  // "there was never anything to bill" (e.g. a $0 room rate, no charges).
+  const hasNothingToInvoice = !!folio && originalBillableItems.length === 0;
 
   // A source remains selectable after a partial invoice. It is disabled only
   // when its remaining amount reaches zero.
@@ -1575,13 +1588,22 @@ export function PrefacturaDialog({
                 <p className="text-sm text-amber-800 dark:text-amber-300">Cierre histórico — salida programada: {formatDateAR(reservationData?.checkOutDate)}.</p>
               </div>
             )}
-            {/* Already-paid-and-invoiced: block new invoice, only allow checkout */}
+            {/* Already-paid-and-invoiced (or nothing to bill at all): block a new invoice, only allow checkout */}
             {alreadyPaidAndInvoiced && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
                 <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                 <div className="text-sm text-green-800 dark:text-green-300 space-y-0.5">
-                  <p className="font-semibold">Esta reserva ya está cobrada y facturada.</p>
-                  <p>El saldo es $0 y ya existe un comprobante emitido. No se puede generar una nueva factura — solo podés dar el check-out.</p>
+                  {hasNothingToInvoice ? (
+                    <>
+                      <p className="font-semibold">Esta reserva no tiene nada para facturar.</p>
+                      <p>Tarifa y cargos en $0 — no hay ningún comprobante que emitir. Solo podés dar el check-out.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold">Esta reserva ya está cobrada y facturada.</p>
+                      <p>El saldo es $0 y ya existe un comprobante emitido. No se puede generar una nueva factura — solo podés dar el check-out.</p>
+                    </>
+                  )}
                 </div>
               </div>
             )}
