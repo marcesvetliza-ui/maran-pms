@@ -10,6 +10,31 @@ import { sendEmailWithPdfAttachment } from "../email-service";
 import { assertFinancialSchemaReady } from "../migrate";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
+// Revierte el cargo en Cuenta Corriente que se creó al registrar un pago CC
+// de evento (ver "Si es cuenta corriente, crear movimiento en CC" más abajo).
+// Se usa tanto al anular un pago individual como al emitir una NC que
+// cancela toda la factura del evento. Guardado contra doble reversión vía
+// reference=`void:${paymentId}`.
+async function reverseEventCcCargo(paymentId: string, reason: string): Promise<void> {
+  const voidReference = `void:${paymentId}`;
+  const [alreadyVoided] = await db.select().from(accountMovements)
+    .where(eq(accountMovements.reference, voidReference));
+  if (alreadyVoided) return;
+  const [originalCargo] = await db.select().from(accountMovements)
+    .where(and(eq(accountMovements.reference, paymentId), eq(accountMovements.type, "cargo")));
+  if (!originalCargo) return;
+  await storage.createAccountMovement({
+    entityType: originalCargo.entityType,
+    entityId: originalCargo.entityId,
+    date: getArgentinaOperationalDate(),
+    type: "ajuste",
+    description: `Anulación cargo CC evento — ${reason}`,
+    amount: String(-parseFloat(originalCargo.amount)),
+    area: "eventos",
+    reference: voidReference,
+  });
+}
+
 export function registerEventsRoutes(app: Express) {
   // Event Rooms
   app.get("/api/events/rooms", async (req, res) => {
@@ -435,29 +460,8 @@ export function registerEventsRoutes(app: Express) {
         await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
       }
 
-      // Revertir el cargo en Cuenta Corriente que se creó al registrar el
-      // pago (routes de arriba, "Si es cuenta corriente, crear movimiento
-      // en CC"), que hasta ahora quedaba de pie para siempre al anular.
       if (pay.method === "cuenta_corriente") {
-        const voidReference = `void:${pay.id}`;
-        const [alreadyVoided] = await db.select().from(accountMovements)
-          .where(eq(accountMovements.reference, voidReference));
-        if (!alreadyVoided) {
-          const [originalCargo] = await db.select().from(accountMovements)
-            .where(and(eq(accountMovements.reference, pay.id), eq(accountMovements.type, "cargo")));
-          if (originalCargo) {
-            await storage.createAccountMovement({
-              entityType: originalCargo.entityType,
-              entityId: originalCargo.entityId,
-              date: getArgentinaOperationalDate(),
-              type: "ajuste",
-              description: `Anulación cargo CC evento — ${motivoAnulacion}`,
-              amount: String(-parseFloat(originalCargo.amount)),
-              area: "eventos",
-              reference: voidReference,
-            });
-          }
-        }
+        await reverseEventCcCargo(pay.id, motivoAnulacion);
       }
 
       // Contraasiento en el folio del evento para que el saldo refleje la
@@ -937,6 +941,10 @@ export function registerEventsRoutes(app: Express) {
 
       // Write void folio_movements for each payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).
+      // El movimiento "payment" original se guarda en positivo (suma a
+      // totalPayments), así que su reversa debe ir en negativo — igual que
+      // voidReservationPaymentAtomic (server/db-storage.ts) — para restar
+      // de totalPayments y devolver el saldo a su valor previo.
       try {
         const folio = await (storage as any).getFolioByEntity("event", req.params.eventId);
         if (folio) {
@@ -947,12 +955,19 @@ export function registerEventsRoutes(app: Express) {
               await (storage as any).addFolioAdjustment(
                 folio.id,
                 "void",
-                amt,
+                -amt,
                 `NC Evento - Anulación pago ${payment.method}`,
                 (req as any).user?.username,
                 payment.id,
                 `NC emitida id=${nc.id}`,
               );
+              // La NC cancela toda la factura, así que también hay que
+              // revertir el cargo en Cuenta Corriente de cada pago CC que
+              // la componía — si no, queda de pie igual que el bug de
+              // anular un pago individual.
+              if (payment.method === "cuenta_corriente") {
+                await reverseEventCcCargo(payment.id, `NC emitida id=${nc.id}`);
+              }
             }
           }
         }
@@ -1060,7 +1075,7 @@ export function registerEventsRoutes(app: Express) {
               await (storage as any).addFolioAdjustment(
                 folio.id,
                 "void",
-                amt,
+                -amt,
                 `NC Mesa ${table.tableNumber} - Anulación pago ${payment.method}`,
                 (req as any).user?.username,
                 payment.id,
