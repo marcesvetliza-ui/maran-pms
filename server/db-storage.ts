@@ -786,17 +786,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchGuests(query: string): Promise<Guest[]> {
+    // Matched the whole query as one string against each field, so "Ojeda"
+    // (found in lastName alone) worked but "Ojeda R" (lastName + first letter
+    // of firstName, a natural way to disambiguate several same-surname guests)
+    // matched nothing — no single field contains "Ojeda R". Split into words
+    // and require each word to appear in some field of the row (still allowing
+    // different words to match different fields), so "Ojeda R" needs "Ojeda"
+    // in lastName/etc. AND "R" in firstName/etc., independent of word order.
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    const wordConditions = words.map(word => or(
+      ilike(guests.firstName, `%${word}%`),
+      ilike(guests.lastName, `%${word}%`),
+      ilike(guests.email, `%${word}%`),
+      ilike(guests.documentNumber, `%${word}%`),
+      ilike(guests.phone, `%${word}%`),
+      ilike(guests.cuilCuit, `%${word}%`)
+    ));
     return db.select().from(guests).where(
       and(
         visibleGuestCondition(),
-        or(
-          ilike(guests.firstName, `%${query}%`),
-          ilike(guests.lastName, `%${query}%`),
-          ilike(guests.email, `%${query}%`),
-          ilike(guests.documentNumber, `%${query}%`),
-          ilike(guests.phone, `%${query}%`),
-          ilike(guests.cuilCuit, `%${query}%`)
-        )
+        ...wordConditions
       )
     ).limit(20);
   }
