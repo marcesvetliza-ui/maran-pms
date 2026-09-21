@@ -88,6 +88,7 @@ const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","res
 const CORE_RECEPCION    = ["admin","reception","responsable_area","jefe_recepcion","comercial"];
 const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","responsable_area","jefe_recepcion","comercial"];
 const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
+const REPORTES_RECEPCION_ROLES = [...HABITACIONES_ROLES, "spa"];
 const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
 const HUESPEDES_ROLES   = ["admin","events","reception","responsable_area","jefe_recepcion","comercial"];
 const PAQUETES_ROLES    = ["admin","spa","reception","responsable_area","jefe_recepcion","comercial"];
@@ -127,10 +128,10 @@ const menuSections = [
       {
         label: "Reportes",
         icon: FileBarChart2,
-        roles: HABITACIONES_ROLES,
+        roles: REPORTES_RECEPCION_ROLES,
         subItems: [
-          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: HABITACIONES_ROLES },
-          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: HABITACIONES_ROLES },
+          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: REPORTES_RECEPCION_ROLES },
+          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: REPORTES_RECEPCION_ROLES },
           { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        roles: ADMIN_MOD_ROLES },
         ],
       },
