@@ -3,13 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
-import { buildInvoicePaymentMethods } from "@/lib/invoice-payment-methods";
+import {
+  buildAppliedPaymentApplications,
+  buildAppliedPaymentMethodDetails,
+  buildInvoicePaymentMethods,
+} from "@/lib/invoice-payment-methods";
 import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
 import {
   getAvailableReservationAdvancePayments,
   isReservationCreditNoteAdjustment,
   parseReservationInvoiceRef,
-  getReservationSelectionFinancialSummary,
 } from "@shared/reservationFolio";
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
@@ -972,34 +975,27 @@ export function PrefacturaDialog({
     safeEmittedInvoices,
   );
   const totalSelected = getSelectedFolioTotal(selectedItems);
-  const selectedBalanceWithCredit = getSelectedFolioBalance(
-    selectedItems,
-    allBillableItems,
+  const selectedPaymentApplications = buildAppliedPaymentApplications(
     applyReleasedCredit ? availableAdvancePayments : [],
+    totalSelected,
   );
-  const selectedFinancialSummary = folio?.financialSummary
-    ? getReservationSelectionFinancialSummary(
-      folio.financialSummary as any,
-      totalSelected,
-      applyReleasedCredit,
-    )
-    : null;
-  const appliedCreditForSelection = selectedFinancialSummary?.appliedCreditForSelection
-    ?? (totalSelected - selectedBalanceWithCredit);
-  const selectedBalance = selectedFinancialSummary?.newCollectionRequired
-    ?? selectedBalanceWithCredit;
-  const selectedAlreadyPaid = appliedCreditForSelection;
+  const selectedAlreadyPaid = Number(selectedPaymentApplications
+    .reduce((sum, application) => sum + application.amount, 0)
+    .toFixed(2));
+  const appliedCreditForSelection = selectedAlreadyPaid;
+  const selectedBalance = Number(Math.max(0, totalSelected - selectedAlreadyPaid).toFixed(2));
   const selectedSourceIds = selectedItems.map(item => item.id);
   // Uninvoiced advances are linked after emission. Advances released by an NC
   // keep the original invoice reference as immutable fiscal history.
-  const selectedAdvancePaymentIds = getAdvancePaymentIdsToLink(
-    availableAdvancePayments,
-    selectedAlreadyPaid,
-  );
-  const creditedAdvanceReapplications = getCreditedAdvanceReapplications(
-    availableAdvancePayments,
-    applyReleasedCredit ? selectedAlreadyPaid : 0,
-  );
+  const selectedAdvancePaymentIds = selectedPaymentApplications
+    .filter(application => !application.releasedFromCreditedInvoice && application.paymentId != null)
+    .map(application => application.paymentId!);
+  const creditedAdvanceReapplications = selectedPaymentApplications
+    .filter(application => application.releasedFromCreditedInvoice && application.paymentId != null)
+    .map(application => ({
+      paymentId: application.paymentId!,
+      amount: application.amount,
+    }));
 
   const totalPayments = paymentRows.reduce((acc, r) => {
     const net = parseFloat(r.amount) || 0;
@@ -1153,9 +1149,21 @@ export function PrefacturaDialog({
 
   async function doSubmit() {
     const isCcPayment = saleCondition === "cuenta_corriente";
+    const appliedPaymentDetails = buildAppliedPaymentMethodDetails(
+      applyReleasedCredit ? availableAdvancePayments : [],
+      selectedAlreadyPaid,
+    );
+    // A fully covered invoice has no new collection. Never let a hidden/stale
+    // payment row leak into the fiscal payment snapshot.
+    const currentCollectionRows = selectedBalance > 0.01 ? paymentRows : [];
     const invoicePaymentMethods = isCcPayment
-      ? { cashFormaPago: "cuenta_corriente" }
-      : buildInvoicePaymentMethods(paymentRows, selectedAlreadyPaid);
+      ? buildInvoicePaymentMethods(
+          selectedBalance > 0.01
+            ? [{ method: "cuenta_corriente", amount: selectedBalance.toFixed(2) }]
+            : [],
+          appliedPaymentDetails,
+        )
+      : buildInvoicePaymentMethods(currentCollectionRows, appliedPaymentDetails);
     const usesCcEntity = isCcPayment || invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
     const invoiceSettlesCcPayment = invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
 
@@ -1289,6 +1297,7 @@ export function PrefacturaDialog({
           },
           items: invoiceItems,
           reservaId: reservationId ? String(reservationId) : undefined,
+          reservationSettlementMethod: isCcPayment ? "cuenta_corriente" : undefined,
           puntoVentaOverride: puntoVenta ? parseInt(puntoVenta) : undefined,
           sourceChargeIds: invoiceSourceIds,
           sourceChargeAmounts: invoiceSourceAmounts,
@@ -1305,7 +1314,13 @@ export function PrefacturaDialog({
           } : {}),
            observaciones: invoiceObservations.trim() || undefined,
            creditReapplications: applyReleasedCredit ? creditedAdvanceReapplications : [],
-           creditOperationId: (usesCcEntity || (applyReleasedCredit && creditedAdvanceReapplications.length > 0))
+          ordinaryAdvanceApplications: selectedPaymentApplications
+            .filter(application => !application.releasedFromCreditedInvoice && application.paymentId != null)
+            .map(application => ({
+              paymentId: application.paymentId!,
+              amount: application.amount,
+            })),
+          creditOperationId: (usesCcEntity || selectedPaymentApplications.length > 0)
              ? creditOperationId : undefined,
         });
         const invoiceBody = await invoiceRes.json();
@@ -1319,7 +1334,7 @@ export function PrefacturaDialog({
 
         // Apply prior advances only after the fiscal document exists. A failed
         // link is persisted for manual retry, never silently discarded.
-        for (const paymentId of saleCondition === "contado" ? selectedAdvancePaymentIds : []) {
+        for (const paymentId of saleCondition === "contado" && !creditOperationId ? selectedAdvancePaymentIds : []) {
           const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
           if (!linkRes.ok) {
             await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData }).catch(() => undefined);

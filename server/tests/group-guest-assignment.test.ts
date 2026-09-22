@@ -35,6 +35,8 @@ const mockStorage = {
   getGroup: vi.fn(),
   assignRoomToGroup: vi.fn(),
   checkOverbooking: vi.fn(),
+  evaluateReservationInventory: vi.fn().mockResolvedValue(null),
+  updateReservation: vi.fn(),
 };
 
 vi.mock("../db-storage", () => ({
@@ -156,19 +158,13 @@ describe("group guest assignment", () => {
         returning: () => Promise.reject(new Error("an existing guest must not be inserted")),
       }),
     }));
-    mockDbUpdate.mockImplementation(() => ({
-      set: (updates: any) => ({
-        where: () => ({
-          returning: () => {
-            expect(updates).toMatchObject({
-              guestId: EXISTING_GUEST_ID,
-              guestName: "Pérez Ana",
-            });
-            return Promise.resolve([updatedReservation]);
-          },
-        }),
-      }),
-    }));
+    mockStorage.updateReservation.mockImplementation(async (_id: string, updates: any) => {
+      expect(updates).toMatchObject({
+        guestId: EXISTING_GUEST_ID,
+        guestName: "Pérez Ana",
+      });
+      return updatedReservation;
+    });
 
     const response = await fetch(
       `${baseUrl}/api/groups/${GROUP_ID}/placeholder-reservations/${PLACEHOLDER_RESERVATION_ID}`,

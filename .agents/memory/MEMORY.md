@@ -71,3 +71,5 @@
 - [Channex staging ACK](channex-staging-ack.md) — real staging ACK removes the revision from the pending feed while preserving only the local Channex inbox row.
 - [Group room inventory priority](group-room-inventory-priority.md) — confirmed/in-house blocks are hard capacity; tentative/blocked are overridable warnings; physical overlap never is.
 - [Reservation CC fiscal identity](reservation-cc-fiscal-identity.md) — link reservation CC cargos to payments by payment_id; reservation invoices always originate in Recepción, independent of fiscal POS.
+- [Reservation invoice payment snapshots](reservation-invoice-payment-snapshots.md) — payment methods must come from atomically reserved applications; never infer an advance’s instrument from its timing.
+- [Bulk financial repair safety](bulk-financial-repair-safety.md) — never expose mutating historical reconciliation as a one-click action; require preview, batch identity, and exact reversal.

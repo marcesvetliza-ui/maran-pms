@@ -96,6 +96,7 @@ vi.mock("../db-storage", () => ({
     })),
     getCharges: vi.fn(async () => state.charges),
     getPayments: vi.fn(async () => []),
+    getOrCreateFolio: vi.fn(async () => ({ id: "folio-reservation-1" })),
     createAccountMovement: vi.fn(),
     registerCashMovement: vi.fn(),
   },
@@ -137,6 +138,8 @@ function invoiceBody(overrides: Record<string, unknown> = {}) {
       subtotal: 100,
     }],
     reservaId: "reservation-1",
+    cashFormaPago: "efectivo",
+    cashFormaPagoDetalle: [{ method: "efectivo", amount: 100 }],
     sourceChargeIds: ["charge-1"],
     sourceChargeAmounts: { "charge-1": 100 },
     ...overrides,
@@ -372,6 +375,7 @@ describe("folio invoice source guard", () => {
             subtotal: 40,
           }],
           sourceChargeAmounts: { "charge-1": 40 },
+          cashFormaPagoDetalle: [{ method: "efectivo", amount: 40 }],
         })),
       });
 

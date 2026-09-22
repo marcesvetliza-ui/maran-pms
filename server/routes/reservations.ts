@@ -387,9 +387,9 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/reservations/:id", async (req, res) => {
+  app.patch("/api/reservations/:id", requireAuth, async (req, res) => {
     try {
-      const contextGroupId = req.body.contextGroupId as string | undefined;
+      const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
       delete req.body.overrideTentativeGroupWarning;
@@ -397,6 +397,17 @@ export function registerReservationsRoutes(app: Express) {
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      // The persisted link is authoritative. Generic reservation editors do not
+      // send contextGroupId, and without it an extension is counted once inside
+      // the confirmed group block and again as unrelated demand.
+      const linkedGroupId = (existing as any).groupId as string | undefined;
+      if (requestedContextGroupId && linkedGroupId && requestedContextGroupId !== linkedGroupId) {
+        return res.status(409).json({ error: "La reserva pertenece a otro grupo." });
+      }
+      if (requestedContextGroupId && !linkedGroupId) {
+        return res.status(409).json({ error: "La reserva no está vinculada al grupo indicado." });
+      }
+      const contextGroupId = linkedGroupId;
       const hasRate = Object.prototype.hasOwnProperty.call(req.body, "finalRatePerNight");
       const hasReason = Object.prototype.hasOwnProperty.call(req.body, "specialRateReason");
       const effectiveRate = hasRate ? req.body.finalRatePerNight : existing.finalRatePerNight;

@@ -9,6 +9,8 @@ Confirmed and in-house group blocks consume room-type capacity for every night i
 
 **How to apply:** Use one server-side calculation across individual reservations, Planning moves, group assignments, booking-engine/OTA imports, and group status/block changes. Count linked group reservations against their block before adding demand so assigned rooms are not counted twice.
 
+When editing an already-linked reservation, derive inventory group context exclusively from its persisted link. Generic editors may omit context, and caller-provided group IDs must never be trusted; otherwise linked demand is double-counted or unrelated demand can hide inside a block.
+
 Group-wide date propagation and room reassignment must be one PostgreSQL transaction protected by the same inventory advisory lock. All physical-room and room-type validations happen before its first write, and any failure rolls back the group, linked reservations, room projections, and placeholder rename together.
 
 **Why:** Sequential propagation could leave only part of a group reprogrammed after an unexpected database failure.

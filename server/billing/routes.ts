@@ -406,6 +406,38 @@ class FolioInvoiceValidationError extends Error {
   }
 }
 
+const RESERVATION_INVOICE_PAYMENT_METHODS = new Set([
+  "efectivo",
+  "tarjeta",
+  "tarjeta_credito",
+  "debito",
+  "tarjeta_debito",
+  "transferencia",
+  "mercadopago",
+  "cheque",
+  "echeq",
+  "cuenta_corriente",
+]);
+
+export function validateReservationInvoicePaymentDetail(
+  detail: Array<{ method: string; amount: number }> | undefined,
+  invoiceTotal: number,
+) {
+  if (!detail?.length) {
+    throw new FolioInvoiceValidationError("La factura de reserva debe informar sus formas de pago");
+  }
+  const unknown = detail.find(row => !RESERVATION_INVOICE_PAYMENT_METHODS.has(row.method));
+  if (unknown) {
+    throw new FolioInvoiceValidationError(`Forma de pago inválida: ${unknown.method}`);
+  }
+  const paymentTotal = detail.reduce((sum, row) => sum + row.amount, 0);
+  if (Math.abs(paymentTotal - invoiceTotal) > 0.02) {
+    throw new FolioInvoiceValidationError(
+      `Las formas de pago ($${paymentTotal.toFixed(2)}) no coinciden con el total de la factura ($${invoiceTotal.toFixed(2)})`,
+    );
+  }
+}
+
 /**
  * A folio can be open in more than one browser tab. Keep the source validation
  * and invoice creation in the same reservation-scoped critical section so two
@@ -1025,7 +1057,7 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      let { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, creditOperationId } = req.body;
+      let { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -1040,20 +1072,12 @@ export function registerBillingRoutes(app: Express) {
           error: "Las Notas de Crédito y Débito deben emitirse desde la factura original (usá 'Nota de Crédito/Débito' sobre un comprobante existente, no como comprobante nuevo).",
         });
       }
-      if (cashFormaPago === "cuenta_corriente" &&
-        (!["guest", "company", "agency"].includes(String(ccEntityType)) || !ccEntityId) && !rawPaymentId) {
-        return res.status(400).json({ error: "Seleccione un huésped, empresa o agencia para cargar a Cuenta Corriente" });
-      }
       // An invoice for an existing CC advance does not create a new
       // settlement: the payment row already owns the debt and is linked below
       // as part of issuance.  Requiring the browser's recovery operation key
       // here would reject this normal path (and make retries depend on a
       // client-generated random key).  Keep the operation identity mandatory
       // only for a new reservation CC settlement/reapplication.
-      if (reservaId && cashFormaPago === "cuenta_corriente" && !creditOperationId && !rawPaymentId) {
-        return res.status(400).json({ error: "operationId es requerido para una liquidación CC recuperable" });
-      }
-      if (cashFormaPago === "cuenta_corriente") assertFinancialSchemaReady();
       const normalizedCashFormaPagoDetalle = Array.isArray(cashFormaPagoDetalle)
         ? cashFormaPagoDetalle
           .map((entry: any) => ({
@@ -1063,9 +1087,24 @@ export function registerBillingRoutes(app: Express) {
           .filter((entry: { method: string; amount: number }) =>
             entry.method.length > 0 && Number.isFinite(entry.amount) && entry.amount > 0)
         : undefined;
+      const isReservationCcSettlement =
+        reservationSettlementMethod === "cuenta_corriente" ||
+        cashFormaPago === "cuenta_corriente";
+      if (isReservationCcSettlement &&
+        (!["guest", "company", "agency"].includes(String(ccEntityType)) || !ccEntityId) && !rawPaymentId) {
+        return res.status(400).json({ error: "Seleccione un huésped, empresa o agencia para cargar a Cuenta Corriente" });
+      }
+      if (reservaId && isReservationCcSettlement && !creditOperationId && !rawPaymentId) {
+        return res.status(400).json({ error: "operationId es requerido para una liquidación CC recuperable" });
+      }
+      if (isReservationCcSettlement) assertFinancialSchemaReady();
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
+      if (reservationId) {
+        const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
+        validateReservationInvoicePaymentDetail(normalizedCashFormaPagoDetalle, invoiceTotal);
+      }
       const paymentId = rawPaymentId === undefined || rawPaymentId === null ? "" : String(rawPaymentId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
@@ -1236,6 +1275,10 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        if (reservationId && !folioId) {
+          const reservationFolio = await storage.getOrCreateFolio("reservation", reservationId);
+          folioId = reservationFolio.id;
+        }
         let creditIntent: Record<string, unknown> | undefined;
         if (Array.isArray(creditReapplications) && creditReapplications.length > 0 && !creditOperationId) {
           throw new FolioInvoiceValidationError("creditOperationId es requerido al aplicar crédito", 400);
@@ -1257,6 +1300,22 @@ export function registerBillingRoutes(app: Express) {
           const appliedCredit = normalized.reduce((sum, row) => sum + row.amount, 0);
           if (appliedCredit > invoiceTotal + 0.009) {
             throw new FolioInvoiceValidationError("El crédito supera el total de la factura", 409);
+          }
+          const requestedOrdinary = Array.isArray(ordinaryAdvanceApplications)
+            ? ordinaryAdvanceApplications
+            : [];
+          const ordinaryAdvances = requestedOrdinary.map((row: any) => ({
+            paymentId: String(row?.paymentId || ""),
+            amount: Number(Number(row?.amount).toFixed(2)),
+          }));
+          if (ordinaryAdvances.some((row) =>
+              !row.paymentId || !Number.isFinite(row.amount) || row.amount <= 0) ||
+              new Set(ordinaryAdvances.map((row) => row.paymentId)).size !== ordinaryAdvances.length) {
+            throw new FolioInvoiceValidationError("Selección de anticipos ordinarios inválida", 400);
+          }
+          if (appliedCredit + ordinaryAdvances.reduce((sum, row) => sum + row.amount, 0) >
+              invoiceTotal + 0.009) {
+            throw new FolioInvoiceValidationError("Los anticipos superan el total de la factura", 409);
           }
           // Recovery lookup must precede every mutable payment-availability
           // calculation. The persisted intent owns its exact ordinary advances.
@@ -1334,27 +1393,39 @@ export function registerBillingRoutes(app: Express) {
             );
           }
           const activePayments = await storage.getPayments(reservationId);
-          const creditPaymentIds = new Set(normalized.map(row => row.paymentId));
-          let ordinaryRemaining = Math.max(0, invoiceTotal - appliedCredit);
-          const ordinaryAdvances = activePayments
-            .filter((payment: any) =>
-              !creditPaymentIds.has(String(payment.id)) &&
-              !payment.invoiceRef && !payment.invoice_ref &&
-              !["cuenta_corriente", "current_account"].includes(String(payment.method))
-            )
-            .sort((a: any, b: any) =>
-              String(a.date || "").localeCompare(String(b.date || "")) ||
-              String(a.id).localeCompare(String(b.id))
-            )
-            .flatMap((payment: any) => {
-              const amount = Number(payment.amount || 0);
-              // Existing reservation linking semantics consume whole advances;
-              // never mutate/split a historical payment silently.
-              if (!(amount > 0.009) || amount > ordinaryRemaining + 0.009) return [];
-              ordinaryRemaining = Number((ordinaryRemaining - amount).toFixed(2));
-              return [{ paymentId: String(payment.id), amount: Number(amount.toFixed(2)) }];
-            });
+          const activePaymentById = new Map(activePayments.map((payment: any) => [String(payment.id), payment]));
+          for (const allocation of ordinaryAdvances) {
+            const payment: any = activePaymentById.get(allocation.paymentId);
+            if (!payment || payment.invoiceRef || payment.invoice_ref ||
+                ["cuenta_corriente", "current_account"].includes(String(payment.method)) ||
+                Math.abs(Number(payment.amount) - allocation.amount) > 0.009) {
+              throw new FolioInvoiceValidationError("Un anticipo ordinario ya no está disponible", 409);
+            }
+          }
           const ordinaryAdvanceAmount = ordinaryAdvances.reduce((sum, row) => sum + row.amount, 0);
+          const paymentDetailByMethod = new Map<string, number>();
+          for (const row of normalizedCashFormaPagoDetalle || []) {
+            paymentDetailByMethod.set(row.method, (paymentDetailByMethod.get(row.method) || 0) + row.amount);
+          }
+          const requiredAdvanceByMethod = new Map<string, number>();
+          for (const allocation of [...normalized, ...ordinaryAdvances]) {
+            const payment: any = activePaymentById.get(allocation.paymentId);
+            if (!payment?.method) {
+              throw new FolioInvoiceValidationError("Un pago aplicado ya no está disponible", 409);
+            }
+            requiredAdvanceByMethod.set(
+              String(payment.method),
+              (requiredAdvanceByMethod.get(String(payment.method)) || 0) + allocation.amount,
+            );
+          }
+          for (const [method, amount] of requiredAdvanceByMethod) {
+            if ((paymentDetailByMethod.get(method) || 0) + 0.009 < amount) {
+              throw new FolioInvoiceValidationError(
+                `La forma de pago ${method} no refleja los anticipos aplicados`,
+                409,
+              );
+            }
+          }
           const uncoveredAmount = getUncoveredReservationSettlement(
             invoiceTotal,
             [{ amount: appliedCredit + Math.min(invoiceTotal - appliedCredit, ordinaryAdvanceAmount) }],
@@ -1362,19 +1433,26 @@ export function registerBillingRoutes(app: Express) {
           const settlement = {
             destination: uncoveredAmount <= 0
               ? "none"
-              : cashFormaPago === "cuenta_corriente"
+              : isReservationCcSettlement
                 ? "cuenta_corriente"
                 : cashArea && cashFormaPago
                   ? "cash"
                   : "none",
             amount: uncoveredAmount,
-            method: cashFormaPago || null,
+            method: isReservationCcSettlement ? "cuenta_corriente" : cashFormaPago || null,
             cashArea: cashArea || null,
             ccEntityType: ccEntityType || null,
             ccEntityId: ccEntityId || null,
             label: String(cashLabelBody || `Anticipo ${tipoComprobante} — ${String(cliente?.razonSocial || "").trim() || "Reserva " + reservationId}`),
             status: "pending",
           };
+          if (isReservationCcSettlement &&
+              Math.abs((paymentDetailByMethod.get("cuenta_corriente") || 0) - uncoveredAmount) > 0.02) {
+            throw new FolioInvoiceValidationError(
+              "El importe a Cuenta Corriente no coincide con el saldo descubierto",
+              409,
+            );
+          }
           const immutableSnapshot = {
             tipoComprobante,
             recipient: {
@@ -1842,7 +1920,7 @@ export function registerBillingRoutes(app: Express) {
       // create a second Caja/CC movement.
       if (reservationId && creditOperationId) {
         await reconcileReservationCreditSettlement(Number(factura.id));
-      } else if (!existingCcPayment && !groupId && cashFormaPago === "cuenta_corriente" && ccEntityType && ccEntityId) {
+      } else if (!existingCcPayment && !groupId && isReservationCcSettlement && ccEntityType && ccEntityId) {
         const total = uncoveredSettlement;
         if (total > 0) {
           const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;

@@ -129,4 +129,14 @@ describe("ARCA invoice PDF compliance", () => {
       cuenta_corriente: 0,
     });
   });
+
+  it("does not silently turn an unknown method into cash", () => {
+    expect(getInvoicePaymentAmounts("pago_dividido", [
+      { method: "metodo_desconocido", amount: 125000 },
+    ], 125000)).toMatchObject({
+      efectivo: 0,
+      adelanto: 0,
+      tarjeta: 0,
+    });
+  });
 });

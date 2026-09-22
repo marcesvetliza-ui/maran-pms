@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
 const storage = {
   generateReservationCode: vi.fn(() => "RES-ZERO"),
   checkOverbooking: vi.fn(async () => false),
+  evaluateReservationInventory: vi.fn(async () => null),
   createReservation: vi.fn(async (data: any) => ({ id: "reservation-zero", ...data })),
   getReservation: vi.fn(async () => state.reservation),
   updateReservation: vi.fn(async (_id: string, patch: any) => {
@@ -102,6 +103,68 @@ beforeEach(() => {
 });
 
 describe("reservation zero-rate API guard", () => {
+  it("uses the persisted group link when extending from the generic reservation editor", async () => {
+    state.reservation = {
+      ...baseReservation,
+      groupId: "group-intercoralia",
+      checkInDate: "2026-09-25",
+      checkOutDate: "2026-09-27",
+    };
+
+    await withServer(async (baseUrl) => {
+      const result = await request(baseUrl, "PATCH", {
+        checkOutDate: "2026-09-28",
+        nights: 3,
+        totalRoomAmount: "3000",
+      });
+
+      expect(result.status).toBe(200);
+      expect(storage.evaluateReservationInventory).toHaveBeenCalledWith(expect.objectContaining({
+        roomTypeId: "room-type-1",
+        checkInDate: "2026-09-25",
+        checkOutDate: "2026-09-28",
+        excludeReservationId: "reservation-zero",
+        contextGroupId: "group-intercoralia",
+      }));
+      expect(storage.updateReservation).toHaveBeenCalledWith(
+        "reservation-zero",
+        expect.objectContaining({ _inventoryContextGroupId: "group-intercoralia" }),
+      );
+    });
+  });
+
+  it("does not accept caller-supplied group inventory context for an unlinked reservation", async () => {
+    state.reservation = { ...baseReservation, groupId: undefined };
+
+    await withServer(async (baseUrl) => {
+      const result = await request(baseUrl, "PATCH", {
+        checkOutDate: "2030-01-03",
+        contextGroupId: "unrelated-group",
+      });
+
+      expect(result.status).toBe(409);
+      expect(result.body.error).toMatch(/no está vinculada/i);
+      expect(storage.evaluateReservationInventory).not.toHaveBeenCalled();
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+    });
+  });
+
+  it("rejects a group context that conflicts with the persisted link", async () => {
+    state.reservation = { ...baseReservation, groupId: "actual-group" };
+
+    await withServer(async (baseUrl) => {
+      const result = await request(baseUrl, "PATCH", {
+        checkOutDate: "2030-01-03",
+        contextGroupId: "other-group",
+      });
+
+      expect(result.status).toBe(409);
+      expect(result.body.error).toMatch(/otro grupo/i);
+      expect(storage.evaluateReservationInventory).not.toHaveBeenCalled();
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects POST and PATCH with a zero rate but no reason before writing", async () => {
     await withServer(async (baseUrl) => {
       const post = await request(baseUrl, "POST", {

@@ -67,6 +67,7 @@ vi.mock("../db-storage", () => ({
     getReservation: vi.fn(async () => ({ id: "res-1", reservationCode: "R-1", totalRoomAmount: "144000", nights: 1 })),
     getCharges: vi.fn(async () => [{ id: "cargo-1", amount: "144000", category: "otros", status: "active" }]),
     getPayments: vi.fn(async () => []),
+    getOrCreateFolio: vi.fn(async () => ({ id: "folio-res-1" })),
     createReservationPaymentWithLedger,
     registerCashMovement,
   },
@@ -93,6 +94,7 @@ function body(overrides: Record<string, unknown> = {}) {
     sourceChargeIds: ["cargo-1"],
     sourceChargeAmounts: { "cargo-1": 144000 },
     cashFormaPago: "cuenta_corriente",
+    cashFormaPagoDetalle: [{ method: "cuenta_corriente", amount: 144000 }],
     ccEntityType: "company",
     ccEntityId: "company-1",
     ...overrides,
@@ -158,7 +160,11 @@ describe("advance Cuenta Corriente invoice route", () => {
   it.each([
     ["method", { cashFormaPago: "efectivo" }, "La forma de pago no coincide con el pago existente"],
     ["target", { ccEntityType: "agency", ccEntityId: "agency-1" }, "La entidad de Cuenta Corriente no coincide con el anticipo"],
-    ["total", { items: [{ descripcion: "Alojamiento", cantidad: 1, precioUnitario: 1, subtotal: 1, subtotalNeto: 1, alicuotaIva: "21" }], sourceChargeAmounts: { "cargo-1": 1 } }, "El total de la factura debe coincidir con el anticipo"],
+    ["total", {
+      items: [{ descripcion: "Alojamiento", cantidad: 1, precioUnitario: 1, subtotal: 1, subtotalNeto: 1, alicuotaIva: "21" }],
+      sourceChargeAmounts: { "cargo-1": 1 },
+      cashFormaPagoDetalle: [{ method: "cuenta_corriente", amount: 1 }],
+    }, "El total de la factura debe coincidir con el anticipo"],
   ])("rejects a %s mismatch", async (_name, override, error) => {
     await withServer(async url => {
       const result = await post(url, body(override));

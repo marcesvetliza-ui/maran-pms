@@ -4082,11 +4082,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         FROM unique_invoiced_candidates
         WHERE am.id = unique_invoiced_candidates.movement_id
       `);
-      await tx.execute(sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS account_movements_cc_payment_unique
-        ON account_movements (payment_id)
-        WHERE payment_id IS NOT NULL AND type = 'cargo'
-      `);
+      await tx.execute(sql.raw(createIndexWithoutRerunNotice(
+        "account_movements_cc_payment_unique",
+        `CREATE UNIQUE INDEX account_movements_cc_payment_unique
+         ON account_movements (payment_id)
+         WHERE payment_id IS NOT NULL AND type = 'cargo'`,
+      )));
       await tx.execute(sql`
         INSERT INTO account_movements (
           id, entity_type, entity_id, date, type, description, amount,

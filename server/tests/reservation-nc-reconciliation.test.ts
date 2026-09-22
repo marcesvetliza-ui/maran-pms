@@ -35,6 +35,12 @@ vi.mock("@shared/schema", () => ({
 }));
 
 vi.mock("../billing/invoiceService", () => ({
+  calcularMontos: (items: any[]) => ({
+    montoTotal: items.reduce(
+      (sum, item) => sum + Number(item.subtotal ?? item.precioUnitario * item.cantidad),
+      0,
+    ),
+  }),
   buildComprobanteAsociado: (doc: any) => ({
     tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
     puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
@@ -66,6 +72,8 @@ vi.mock("../db-storage", () => ({
   storage: {
     getReservation: vi.fn(),
     getCharges: vi.fn(),
+    getPayments: vi.fn(async () => []),
+    getOrCreateFolio: vi.fn(async () => ({ id: "folio-reservation-1" })),
     createAccountMovement: vi.fn(),
     registerCashMovement: vi.fn(),
   },
@@ -471,6 +479,8 @@ describe("reservation credit notes from Administración", () => {
             subtotal: 43000,
           }],
           reservaId: "reservation-1",
+          cashFormaPago: "efectivo",
+          cashFormaPagoDetalle: [{ method: "efectivo", amount: 43000 }],
           sourceChargeIds: ["accommodation"],
           sourceChargeAmounts: { accommodation: 43000 },
         }),

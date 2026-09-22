@@ -17,7 +17,7 @@ const INVOICE_PAYMENT_GRID_METHODS = [
   "cuenta_corriente",
 ] as const;
 
-function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] {
+function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] | null {
   return method === "tarjeta" || method === "tarjeta_credito" ? "tarjeta"
     : method === "debito" || method === "tarjeta_debito" ? "debito"
     : method === "cheque" || method === "echeq" ? "cheque"
@@ -25,7 +25,8 @@ function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METH
     : method === "transferencia" ? "transferencia"
     : method === "cuenta_corriente" ? "cuenta_corriente"
     : method === "adelanto" ? "adelanto"
-    : "efectivo";
+    : method === "efectivo" ? "efectivo"
+    : null;
 }
 
 export function getInvoicePaymentAmounts(
@@ -43,10 +44,12 @@ export function getInvoicePaymentAmounts(
       const amount = $n(entry?.amount);
       if (amount <= 0) continue;
       const key = invoicePaymentGridKey(String(entry?.method ?? ""));
+      if (!key) continue;
       amounts[key] += amount;
     }
   } else if (cashFormaPago) {
-    amounts[invoicePaymentGridKey(cashFormaPago)] = montoTotal;
+    const key = invoicePaymentGridKey(cashFormaPago);
+    if (key) amounts[key] = montoTotal;
   }
 
   return amounts;
