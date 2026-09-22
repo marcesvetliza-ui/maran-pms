@@ -1357,7 +1357,7 @@ export function registerBillingRoutes(app: Express) {
             cashArea: cashArea || null,
             ccEntityType: ccEntityType || null,
             ccEntityId: ccEntityId || null,
-            label: String(cashLabelBody || `${tipoComprobante} reaplicación ${creditOperationId}`),
+            label: String(cashLabelBody || `Anticipo ${tipoComprobante} — ${String(cliente?.razonSocial || "").trim() || "Reserva " + reservationId}`),
             status: "pending",
           };
           const immutableSnapshot = {
@@ -1831,6 +1831,8 @@ export function registerBillingRoutes(app: Express) {
         const total = uncoveredSettlement;
         if (total > 0) {
           const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
+          const ccEntityLabel = String(cliente?.razonSocial || "").trim();
+          const defaultCcLabel = ccEntityLabel ? `${nroFac} — ${ccEntityLabel}` : nroFac;
           const reservationForSettlement = reservationId
             ? await storage.getReservation(reservationId)
             : null;
@@ -1845,7 +1847,7 @@ export function registerBillingRoutes(app: Express) {
                 method: "cuenta_corriente",
                 date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
                 reference: nroFac,
-                notes: cashLabelBody || nroFac,
+                notes: cashLabelBody || defaultCcLabel,
                 invoiceRef: JSON.stringify({
                   id: factura.id,
                   tipoComprobante: factura.tipoComprobante,
@@ -1855,13 +1857,13 @@ export function registerBillingRoutes(app: Express) {
                   total: factura.montoTotal,
                 }),
               } as any,
-              sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${nroFac}`,
+              sourceLabel: `Reserva ${reservationForSettlement.reservationCode} — ${defaultCcLabel}`,
               registeredBy: user?.username,
               receiptType: factura.tipoComprobante,
               accountSettlement: {
                 entityType: ccEntityType,
                 entityId: ccEntityId,
-                description: cashLabelBody || nroFac,
+                description: cashLabelBody || defaultCcLabel,
                 reference: nroFac,
                 createdBy: user?.id || null,
                 invoiceId: Number(factura.id),
@@ -1890,7 +1892,7 @@ export function registerBillingRoutes(app: Express) {
                 entityId: ccEntityId,
                 date: new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }),
                 type: "cargo",
-                description: cashLabelBody || nroFac,
+                description: cashLabelBody || defaultCcLabel,
                 amount: total.toFixed(2),
                 reference: nroFac,
                 createdBy: user?.id || null,

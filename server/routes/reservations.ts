@@ -2684,11 +2684,29 @@ export function registerReservationsRoutes(app: Express) {
       const reservationForPayment = req.body.reservationId
         ? await storage.getReservation(req.body.reservationId)
         : null;
+      // El pago puede quedar a cargo de la empresa/agencia (Cta. Cte.) en vez
+      // del huésped — la etiqueta debe mostrar a quién se le está cargando,
+      // no siempre al huésped de la reserva.
+      let billedEntityLabel: string | null = null;
+      if (reservationForPayment) {
+        const billingTargetForLabel = req.body.billingTarget || "guest";
+        if (billingTargetForLabel === "company") {
+          const companyId = reservationForPayment.companyId || req.body.companyId;
+          const company = companyId ? await storage.getCompany(companyId) : undefined;
+          billedEntityLabel = company ? (company.razonSocial || company.nombreFantasia || null) : null;
+        } else if (billingTargetForLabel === "agency") {
+          const agencyId = reservationForPayment.agencyId || req.body.agencyId;
+          const agency = agencyId ? await storage.getAgency(agencyId) : undefined;
+          billedEntityLabel = agency ? (agency.razonSocial || agency.nombreFantasia || null) : null;
+        } else if (reservationForPayment.guest) {
+          billedEntityLabel = `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}`;
+        }
+      }
       const cashLabel = reservationForPayment
         ? [
             `Reserva ${reservationForPayment.reservationCode}`,
             reservationForPayment.room?.roomNumber ? `Hab. ${reservationForPayment.room.roomNumber}` : null,
-            reservationForPayment.guest ? `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}` : null,
+            billedEntityLabel,
             `Pago ${rawMethod}`,
           ].filter(Boolean).join(" — ")
         : `Pago manual - ${req.body.description || "Sin descripción"}`;
