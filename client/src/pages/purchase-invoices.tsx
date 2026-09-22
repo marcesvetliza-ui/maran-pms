@@ -71,6 +71,7 @@ interface Invoice {
   retencionGanancias?: string;
   retencionIva?: string;
   retencionSuss?: string;
+  retencionMunicipal?: string;
   impuestosInternos?: string;
   ley25413?: string;
   montoTotal: string;
@@ -225,6 +226,7 @@ const emptyForm = () => ({
   retencionGanancias: "",
   retencionIva: "",
   retencionSuss: "",
+  retencionMunicipal: "",
   impuestosInternos: "",
   ley25413: "",
   cuentaContableId: "",
@@ -446,6 +448,7 @@ export function InvoiceDialog({
         retencionGanancias: editingInvoice.retencionGanancias || "",
         retencionIva: editingInvoice.retencionIva || "",
         retencionSuss: editingInvoice.retencionSuss || "",
+        retencionMunicipal: editingInvoice.retencionMunicipal || "",
         impuestosInternos: editingInvoice.impuestosInternos || "",
         ley25413: editingInvoice.ley25413 || "",
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
@@ -767,6 +770,7 @@ export function InvoiceDialog({
                         retencionGanancias: "",
                         retencionIva: "",
                         retencionSuss: "",
+                        retencionMunicipal: "",
                         subtipoRetencion: "",
                         ...ALL_IVA_FIELDS,
                       }));
@@ -1341,6 +1345,7 @@ export function InvoiceDialog({
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
                 <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
+                <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
               </div>
                 </>
               )}
@@ -1697,6 +1702,7 @@ export function InvoiceDialog({
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
                 <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
+                <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
               </div>
                 </>
               )}
@@ -2120,6 +2126,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ...(invoice.retencionGanancias && parseFloat(invoice.retencionGanancias) !== 0 ? [[retentionLabel("Ret. Ganancias"), retentionValue(invoice.retencionGanancias)] as [string, string]] : []),
     ...(invoice.retencionIva && parseFloat(invoice.retencionIva) !== 0 ? [[retentionLabel("Ret. IVA"), retentionValue(invoice.retencionIva)] as [string, string]] : []),
     ...(invoice.retencionSuss && parseFloat(invoice.retencionSuss) !== 0 ? [[retentionLabel("Ret. SUSS"), retentionValue(invoice.retencionSuss)] as [string, string]] : []),
+    ...(invoice.retencionMunicipal && parseFloat(invoice.retencionMunicipal) !== 0 ? [[retentionLabel("Ret. Municipal"), retentionValue(invoice.retencionMunicipal)] as [string, string]] : []),
     ...(invoice.impuestosInternos && parseFloat(invoice.impuestosInternos) !== 0 ? [["Imp. Internos", fmt2(invoice.impuestosInternos)] as [string, string]] : []),
     ...(invoice.ley25413 && parseFloat(invoice.ley25413) !== 0 ? [["Ley 25.413", fmt2(invoice.ley25413)] as [string, string]] : []),
   ];

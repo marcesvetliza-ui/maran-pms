@@ -145,6 +145,29 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(capture.body.tipoComprobante).toBe("FACT-A");
   });
 
+  it("Ret. Municipal se envía y reduce el Total Comprobante como las otras retenciones", async () => {
+    const capture: { body: any } = { body: undefined };
+    vi.stubGlobal("fetch", buildFetchMock(capture));
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+
+    expect(screen.getByTestId("input-ret-municipal")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.type(screen.getByTestId("input-numero-comprobante"), "00000124");
+    await user.type(screen.getByTestId("input-neto-line-0"), "1000");
+    await user.type(screen.getByTestId("input-ret-municipal"), "50");
+
+    // Neto 1000 + IVA 21% automático (210) − Ret. Municipal (50) = 1160.
+    expect(screen.getByText(/1\.160,00/)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+
+    await waitFor(() => expect(capture.body).toBeTruthy());
+    expect(capture.body.retencionMunicipal).toBe("50");
+  });
+
   it("el asistente original (sin unifiedLayout) sigue mostrando los pasos de a uno, sin cambios", async () => {
     renderDialog({ unifiedLayout: false });
     expect(screen.getByText("1. Encabezado")).toBeInTheDocument();
