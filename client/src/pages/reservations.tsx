@@ -122,6 +122,29 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
+
+const roomNumberCollator = new Intl.Collator("es-AR", {
+  numeric: true,
+  sensitivity: "base",
+});
+
+/** Orden operativo de la tabla: habitaciones numeradas primero y sin asignar al final. */
+export function compareReservationsByRoom(
+  a: ReservationWithDetails,
+  b: ReservationWithDetails,
+): number {
+  const roomA = a.room?.roomNumber?.trim() || null;
+  const roomB = b.room?.roomNumber?.trim() || null;
+
+  if (!roomA && !roomB) return a.checkInDate.localeCompare(b.checkInDate);
+  if (!roomA) return 1;
+  if (!roomB) return -1;
+
+  const roomComparison = roomNumberCollator.compare(roomA, roomB);
+  return roomComparison !== 0
+    ? roomComparison
+    : a.checkInDate.localeCompare(b.checkInDate);
+}
 import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -5721,7 +5744,7 @@ export default function ReservationsPage() {
     ?.sort((a, b) =>
       dateMode === "created"
         ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        : a.checkInDate.localeCompare(b.checkInDate)
+        : compareReservationsByRoom(a, b)
     );
 
   const isResLocked = (r: ReservationWithDetails) => {
