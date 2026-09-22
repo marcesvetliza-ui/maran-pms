@@ -15,6 +15,7 @@ import { Receipt, ArrowLeft } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
 import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
+import { PrefacturaDialog, isArgentineNationality } from "@/components/PrefacturaDialog";
 
 // Notas de Crédito/Débito siempre deben asociarse a una factura existente
 // (exigencia de ARCA) — nunca se emiten como comprobante nuevo. El backend
@@ -85,6 +86,15 @@ const VOUCHERS_POR_AREA: Partial<Record<AreaId, { value: string; label: string }
   ],
 };
 
+// Factura T solo corresponde a alojamiento de un huésped extranjero (misma
+// condición que exige el servidor en POST /api/billing/invoices) — a
+// diferencia de FA/FB/ticket no aplica a Restaurant/Spa/Eventos, así que se
+// agrega solo para Recepción, con su propio flujo de "buscar la reserva"
+// (ver FacturaTSearch) en vez del EmitirFacturaDialog genérico.
+const TIPOS_FISCALES_EXTRA_POR_AREA: Partial<Record<AreaId, { value: string; label: string }[]>> = {
+  recepcion: [{ value: "FT", label: "Factura T (Turismo)" }],
+};
+
 const TIPOS_COMPRA: { value: string; label: string }[] = [
   { value: "FACT-A", label: "Factura A" },
   { value: "FACT-B", label: "Factura B" },
@@ -106,7 +116,7 @@ const TIPOS_MOVIMIENTO: { value: string; label: string }[] = [
 function tiposParaSeleccion(operacion: Operacion, area: AreaId | ""): { value: string; label: string }[] {
   if (operacion === "venta") {
     if (!area) return TIPOS_VENTA;
-    return [...TIPOS_VENTA, ...(VOUCHERS_POR_AREA[area] ?? [])];
+    return [...TIPOS_VENTA, ...(TIPOS_FISCALES_EXTRA_POR_AREA[area] ?? []), ...(VOUCHERS_POR_AREA[area] ?? [])];
   }
   if (operacion === "compra") return TIPOS_COMPRA;
   if (operacion === "movimiento") return TIPOS_MOVIMIENTO;
@@ -251,7 +261,7 @@ export default function EmitirComprobantePage() {
                 <Badge>{tipos.find((t) => t.value === tipo)?.label}</Badge>
               </div>
 
-              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && (
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && tipo !== "FT" && (
                 <EmitirFacturaDialog
                   embedded
                   open
@@ -266,6 +276,10 @@ export default function EmitirComprobantePage() {
 
               {operacion === "venta" && NC_ND_TIPOS.has(tipo) && (
                 <NotaCreditoDebitoSearch area={area as AreaId} tipo={tipo} onClose={resetSeleccion} />
+              )}
+
+              {operacion === "venta" && tipo === "FT" && (
+                <FacturaTSearch onClose={resetSeleccion} />
               )}
 
               {operacion === "compra" && (
@@ -445,5 +459,76 @@ function NotaDebitoCentroDialog({ invoiceId, onClose }: { invoiceId: number; onC
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Factura T: buscar la reserva del huésped extranjero antes de emitir ────────
+// Factura T solo corresponde a alojamiento de un huésped extranjero — se
+// reutiliza PrefacturaDialog completo (mode="billing") en vez de reimplementar
+// esa elegibilidad: ya calcula si corresponde según la nacionalidad real de la
+// reserva elegida, arma el folio y valida el resto de las reglas de ARCA.
+function FacturaTSearch({ onClose }: { onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<any | null>(null);
+
+  const { data: reservations = [] } = useQuery<any[]>({
+    queryKey: ["/api/reservations", { search, dateMode: "all" }],
+    queryFn: () =>
+      fetch(`/api/reservations?dateMode=all&search=${encodeURIComponent(search)}`, { credentials: "include" }).then((r) => r.json()),
+    enabled: search.trim().length >= 2,
+  });
+
+  const candidatos = (reservations || []).filter(
+    (r: any) => r.guest && !isArgentineNationality(r.guest.nationality, r.guest.nationalityCode)
+  );
+
+  if (selected) {
+    return (
+      <PrefacturaDialog
+        open
+        onClose={onClose}
+        reservationId={selected.id}
+        reservation={selected}
+        mode="billing"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label htmlFor="buscar-reserva-ft">Buscar la reserva del huésped extranjero</Label>
+      <Input
+        id="buscar-reserva-ft"
+        placeholder="Nombre del huésped, código de reserva, habitación..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        data-testid="input-buscar-reserva-ft"
+      />
+      <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-md border p-1.5">
+        {search.trim().length < 2 && (
+          <p className="text-sm text-muted-foreground text-center py-6">Escribí al menos 2 caracteres para buscar</p>
+        )}
+        {search.trim().length >= 2 && candidatos.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-6">Sin reservas de huéspedes extranjeros encontradas</p>
+        )}
+        {candidatos.map((r: any) => (
+          <button
+            key={r.id}
+            type="button"
+            className="w-full text-left border rounded-md p-2.5 text-sm hover:bg-muted/50"
+            onClick={() => setSelected(r)}
+            data-testid={`row-reservation-ft-${r.id}`}
+          >
+            <div className="flex justify-between">
+              <span>{r.guest?.lastName} {r.guest?.firstName}</span>
+              <span className="text-xs text-muted-foreground">{r.reservationCode}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {r.guest?.nationality || r.guest?.nationalityCode || "Extranjero"} · Hab. {r.room?.roomNumber || "—"}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
