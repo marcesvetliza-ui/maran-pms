@@ -31,6 +31,26 @@ function baseReservationData(overrides: Record<string, any> = {}) {
   };
 }
 
+async function createReservationFixture(overrides: Record<string, any> = {}) {
+  const data = baseReservationData(overrides);
+  await pool!.query(
+    `INSERT INTO room_types (id, code, name)
+     VALUES ($1, $2, 'Voucher alojamiento test')`,
+    [data.roomTypeId, `VCH-${randomUUID().slice(0, 8)}`],
+  );
+  await pool!.query(
+    `INSERT INTO rooms (id, room_number, room_type_id, status)
+     VALUES ($1, $2, $3, 'available')`,
+    [data.roomId, `VCH-${randomUUID().slice(0, 8)}`, data.roomTypeId],
+  );
+  return data;
+}
+
+async function cleanupReservationFixture(data: ReturnType<typeof baseReservationData>) {
+  await pool?.query("DELETE FROM rooms WHERE id = $1", [data.roomId]);
+  await pool?.query("DELETE FROM room_types WHERE id = $1", [data.roomTypeId]);
+}
+
 async function cleanupVoucher(voucherId: string) {
   await pool?.query("DELETE FROM gift_voucher_events WHERE voucher_id = $1", [voucherId]);
   await pool?.query("DELETE FROM gift_voucher_applications WHERE voucher_id = $1", [voucherId]);
@@ -42,11 +62,12 @@ suite("PostgreSQL: voucher de regalo aplicado a una reserva de alojamiento", () 
 
   it("crear con voucher aplica y reserva el voucher; cancelar la reserva lo libera", async () => {
     const voucher = await makeVoucher();
+    const reservationData = await createReservationFixture({
+      voucherId: voucher.id, voucherAppliedAmount: "1000.00",
+    });
     let reservationId: string | null = null;
     try {
-      const reservation = await storage.createReservation(baseReservationData({
-        voucherId: voucher.id, voucherAppliedAmount: "1000.00",
-      }) as any);
+      const reservation = await storage.createReservation(reservationData as any);
       reservationId = reservation.id;
 
       const afterCreate = await storage.getGiftVoucher(voucher.id);
@@ -62,16 +83,18 @@ suite("PostgreSQL: voucher de regalo aplicado a una reserva de alojamiento", () 
     } finally {
       if (reservationId) await pool?.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
       await cleanupVoucher(voucher.id);
+      await cleanupReservationFixture(reservationData);
     }
   });
 
   it("checked_out consume el voucher aplicado", async () => {
     const voucher = await makeVoucher();
+    const reservationData = await createReservationFixture({
+      voucherId: voucher.id, voucherAppliedAmount: "1000.00",
+    });
     let reservationId: string | null = null;
     try {
-      const reservation = await storage.createReservation(baseReservationData({
-        voucherId: voucher.id, voucherAppliedAmount: "1000.00",
-      }) as any);
+      const reservation = await storage.createReservation(reservationData as any);
       reservationId = reservation.id;
 
       await storage.updateReservation(reservationId, { status: "checked_in" } as any);
@@ -82,22 +105,25 @@ suite("PostgreSQL: voucher de regalo aplicado a una reserva de alojamiento", () 
     } finally {
       if (reservationId) await pool?.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
       await cleanupVoucher(voucher.id);
+      await cleanupReservationFixture(reservationData);
     }
   });
 
   it("no crea la reserva si el voucher ya no está disponible", async () => {
     const voucher = await makeVoucher();
+    const firstReservationData = await createReservationFixture({
+      voucherId: voucher.id, voucherAppliedAmount: "1000.00",
+    });
+    const secondReservationData = await createReservationFixture({
+      voucherId: voucher.id, voucherAppliedAmount: "1000.00",
+    });
     let firstReservationId: string | null = null;
     try {
-      const first = await storage.createReservation(baseReservationData({
-        voucherId: voucher.id, voucherAppliedAmount: "1000.00",
-      }) as any);
+      const first = await storage.createReservation(firstReservationData as any);
       firstReservationId = first.id;
 
       await expect(
-        storage.createReservation(baseReservationData({
-          voucherId: voucher.id, voucherAppliedAmount: "1000.00",
-        }) as any),
+        storage.createReservation(secondReservationData as any),
       ).rejects.toThrow();
 
       const reservationsWithVoucher = await pool!.query(
@@ -107,6 +133,8 @@ suite("PostgreSQL: voucher de regalo aplicado a una reserva de alojamiento", () 
     } finally {
       if (firstReservationId) await pool?.query("DELETE FROM reservations WHERE id = $1", [firstReservationId]);
       await cleanupVoucher(voucher.id);
+      await cleanupReservationFixture(firstReservationData);
+      await cleanupReservationFixture(secondReservationData);
     }
   });
 });

@@ -15,7 +15,19 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("../billing/billingConfig", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../billing/billingConfig")>();
+  return {
+    ...actual,
+    getBillingConfig: async () => ({
+      ...(await actual.getBillingConfig()),
+      modoArca: false,
+      arcaAmbiente: "ficticio",
+    }),
+  };
+});
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL
@@ -116,11 +128,13 @@ runIfDatabaseIsConfigured("Factura T — el reintegro no deja saldo fantasma en 
           subtotal: 126446.28,
         }],
         reservaId: reservationId,
+        cashFormaPago: "efectivo",
+        cashFormaPagoDetalle: [{ method: "efectivo", amount: 126446.28 }],
         sourceChargeIds: ["accommodation"],
         sourceChargeAmounts: { accommodation: 126446.28 },
         folioContext: { billingTarget: "guest", nationalityCode: "BRA", nationality: "Brasil", hasAccommodation: true },
       });
-      expect(emitResponse.status).toBe(201);
+      expect(emitResponse.status, JSON.stringify(emitResponse.body)).toBe(201);
       expect(emitResponse.body).toMatchObject({ tipoComprobante: "FT", montoTotal: "126446.28" });
       invoiceId = Number(emitResponse.body.id);
 
@@ -166,6 +180,8 @@ runIfDatabaseIsConfigured("Factura T — el reintegro no deja saldo fantasma en 
           subtotal: 126446.28,
         }],
         reservaId: reservationId,
+        cashFormaPago: "efectivo",
+        cashFormaPagoDetalle: [{ method: "efectivo", amount: 126446.28 }],
         sourceChargeIds: ["other-accommodation-line"],
         sourceChargeAmounts: { accommodation: 126446.28 },
         folioContext: { billingTarget: "guest", nationalityCode: "BRA", nationality: "Brasil", hasAccommodation: true },

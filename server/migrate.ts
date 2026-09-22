@@ -2885,6 +2885,27 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN cash_forma_pago_detalle jsonb`)))
   );
 
+  await withTimeout("sales_invoices.folio_id varchar", T, () =>
+    db.execute(sql.raw(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'sales_invoices'
+            AND column_name = 'folio_id'
+            AND data_type = 'integer'
+        ) THEN
+          ALTER TABLE sales_invoices
+            ALTER COLUMN folio_id TYPE varchar
+            USING folio_id::text;
+        END IF;
+      END
+      $$;
+    `))
+  );
+
   await withTimeout("sales_invoices.source_charge_ids", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN source_charge_ids jsonb`)))
   );

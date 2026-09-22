@@ -52,7 +52,7 @@ export interface NewInvoiceData {
   /** SPA folio claimed by this invoice at issuance time. */
   spaAccountId?: string;
   restaurantOrderId?: string;
-  folioId?: number;
+  folioId?: string;
   facturaOriginalId?: number; // para NC
   /**
    * The original document this NC/ND corrects, exactly as ARCA needs to

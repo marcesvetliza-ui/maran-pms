@@ -2782,7 +2782,7 @@ export const salesInvoices = pgTable("sales_invoices", {
   // SPA account that owns this invoice. Persisted at issuance so the later
   // account link cannot attach an unrelated same-value invoice.
   spaAccountId: varchar("spa_account_id"),
-  folioId: integer("folio_id"),
+  folioId: varchar("folio_id"),
   notaCreditoId: integer("nota_credito_id"),
   restaurantOrderId: varchar("restaurant_order_id"),
   montoAcreditado: numeric("monto_acreditado", { precision: 14, scale: 2 }).default("0"),
