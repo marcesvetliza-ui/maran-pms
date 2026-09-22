@@ -9,7 +9,11 @@ import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
 
 const AREA_EXTRA_TIPOS: Record<string, { value: string; label: string }[]> = {
   recepcion: [{ value: "cierre_habitacion", label: "Voucher Habitaciones" }],
-  spa: [{ value: "cierre_spa", label: "Voucher SPA" }],
+  spa: [
+    { value: "cierre_spa", label: "Voucher SPA" },
+    { value: "cierre_spa_agustin", label: "Voucher SPA — Agustín I" },
+    { value: "cierre_spa_cortesia", label: "Voucher SPA — Cortesía" },
+  ],
 };
 
 export function EmitirComprobanteButton({ area, variant = "outline", size = "sm" }: {

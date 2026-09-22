@@ -74,7 +74,11 @@ const TIPOS_VENTA: { value: string; label: string }[] = [
 // corresponde a su área.
 const VOUCHERS_POR_AREA: Partial<Record<AreaId, { value: string; label: string }[]>> = {
   recepcion: [{ value: "cierre_habitacion", label: "Voucher Habitaciones" }],
-  spa: [{ value: "cierre_spa", label: "Voucher SPA" }],
+  spa: [
+    { value: "cierre_spa", label: "Voucher SPA" },
+    { value: "cierre_spa_agustin", label: "Voucher SPA — Agustín I" },
+    { value: "cierre_spa_cortesia", label: "Voucher SPA — Cortesía" },
+  ],
   restaurant: [
     { value: "voucher_justo", label: "Voucher Justo" },
     { value: "voucher_pedidos_ya", label: "Voucher PedidosYa" },

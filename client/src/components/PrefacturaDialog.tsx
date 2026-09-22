@@ -319,7 +319,7 @@ const TIPO_OPTIONS = [
   { value: "cierre_habitacion", label: "Cierre de habitación (no fiscal)", fiscal: false },
 ];
 
-const NON_FISCAL = new Set(["cierre_habitacion", "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_spa"]);
+const NON_FISCAL = new Set(["cierre_habitacion", "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
 
 const RECEIPT_TYPE_MAP: Record<string, string> = {
   FA: "factura_a", FB: "factura_b", FC: "factura_c",

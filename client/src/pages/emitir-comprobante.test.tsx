@@ -129,6 +129,24 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.queryByTestId("select-area")).not.toBeInTheDocument();
   });
 
+  it("Venta > Spa ofrece los tres vouchers de SPA (general, Agustín I, Cortesía)", async () => {
+    mockRole = "spa";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Venta" }));
+
+    await user.click(screen.getByTestId("select-tipo"));
+    expect(screen.getByRole("option", { name: "Voucher SPA" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Voucher SPA — Agustín I" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Voucher SPA — Cortesía" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Voucher SPA — Cortesía" }));
+
+    const embedded = screen.getByTestId("emitir-factura-embedded");
+    expect(within(embedded).getByTestId("select-tipo-factura")).toHaveTextContent("Voucher SPA — Cortesía — Comprobante interno");
+  });
+
   it("Venta > Recepción ofrece Factura MiPyME B junto a la A", async () => {
     mockRole = "admin";
     const user = userEvent.setup();
