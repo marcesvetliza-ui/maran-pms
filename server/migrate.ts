@@ -4201,6 +4201,58 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Final incident sweep for the retired button. The description is exclusive
+  // to that action, so this safely catches company/agency rows that a database
+  // session timezone may have placed outside the original UTC minute window.
+  const companyAgencyIncidentRollback = await withTimeout(
+    "rollback_company_agency_checkout_debt_reconcile_2026_09_22",
+    T,
+    () => db.execute(sql`
+      WITH deleted AS (
+        DELETE FROM account_movements
+        WHERE date = '2026-09-22'
+          AND entity_type IN ('company', 'agency')
+          AND type = 'cargo'
+          AND area = 'recepcion'
+          AND description LIKE 'Saldo por estadía % (cierre con deuda)'
+          AND group_payment_id IS NULL
+        RETURNING entity_type, amount
+      )
+      SELECT
+        entity_type,
+        count(*)::int AS deleted_count,
+        COALESCE(sum(amount::numeric), 0)::text AS deleted_total
+      FROM deleted
+      GROUP BY entity_type
+      ORDER BY entity_type
+    `),
+  );
+  logger.info(
+    `[checkout-debt-incident] Empresas/agencias eliminadas: ${JSON.stringify(companyAgencyIncidentRollback?.rows ?? [])}`,
+  );
+  const companyAgencyIncidentPostcheck = await withTimeout(
+    "postcheck_company_agency_checkout_debt_reconcile_2026_09_22",
+    T,
+    () => db.execute(sql`
+      SELECT
+        entity_type,
+        count(*)::int AS remaining_count,
+        COALESCE(sum(amount::numeric), 0)::text AS remaining_total
+      FROM account_movements
+      WHERE date = '2026-09-22'
+        AND entity_type IN ('company', 'agency')
+        AND type = 'cargo'
+        AND area = 'recepcion'
+        AND description LIKE 'Saldo por estadía % (cierre con deuda)'
+        AND group_payment_id IS NULL
+      GROUP BY entity_type
+      ORDER BY entity_type
+    `),
+  );
+  logger.info(
+    `[checkout-debt-incident] Empresas/agencias remanentes: ${JSON.stringify(companyAgencyIncidentPostcheck?.rows ?? [])}`,
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
