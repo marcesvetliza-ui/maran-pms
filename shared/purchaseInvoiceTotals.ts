@@ -28,6 +28,7 @@ export type PurchaseInvoiceAmountInput = {
   retencionGanancias?: string | number | null;
   retencionIva?: string | number | null;
   retencionSuss?: string | number | null;
+  retencionMunicipal?: string | number | null;
 };
 
 export type PurchaseInvoiceNetLine = {
@@ -97,6 +98,7 @@ export function mapPurchaseInvoiceAmountFields(row: Record<string, unknown>) {
     retencionGanancias: formAmount(row.retencion_ganancias),
     retencionIva: formAmount(row.retencion_iva),
     retencionSuss: formAmount(row.retencion_suss),
+    retencionMunicipal: formAmount(row.retencion_municipal),
     montoTotal: formAmount(row.monto_total),
   };
 }
@@ -153,7 +155,8 @@ export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput)
     amount(input.retencionIibb) +
     amount(input.retencionGanancias) +
     amount(input.retencionIva) +
-    amount(input.retencionSuss);
+    amount(input.retencionSuss) +
+    amount(input.retencionMunicipal);
 
   return roundCurrency(baseAndTaxes + (isCardSettlement(input.tipoComprobante) ? retentions : -retentions));
 }

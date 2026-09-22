@@ -47,6 +47,17 @@ describe("purchase invoice totals", () => {
     expect(shouldRegisterPracticedIibbRetention("FACT-A")).toBe(true);
   });
 
+  it("also subtracts a practiced municipal retention from a regular invoice", () => {
+    const total = calculatePurchaseInvoiceTotal({
+      tipoComprobante: "FACT-A",
+      montoNeto: "100.00",
+      montoIva21: "21.00",
+      retencionMunicipal: "5.00",
+    });
+
+    expect(total).toBe(116);
+  });
+
   it("treats a received retention net amount as the final total and maps its asset account", () => {
     const total = calculatePurchaseInvoiceTotal({
       tipoComprobante: "RETENCION",
@@ -84,6 +95,7 @@ describe("purchase invoice totals", () => {
       retencion_ganancias: "8.00",
       retencion_iva: "9.00",
       retencion_suss: "10.00",
+      retencion_municipal: "11.00",
       monto_total: "217.00",
     })).toEqual({
       montoNeto: "100.00",
@@ -103,6 +115,7 @@ describe("purchase invoice totals", () => {
       retencionGanancias: "8.00",
       retencionIva: "9.00",
       retencionSuss: "10.00",
+      retencionMunicipal: "11.00",
       montoTotal: "217.00",
     });
   });

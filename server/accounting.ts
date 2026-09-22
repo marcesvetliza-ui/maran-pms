@@ -84,6 +84,7 @@ export async function generarAsiento(
   const retIibb = parseNum(invoice.retencionIibb);
   const retGanancias = parseNum(invoice.retencionGanancias);
   const retSuss = parseNum(invoice.retencionSuss);
+  const retMunicipal = parseNum(invoice.retencionMunicipal);
   const total = parseNum(invoice.montoTotal);
   const retentionsAreSuffered = purchaseInvoiceRetentionSide(invoice.tipoComprobante) === "debe";
 
@@ -91,7 +92,7 @@ export async function generarAsiento(
   const [
     acIva21, acIva105, acIva27,
     acPercIva, acPercIibb, acPercGanancias,
-    acRetIva, acRetIibb, acRetGanancias, acRetSuss,
+    acRetIva, acRetIibb, acRetGanancias, acRetSuss, acRetMunicipal,
     acImpInt, acLey25, acProv, acCaja,
     acCuentaContable,
   ] = await Promise.all([
@@ -105,6 +106,7 @@ export async function generarAsiento(
     getAccountId("1.1.4.01.08.01", executor),
     getAccountId("1.1.4.01.05", executor),
     getAccountId("1.1.4.01.10", executor),
+    getAccountId("1.1.4.01.11", executor),
     getAccountId("2.1.3.02.09", executor),
     getAccountId("1.1.4.01.15", executor),
     getAccountId("2.1.1.01", executor),
@@ -155,6 +157,7 @@ export async function generarAsiento(
     if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: retIibb * sign, haber: 0 });
     if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: retGanancias * sign, haber: 0 });
     if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: retSuss * sign, haber: 0 });
+    if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: retMunicipal * sign, haber: 0 });
   }
 
   // DEBE: impuestos internos y ley 25413
@@ -171,6 +174,7 @@ export async function generarAsiento(
       if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
       if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
       if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+      if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: 0, haber: retMunicipal * sign });
     }
   } else {
     // Cuenta corriente: haber = proveedores a pagar

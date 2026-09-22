@@ -213,6 +213,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
         "1.1.4.01.04.01",
         "1.1.4.01.05",
         "1.1.4.01.08.01",
+        "1.1.4.01.11",
         "2.1.1.01",
         "4.2.1.08.05.02",
       ]],
@@ -225,6 +226,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       "1.1.4.01.04.01",
       "1.1.4.01.05",
       "1.1.4.01.08.01",
+      "1.1.4.01.11",
       "2.1.1.01",
       "4.2.1.08.05.02",
     ]);
@@ -369,6 +371,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
         condicionPago: "contado",
         montoNeto: "100.00",
         retencionIibb: "10.00",
+        retencionMunicipal: "6.00",
         cuentaContableId: accountId,
         alicuotaIibbProveedor: "3.00",
       });
@@ -384,7 +387,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
          WHERE id = $1`,
         [fixture.facturaInvoiceId],
       );
-      expect(facturaState.rows[0].monto_total).toBe("90.00");
+      expect(facturaState.rows[0].monto_total).toBe("84.00");
       expect(facturaState.rows[0].asiento_id).toBeTruthy();
 
       const lines = await readAccountingLines(Number(facturaState.rows[0].asiento_id));
@@ -394,6 +397,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       expect(lines).toEqual(
         expect.arrayContaining([
           { codigo: "1.1.4.01.08.01", debe: "0.00", haber: "10.00" },
+          { codigo: "1.1.4.01.11", debe: "0.00", haber: "6.00" },
         ]),
       );
 
@@ -409,6 +413,78 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       expect(practicedIibb.rows).toEqual([
         { importe_retenido: "10.00", invoice_id: fixture.facturaInvoiceId },
       ]);
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }, 15_000);
+
+  it("persiste la retención municipal al editar (antes se perdía en el PATCH)", async () => {
+    if (!testPool) return;
+
+    const fixture = await createFixture();
+    try {
+      const expenseAccount = await testPool.query<{ id: number }>(
+        "SELECT id FROM accounting_accounts WHERE codigo = '4.2.1.08.05.02'",
+      );
+      const accountId = expenseAccount.rows[0].id;
+
+      const created = await requestInvoice("POST", "/api/purchase-invoices", {
+        tipoComprobante: "FACT-A",
+        supplierId: fixture.supplierId,
+        proveedorNombre: "Proveedor municipal prueba",
+        proveedorCuit: fixture.supplierCuit,
+        numeroComprobante: `PG-FACT-A-MUN-${randomUUID()}`,
+        fechaEmision: "2026-08-31",
+        periodo: "08/2026",
+        condicionPago: "cuenta_corriente",
+        montoNeto: "100.00",
+        retencionMunicipal: "4.00",
+        cuentaContableId: accountId,
+      });
+      expect(created.status).toBe(201);
+      fixture.facturaInvoiceId = Number(created.body.id);
+
+      const updated = await requestInvoice(
+        "PATCH",
+        `/api/purchase-invoices/${fixture.facturaInvoiceId}`,
+        {
+          montoNeto: "100.00",
+          montoIva21: "0.00",
+          montoIva105: "0.00",
+          montoIva27: "0.00",
+          montoIva5: "0.00",
+          montoIva25: "0.00",
+          montoExento: "0.00",
+          montoNoGravado: "0.00",
+          impuestosInternos: "0.00",
+          ley25413: "0.00",
+          percepcionIibb: "0.00",
+          percepcionIva: "0.00",
+          percepcionGanancias: "0.00",
+          retencionIibb: "0.00",
+          retencionGanancias: "0.00",
+          retencionIva: "0.00",
+          retencionSuss: "0.00",
+          retencionMunicipal: "9.00",
+          cuentaContableId: accountId,
+        },
+      );
+      expect(updated.status).toBe(200);
+
+      const facturaState = await testPool.query<{
+        monto_total: string;
+        retencion_municipal: string;
+      }>(
+        `SELECT monto_total, retencion_municipal
+         FROM purchase_invoices
+         WHERE id = $1`,
+        [fixture.facturaInvoiceId],
+      );
+      // Antes del fix, el UPDATE del PATCH no incluía retencion_municipal en
+      // absoluto: el valor cargado al crear (o editar) el comprobante se
+      // perdía en silencio en cada edición posterior.
+      expect(facturaState.rows[0].retencion_municipal).toBe("9.00");
+      expect(facturaState.rows[0].monto_total).toBe("91.00");
     } finally {
       await cleanupFixture(fixture);
     }
