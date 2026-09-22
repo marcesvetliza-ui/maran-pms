@@ -137,6 +137,26 @@ const TIPOS = [
 // Solo para el layout unificado del Centro de Comprobantes — el asistente
 // original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
 const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }];
+
+// Sugerencia (no validación dura, confirmado con el usuario): al elegir un
+// proveedor, la letra del comprobante se ajusta según su condición IVA —
+// Responsable Inscripto → A, Monotributo → C, Exento → B — pero el
+// operador la puede cambiar a mano (hay proveedores RI cuyo concepto es
+// exento). Solo toca comprobantes "con letra" (Factura/NC/Recibo); no
+// altera Factura M, Remito, Resumen Bancario, Liquidación de Tarjeta ni
+// Retención, que no siguen esa regla.
+const LETRA_POR_CONDICION_IVA: Record<string, "A" | "B" | "C"> = {
+  "Responsable Inscripto": "A",
+  "Monotributo": "C",
+  "Exento": "B",
+};
+const TIPOS_CON_LETRA = new Set(["FACT-A", "FACT-B", "FACT-C", "NC-A", "NC-B", "NC-C", "RECIBO-A", "RECIBO-B", "RECIBO-C"]);
+function sugerirTipoPorCondicionIva(tipoActual: string, condicionIva: string | undefined | null): string {
+  const letra = condicionIva ? LETRA_POR_CONDICION_IVA[condicionIva] : undefined;
+  if (!letra || !TIPOS_CON_LETRA.has(tipoActual)) return tipoActual;
+  const familia = tipoActual.split("-")[0];
+  return `${familia}-${letra}`;
+}
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },
@@ -500,6 +520,7 @@ export function InvoiceDialog({
       f("supplierId", id);
       f("proveedorNombre", s.razonSocial);
       f("proveedorCuit", s.cuit);
+      f("tipoComprobante", sugerirTipoPorCondicionIva(form.tipoComprobante, s.condicionIva));
       if (s.alicuotaIibb) f("alicuotaIibbProveedor", String(s.alicuotaIibb));
       if (!isReceivedRetention(form.tipoComprobante) && s.cuentaContableId) {
         f("cuentaContableId", String(s.cuentaContableId));
