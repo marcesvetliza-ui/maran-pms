@@ -145,6 +145,28 @@ export function compareReservationsByRoom(
     ? roomComparison
     : a.checkInDate.localeCompare(b.checkInDate);
 }
+
+export type ReservationSortMode = "room" | "checkin" | "guest" | "created";
+
+export function compareReservationsForList(
+  mode: ReservationSortMode,
+  a: ReservationWithDetails,
+  b: ReservationWithDetails,
+): number {
+  if (mode === "checkin") {
+    return a.checkInDate.localeCompare(b.checkInDate) || compareReservationsByRoom(a, b);
+  }
+  if (mode === "guest") {
+    const guestA = `${a.guest?.lastName || ""} ${a.guest?.firstName || ""}`.trim();
+    const guestB = `${b.guest?.lastName || ""} ${b.guest?.firstName || ""}`.trim();
+    return roomNumberCollator.compare(guestA, guestB) || compareReservationsByRoom(a, b);
+  }
+  if (mode === "created") {
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      || compareReservationsByRoom(a, b);
+  }
+  return compareReservationsByRoom(a, b);
+}
 import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -5462,6 +5484,7 @@ export default function ReservationsPage() {
   const searchParams = useSearch();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortMode, setSortMode] = useState<ReservationSortMode>("room");
   const [showHistory, setShowHistory] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
@@ -5741,11 +5764,7 @@ export default function ReservationsPage() {
 
       return matchesSearch && matchesStatus;
     })
-    ?.sort((a, b) =>
-      dateMode === "created"
-        ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        : compareReservationsByRoom(a, b)
-    );
+    ?.sort((a, b) => compareReservationsForList(sortMode, a, b));
 
   const isResLocked = (r: ReservationWithDetails) => {
     return r.status === "checked_out" || r.status === "cancelled";
@@ -6098,6 +6117,17 @@ export default function ReservationsPage() {
                   <SelectItem value="checked_in">Check-in</SelectItem>
                   <SelectItem value="checked_out">Check-out</SelectItem>
                   <SelectItem value="cancelled">Canceladas</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={sortMode} onValueChange={(value) => setSortMode(value as ReservationSortMode)}>
+                <SelectTrigger className="w-[210px]" data-testid="select-sort-reservations">
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="room">Habitación: menor a mayor</SelectItem>
+                  <SelectItem value="checkin">Fecha de ingreso</SelectItem>
+                  <SelectItem value="guest">Huésped: A–Z</SelectItem>
+                  <SelectItem value="created">Fecha de creación</SelectItem>
                 </SelectContent>
               </Select>
               <Button
