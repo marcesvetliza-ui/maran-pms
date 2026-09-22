@@ -1792,6 +1792,7 @@ export function registerBillingRoutes(app: Express) {
             ? await withSpaInvoiceLock(spaAccountId, emitInvoice)
             : await emitInvoice();
       const user = (req as any).user;
+      let cashMovementError: string | undefined;
       const invoiceTotalForSettlement = parseFloat(String(
         (factura as any).montoTotal ?? (factura as any).monto_total ?? "0",
       ));
@@ -1899,7 +1900,12 @@ export function registerBillingRoutes(app: Express) {
           }
         }
       } else if (!reusedExistingClaim && !groupId && cashArea && cashFormaPago && !spaAccountId) {
-        // Registrar movimiento de caja si se especificó un área
+        // Registrar movimiento de caja si se especificó un área. La factura ya
+        // está emitida (y puede tener CAE real de ARCA) en este punto — no hay
+        // forma segura de "deshacerla" si esto falla, así que la respuesta
+        // sigue siendo 201, pero el fallo ya NO se traga en silencio: queda en
+        // audit_logs (visible en Administración) y viaja en la respuesta para
+        // que la pantalla que llamó a este endpoint pueda avisar al usuario.
         try {
           const total = uncoveredSettlement;
           if (total > 0) {
@@ -1916,12 +1922,17 @@ export function registerBillingRoutes(app: Express) {
               factura.tipoComprobante
             );
           }
-        } catch (cashErr) {
+        } catch (cashErr: any) {
           console.error("[Billing] Error registrando movimiento de caja:", cashErr);
+          cashMovementError = cashErr?.message || "No se pudo registrar el movimiento de caja";
+          await audit(req, "update", "sales_invoices",
+            `Factura ${factura.tipoComprobante} ${String(factura.puntoVenta).padStart(4, "0")}-${String(factura.numero).padStart(8, "0")} emitida, pero falló el registro del movimiento de caja — requiere revisión manual`,
+            { entityType: "sales_invoice", entityId: String(factura.id), details: { cashArea, cashFormaPago, error: cashMovementError } },
+          );
         }
       }
 
-      res.status(201).json(factura);
+      res.status(201).json(cashMovementError ? { ...factura, cashMovementError } : factura);
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
