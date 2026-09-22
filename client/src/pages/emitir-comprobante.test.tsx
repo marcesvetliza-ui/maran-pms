@@ -128,4 +128,53 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.getByText(/no tiene ningún área habilitada/i)).toBeInTheDocument();
     expect(screen.queryByTestId("select-area")).not.toBeInTheDocument();
   });
+
+  it("comercial ve todas las áreas, igual que admin", async () => {
+    mockRole = "comercial";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    for (const label of ["Alojamiento", "Restaurant", "Spa", "Eventos", "Compras", "Inventario"]) {
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("responsable_area y resp_administracion ven todas las áreas", async () => {
+    for (const role of ["responsable_area", "resp_administracion"]) {
+      mockRole = role;
+      const user = userEvent.setup();
+      const { unmount } = renderPage();
+
+      await user.click(screen.getByTestId("select-area"));
+      for (const label of ["Alojamiento", "Restaurant", "Spa", "Eventos", "Compras", "Inventario"]) {
+        expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
+      }
+      unmount();
+    }
+  });
+
+  it("un rol restringido a un área (reception, restaurant, events) no ve las demás", async () => {
+    const cases: Array<[string, string]> = [
+      ["reception", "Alojamiento"],
+      ["restaurant", "Restaurant"],
+      ["events", "Eventos"],
+    ];
+    for (const [role, label] of cases) {
+      mockRole = role;
+      const { unmount } = renderPage();
+      const areaSelect = screen.getByTestId("select-area");
+      expect(within(areaSelect).getByText(label)).toBeInTheDocument();
+      expect(areaSelect).toBeDisabled();
+      unmount();
+    }
+  });
+
+  it("jefe_recepcion queda restringido solo a Alojamiento (no ve todo)", () => {
+    mockRole = "jefe_recepcion";
+    renderPage();
+    const areaSelect = screen.getByTestId("select-area");
+    expect(within(areaSelect).getByText("Alojamiento")).toBeInTheDocument();
+    expect(areaSelect).toBeDisabled();
+  });
 });

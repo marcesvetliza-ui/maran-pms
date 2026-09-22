@@ -29,13 +29,16 @@ const NC_ND_TIPOS = new Set(["NCA", "NCB", "NCM", "NDA", "NDB", "NDM"]);
 
 type AreaId = "recepcion" | "restaurant" | "spa" | "events" | "compras" | "inventario";
 
+// Roles que ven todos los comprobantes de todas las áreas, sin restricción.
+const ROLES_VEN_TODO = ["admin", "manager", "responsable_area", "resp_administracion", "comercial"];
+
 const AREAS: { id: AreaId; label: string; roles: string[] }[] = [
-  { id: "recepcion", label: "Alojamiento", roles: ["admin", "manager", "reception", "jefe_recepcion", "comercial"] },
-  { id: "restaurant", label: "Restaurant", roles: ["admin", "manager", "restaurant", "jefe_recepcion", "comercial"] },
-  { id: "spa", label: "Spa", roles: ["admin", "manager", "spa", "jefe_recepcion", "comercial"] },
-  { id: "events", label: "Eventos", roles: ["admin", "manager", "events", "jefe_recepcion", "comercial"] },
-  { id: "compras", label: "Compras", roles: ["admin", "manager", "resp_deposito", "resp_administracion"] },
-  { id: "inventario", label: "Inventario", roles: ["admin", "manager", "resp_deposito", "resp_administracion"] },
+  { id: "recepcion", label: "Alojamiento", roles: [...ROLES_VEN_TODO, "reception", "jefe_recepcion"] },
+  { id: "restaurant", label: "Restaurant", roles: [...ROLES_VEN_TODO, "restaurant"] },
+  { id: "spa", label: "Spa", roles: [...ROLES_VEN_TODO, "spa"] },
+  { id: "events", label: "Eventos", roles: [...ROLES_VEN_TODO, "events"] },
+  { id: "compras", label: "Compras", roles: [...ROLES_VEN_TODO, "resp_deposito"] },
+  { id: "inventario", label: "Inventario", roles: [...ROLES_VEN_TODO, "resp_deposito"] },
 ];
 
 // ── Operaciones y tipos ──────────────────────────────────────────────────────
