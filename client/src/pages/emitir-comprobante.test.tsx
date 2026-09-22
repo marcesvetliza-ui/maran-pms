@@ -129,6 +129,25 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.queryByTestId("select-area")).not.toBeInTheDocument();
   });
 
+  it("Venta > Recepción ofrece Factura MiPyME B junto a la A", async () => {
+    mockRole = "admin";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Alojamiento" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Venta" }));
+
+    await user.click(screen.getByTestId("select-tipo"));
+    expect(screen.getByRole("option", { name: "Factura MiPyME A" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Factura MiPyME B" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Factura MiPyME B" }));
+
+    const embedded = screen.getByTestId("emitir-factura-embedded");
+    expect(within(embedded).getByTestId("select-tipo-factura")).toHaveTextContent("Factura MiPyme B");
+  });
+
   it("comercial ve todas las áreas, igual que admin", async () => {
     mockRole = "comercial";
     const user = userEvent.setup();

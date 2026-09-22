@@ -52,6 +52,7 @@ export function GroupPaymentHistoryRow({
     : gp.receiptType === "factura_b" ? "Factura B"
     : gp.receiptType === "factura_t" ? "Factura T"
     : gp.receiptType === "factura_mipyme_a" ? "MiPyme A"
+    : gp.receiptType === "factura_mipyme_b" ? "MiPyme B"
     : gp.receiptType === "ticket" ? "Ticket"
     : gp.receiptType === "cierre_habitacion" ? "Voucher Habitaciones"
     : gp.receiptType;

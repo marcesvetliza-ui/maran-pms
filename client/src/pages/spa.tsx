@@ -3383,7 +3383,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         </a>
                       </div>
                       {spaInvoice && (() => {
-                        const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(spaInvoice.tipo_comprobante);
+                        const isNC = ["NCA","NCB","NCC","NCT","NCM","NCMB"].includes(spaInvoice.tipo_comprobante);
                         const hasOriginal = isNC && spaInvoice.original_tipo && spaInvoice.original_numero != null;
                         const originalRef = hasOriginal
                           ? `${spaInvoice.original_tipo} ${String(spaInvoice.original_punto_venta || 1).padStart(4, "0")}-${String(spaInvoice.original_numero).padStart(8, "0")}`
@@ -4526,7 +4526,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           {selectedInvoiceDetail && (() => {
             const { invoice: inv, linkedNc } = selectedInvoiceDetail;
             const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
-            const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(inv.tipo_comprobante);
+            const isNC = ["NCA","NCB","NCC","NCT","NCM","NCMB"].includes(inv.tipo_comprobante);
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border p-4 space-y-2">

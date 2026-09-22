@@ -981,7 +981,7 @@ export function registerReservationsRoutes(app: Express) {
           SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB')
             AND estado IN ('emitida','parcial','anulada')
         `),
         db.execute(sql`
@@ -1060,7 +1060,7 @@ export function registerReservationsRoutes(app: Express) {
                  monto_acreditado, estado, nota_credito_id, cae
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','NCA','NCB','NCC','NCT','NCM')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','NCA','NCB','NCC','NCT','NCM','NCMB')
             AND estado IN ('emitida','parcial','anulada')
           ORDER BY created_at ASC
         `),
@@ -1157,20 +1157,20 @@ export function registerReservationsRoutes(app: Express) {
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
-                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
                ), '[]'::jsonb) AS credit_source_charge_amounts,
                COALESCE((
                  SELECT jsonb_agg(nd.source_charge_amounts)
                  FROM sales_invoices nc
                  JOIN sales_invoices nd ON nd.nota_credito_id = nc.id
                  WHERE nc.nota_credito_id = si.id
-                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
-                   AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+                   AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
                    AND nd.estado <> 'anulada'
                ), '[]'::jsonb) AS debit_source_charge_amounts
         FROM sales_invoices si
         WHERE si.reserva_id = ${req.params.id}
-          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
           AND estado IN ('emitida', 'parcial', 'anulada')
           AND COALESCE(monto_total::numeric, 0) > 0
         ORDER BY si.created_at DESC
@@ -1210,7 +1210,7 @@ export function registerReservationsRoutes(app: Express) {
         FROM sales_invoices nc
         LEFT JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.reserva_id = ${req.params.id}
-          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.estado IN ('emitida', 'parcial', 'anulada')
           AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status = 'conciliada')
           AND COALESCE(nc.monto_total::numeric, 0) > COALESCE(nc.monto_acreditado::numeric, 0)
@@ -3139,7 +3139,7 @@ export function registerReservationsRoutes(app: Express) {
       if (String(target.reserva_id) !== String(payment.reservation_id)) {
         return res.status(403).json({ error: "La factura destino no pertenece a la reserva del pago" });
       }
-      if (!["FA", "FB", "FC", "FT", "FM"].includes(String(target.tipo_comprobante)) ||
+      if (!["FA", "FB", "FC", "FT", "FM", "FMB"].includes(String(target.tipo_comprobante)) ||
         !["emitida", "parcial"].includes(String(target.estado))) {
         return res.status(409).json({ error: "La factura destino no está activa para reaplicación" });
       }

@@ -783,7 +783,7 @@ export function registerBillingRoutes(app: Express) {
         LEFT JOIN groups g ON g.id = si.group_id
         LEFT JOIN sales_invoices orig
                ON orig.id = si.nota_credito_id
-              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
         WHERE ${whereClause}
         ORDER BY si.created_at DESC
         LIMIT 200
@@ -810,7 +810,7 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.reserva_id IS NOT NULL
-          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.reconciliation_status = 'pendiente'
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
         LIMIT 100
@@ -837,7 +837,7 @@ export function registerBillingRoutes(app: Express) {
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.id = ${ncId}
           AND nc.reserva_id IS NOT NULL
-          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
         LIMIT 1
       `);
       if (!initial.rows.length) {
@@ -956,7 +956,7 @@ export function registerBillingRoutes(app: Express) {
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
-                   AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+                   AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
                ), '[]'::jsonb) AS credit_source_charge_amounts,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
@@ -975,7 +975,7 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices si
         LEFT JOIN sales_invoices orig
                ON orig.id = si.nota_credito_id
-              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM')
+              AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
         WHERE si.id = ${id}
       `);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
@@ -1434,15 +1434,15 @@ export function registerBillingRoutes(app: Express) {
                    SELECT jsonb_agg(nc.source_charge_amounts)
                    FROM sales_invoices nc
                    WHERE nc.nota_credito_id = si.id
-                     AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                     AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
                   ), '[]'::jsonb) AS credit_source_charge_amounts,
                   COALESCE((
                     SELECT jsonb_agg(nd.source_charge_amounts)
                     FROM sales_invoices nc
                     JOIN sales_invoices nd ON nd.nota_credito_id = nc.id
                     WHERE nc.nota_credito_id = si.id
-                      AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
-                      AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+                      AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+                      AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
                       AND nd.estado <> 'anulada'
                   ), '[]'::jsonb) AS debit_source_charge_amounts
             FROM sales_invoices si
@@ -2543,7 +2543,7 @@ export function registerBillingRoutes(app: Express) {
           FROM sales_invoices
           WHERE nota_credito_id = ${id}
             AND reserva_id = ${String(original.reserva_id)}
-            AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+            AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
             AND reconciliation_status = 'pendiente'
           ORDER BY id DESC
           LIMIT 1
@@ -2628,7 +2628,7 @@ export function registerBillingRoutes(app: Express) {
         SELECT source_charge_amounts, monto_total
         FROM sales_invoices
         WHERE nota_credito_id = ${original.id}
-          AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
       `);
       const creditedBySource: Record<string, number> = {};
       let creditedWithNoSourceMap = 0;
@@ -3150,7 +3150,7 @@ export function registerBillingRoutes(app: Express) {
             SELECT *
             FROM sales_invoices
             WHERE nota_credito_id = ${id}
-              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
               AND reconciliation_status = 'pendiente'
             ORDER BY id DESC
             LIMIT 1
@@ -3190,7 +3190,7 @@ export function registerBillingRoutes(app: Express) {
             SELECT source_charge_amounts, monto_total
             FROM sales_invoices
             WHERE nota_credito_id = ${id}
-              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+              AND tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
               AND estado <> 'anulada'
           `);
           const creditedBySource = parseJson(nc.source_charge_amounts);

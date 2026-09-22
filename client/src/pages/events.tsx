@@ -3544,7 +3544,7 @@ export default function EventsPage() {
           {selectedInvoiceDetail && (() => {
             const { invoice: inv, linkedNc } = selectedInvoiceDetail;
             const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
-            const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(inv.tipo_comprobante);
+            const isNC = ["NCA","NCB","NCC","NCT","NCM","NCMB"].includes(inv.tipo_comprobante);
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border p-4 space-y-2">

@@ -559,10 +559,12 @@ export function registerExportRoutes(app: Express) {
         FA:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
         FM:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
         FB:  { code: 11101, label: "FACT -B- ELECT HOTEL" },
+        FMB: { code: 11101, label: "FACT -B- ELECT HOTEL" },
         FC:  { code: 11103, label: "FACT -C- ELECT HOTEL" },
         NCA: { code: 11300, label: "NC -A- ELECT HOTEL"   },
         NCM: { code: 11300, label: "NC -A- ELECT HOTEL"   },
         NCB: { code: 11301, label: "NC -B- ELECT HOTEL"   },
+        NCMB: { code: 11301, label: "NC -B- ELECT HOTEL"   },
         NCC: { code: 11303, label: "NC -C- ELECT HOTEL"   },
       };
 

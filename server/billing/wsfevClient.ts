@@ -4,9 +4,9 @@ const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
 
 const TIPOS_CBT: Record<string, number> = {
-  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
-  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
-  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202,
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201, FMB: 206,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203, NCMB: 208,
+  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202, NDMB: 207,
 };
 
 export interface FECAERequest {

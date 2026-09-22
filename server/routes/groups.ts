@@ -202,7 +202,7 @@ function confirmedInvoiceAppliedAdvances(invoiceData: any, fallback: number): nu
 }
 
 const supportedGroupReceiptTypes = new Set([
-  "sin_comprobante", "none", "factura_a", "factura_b", "factura_mipyme_a", "factura_t",
+  "sin_comprobante", "none", "factura_a", "factura_b", "factura_mipyme_a", "factura_mipyme_b", "factura_t",
 ]);
 
 /** Validate collection evidence before either group collection path persists it. */
@@ -219,7 +219,7 @@ function validateGroupPaymentEvidence(
   if (!rows.some((row) => Number(row.amount) > 0)) {
     throw Object.assign(new Error("Debe informar al menos un detalle de cobro con importe positivo."), { statusCode: 400 });
   }
-  const isFiscal = ["factura_a", "factura_b", "factura_mipyme_a", "factura_t"].includes(normalizedReceiptType);
+  const isFiscal = ["factura_a", "factura_b", "factura_mipyme_a", "factura_mipyme_b", "factura_t"].includes(normalizedReceiptType);
   for (const row of rows) {
     if (!isFiscal && Number(row.amount) > 0 && !String(row.reference || "").trim()) {
       throw Object.assign(new Error("Cada medio de pago debe incluir una referencia no vacía."), { statusCode: 400 });
@@ -1612,9 +1612,9 @@ export function registerGroupsRoutes(app: Express) {
       );
       const compositionSources = await getGroupInvoiceCompositionSources(req.params.groupId);
       const fiscalTypes = new Set([
-        "FA", "FB", "FC", "FT", "FM",
-        "NCA", "NCB", "NCC", "NCT", "NCM",
-        "NDA", "NDB", "NDC", "NDT", "NDM",
+        "FA", "FB", "FC", "FT", "FM", "FMB",
+        "NCA", "NCB", "NCC", "NCT", "NCM", "NCMB",
+        "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB",
       ]);
       const invoices = rows
         .filter((invoice) => fiscalTypes.has(invoice.tipoComprobante))
@@ -1839,7 +1839,7 @@ export function registerGroupsRoutes(app: Express) {
         SELECT 1
         FROM sales_invoices si
         WHERE si.group_id = ${req.params.groupId}
-          AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
           AND si.estado IN ('emitida', 'parcial')
           AND COALESCE(si.source_charge_amounts->>${sourceId}, '0')::numeric > 0
           AND COALESCE(si.monto_total, 0)::numeric > COALESCE(si.monto_acreditado, 0)::numeric + 0.009
@@ -2456,7 +2456,7 @@ export function registerGroupsRoutes(app: Express) {
           SELECT si.id
           FROM sales_invoices si
           WHERE (si.group_payment_id = ${paymentId} OR si.id = ${payment.invoiceId ?? null})
-            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
             AND si.estado IN ('emitida', 'parcial')
           LIMIT 1
         `);

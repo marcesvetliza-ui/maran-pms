@@ -308,6 +308,7 @@ const TIPO_OPTIONS = [
   { value: "FA",  label: "Factura A",           fiscal: true },
   { value: "FB",  label: "Factura B",           fiscal: true },
   { value: "FM",  label: "Factura MiPyme A",    fiscal: true },
+  { value: "FMB", label: "Factura MiPyme B",    fiscal: true },
   { value: "FT",  label: "Factura T (Turismo)", fiscal: true },
   // NC/ND types are intentionally excluded here — use the dedicated Nota de Crédito/Débito
   // buttons in the folio view. Showing them in this selector caused accidental NC creation.
@@ -319,8 +320,8 @@ const NON_FISCAL = new Set(["cierre_habitacion", "ticket", "voucher_justo", "vou
 
 const RECEIPT_TYPE_MAP: Record<string, string> = {
   FA: "factura_a", FB: "factura_b", FC: "factura_c",
-  FT: "factura_t", FM: "factura_mipyme_a",
-  NCA: "factura_a", NCB: "factura_b", NCT: "factura_t", NCM: "factura_mipyme_a",
+  FT: "factura_t", FM: "factura_mipyme_a", FMB: "factura_mipyme_b",
+  NCA: "factura_a", NCB: "factura_b", NCT: "factura_t", NCM: "factura_mipyme_a", NCMB: "factura_mipyme_b",
   cierre_habitacion: "cierre_habitacion", ticket: "ticket",
 };
 
@@ -1106,7 +1107,7 @@ export function PrefacturaDialog({
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
     if (opt.value === "FT") return canOfferFacturaT;
     if (["Responsable Inscripto", "Exento"].includes(condicionIva)) return ["FA", "FM"].includes(opt.value);
-    return opt.value === "FB";
+    return ["FB", "FMB"].includes(opt.value);
   });
 
   useEffect(() => {
@@ -1530,14 +1531,14 @@ export function PrefacturaDialog({
 
   // Invoices eligible for a Nota de Crédito (only FA / FB / FC / FT / FM)
   const ncEligibleInvoices = safeEmittedInvoices.filter((inv: any) =>
-    ["FA", "FB", "FT", "FM", "FC"].includes(inv.tipo_comprobante) &&
+    ["FA", "FB", "FT", "FM", "FMB", "FC"].includes(inv.tipo_comprobante) &&
     (parseFloat(inv.monto_total || "0") - parseFloat(inv.monto_acreditado || "0")) > 0.01
   );
   const ncDisabled = ncEligibleInvoices.length === 0;
 
   // A reservation ND reverses an active NC, never the original invoice directly.
   const ndEligibleCreditNotes = emittedCreditNotes.filter((nc: any) =>
-    ["NCA", "NCB", "NCT", "NCM", "NCC"].includes(nc.tipo_comprobante) &&
+    ["NCA", "NCB", "NCT", "NCM", "NCMB", "NCC"].includes(nc.tipo_comprobante) &&
     (parseFloat(nc.monto_total || "0") - parseFloat(nc.monto_revertido || "0")) > 0.01
   );
   const ndDisabled = ndEligibleCreditNotes.length === 0;
@@ -2082,7 +2083,7 @@ export function PrefacturaDialog({
                       </TooltipTrigger>
                       {ncDisabled && (
                         <TooltipContent side="top">
-                          No hay facturas (FA/FB/FC/FT/FM) emitidas para esta reserva. La Nota de Crédito requiere al menos una factura base.
+                          No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Crédito requiere al menos una factura base.
                         </TooltipContent>
                       )}
                     </Tooltip>
@@ -2104,7 +2105,7 @@ export function PrefacturaDialog({
                       </TooltipTrigger>
                       {ndDisabled && (
                         <TooltipContent side="top">
-                          No hay facturas (FA/FB/FC/FT/FM) emitidas para esta reserva. La Nota de Débito requiere al menos una factura base.
+                          No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Débito requiere al menos una factura base.
                         </TooltipContent>
                       )}
                     </Tooltip>
@@ -3173,6 +3174,7 @@ function NotaDebitoDialog({
                   FA: "NDA (Nota de Débito A)",
                   FT: "NDT (Nota de Débito T)",
                   FM: "NDM (Nota de Débito MiPyme A)",
+                  FMB: "NDMB (Nota de Débito MiPyme B)",
                   FC: "NDC (Nota de Débito C)",
                 }[selectedCreditNote.original_tipo_comprobante || ""] ?? "NDB (Nota de Débito B)"}</strong>
               </div>

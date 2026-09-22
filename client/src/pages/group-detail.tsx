@@ -1417,10 +1417,10 @@ export default function GroupDetailPage() {
       if (!groupPaymentReceptorLocked) {
         throw new Error("Seleccioná y confirmá el receptor antes de registrar el pago.");
       }
-      if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a") {
+      if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a" && groupPaymentReceiptType !== "factura_mipyme_b") {
         throw new Error("Ingresá al menos un monto");
       }
-      if (!["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType)
+      if (!["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType)
         && validRows.some(row => !row.reference.trim())) {
         throw new Error("El Anticipo requiere una referencia para cada medio de pago.");
       }
@@ -1433,7 +1433,7 @@ export default function GroupDetailPage() {
             ? { tipo: r.retencionTipo, monto: parseFloat(r.retencionMonto || "0") }
             : undefined,
         }));
-      const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+      const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
       const grossPaymentTotal = validRows.reduce((sum, row) =>
         sum + (parseFloat(row.amount || "0") || 0)
         + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0);
@@ -1878,7 +1878,7 @@ export default function GroupDetailPage() {
     });
   };
 
-  const autoSyncFiscalPayment = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+  const autoSyncFiscalPayment = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
   const autoSyncItemsTotal = groupPaymentItems.reduce((sum, item) => sum + item.subtotal, 0);
   const autoSyncRequiredCollection = requiredGroupInvoiceCollection(
     autoSyncItemsTotal,
@@ -1888,6 +1888,7 @@ export default function GroupDetailPage() {
     if (!showGroupPaymentDialog
       || !autoSyncFiscalPayment
       || groupPaymentReceiptType === "factura_mipyme_a"
+      || groupPaymentReceiptType === "factura_mipyme_b"
       || groupPaymentCloseAll
       || groupPaymentRows.length !== 1) {
       return;
@@ -1930,8 +1931,8 @@ export default function GroupDetailPage() {
 
   // Keep the three financial validations independent: collection media,
   // fiscal concepts, and source availability represent different ledgers.
-  const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
-  const groupPaymentIsMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+  const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
+  const groupPaymentIsMipyme = (groupPaymentReceiptType === "factura_mipyme_a" || groupPaymentReceiptType === "factura_mipyme_b");
   const groupPaymentHasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
   const groupPaymentEntityRequired = (groupPaymentIsFiscal && !groupPaymentIsMipyme) || groupPaymentHasCuentaCorriente;
   const groupPaymentHasEntityData = !!groupPaymentRazonSocial.trim();
@@ -2792,6 +2793,7 @@ export default function GroupDetailPage() {
                               : gp.receiptType === "factura_b" ? "Factura B"
                               : gp.receiptType === "factura_t" ? "Factura T"
                               : gp.receiptType === "factura_mipyme_a" ? "MiPyme A"
+                              : gp.receiptType === "factura_mipyme_b" ? "MiPyme B"
                               : gp.receiptType;
                             // Bug 7: resolve entity name from companies/agencies
                             const entityName = (() => {
@@ -3855,8 +3857,8 @@ export default function GroupDetailPage() {
           </DialogHeader>
 
           {(() => {
-            const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
-            const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+            const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
+            const isMipyme = (groupPaymentReceiptType === "factura_mipyme_a" || groupPaymentReceiptType === "factura_mipyme_b");
             const isFA = groupPaymentReceiptType === "factura_a";
             // CUIT vs. DNI must follow WHO the receptor is (Empresa/Agencia always has
             // CUIT; only a Huésped may show a DNI instead), never which comprobante is
@@ -3876,6 +3878,7 @@ export default function GroupDetailPage() {
               factura_a: "Factura A",
               factura_b: "Factura B",
               factura_mipyme_a: "Factura MiPyme A",
+              factura_mipyme_b: "Factura MiPyme B",
               factura_t: "Factura T",
             };
             // Factura T ("solo alojamiento") is only fiscally valid when the master folio is
@@ -4231,6 +4234,7 @@ export default function GroupDetailPage() {
                           {condicionSupportsFA && <SelectItem value="factura_a">Factura A</SelectItem>}
                           {!condicionSupportsFA && <SelectItem value="factura_b">Factura B</SelectItem>}
                           {condicionSupportsFA && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                          {!condicionSupportsFA && <SelectItem value="factura_mipyme_b">Factura MiPyme B</SelectItem>}
                           {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
                         </SelectContent>
                       </Select>
@@ -4861,6 +4865,7 @@ export default function GroupDetailPage() {
             groupPaymentReceiptType === "factura_a" ? ["FA"] :
             groupPaymentReceiptType === "factura_t" ? ["FT"] :
             groupPaymentReceiptType === "factura_mipyme_a" ? ["FM"] :
+            groupPaymentReceiptType === "factura_mipyme_b" ? ["FMB"] :
             ["FB"]
           }
           compactMode={!groupFacturaFromResumen}
@@ -4924,6 +4929,7 @@ export default function GroupDetailPage() {
           factura_a: ["FA"],
           factura_b: ["FB"],
           factura_mipyme_a: ["FM"],
+          factura_mipyme_b: ["FMB"],
           factura_t: ["FT"],
         };
 
