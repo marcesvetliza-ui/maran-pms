@@ -70,3 +70,4 @@
 - [Restaurant breakfast navigation](restaurant-breakfast-navigation.md) — reuse the dashboard breakfast view in Restaurant as a button/dialog, not another main tab.
 - [Channex staging ACK](channex-staging-ack.md) — real staging ACK removes the revision from the pending feed while preserving only the local Channex inbox row.
 - [Group room inventory priority](group-room-inventory-priority.md) — confirmed/in-house blocks are hard capacity; tentative/blocked are overridable warnings; physical overlap never is.
+- [Reservation CC fiscal identity](reservation-cc-fiscal-identity.md) — link reservation CC cargos to payments by payment_id; reservation invoices always originate in Recepción, independent of fiscal POS.

@@ -3944,6 +3944,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ADD COLUMN area text
     `)))
   );
+  await withTimeout("account_movements.payment_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE account_movements
+      ADD COLUMN payment_id varchar
+    `)))
+  );
 
   // generateFolioCodigo() used to derive the numeric suffix from COUNT(*) —
   // two concurrent first-charges to the same (brand-new) entity could both
@@ -3993,6 +3999,157 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         ('4.1.1.06.05', 'Otros Ingresos', 'ingreso', 4, true, 'otros')
       ON CONFLICT (codigo) DO NOTHING
     `)
+  );
+
+  // Reconcile only invoice-backed reservation CC cargos. The invoice receptor
+  // is the historical ownership evidence; current reservation links alone are
+  // not trusted because they may have changed after payment creation.
+  await withTimeout("reservation_cc_invoice_ledger_reconcile", T, () =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('reservation-cc-invoice-ledger-reconcile'))`);
+      await tx.execute(sql`
+        UPDATE payments p
+        SET agency_id = a.id
+        FROM sales_invoices si
+        JOIN agencies a
+          ON regexp_replace(COALESCE(a.cuil_cuit, ''), '\D', '', 'g')
+           = regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g')
+        WHERE si.payment_id = p.id
+          AND p.billing_target = 'agency'
+          AND p.agency_id IS NULL
+          AND si.estado IN ('emitida', 'parcial')
+          AND regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g') <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM agencies other
+            WHERE other.id <> a.id
+              AND regexp_replace(COALESCE(other.cuil_cuit, ''), '\D', '', 'g')
+                = regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g')
+          )
+      `);
+      await tx.execute(sql`
+        UPDATE payments p
+        SET company_id = c.id
+        FROM sales_invoices si
+        JOIN companies c
+          ON regexp_replace(COALESCE(c.cuil_cuit, ''), '\D', '', 'g')
+           = regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g')
+        WHERE si.payment_id = p.id
+          AND p.billing_target = 'company'
+          AND p.company_id IS NULL
+          AND si.estado IN ('emitida', 'parcial')
+          AND regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g') <> ''
+          AND NOT EXISTS (
+            SELECT 1 FROM companies other
+            WHERE other.id <> c.id
+              AND regexp_replace(COALESCE(other.cuil_cuit, ''), '\D', '', 'g')
+                = regexp_replace(COALESCE(si.cliente_cuit, ''), '\D', '', 'g')
+          )
+      `);
+      await tx.execute(sql`
+        WITH candidates AS (
+          SELECT
+            p.id AS payment_id,
+            am.id AS movement_id,
+            count(*) OVER (PARTITION BY p.id) AS movements_for_payment,
+            count(*) OVER (PARTITION BY am.id) AS payments_for_movement
+          FROM payments p
+          JOIN reservations r ON r.id = p.reservation_id
+          JOIN account_movements am
+            ON am.reservation_id = p.reservation_id
+           AND am.entity_type = COALESCE(p.billing_target, 'guest')
+           AND am.entity_id = CASE
+                 WHEN p.billing_target = 'company' THEN p.company_id
+                 WHEN p.billing_target = 'agency' THEN p.agency_id
+                 ELSE r.guest_id
+               END
+           AND am.type = 'cargo'
+           AND am.amount::numeric = p.amount::numeric
+           AND am.payment_id IS NULL
+          WHERE p.method IN ('cuenta_corriente', 'current_account')
+            AND (p.status IS NULL OR p.status = 'active')
+        ),
+        unique_invoiced_candidates AS (
+          SELECT candidates.payment_id, candidates.movement_id
+          FROM candidates
+          JOIN sales_invoices si
+            ON si.payment_id = candidates.payment_id
+           AND si.estado IN ('emitida', 'parcial')
+          WHERE candidates.movements_for_payment = 1
+            AND candidates.payments_for_movement = 1
+        )
+        UPDATE account_movements am
+        SET payment_id = unique_invoiced_candidates.payment_id
+        FROM unique_invoiced_candidates
+        WHERE am.id = unique_invoiced_candidates.movement_id
+      `);
+      await tx.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS account_movements_cc_payment_unique
+        ON account_movements (payment_id)
+        WHERE payment_id IS NOT NULL AND type = 'cargo'
+      `);
+      await tx.execute(sql`
+        INSERT INTO account_movements (
+          id, entity_type, entity_id, date, type, description, amount,
+          reservation_id, reservation_code, guest_name, reference,
+          payment_method, payment_id, area
+        )
+        SELECT
+          gen_random_uuid()::text,
+          COALESCE(p.billing_target, 'guest'),
+          CASE
+            WHEN p.billing_target = 'company' THEN p.company_id
+            WHEN p.billing_target = 'agency' THEN p.agency_id
+            ELSE r.guest_id
+          END,
+          p.date,
+          'cargo',
+          'Estadía ' || r.reservation_code || ' — Hab. ' || COALESCE(ro.room_number, r.room_id, 'N/A'),
+          p.amount,
+          p.reservation_id,
+          r.reservation_code,
+          NULLIF(CONCAT_WS(' ', g.first_name, g.last_name), ''),
+          p.invoice_ref,
+          'current_account',
+          p.id,
+          'recepcion'
+        FROM payments p
+        JOIN reservations r ON r.id = p.reservation_id
+        JOIN sales_invoices si ON si.payment_id = p.id AND si.estado IN ('emitida', 'parcial')
+        LEFT JOIN rooms ro ON ro.id = r.room_id
+        LEFT JOIN guests g ON g.id = r.guest_id
+        WHERE p.method IN ('cuenta_corriente', 'current_account')
+          AND (p.status IS NULL OR p.status = 'active')
+          AND CASE
+                WHEN p.billing_target = 'company' THEN p.company_id
+                WHEN p.billing_target = 'agency' THEN p.agency_id
+                ELSE r.guest_id
+              END IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM account_movements existing
+            WHERE existing.reservation_id = p.reservation_id
+              AND existing.entity_type = COALESCE(p.billing_target, 'guest')
+              AND existing.entity_id = CASE
+                    WHEN p.billing_target = 'company' THEN p.company_id
+                    WHEN p.billing_target = 'agency' THEN p.agency_id
+                    ELSE r.guest_id
+                  END
+              AND existing.type = 'cargo'
+              AND existing.amount::numeric = p.amount::numeric
+              AND existing.payment_id IS NULL
+          )
+        ON CONFLICT (payment_id) WHERE payment_id IS NOT NULL AND type = 'cargo'
+        DO NOTHING
+      `);
+      await tx.execute(sql`
+        UPDATE account_movements am
+        SET area = 'recepcion',
+            reference = COALESCE(am.reference, p.invoice_ref)
+        FROM payments p
+        JOIN sales_invoices si ON si.payment_id = p.id AND si.estado IN ('emitida', 'parcial')
+        WHERE am.payment_id = p.id
+      `);
+    })
   );
 
   const financialSchema = await verifyFinancialSchema();

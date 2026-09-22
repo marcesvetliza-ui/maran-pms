@@ -1990,6 +1990,7 @@ export class DatabaseStorage implements IStorage {
           amount: canonicalAmount,
           reservationId: payment.reservationId,
           reference: input.accountSettlement.reference ?? payment.reference ?? payment.invoiceRef ?? null,
+          paymentId: payment.id,
           createdBy: input.accountSettlement.createdBy ?? null,
           // Esta función solo liquida CC de una reserva (reservationId es
           // obligatorio más arriba), así que el área es siempre recepción.

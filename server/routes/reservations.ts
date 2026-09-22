@@ -2684,29 +2684,49 @@ export function registerReservationsRoutes(app: Express) {
       const reservationForPayment = req.body.reservationId
         ? await storage.getReservation(req.body.reservationId)
         : null;
-      // El pago puede quedar a cargo de la empresa/agencia (Cta. Cte.) en vez
-      // del huésped — la etiqueta debe mostrar a quién se le está cargando,
-      // no siempre al huésped de la reserva.
-      let billedEntityLabel: string | null = null;
-      if (reservationForPayment) {
-        const billingTargetForLabel = req.body.billingTarget || "guest";
-        if (billingTargetForLabel === "company") {
-          const companyId = reservationForPayment.companyId || req.body.companyId;
-          const company = companyId ? await storage.getCompany(companyId) : undefined;
-          billedEntityLabel = company ? (company.razonSocial || company.nombreFantasia || null) : null;
-        } else if (billingTargetForLabel === "agency") {
-          const agencyId = reservationForPayment.agencyId || req.body.agencyId;
-          const agency = agencyId ? await storage.getAgency(agencyId) : undefined;
-          billedEntityLabel = agency ? (agency.razonSocial || agency.nombreFantasia || null) : null;
-        } else if (reservationForPayment.guest) {
-          billedEntityLabel = `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}`;
+      const billingTarget = req.body.billingTarget || "guest";
+      const effectiveCompanyId = billingTarget === "company"
+        ? (reservationForPayment?.companyId || req.body.companyId || null)
+        : null;
+      const effectiveAgencyId = billingTarget === "agency"
+        ? (reservationForPayment?.agencyId || req.body.agencyId || null)
+        : null;
+      // Persist the actual CC owner on the payment. Depending only on the
+      // reservation makes historical payments change meaning if its links are
+      // edited later and leaves reconciliation without a durable entity ID.
+      if (billingTarget === "company") req.body.companyId = effectiveCompanyId;
+      if (billingTarget === "agency") req.body.agencyId = effectiveAgencyId;
+      const effectiveCompany = effectiveCompanyId
+        ? ((reservationForPayment as any)?.company || await storage.getCompany(effectiveCompanyId))
+        : null;
+      const effectiveAgency = effectiveAgencyId
+        ? ((reservationForPayment as any)?.agency || await storage.getAgency(effectiveAgencyId))
+        : null;
+      const effectiveGuest = billingTarget === "guest" && reservationForPayment?.guestId
+        ? ((reservationForPayment as any)?.guest || await storage.getGuest(reservationForPayment.guestId))
+        : null;
+      if (req.body.method === "cuenta_corriente") {
+        if (billingTarget === "company" && !effectiveCompany) {
+          return res.status(400).json({ error: "La empresa seleccionada para Cuenta Corriente no existe" });
+        }
+        if (billingTarget === "agency" && !effectiveAgency) {
+          return res.status(400).json({ error: "La agencia seleccionada para Cuenta Corriente no existe" });
+        }
+        if (billingTarget === "guest" && !effectiveGuest) {
+          return res.status(400).json({ error: "La reserva no tiene un huésped válido para Cuenta Corriente" });
         }
       }
+      const ccOwnerName = billingTarget === "company"
+        ? (effectiveCompany?.razonSocial || effectiveCompany?.nombreFantasia || "Empresa vinculada")
+        : billingTarget === "agency"
+          ? (effectiveAgency?.razonSocial || effectiveAgency?.nombreFantasia || "Agencia vinculada")
+          : null;
       const cashLabel = reservationForPayment
         ? [
+            req.body.method === "cuenta_corriente" ? ccOwnerName : null,
             `Reserva ${reservationForPayment.reservationCode}`,
             reservationForPayment.room?.roomNumber ? `Hab. ${reservationForPayment.room.roomNumber}` : null,
-            billedEntityLabel,
+            reservationForPayment.guest ? `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}` : null,
             `Pago ${rawMethod}`,
           ].filter(Boolean).join(" — ")
         : `Pago manual - ${req.body.description || "Sin descripción"}`;
@@ -2719,11 +2739,10 @@ export function registerReservationsRoutes(app: Express) {
         invoiceId?: number;
       } | undefined;
       if (req.body.method === "cuenta_corriente" && reservationForPayment) {
-        const billingTarget = req.body.billingTarget || "guest";
         const entityId = billingTarget === "company"
-          ? (reservationForPayment.companyId || req.body.companyId)
+          ? effectiveCompanyId
           : billingTarget === "agency"
-            ? (reservationForPayment.agencyId || req.body.agencyId)
+            ? effectiveAgencyId
             : reservationForPayment.guestId;
         if (entityId) {
           let invoiceId: number | undefined;

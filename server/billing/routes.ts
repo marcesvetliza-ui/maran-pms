@@ -756,12 +756,27 @@ export function registerBillingRoutes(app: Express) {
       if (hasta) whereClause = sql`${whereClause} AND si.fecha_emision <= ${hasta}`;
       if (tipo) whereClause = sql`${whereClause} AND si.tipo_comprobante = ${tipo}`;
       if (clienteCuit) whereClause = sql`${whereClause} AND si.cliente_cuit = ${clienteCuit}`;
-      if (area) whereClause = sql`${whereClause} AND si.punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)`;
+      if (area === "recepcion") {
+        // Reservation invoices originate in Reception even when a legacy or
+        // exceptional fiscal point of sale has no pos_configs row.
+        whereClause = sql`${whereClause} AND (
+          si.reserva_id IS NOT NULL
+          OR si.punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)
+        )`;
+      } else if (area) {
+        whereClause = sql`${whereClause}
+          AND si.reserva_id IS NULL
+          AND si.punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)`;
+      }
       if (cliente) whereClause = sql`${whereClause} AND LOWER(si.cliente_razon_social) LIKE ${'%' + cliente.toLowerCase() + '%'}`;
       if (reservaId) whereClause = sql`${whereClause} AND si.reserva_id::text = ${reservaId}`;
 
       const rows = await db.execute(sql`
-        SELECT si.*, pc.area AS area_name,
+        SELECT si.*,
+               CASE
+                 WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
+                 ELSE pc.area
+               END AS area_name,
                g.name AS group_name,
                g.group_code AS group_code,
                orig.tipo_comprobante AS original_tipo,

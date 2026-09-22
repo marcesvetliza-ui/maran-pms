@@ -2424,6 +2424,10 @@ export const accountMovements = pgTable("account_movements", {
   guestName: text("guest_name"),
   reference: text("reference"),
   paymentMethod: text("payment_method"),
+  // Durable identity for reservation CC cargos. This avoids inferring a
+  // fiscal link from reservation + amount, which is ambiguous when equal
+  // advances exist.
+  paymentId: varchar("payment_id").references(() => payments.id),
   // Source parent for cargos created by a group payment. Lets reversals or
   // permitted deletions keep the current-account ledger in lockstep.
   groupPaymentId: varchar("group_payment_id").references(() => groupPayments.id),
