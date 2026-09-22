@@ -147,6 +147,40 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(within(embedded).getByTestId("select-tipo-factura")).toHaveTextContent("Voucher SPA — Cortesía — Comprobante interno");
   });
 
+  it("Venta > Recepción ofrece Factura T y abre la búsqueda de reserva (no el diálogo genérico)", async () => {
+    mockRole = "admin";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Alojamiento" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Venta" }));
+
+    await user.click(screen.getByTestId("select-tipo"));
+    expect(screen.getByRole("option", { name: "Factura T (Turismo)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Factura T (Turismo)" }));
+
+    expect(screen.getByTestId("input-buscar-reserva-ft")).toBeInTheDocument();
+    expect(screen.queryByTestId("emitir-factura-embedded")).not.toBeInTheDocument();
+  });
+
+  it("Factura T no aparece en Restaurant, Spa ni Eventos — solo alojamiento la ofrece", async () => {
+    mockRole = "admin";
+    const user = userEvent.setup();
+
+    for (const area of ["Restaurant", "Spa", "Eventos"]) {
+      const { unmount } = renderPage();
+      await user.click(screen.getByTestId("select-area"));
+      await user.click(screen.getByRole("option", { name: area }));
+      await user.click(screen.getByTestId("select-operacion"));
+      await user.click(screen.getByRole("option", { name: "Venta" }));
+      await user.click(screen.getByTestId("select-tipo"));
+      expect(screen.queryByRole("option", { name: "Factura T (Turismo)" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("Venta > Recepción ofrece Factura MiPyME B junto a la A", async () => {
     mockRole = "admin";
     const user = userEvent.setup();
