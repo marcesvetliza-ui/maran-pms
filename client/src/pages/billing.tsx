@@ -137,10 +137,12 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   voucher_pedidos_ya: { nombre: "Voucher PedidosYa", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
   cierre_habitacion: { nombre: "Voucher Habitaciones", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
   cierre_spa: { nombre: "Voucher SPA", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  cierre_spa_agustin: { nombre: "Voucher SPA — Agustín I", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  cierre_spa_cortesia: { nombre: "Voucher SPA — Cortesía", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
 };
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
-const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
 
 // cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
 // and the Centro de Comprobantes) uses "events" while pos_configs.area (see
@@ -152,6 +154,8 @@ const NON_FISCAL_LABELS: Record<string, string> = {
   voucher_pedidos_ya: "Voucher PedidosYa — Comprobante interno",
   cierre_habitacion: "Voucher Habitaciones — Comprobante interno",
   cierre_spa: "Voucher SPA — Comprobante interno",
+  cierre_spa_agustin: "Voucher SPA — Agustín I — Comprobante interno",
+  cierre_spa_cortesia: "Voucher SPA — Cortesía — Comprobante interno",
 };
 
 type AmbienteMode = "ficticio" | "homologacion" | "produccion";

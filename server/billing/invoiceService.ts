@@ -23,10 +23,10 @@ export interface InvoiceItem {
   giftBeneficiaryName?: string;
 }
 
-export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa";
+export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa" | "cierre_spa_agustin" | "cierre_spa_cortesia";
 
 export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
-  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa",
+  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia",
 ];
 
 export interface NewInvoiceData {
