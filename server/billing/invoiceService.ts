@@ -30,7 +30,7 @@ export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
 ];
 
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NDA" | "NDB" | "NDT" | "NDM" | "NDC" | NonFiscalTipo;
+  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "FMB" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NCMB" | "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
@@ -92,9 +92,9 @@ export interface NewInvoiceData {
 }
 
 export const TIPOS_CBT_WSFE: Record<string, number> = {
-  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
-  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
-  NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201, FMB: 206,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203, NCMB: 208,
+  NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDMB: 207, NDC: 12,
 };
 
 function invoiceRowValue(doc: any, snakeCase: string, camelCase: string) {

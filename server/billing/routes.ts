@@ -1019,7 +1019,7 @@ export function registerBillingRoutes(app: Express) {
       // emitirse por los endpoints dedicados que sí lo exigen por diseño (el id de
       // la factura origen va en la URL): POST /api/billing/invoices/:id/nota-credito
       // y POST /api/billing/invoices/:id/nota-debito.
-      const NC_ND_TYPES = new Set(["NCA", "NCB", "NCC", "NCT", "NCM", "NDA", "NDB", "NDC", "NDT", "NDM"]);
+      const NC_ND_TYPES = new Set(["NCA", "NCB", "NCC", "NCT", "NCM", "NCMB", "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB"]);
       if (NC_ND_TYPES.has(String(tipoComprobante))) {
         return res.status(400).json({
           error: "Las Notas de Crédito y Débito deben emitirse desde la factura original (usá 'Nota de Crédito/Débito' sobre un comprobante existente, no como comprobante nuevo).",
@@ -1160,7 +1160,7 @@ export function registerBillingRoutes(app: Express) {
           return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto o Exento" });
         }
       }
-      if (tipoComprobante === "FB" && ["responsable_inscripto", "exento"].includes(vatCondition)) {
+      if ((tipoComprobante === "FB" || tipoComprobante === "FMB") && ["responsable_inscripto", "exento"].includes(vatCondition)) {
         return res.status(400).json({ error: "Factura B no corresponde a receptores Responsable Inscripto o Exento" });
       }
       if (tipoComprobante === "FT" && !groupId && (!isForeignGuest || !folioContext?.hasAccommodation)) {
@@ -1448,7 +1448,7 @@ export function registerBillingRoutes(app: Express) {
             FROM sales_invoices si
             WHERE si.reserva_id = ${reservationId}
             AND (${paymentId || null}::text IS NULL OR si.payment_id IS DISTINCT FROM ${paymentId || null})
-            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
             AND (
               si.estado IN ('emitida', 'parcial')
               OR (
@@ -2305,7 +2305,7 @@ export function registerBillingRoutes(app: Express) {
       }
 
       // Fetch linked NC if present — only for original Factura types, never for NC/ND documents
-      const FACTURA_TIPOS = ["FA", "FB", "FC", "FT", "FM"];
+      const FACTURA_TIPOS = ["FA", "FB", "FC", "FT", "FM", "FMB"];
       let notaCreditoInfo: NotaCreditoInfo | undefined;
       if (factura.nota_credito_id && FACTURA_TIPOS.includes(tipo)) {
         try {
@@ -2510,6 +2510,7 @@ export function registerBillingRoutes(app: Express) {
         original.tipo_comprobante === "FA" ? "NCA" :
         original.tipo_comprobante === "FT" ? "NCT" :
         original.tipo_comprobante === "FM" ? "NCM" :
+        original.tipo_comprobante === "FMB" ? "NCMB" :
         original.tipo_comprobante === "FC" ? "NCC" : "NCB";
       const user = (req as any).user;
 
@@ -3075,7 +3076,7 @@ export function registerBillingRoutes(app: Express) {
       // Reservation debit notes reverse an active credit note. They restore the
       // original invoice's fiscal allocation; they are not a new operational
       // charge and do not collect cash by themselves.
-      if (["NCA", "NCB", "NCC", "NCT", "NCM"].includes(original.tipo_comprobante) && original.reserva_id) {
+      if (["NCA", "NCB", "NCC", "NCT", "NCM", "NCMB"].includes(original.tipo_comprobante) && original.reserva_id) {
         const { motivo, monto } = req.body;
         const requestedAmount = parseFloat(String(monto || "0"));
         if (!String(motivo || "").trim()) {
@@ -3086,7 +3087,7 @@ export function registerBillingRoutes(app: Express) {
           const result = await withReservationInvoiceLock(String(original.reserva_id), async () => {
           const lockedNcResult = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id} LIMIT 1`);
           const nc = lockedNcResult.rows[0] as any;
-          if (!nc || !["NCA", "NCB", "NCC", "NCT", "NCM"].includes(nc.tipo_comprobante)) {
+          if (!nc || !["NCA", "NCB", "NCC", "NCT", "NCM", "NCMB"].includes(nc.tipo_comprobante)) {
             throw new Error("La Nota de Crédito seleccionada ya no está disponible");
           }
           if (nc.reconciliation_status && nc.reconciliation_status !== "conciliada") {
@@ -3242,6 +3243,7 @@ export function registerBillingRoutes(app: Express) {
             sourceType === "FA" ? "NDA" :
             sourceType === "FT" ? "NDT" :
             sourceType === "FM" ? "NDM" :
+            sourceType === "FMB" ? "NDMB" :
             sourceType === "FC" ? "NDC" : "NDB";
           const user = (req as any).user;
           const nd = await emitirFactura({
@@ -3291,8 +3293,8 @@ export function registerBillingRoutes(app: Express) {
       }
 
       // AFIP rule: NDs may only reference original invoices (FA/FB/FT/FM/FC), not NCs or other NDs
-      const NC_TYPES = new Set(["NCA", "NCB", "NCT", "NCM", "NCC"]);
-      const ND_TYPES = new Set(["NDA", "NDB", "NDT", "NDM", "NDC"]);
+      const NC_TYPES = new Set(["NCA", "NCB", "NCT", "NCM", "NCMB", "NCC"]);
+      const ND_TYPES = new Set(["NDA", "NDB", "NDT", "NDM", "NDMB", "NDC"]);
       if (NC_TYPES.has(original.tipo_comprobante)) {
         return res.status(400).json({ error: "No se puede emitir una Nota de Débito sobre una Nota de Crédito" });
       }
@@ -3308,11 +3310,12 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "El motivo es requerido" });
       }
 
-      // Derive ND type from original invoice: FA → NDA, FT → NDT, FM → NDM, FB → NDB, FC → NDC
+      // Derive ND type from original invoice: FA → NDA, FT → NDT, FM → NDM, FMB → NDMB, FB → NDB, FC → NDC
       const tipoND =
         original.tipo_comprobante === "FA" ? "NDA" :
         original.tipo_comprobante === "FT" ? "NDT" :
         original.tipo_comprobante === "FM" ? "NDM" :
+        original.tipo_comprobante === "FMB" ? "NDMB" :
         original.tipo_comprobante === "FC" ? "NDC" : "NDB";
       const user = (req as any).user;
 
@@ -3335,7 +3338,7 @@ export function registerBillingRoutes(app: Express) {
       }] : []);
 
       const nd = await emitirFactura({
-        tipoComprobante: tipoND as "NDA" | "NDB" | "NDT" | "NDM" | "NDC",
+        tipoComprobante: tipoND as "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC",
         cliente: {
           razonSocial: original.cliente_razon_social,
           cuit: original.cliente_cuit,
