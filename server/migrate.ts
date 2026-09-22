@@ -4169,6 +4169,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // The production database may materialize created_at in its session timezone,
+  // so the UTC incident window above can miss guest rows. Client CC was zero
+  // before this action: remove only guest cargos with the retired action's
+  // unique signature and business date, leaving companies and agencies intact.
+  await withTimeout("rollback_guest_checkout_debt_reconcile_2026_09_22", T, () =>
+    db.execute(sql`
+      DELETE FROM account_movements
+      WHERE date = '2026-09-22'
+        AND entity_type = 'guest'
+        AND type = 'cargo'
+        AND area = 'recepcion'
+        AND description LIKE 'Saldo por estadía % (cierre con deuda)'
+        AND group_payment_id IS NULL
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
