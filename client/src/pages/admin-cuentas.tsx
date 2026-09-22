@@ -666,23 +666,6 @@ export default function AdminCuentasPage() {
     },
   });
 
-  const reconcileCheckoutDebtsMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/reconcile-checkout-debts");
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
-      toast({
-        title: "Revisión completada",
-        description: data.message || `${data.created} cargo(s) creado(s)`,
-      });
-    },
-    onError: () => {
-      toast({ title: "Error al revisar saldos pendientes", variant: "destructive" });
-    },
-  });
-
   const [reporteFrom, setReporteFrom] = useState(() => {
     return getArgentinaToday().slice(0, 7) + "-01";
   });
@@ -1202,34 +1185,6 @@ export default function AdminCuentasPage() {
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
               {reconcileMutation.isPending ? "Sincronizando..." : "Sincronizar ahora"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Revisión de saldos pendientes de checkout histórico */}
-      <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/40 dark:bg-orange-950/10">
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium">Revisar saldos pendientes de checkout</p>
-                <p className="text-xs text-muted-foreground">
-                  Detecta reservas ya cerradas (check-out) que tienen saldo sin registrar en cuentas corrientes y crea los cargos faltantes.
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => reconcileCheckoutDebtsMutation.mutate()}
-              disabled={reconcileCheckoutDebtsMutation.isPending}
-              className="border-orange-300 dark:border-orange-700 shrink-0"
-              data-testid="button-reconcile-checkout-debts"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${reconcileCheckoutDebtsMutation.isPending ? "animate-spin" : ""}`} />
-              {reconcileCheckoutDebtsMutation.isPending ? "Revisando..." : "Revisar saldos pendientes"}
             </Button>
           </div>
         </CardContent>

@@ -4152,6 +4152,23 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     })
   );
 
+  // Production incident 2026-09-22: the retired checkout-debt reconciliation
+  // action created 661 synthetic cargos in one execution. Remove only rows
+  // bearing that action's unique description and creation window. No payments,
+  // invoices, allocations, or legitimate CC movements are touched.
+  await withTimeout("rollback_checkout_debt_reconcile_2026_09_22", T, () =>
+    db.execute(sql`
+      DELETE FROM account_movements
+      WHERE created_at >= timestamp '2026-09-22 12:59:00'
+        AND created_at <  timestamp '2026-09-22 13:00:00'
+        AND date = '2026-09-22'
+        AND type = 'cargo'
+        AND area = 'recepcion'
+        AND description LIKE 'Saldo por estadía % (cierre con deuda)'
+        AND group_payment_id IS NULL
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

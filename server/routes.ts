@@ -7,7 +7,7 @@ import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
 import { assertFinancialSchemaReady } from "./migrate";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks, rooms } from "@shared/schema";
-import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
+import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
@@ -15,7 +15,6 @@ import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
-import { getOperationalReservationCharges } from "@shared/reservationFolio";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
 import { registerExportRoutes } from "./exports";
@@ -955,163 +954,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error en reconciliación CC:", error);
       res.status(500).json({ error: "Error en reconciliación" });
-    }
-  });
-
-  // Revisar saldos pendientes de checkout: crea cargos CC faltantes para reservas checked_out con balance > 0
-  app.post("/api/admin/reconcile-checkout-debts", requireRole(["admin", "manager"]), async (req, res) => {
-    try {
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-
-      // Obtener todas las reservas checked_out con empresa, agencia o huésped
-      const checkedOutRows = await db.execute(sql`
-        SELECT r.id, r.reservation_code, r.company_id, r.agency_id, r.guest_id,
-               r.total_room_amount, r.final_rate_per_night, r.nights,
-               r.room_id, ro.room_number,
-               g.first_name, g.last_name,
-               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS payments_total
-        FROM reservations r
-        LEFT JOIN rooms ro ON r.room_id = ro.id
-        LEFT JOIN guests g ON r.guest_id = g.id
-        WHERE r.status = 'checked_out'
-          AND (r.company_id IS NOT NULL OR r.agency_id IS NOT NULL OR r.guest_id IS NOT NULL)
-      `);
-
-      // Los cargos se traen aparte (en un solo query por lote, agrupados por
-      // reserva) para poder filtrarlos con la MISMA regla que usa el resto
-      // del sistema (getOperationalReservationCharges, shared/reservationFolio.ts):
-      // un cargo de ajuste creado por una Nota de Crédito ([nc:...] en la
-      // descripción) nunca cuenta como servicio pendiente de cobro — la NC
-      // corrige el comprobante fiscal, no borra la estadía. Antes esta
-      // reconciliación sumaba esos ajustes junto con los cargos reales,
-      // pudiendo calcular un saldo distinto al que ve el resto del sistema
-      // para la misma reserva.
-      const candidateReservationIds = (checkedOutRows.rows as any[]).map(row => row.id);
-      const chargesByReservation = new Map<string, { amount: string; category: string | null; description: string | null; status: string | null }[]>();
-      if (candidateReservationIds.length > 0) {
-        const chargeRows = await db.select({
-          reservationId: charges.reservationId,
-          amount: charges.amount,
-          category: charges.category,
-          description: charges.description,
-          status: charges.status,
-        }).from(charges).where(and(
-          inArray(charges.reservationId, candidateReservationIds),
-          or(eq(charges.status, "active"), sql`${charges.status} IS NULL`),
-        ));
-        for (const chargeRow of chargeRows) {
-          const list = chargesByReservation.get(chargeRow.reservationId) ?? [];
-          list.push({ ...chargeRow, amount: String(chargeRow.amount) });
-          chargesByReservation.set(chargeRow.reservationId, list);
-        }
-      }
-
-      let created = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      for (const row of (checkedOutRows.rows as any[])) {
-        try {
-          const savedRoomTotal = parseFloat(row.total_room_amount || "0");
-          const roomTotal = savedRoomTotal > 0
-            ? savedRoomTotal
-            : parseFloat(row.final_rate_per_night || "0") * (parseInt(row.nights) || 0);
-          const operationalCharges = getOperationalReservationCharges(chargesByReservation.get(row.id) ?? []);
-          const chargesTotal = operationalCharges.reduce((sum, charge) => sum + (parseFloat(charge.amount) || 0), 0);
-          const paymentsTotal = parseFloat(row.payments_total || "0");
-          const balance = roomTotal + chargesTotal - paymentsTotal;
-
-          if (balance <= 0.01) { skipped++; continue; }
-
-          // Verificar si ya existe un cargo de deuda para esta reserva
-          const existingMov = await storage.getAccountMovementsByReservation(row.id);
-          const legacyCandidate = await db.execute(sql`
-            SELECT 1
-            FROM account_movements m
-            JOIN sales_invoices si
-              ON m.reference = si.tipo_comprobante || '-' || lpad(si.numero::text, 8, '0')
-            WHERE si.reserva_id = ${row.id}
-              AND (m.reservation_id = ${row.id} OR m.reservation_id IS NULL)
-              AND m.type = 'cargo'
-              AND m.amount::numeric = ${balance}
-              AND si.estado IN ('emitida','parcial')
-              AND si.cash_forma_pago = 'cuenta_corriente'
-            LIMIT 1
-          `);
-          if (legacyCandidate.rows.length) { skipped++; continue; }
-          // A canonical invoice settlement already has its own CC payment and
-          // cargo. Never turn the historical checkout fallback into a second
-          // cargo for that same invoice/payment identity.
-          const alreadyHasDebtCargo = existingMov.some(
-            m => m.type === "cargo" && m.description?.includes("cierre con deuda")
-          );
-          if (alreadyHasDebtCargo) { skipped++; continue; }
-
-          const guestName = row.first_name ? `${row.first_name} ${row.last_name}` : "Huésped";
-          const roomNum = row.room_number || row.room_id || "N/A";
-          const descCC = `Saldo por estadía ${row.reservation_code} — Hab. ${roomNum} (cierre con deuda)`;
-          const amtCC = balance.toFixed(2);
-
-          if (row.company_id) {
-            await storage.createAccountMovement({
-              entityType: "company",
-              entityId: row.company_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-              area: "recepcion",
-            });
-            created++;
-          } else if (row.agency_id) {
-            await storage.createAccountMovement({
-              entityType: "agency",
-              entityId: row.agency_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-              area: "recepcion",
-            });
-            created++;
-          } else if (row.guest_id) {
-            await storage.createAccountMovement({
-              entityType: "guest",
-              entityId: row.guest_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-              area: "recepcion",
-            });
-            created++;
-          } else {
-            skipped++;
-          }
-        } catch (rowError) {
-          failed++;
-          console.error(`[reconcile-checkout-debts] Error procesando reserva ${row?.id}:`, rowError);
-        }
-      }
-
-      res.json({
-        created,
-        skipped,
-        failed,
-        message: `${created} cargo(s) creado(s), ${skipped} omitido(s)${failed > 0 ? `, ${failed} con error` : ""}`,
-      });
-    } catch (error) {
-      console.error("Error en revisión de saldos pendientes:", error);
-      res.status(500).json({ error: "Error al revisar saldos pendientes" });
     }
   });
 
