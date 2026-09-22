@@ -1,14 +1,27 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { fmtMoney } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Receipt, ArrowLeft } from "lucide-react";
-import { EmitirFacturaDialog } from "@/pages/billing";
+import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
 import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
+
+// Notas de Crédito/Débito siempre deben asociarse a una factura existente
+// (exigencia de ARCA) — nunca se emiten como comprobante nuevo. El backend
+// ya lo exige en POST /api/billing/invoices (ver server/billing/routes.ts),
+// así que acá se resuelven con el mismo flujo de "buscar factura → asociar"
+// que ya usa el botón por área (emitir-comprobante-button.tsx).
+const NC_ND_TIPOS = new Set(["NCA", "NCB", "NCM", "NDA", "NDB", "NDM"]);
 
 // ── Áreas ──────────────────────────────────────────────────────────────────────
 // Mismos identificadores de área que ya usa EmitirComprobanteButton
@@ -228,7 +241,7 @@ export default function EmitirComprobantePage() {
                 <Badge>{tipos.find((t) => t.value === tipo)?.label}</Badge>
               </div>
 
-              {operacion === "venta" && (
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && (
                 <EmitirFacturaDialog
                   embedded
                   open
@@ -239,6 +252,10 @@ export default function EmitirComprobantePage() {
                   showPaymentMethod
                   operationKey={`centro-comprobantes-venta-${area}-${tipo}`}
                 />
+              )}
+
+              {operacion === "venta" && NC_ND_TIPOS.has(tipo) && (
+                <NotaCreditoDebitoSearch area={area as AreaId} tipo={tipo} onClose={resetSeleccion} />
               )}
 
               {operacion === "compra" && (
@@ -273,5 +290,150 @@ export default function EmitirComprobantePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ── Notas de Crédito/Débito: buscar la factura origen antes de emitir ──────────
+// Mismo criterio que emitir-comprobante-button.tsx: solo facturas activas
+// (no anuladas) de los tipos que ARCA acepta como comprobante original.
+function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: string; onClose: () => void }) {
+  const [search, setSearch] = useState("");
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const esNotaCredito = tipo.startsWith("NC");
+
+  const { data: invoices = [] } = useQuery<any[]>({
+    queryKey: ["/api/billing/invoices", { area, cliente: search }],
+    queryFn: () =>
+      fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${search ? `&cliente=${encodeURIComponent(search)}` : ""}`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const candidatos = (invoices || []).filter((i: any) =>
+    i.estado !== "anulada" && ["FA", "FB", "FT", "FM"].includes(i.tipo_comprobante)
+  );
+
+  if (selectedInvoiceId !== null) {
+    return esNotaCredito
+      ? <NotaCreditoDialog invoiceId={selectedInvoiceId} onClose={onClose} />
+      : <NotaDebitoCentroDialog invoiceId={selectedInvoiceId} onClose={onClose} />;
+  }
+
+  return (
+    <div className="space-y-3">
+      <Label htmlFor="buscar-comprobante-nc-nd">Buscar la factura original por cliente</Label>
+      <Input
+        id="buscar-comprobante-nc-nd"
+        placeholder="Nombre, razón social, CUIT..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        data-testid="input-buscar-comprobante-nc-nd"
+      />
+      <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-md border p-1.5">
+        {candidatos.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            {search ? "Sin comprobantes encontrados" : "Escribí para buscar la factura original"}
+          </p>
+        )}
+        {candidatos.map((inv: any) => (
+          <button
+            key={inv.id}
+            type="button"
+            className="w-full text-left border rounded-md p-2.5 text-sm hover:bg-muted/50"
+            onClick={() => setSelectedInvoiceId(inv.id)}
+            data-testid={`row-invoice-nc-nd-${inv.id}`}
+          >
+            <div className="flex justify-between">
+              <span>{inv.tipo_comprobante} {String(inv.punto_venta).padStart(4, "0")}-{String(inv.numero).padStart(8, "0")}</span>
+              <span className="font-medium">${fmtMoney(inv.monto_total)}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">{inv.cliente_razon_social}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Nota de Débito genérica sobre una factura existente — pega contra el mismo
+// endpoint que ya exige factura origen por diseño (POST /invoices/:id/nota-debito,
+// ver server/billing/routes.ts). No confundir con NotaDebitoDialog de
+// PrefacturaDialog.tsx, que es un flujo distinto (reversión de una NC ya
+// emitida, acoplado a una reserva) — acá el caso es "ND directa sobre una
+// factura", igual que ya resuelve NotaCreditoDialog para las NC.
+function NotaDebitoCentroDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
+  const { toast } = useToast();
+  const { data: invoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", invoiceId],
+    queryFn: () => fetch(`/api/billing/invoices/${invoiceId}`, { credentials: "include" }).then((r) => r.json()),
+    enabled: !!invoiceId,
+  });
+  const [motivo, setMotivo] = useState("");
+  const [monto, setMonto] = useState("");
+
+  const saldoPendiente = invoice
+    ? Math.max(0, (parseFloat(invoice.monto_total) || 0) - (parseFloat(invoice.monto_acreditado || "0") || 0))
+    : 0;
+  const montoNum = parseFloat(monto) || 0;
+  const montoInvalido = !monto || montoNum <= 0 || montoNum > saldoPendiente + 0.01;
+
+  const mutation = useMutation({
+    mutationFn: (body: { motivo: string; monto: number }) => apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-debito`, body),
+    onSuccess: async (res: any) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({ title: "Nota de Débito emitida", description: `${data.tipoComprobante ?? data.tipo_comprobante} N° ${String(data.puntoVenta ?? data.punto_venta).padStart(4, "0")}-${String(data.numero).padStart(8, "0")}` });
+      onClose();
+    },
+    onError: (e: any) => toast({ title: "Error", description: e?.message || "No se pudo emitir la Nota de Débito", variant: "destructive" }),
+  });
+
+  if (!invoice) return null;
+
+  return (
+    <Dialog open={!!invoiceId} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Emitir Nota de Débito</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+            <div className="font-medium">Factura original:</div>
+            <div className="text-muted-foreground text-xs">
+              {invoice.tipo_comprobante} {String(invoice.punto_venta).padStart(4, "0")}-{String(invoice.numero).padStart(8, "0")} — {invoice.cliente_razon_social}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              Total: ${fmtMoney(invoice.monto_total)} · Saldo pendiente: ${fmtMoney(saldoPendiente)}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="nd-motivo">Motivo *</Label>
+            <Input id="nd-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} data-testid="input-nd-motivo" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="nd-monto">Importe *</Label>
+            <Input
+              id="nd-monto"
+              type="number"
+              min="0"
+              max={saldoPendiente}
+              step="0.01"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              data-testid="input-nd-monto"
+            />
+            {montoInvalido && monto && (
+              <p className="text-xs text-destructive">El importe debe ser mayor a $0 y no superar el saldo pendiente.</p>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button
+            disabled={montoInvalido || !motivo.trim() || mutation.isPending}
+            onClick={() => mutation.mutate({ motivo: motivo.trim(), monto: montoNum })}
+            data-testid="button-submit-nd"
+          >
+            Emitir Nota de Débito
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1014,6 +1014,17 @@ export function registerBillingRoutes(app: Express) {
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
+      // Las Notas de Crédito/Débito siempre deben asociarse a una factura existente
+      // (exigencia de ARCA). Este endpoint genérico no tiene ese vínculo — deben
+      // emitirse por los endpoints dedicados que sí lo exigen por diseño (el id de
+      // la factura origen va en la URL): POST /api/billing/invoices/:id/nota-credito
+      // y POST /api/billing/invoices/:id/nota-debito.
+      const NC_ND_TYPES = new Set(["NCA", "NCB", "NCC", "NCT", "NCM", "NDA", "NDB", "NDC", "NDT", "NDM"]);
+      if (NC_ND_TYPES.has(String(tipoComprobante))) {
+        return res.status(400).json({
+          error: "Las Notas de Crédito y Débito deben emitirse desde la factura original (usá 'Nota de Crédito/Débito' sobre un comprobante existente, no como comprobante nuevo).",
+        });
+      }
       if (cashFormaPago === "cuenta_corriente" &&
         (!["guest", "company", "agency"].includes(String(ccEntityType)) || !ccEntityId) && !rawPaymentId) {
         return res.status(400).json({ error: "Seleccione un huésped, empresa o agencia para cargar a Cuenta Corriente" });

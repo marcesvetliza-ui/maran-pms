@@ -3079,7 +3079,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/purchase-invoices", requireAuth, async (req, res) => {
+  app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
       if (isReceivedRetention(body.tipoComprobante)) {
@@ -3241,7 +3241,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+  app.patch("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const existing = await db.execute(sql`SELECT estado, tipo_comprobante FROM purchase_invoices WHERE id = ${id}`);
@@ -3378,7 +3378,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+  app.delete("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       await db.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);

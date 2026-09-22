@@ -941,7 +941,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
-    const condVal = normalizeCondicionIvaLabel(entity.condicionIva) || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    // Si la ficha no tiene una condición IVA reconocible, no la adivinamos
+    // (antes se asumía "Responsable Inscripto" con CUIT o "Consumidor Final"
+    // sin él, en silencio) — se deja sin elegir y validateForm() bloquea el
+    // envío hasta que alguien la complete a mano.
+    const normalizedCond = normalizeCondicionIvaLabel(entity.condicionIva);
+    const condVal = normalizedCond ?? "";
     const domVal = entity.domicilio || entity.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
@@ -952,7 +957,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     // Track the entity so we can update its address if domicilio is edited
     const eType: "company" | "agency" = entity._type === "Agencia" ? "agency" : "company";
     setSelectedEntityInfo({ type: eType, id: entity.id });
-    if (cuitVal || condVal === "Responsable Inscripto" || condVal === "Exento" || condVal === "Monotributista") {
+    if (isRiOrExento(condVal) || condVal === "Monotributista") {
       // Responsable Inscripto/Exento may only receive FA/MiPyme A (never FB),
       // regardless of whether CUIT is present yet — a missing CUIT surfaces
       // as a validation error on submit instead of silently switching to an
@@ -964,7 +969,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }
     setEntitySearch("");
     setShowEntityDropdown(false);
-    setFieldErrors({});
+    setFieldErrors(normalizedCond ? {} : { condicionIva: "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir." });
   }
 
   function selectEntity(entity: any) {
@@ -988,10 +993,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       if (!cuitClean) errs.cuit = "Requerido para Factura A";
       else if (!/^\d{11}$/.test(cuitClean)) errs.cuit = "Debe tener 11 dígitos (ej: 20123456789)";
     }
-    if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
+    if (!condicionIva.trim()) {
+      errs.condicionIva = "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir.";
+    } else if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto o Exento";
-    }
-    if (tipo === "FB" && isRiOrExento(condicionIva)) {
+    } else if (tipo === "FB" && isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto o Exento";
     }
     items.forEach((it, i) => {
@@ -2644,17 +2650,17 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
           )}
           <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
             {isSourceMappedInvoice
-              ? `Se emitirá una ${tipoNC} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
+              ? `Se emitirá una ${tipoNCLabel} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
               : modoParcial
-                ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
-                : `Se emitirá una ${tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
+                ? `Se emitirá una ${tipoNCLabel} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
+                : `Se emitirá una ${tipoNCLabel} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
           </div>
           <div className="space-y-1"><Label>Motivo *</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
         <DialogFooter className="shrink-0 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose} data-testid="button-nc-cancel">Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || montoInvalido} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
-            {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNC}`}
+            {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNCLabel}`}
           </Button>
         </DialogFooter>
       </DialogContent>
