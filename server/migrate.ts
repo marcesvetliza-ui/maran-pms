@@ -4119,6 +4119,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         LEFT JOIN guests g ON g.id = r.guest_id
         WHERE p.method IN ('cuenta_corriente', 'current_account')
           AND (p.status IS NULL OR p.status = 'active')
+          AND p.billing_target IN ('company', 'agency')
           AND CASE
                 WHEN p.billing_target = 'company' THEN p.company_id
                 WHEN p.billing_target = 'agency' THEN p.agency_id
@@ -4182,6 +4183,21 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         AND area = 'recepcion'
         AND description LIKE 'Saldo por estadía % (cierre con deuda)'
         AND group_payment_id IS NULL
+    `)
+  );
+
+  // The fiscal-identity backfill deployed during the same incident also
+  // materialized historical guest CC payments as new "Estadía" cargos.
+  // Guest CC was zero before the deployment. Remove only that new canonical
+  // shape; live movements created by normal operations are unaffected.
+  await withTimeout("rollback_guest_fiscal_backfill_2026_09_22", T, () =>
+    db.execute(sql`
+      DELETE FROM account_movements
+      WHERE entity_type = 'guest'
+        AND type = 'cargo'
+        AND payment_id IS NOT NULL
+        AND created_at::date = '2026-09-22'
+        AND description LIKE 'Estadía %'
     `)
   );
 
