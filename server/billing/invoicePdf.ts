@@ -155,16 +155,19 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   FC:  { nombre: "FACTURA",             letra: "C", codigo: "011" },
   FT:  { nombre: "FACTURA",             letra: "T", codigo: "195" },
   FM:  { nombre: "FACTURA MiPyME",      letra: "A", codigo: "201" },
+  FMB: { nombre: "FACTURA MiPyME",      letra: "B", codigo: "206" },
   NCA: { nombre: "NOTA DE CRÉDITO",     letra: "A", codigo: "003" },
   NCB: { nombre: "NOTA DE CRÉDITO",     letra: "B", codigo: "008" },
   NCC: { nombre: "NOTA DE CRÉDITO",     letra: "C", codigo: "013" },
   NCT: { nombre: "NOTA DE CRÉDITO",     letra: "T", codigo: "197" },
   NCM: { nombre: "NOTA DE CRÉDITO MiPyME", letra: "A", codigo: "203" },
+  NCMB: { nombre: "NOTA DE CRÉDITO MiPyME", letra: "B", codigo: "208" },
   NDA: { nombre: "NOTA DE DÉBITO",      letra: "A", codigo: "002" },
   NDB: { nombre: "NOTA DE DÉBITO",      letra: "B", codigo: "007" },
   NDC: { nombre: "NOTA DE DÉBITO",      letra: "C", codigo: "012" },
   NDT: { nombre: "NOTA DE DÉBITO",      letra: "T", codigo: "196" },
   NDM: { nombre: "NOTA DE DÉBITO MiPyME", letra: "A", codigo: "202" },
+  NDMB: { nombre: "NOTA DE DÉBITO MiPyME", letra: "B", codigo: "207" },
 };
 
 // ── Guest data (optional, enriched from reservation) ─────────────────────────

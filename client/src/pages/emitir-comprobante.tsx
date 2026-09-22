@@ -21,7 +21,7 @@ import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 // ya lo exige en POST /api/billing/invoices (ver server/billing/routes.ts),
 // así que acá se resuelven con el mismo flujo de "buscar factura → asociar"
 // que ya usa el botón por área (emitir-comprobante-button.tsx).
-const NC_ND_TIPOS = new Set(["NCA", "NCB", "NCM", "NDA", "NDB", "NDM"]);
+const NC_ND_TIPOS = new Set(["NCA", "NCB", "NCM", "NCMB", "NDA", "NDB", "NDM", "NDMB"]);
 
 // ── Áreas ──────────────────────────────────────────────────────────────────────
 // Mismos identificadores de área que ya usa EmitirComprobanteButton
@@ -57,13 +57,16 @@ const TIPOS_VENTA: { value: string; label: string }[] = [
   { value: "FA", label: "Factura A" },
   { value: "FB", label: "Factura B" },
   { value: "FM", label: "Factura MiPyME A" },
+  { value: "FMB", label: "Factura MiPyME B" },
   { value: "ticket", label: "Ticket" },
   { value: "NCA", label: "Nota de Crédito A" },
   { value: "NCB", label: "Nota de Crédito B" },
-  { value: "NCM", label: "Nota de Crédito MiPyME" },
+  { value: "NCM", label: "Nota de Crédito MiPyME A" },
+  { value: "NCMB", label: "Nota de Crédito MiPyME B" },
   { value: "NDA", label: "Nota de Débito A" },
   { value: "NDB", label: "Nota de Débito B" },
-  { value: "NDM", label: "Nota de Débito MiPyME" },
+  { value: "NDM", label: "Nota de Débito MiPyME A" },
+  { value: "NDMB", label: "Nota de Débito MiPyME B" },
 ];
 
 // Vouchers no fiscales que YA existen en el sistema (NON_FISCAL_TIPOS_SET en
@@ -311,7 +314,7 @@ function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: 
   });
 
   const candidatos = (invoices || []).filter((i: any) =>
-    i.estado !== "anulada" && ["FA", "FB", "FT", "FM"].includes(i.tipo_comprobante)
+    i.estado !== "anulada" && ["FA", "FB", "FT", "FM", "FMB"].includes(i.tipo_comprobante)
   );
 
   if (selectedInvoiceId !== null) {

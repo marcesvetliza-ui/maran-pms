@@ -321,15 +321,18 @@ export default function BillingPage() {
                   <SelectItem value="FB">Factura B</SelectItem>
                   <SelectItem value="FT">Factura T</SelectItem>
                   <SelectItem value="FM">Factura MiPyme A</SelectItem>
+                  <SelectItem value="FMB">Factura MiPyme B</SelectItem>
                   <SelectItem value="FC">Factura C</SelectItem>
                   <SelectItem value="NCA">NC A</SelectItem>
                   <SelectItem value="NCB">NC B</SelectItem>
                   <SelectItem value="NCT">NC T</SelectItem>
                   <SelectItem value="NCM">NC MiPyme A</SelectItem>
+                  <SelectItem value="NCMB">NC MiPyme B</SelectItem>
                   <SelectItem value="NDA">ND A</SelectItem>
                   <SelectItem value="NDB">ND B</SelectItem>
                   <SelectItem value="NDT">ND T</SelectItem>
                   <SelectItem value="NDM">ND MiPyme A</SelectItem>
+                  <SelectItem value="NDMB">ND MiPyme B</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filtroArea || "__all__"} onValueChange={(v) => setFiltroArea(v === "__all__" ? "" : v)}>
@@ -962,7 +965,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       // regardless of whether CUIT is present yet — a missing CUIT surfaces
       // as a validation error on submit instead of silently switching to an
       // invalid comprobante for this condición.
-      const auto = isRiOrExento(condVal) ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA") : "FB";
+      const auto = isRiOrExento(condVal)
+        ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA")
+        : (tipos.includes("FB") ? "FB" : tipos.includes("FMB") ? "FMB" : "FB");
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
       setTipo(nextTipo);
       recalcForTipo(nextTipo, tipo);
@@ -997,7 +1002,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       errs.condicionIva = "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir.";
     } else if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto o Exento";
-    } else if (tipo === "FB" && isRiOrExento(condicionIva)) {
+    } else if ((tipo === "FB" || tipo === "FMB") && isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto o Exento";
     }
     items.forEach((it, i) => {
@@ -1852,7 +1857,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               // clobbered into Responsable Inscripto); only correct it when
               // the current value would be an invalid pairing.
               if (!isRiOrExento(condicionIva)) setCondicionIva("Responsable Inscripto");
-            } else if (v === "FB" && isRiOrExento(condicionIva)) {
+            } else if ((v === "FB" || v === "FMB") && isRiOrExento(condicionIva)) {
               setCondicionIva("Consumidor Final");
             } else if (v === "FC" || v === "FT") {
               setCondicionIva("Consumidor Final");
@@ -1864,6 +1869,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               {tipos.includes("FA") && <SelectItem value="FA">Factura A</SelectItem>}
               {tipos.includes("FB") && <SelectItem value="FB">Factura B</SelectItem>}
               {tipos.includes("FM") && <SelectItem value="FM">Factura MiPyme A</SelectItem>}
+              {tipos.includes("FMB") && <SelectItem value="FMB">Factura MiPyme B</SelectItem>}
               {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
                 <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
               ))}
@@ -2027,9 +2033,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   // current one invalid — same strict split as the tipo
                   // selector above, applied in the other direction.
                   const nowRiExento = isRiOrExento(v);
-                  if (!nowRiExento && (tipo === "FA" || tipo === "FM") && tipos.includes("FB")) {
-                    const prevTipo = tipo; setTipo("FB"); recalcForTipo("FB", prevTipo);
-                  } else if (nowRiExento && tipo === "FB") {
+                  if (!nowRiExento && (tipo === "FA" || tipo === "FM") && (tipos.includes("FB") || tipos.includes("FMB"))) {
+                    const next = tipos.includes("FB") ? "FB" : "FMB";
+                    const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo);
+                  } else if (nowRiExento && (tipo === "FB" || tipo === "FMB")) {
                     const next = tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : tipo;
                     if (next !== tipo) { const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo); }
                   }
@@ -2516,7 +2523,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
     );
   }
 
-  const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A" };
+  const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A", FMB: "Nota de Crédito MiPyme B" };
   const tipoNCLabel = tipoNC[invoice.tipo_comprobante] ?? "Nota de Crédito B";
   const totalOriginal = parseFloat(invoice.monto_total) || 0;
   const saldoPendiente = Math.max(0, totalOriginal - (parseFloat(invoice.monto_acreditado || "0") || 0));

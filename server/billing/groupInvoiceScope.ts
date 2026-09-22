@@ -246,11 +246,11 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
                SELECT jsonb_agg(nc.source_charge_amounts)
                FROM sales_invoices nc
                WHERE nc.nota_credito_id = si.id
-                 AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                 AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
              ), '[]'::jsonb) AS credit_source_charge_amounts
       FROM sales_invoices si
       WHERE si.group_id = ${groupId}
-        AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+        AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
         AND si.estado IN ('emitida', 'parcial', 'autorizacion_pendiente')
     `),
     db.execute(sql`
@@ -263,7 +263,7 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
         SELECT candidate.*
         FROM sales_invoices candidate
         WHERE (candidate.group_payment_id = gp.id OR candidate.id = gp.invoice_id)
-          AND candidate.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND candidate.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
         ORDER BY CASE WHEN COALESCE(candidate.monto_total, 0)::numeric > COALESCE(candidate.monto_acreditado, 0)::numeric THEN 0 ELSE 1 END,
                  candidate.id DESC
         LIMIT 1
@@ -447,7 +447,7 @@ export async function assertGroupPaymentInvoiceEligibility(
            EXISTS (
              SELECT 1 FROM sales_invoices active_invoice
              WHERE (active_invoice.group_payment_id = gp.id OR active_invoice.id = gp.invoice_id)
-               AND active_invoice.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+               AND active_invoice.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
                 AND active_invoice.estado IN ('emitida', 'parcial', 'autorizacion_pendiente')
                AND COALESCE(active_invoice.monto_total, 0)::numeric > COALESCE(active_invoice.monto_acreditado, 0)::numeric + 0.009
            ) AS has_active_claim

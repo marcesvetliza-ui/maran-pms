@@ -1295,7 +1295,7 @@ export async function backfillGroupPaymentSettlementBreakdowns() {
       WHERE gp.settlement_breakdown IS NULL
         AND (
           lower(COALESCE(gp.receipt_type, '')) IN (
-            'factura_a', 'factura_b', 'factura_mipyme_a', 'factura_t'
+            'factura_a', 'factura_b', 'factura_mipyme_a', 'factura_mipyme_b', 'factura_t'
           )
           OR gp.invoice_id IS NOT NULL
           OR NULLIF(gp.invoice_ref, '') IS NOT NULL
@@ -2758,7 +2758,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero,
              si.monto_total, si.reserva_id, si.created_at
       FROM sales_invoices si
-      WHERE si.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+      WHERE si.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
         AND si.reserva_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM folio_movements fm

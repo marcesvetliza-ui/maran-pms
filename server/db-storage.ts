@@ -3191,6 +3191,7 @@ export class DatabaseStorage implements IStorage {
           factura_a: "FA",
           factura_b: "FB",
           factura_mipyme_a: "FM",
+          factura_mipyme_b: "FMB",
           factura_t: "FT",
         };
         const expectedInvoiceType = receiptToInvoiceType[String(input.receiptType || "").toLowerCase()];
@@ -3320,7 +3321,7 @@ export class DatabaseStorage implements IStorage {
               FROM sales_invoices si
               WHERE si.group_id = ${input.groupId}
                 AND si.id <> ${Number(linkedInvoice.id)}
-                AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FM', 'FT')
+                AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FM', 'FMB', 'FT')
                 AND si.estado IN ('emitida', 'autorizacion_pendiente')
             ), 0) AS invoiced
         `);
