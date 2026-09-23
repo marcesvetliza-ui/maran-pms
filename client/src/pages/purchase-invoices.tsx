@@ -127,6 +127,7 @@ const TIPOS = [
   { value: "NC-A", label: "Nota de Crédito A" },
   { value: "NC-B", label: "Nota de Crédito B" },
   { value: "NC-C", label: "Nota de Crédito C" },
+  { value: "NC-M", label: "Nota de Crédito M" },
   { value: "ND-A", label: "Nota de Débito A" },
   { value: "ND-B", label: "Nota de Débito B" },
   { value: "ND-C", label: "Nota de Débito C" },

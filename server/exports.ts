@@ -94,6 +94,7 @@ function tipoInfo(tipo: string) {
     "NC-A":          { arca: "003", codcom: "3",   label: "PROV N.CRED -A-" },
     "NC-B":          { arca: "003", codcom: "3",   label: "PROV N.CRED -B-" },
     "NC-C":          { arca: "003", codcom: "3",   label: "PROV N.CRED -C-" },
+    "NC-M":          { arca: "053", codcom: "3",   label: "PROV N.CRED -M-" },
     // codcom "4" sigue el mismo patrón que esta tabla ya usa para NC (un
     // bucket propio, compartido entre letras) — no confirmado todavía con el
     // código real del sistema contable externo del usuario.
