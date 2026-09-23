@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getLocalToday, formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { canUseWalkInRate } from "@/lib/walk-in-rate";
@@ -26,6 +26,7 @@ import {
   Heart,
   Loader2,
   AlertTriangle,
+  CreditCard,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { getBedConfigLabel } from "@/lib/planning-utils";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
+import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin, GuestPreference } from "@shared/schema";
 
 interface WebCheckinListItem extends WebCheckin {
@@ -92,6 +94,9 @@ export default function CheckInPage() {
   const [checkInNotes, setCheckInNotes] = useState<string>("");
   const [dirtyRoomDialog, setDirtyRoomDialog] = useState(false);
   const [anticipadoDialog, setAnticipadorDialog] = useState(false);
+  const [prefacturaOpen, setPrefacturaOpen] = useState(false);
+  const [prefacturaReservation, setPrefacturaReservation] = useState<ReservationWithDetails | null>(null);
+  const postCheckInActionRef = useRef<"none" | "billing">("none");
 
   const [historyDate, setHistoryDate] = useState<string>(() => {
     return getLocalToday();
@@ -257,6 +262,11 @@ export default function CheckInPage() {
       return apiRequest("POST", `/api/reservations/${id}/check-in`, motivo ? { motivo } : {});
     },
     onSuccess: () => {
+      const shouldOpenBilling = postCheckInActionRef.current === "billing";
+      const reservationForBilling = selectedReservation
+        ? { ...selectedReservation, status: "checked_in" as const }
+        : null;
+      postCheckInActionRef.current = "none";
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-in"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-ins-by-date"] });
@@ -275,6 +285,10 @@ export default function CheckInPage() {
       setRetroactivoMotivo("");
       setPendingCheckInId(null);
       setSelectedReservation(null);
+      if (shouldOpenBilling && reservationForBilling) {
+        setPrefacturaReservation(reservationForBilling);
+        setPrefacturaOpen(true);
+      }
     },
     onError: async (error: any) => {
       let errorData: any = {};
@@ -288,6 +302,7 @@ export default function CheckInPage() {
         setRetroactivoDialog(true);
         return;
       }
+      postCheckInActionRef.current = "none";
       if (errorData?.code === "CHECK_IN_REQUIRES_REAL_ROOM") {
         toast({
           title: "Asigne una habitación real",
@@ -1389,7 +1404,13 @@ export default function CheckInPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+      <AlertDialog
+        open={confirmDialogOpen}
+        onOpenChange={(open) => {
+          setConfirmDialogOpen(open);
+          if (!open && !checkInMutation.isPending) postCheckInActionRef.current = "none";
+        }}
+      >
         <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Check-in</AlertDialogTitle>
@@ -1518,9 +1539,30 @@ export default function CheckInPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel data-testid="button-cancel-checkin">Volver</AlertDialogCancel>
+            <Button
+              variant="outline"
+              className="sm:mr-auto"
+              onClick={() => {
+                postCheckInActionRef.current = "billing";
+                void performCheckIn();
+              }}
+              disabled={checkInMutation.isPending}
+              data-testid="button-confirm-checkin-and-bill"
+            >
+              <CreditCard className="h-4 w-4 mr-2" />
+              Confirmar check-in y cobrar
+            </Button>
+            <AlertDialogCancel
+              onClick={() => { postCheckInActionRef.current = "none"; }}
+              data-testid="button-cancel-checkin"
+            >
+              Volver
+            </AlertDialogCancel>
             <AlertDialogAction
-              onClick={performCheckIn}
+              onClick={() => {
+                postCheckInActionRef.current = "none";
+                void performCheckIn();
+              }}
               disabled={checkInMutation.isPending}
               data-testid="button-confirm-checkin"
             >
@@ -1647,6 +1689,19 @@ export default function CheckInPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {prefacturaReservation && (
+        <PrefacturaDialog
+          open={prefacturaOpen}
+          onClose={() => {
+            setPrefacturaOpen(false);
+            setPrefacturaReservation(null);
+          }}
+          reservationId={prefacturaReservation.id}
+          reservation={prefacturaReservation}
+          mode="billing"
+        />
+      )}
     </div>
   );
 }
