@@ -840,6 +840,8 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
   const paymentMethodLabel: Record<string, string> = {
     efectivo: "Efectivo", tarjeta_credito: "Tarj. Crédito", tarjeta_debito: "Tarj. Débito",
     transferencia: "Transferencia", cheque: "Cheque", cuenta_corriente: "Cta. Corriente",
+    retencion_iibb: "Retención IIBB", retencion_ganancias: "Retención Ganancias",
+    retencion_iva: "Retención IVA",
   };
   const activeCharges = r.charges?.filter(c => c.status === "active") || [];
   const activePayments = r.payments?.filter(p => p.status === "active") || [];

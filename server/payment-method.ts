@@ -26,10 +26,14 @@ export function classifyReservationPaymentMethod(value: unknown): {
   informational: boolean;
 } {
   const method = aliases[normalizeReservationPaymentMethod(value)] ?? normalizeReservationPaymentMethod(value);
-  const informational = method === "current_account" || method === "voucher";
+  // A retención (IIBB/Ganancias/IVA) that whoever pays us withholds is never
+  // money that reached Caja — same treatment as current_account/voucher:
+  // it settles the folio balance but doesn't count as cash received.
+  const isRetencion = method.startsWith("retencion_");
+  const informational = method === "current_account" || method === "voucher" || isRetencion;
   return {
     method,
-    class: informational ? (method as "current_account" | "voucher") : method === "cash" ? "cash" : "other",
+    class: informational ? (isRetencion ? "other" : (method as "current_account" | "voucher")) : method === "cash" ? "cash" : "other",
     informational,
   };
 }

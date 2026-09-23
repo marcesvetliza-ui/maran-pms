@@ -1708,7 +1708,7 @@ export class DatabaseStorage implements IStorage {
       voucher_habitacion: "voucher",
     };
     const paymentMethod = classifyReservationPaymentMethod(input.payment.method).method;
-    if (!paymentMethod || !["cash", "debit_card", "credit_card", "transfer", "mercadopago", "current_account", "voucher", "room_charge"].includes(paymentMethod)) {
+    if (!paymentMethod || !["cash", "debit_card", "credit_card", "transfer", "mercadopago", "current_account", "voucher", "room_charge", "retencion_iibb", "retencion_ganancias", "retencion_iva"].includes(paymentMethod)) {
       throw Object.assign(new Error("Método de pago no admitido."), { statusCode: 400 });
     }
     const rawAmount = typeof input.payment.amount === "string"
@@ -1739,7 +1739,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const cashBearingMethods = new Set(["cash", "debit_card", "credit_card", "transfer", "mercadopago"]);
-    const informationalMethods = new Set(["current_account", "voucher"]);
+    const informationalMethods = new Set(["current_account", "voucher", "retencion_iibb", "retencion_ganancias", "retencion_iva"]);
     return db.transaction(async (tx) => {
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
@@ -7844,6 +7844,12 @@ export class DatabaseStorage implements IStorage {
       if (m.movementType === "informational") {
         if (method === "current_account" || method === "voucher") {
           totals[method] += amt;
+          nonCashSettlementsTotal += amt;
+          nonCashSettlementsCount++;
+        } else if (method.startsWith("retencion_")) {
+          // Retención practicada por quien nos paga: no hay bucket propio en
+          // cash_closing_summaries, pero igual debe contar como liquidación
+          // no monetaria para que el cierre de turno no la deje afuera.
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;
         }

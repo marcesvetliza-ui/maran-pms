@@ -52,13 +52,33 @@ describe("invoice payment method detail", () => {
         method: "transferencia",
         amount: "80000",
         retencionEnabled: true,
+        retencionTipo: "iibb",
         retencionMonto: "5000",
       },
     ], applied)).toEqual({
       cashFormaPago: "pago_dividido",
       cashFormaPagoDetalle: [
         { method: "tarjeta_credito", amount: 151500 },
-        { method: "transferencia", amount: 85000 },
+        { method: "transferencia", amount: 80000 },
+        { method: "retencion_iibb", amount: 5000 },
+      ],
+    });
+  });
+
+  it("gives a retención its own line instead of folding it into the real payment method", () => {
+    expect(buildInvoicePaymentMethods([
+      {
+        method: "efectivo",
+        amount: "98000",
+        retencionEnabled: true,
+        retencionTipo: "ganancias",
+        retencionMonto: "2000",
+      },
+    ])).toEqual({
+      cashFormaPago: "pago_dividido",
+      cashFormaPagoDetalle: [
+        { method: "efectivo", amount: 98000 },
+        { method: "retencion_ganancias", amount: 2000 },
       ],
     });
   });

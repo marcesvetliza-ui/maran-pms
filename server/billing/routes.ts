@@ -417,6 +417,9 @@ const RESERVATION_INVOICE_PAYMENT_METHODS = new Set([
   "cheque",
   "echeq",
   "cuenta_corriente",
+  "retencion_iibb",
+  "retencion_ganancias",
+  "retencion_iva",
 ]);
 
 export function validateReservationInvoicePaymentDetail(

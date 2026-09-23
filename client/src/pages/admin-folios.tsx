@@ -173,6 +173,8 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   mercadopago: "MercadoPago",
   cuenta_corriente: "Cta. Cte.", current_account: "Cta. Cte.",
   room_charge: "Cargo hab.",
+  retencion_iibb: "Retención IIBB", retencion_ganancias: "Retención Ganancias",
+  retencion_iva: "Retención IVA",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
