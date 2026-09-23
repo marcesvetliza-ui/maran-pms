@@ -202,6 +202,10 @@ function RoomPreventiveCard({ task, today }: { task: any; today: string }) {
   const [selected, setSelected] = useState<RoomPreventiveRow | null>(null);
   const [notes, setNotes] = useState("");
   const [historyRoom, setHistoryRoom] = useState<RoomPreventiveRow | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editName, setEditName] = useState(task.name as string);
+  const [editDescription, setEditDescription] = useState((task.description || "") as string);
   const key = ["/api/maintenance/preventive", task.id, "rooms"];
   const { data: rooms = [], isLoading } = useQuery<RoomPreventiveRow[]>({
     queryKey: key, enabled: expanded,
@@ -225,6 +229,31 @@ function RoomPreventiveCard({ task, today }: { task: any; today: string }) {
     },
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
+  const edit = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("PATCH", `/api/maintenance/preventive/${task.id}/rooms`, { name: editName, description: editDescription });
+      if (!r.ok) throw new Error((await r.json()).error || "No se pudo editar la preventiva");
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      setEditing(false);
+      toast({ title: "Preventiva actualizada" });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+  const remove = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("DELETE", `/api/maintenance/preventive/${task.id}/rooms`);
+      if (!r.ok) throw new Error((await r.json()).error || "No se pudo eliminar la preventiva");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      setConfirmDelete(false);
+      toast({ title: "Preventiva eliminada", description: "Se conservó el historial de las habitaciones." });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
   const visible = pendingOnly ? rooms.filter(r => !r.done_at_current_month) : rooms;
   const fmt = (value: string | null) => value ? new Date(value + "T00:00:00").toLocaleDateString("es-AR") : "—";
   return <Card className={task.next_due_at < today ? "border-l-4 border-l-red-500" : "border-l-4 border-l-green-500"}>
@@ -235,9 +264,15 @@ function RoomPreventiveCard({ task, today }: { task: any; today: string }) {
           {task.description && <p className="text-sm text-muted-foreground">{task.description}</p>}
           <p className="text-sm text-muted-foreground">{task.completed_count} de {task.room_count} habitaciones realizadas este mes · Vence {fmt(task.next_due_at)}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setExpanded(!expanded)}>
-          {expanded ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />} Habitaciones
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" aria-label={`Editar ${task.name}`} onClick={() => {
+            setEditName(task.name); setEditDescription(task.description || ""); setEditing(true);
+          }}><Edit className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" aria-label={`Eliminar ${task.name}`} onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" /></Button>
+          <Button variant="outline" size="sm" onClick={() => setExpanded(!expanded)}>
+            {expanded ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />} Habitaciones
+          </Button>
+        </div>
       </div>
       {expanded && <div className="space-y-2">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} /> Solo pendientes de este mes</label>
@@ -254,6 +289,18 @@ function RoomPreventiveCard({ task, today }: { task: any; today: string }) {
         </div>}
       </div>}
     </CardContent>
+    <Dialog open={editing} onOpenChange={setEditing}>
+      <DialogContent><DialogHeader><DialogTitle>Editar preventiva por habitación</DialogTitle><DialogDescription>Podés cambiar el nombre y la descripción. Las limpiezas registradas se conservan.</DialogDescription></DialogHeader>
+        <div className="space-y-3"><Label>Nombre *</Label><Input value={editName} onChange={e => setEditName(e.target.value)} />
+          <Label>Descripción</Label><Textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} /></div>
+        <DialogFooter><Button variant="outline" onClick={() => setEditing(false)}>Cancelar</Button><Button disabled={!editName.trim() || edit.isPending} onClick={() => edit.mutate()}>Guardar cambios</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <DialogContent><DialogHeader><DialogTitle>¿Eliminar «{task.name}»?</DialogTitle><DialogDescription>Dejará de aparecer en Preventivo y no generará más alertas. El historial de limpiezas ya registradas se conservará.</DialogDescription></DialogHeader>
+        <DialogFooter><Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancelar</Button><Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>Eliminar preventiva</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={!!selected} onOpenChange={open => { if (!open) { setSelected(null); setNotes(""); } }}>
       <DialogContent><DialogHeader><DialogTitle>Registrar limpieza · Hab. {selected?.room_number}</DialogTitle><DialogDescription>Se registrará la limpieza de filtros de este mes calendario y quedará en el historial.</DialogDescription></DialogHeader>
         <Label>Observaciones (opcional)</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} />
