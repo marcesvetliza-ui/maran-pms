@@ -88,6 +88,50 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(screen.getByTestId("invoice-form-embedded")).toBeInTheDocument();
   });
 
+  it.each([
+    ["Factura B", "Factura B"],
+    ["Factura C", "Factura C"],
+    ["Nota de Crédito B", "Nota de Crédito B"],
+    ["Remito", "Remito"],
+  ])("mantiene %s al entrar en la carga de compra", async (chosen, expected) => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Compras" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Compra" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: chosen }));
+
+    const form = screen.getByTestId("invoice-form-embedded");
+    expect(within(form).getByTestId("select-tipo-comprobante")).toHaveTextContent(expected);
+    expect(within(form).getByTestId("select-tipo-comprobante")).toBeDisabled();
+  });
+
+  it("el proveedor no modifica el tipo de compra elegido en el Centro", async () => {
+    mockRole = "resp_deposito";
+    queryClient.setQueryData(["/api/accounting-suppliers"], [{
+      id: 23, razon_social: "Proveedor RI", cuit: "30-11111111-1",
+      condicion_iva: "Responsable Inscripto",
+    }]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Compras" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Compra" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: "Factura B" }));
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor RI"));
+
+    expect(within(screen.getByTestId("invoice-form-embedded")).getByTestId("select-tipo-comprobante"))
+      .toHaveTextContent("Factura B");
+  });
+
   it("movimiento interno reutiliza InternalMovementForm embebido, con el motivo ya elegido", async () => {
     mockRole = "resp_deposito";
     const user = userEvent.setup();
