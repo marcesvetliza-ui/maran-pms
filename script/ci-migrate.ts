@@ -15,6 +15,7 @@
 import { runMigrations, verifyFinancialSchema } from "../server/migrate";
 import { db } from "../server/db";
 import { sql } from "drizzle-orm";
+import { ensureRoomPreventiveSchema } from "../server/maintenance/roomPreventiveSchema";
 
 const REQUIRED_ACCOUNT_CODES = [
   "1.1.1.01",
@@ -33,6 +34,7 @@ async function main() {
 
   console.log("[ci-migrate] Ejecutando runMigrations()...");
   await runMigrations();
+  await ensureRoomPreventiveSchema();
 
   console.log("[ci-migrate] Verificando esquema financiero contra el catálogo real...");
   const status = await verifyFinancialSchema();

@@ -4,6 +4,7 @@ import { requireAuth } from "../auth";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addArgentinaOperationalDays, getArgentinaOperationalDate } from "../utils/argentinaDateTime";
+import { registerRoomPreventiveRoutes } from "../maintenance/roomPreventiveRoutes";
 
 export function registerMaintenanceRoutes(app: Express) {
   // Maintenance Staff
@@ -266,9 +267,22 @@ export function registerMaintenanceRoutes(app: Express) {
   });
 
   // ── Preventive Maintenance Tasks ──────────────────────────────────────────
+  registerRoomPreventiveRoutes(app);
   app.get("/api/maintenance/preventive", requireAuth, async (_req, res) => {
     try {
-      const result = await db.execute(sql`SELECT * FROM preventive_tasks WHERE active = true ORDER BY next_due_at ASC`);
+      const today = getArgentinaOperationalDate();
+      const period = `${today.slice(0, 7)}-01`;
+      const result = await db.execute(sql`
+        SELECT p.*, COALESCE(progress.room_count, 0)::int AS room_count,
+          COALESCE(progress.completed_count, 0)::int AS completed_count
+        FROM preventive_tasks p LEFT JOIN LATERAL (
+          SELECT count(*)::int AS room_count, count(c.id)::int AS completed_count
+          FROM preventive_room_slots s LEFT JOIN preventive_room_completions c
+            ON c.task_id = s.task_id AND c.room_id = s.room_id AND c.period = ${period}::date
+          WHERE s.task_id = p.id
+        ) progress ON true
+        WHERE p.active = true ORDER BY p.next_due_at ASC
+      `);
       res.json(result.rows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -292,6 +306,8 @@ export function registerMaintenanceRoutes(app: Express) {
 
   app.patch("/api/maintenance/preventive/:id", requireAuth, async (req, res) => {
     try {
+      const grouped = await db.execute(sql`SELECT 1 FROM preventive_room_slots WHERE task_id = ${req.params.id} LIMIT 1`);
+      if (grouped.rows.length) return res.status(409).json({ error: "La preventiva por habitación se administra desde su grilla" });
       const { name, description, frequency, frequencyDays, nextDueAt, assignedTo, notes, active } = req.body;
       const result = await db.execute(sql`
         UPDATE preventive_tasks SET
@@ -316,6 +332,8 @@ export function registerMaintenanceRoutes(app: Express) {
 
   app.delete("/api/maintenance/preventive/:id", requireAuth, async (req, res) => {
     try {
+      const grouped = await db.execute(sql`SELECT 1 FROM preventive_room_slots WHERE task_id = ${req.params.id} LIMIT 1`);
+      if (grouped.rows.length) return res.status(409).json({ error: "La preventiva por habitación tiene historial y no se puede borrar" });
       await db.execute(sql`DELETE FROM preventive_tasks WHERE id = ${req.params.id}`);
       res.json({ ok: true });
     } catch (e: any) {
@@ -326,6 +344,8 @@ export function registerMaintenanceRoutes(app: Express) {
   // Marcar como hecha → auto-programa la siguiente ocurrencia
   app.post("/api/maintenance/preventive/:id/done", requireAuth, async (req, res) => {
     try {
+      const grouped = await db.execute(sql`SELECT 1 FROM preventive_room_slots WHERE task_id = ${req.params.id} LIMIT 1`);
+      if (grouped.rows.length) return res.status(409).json({ error: "Marcá la limpieza en cada habitación" });
       const { doneNotes } = req.body;
       const existing = await db.execute(sql`SELECT * FROM preventive_tasks WHERE id = ${req.params.id}`);
       if (!existing.rows.length) return res.status(404).json({ error: "Tarea no encontrada" });
