@@ -288,6 +288,7 @@ export default function EmitirComprobantePage() {
                   unifiedLayout
                   open
                   onClose={resetSeleccion}
+                  initialTipo={tipo}
                   suppliers={suppliers}
                   accounts={accounts}
                 />

@@ -355,6 +355,7 @@ export function InvoiceDialog({
   editingInvoice,
   embedded,
   unifiedLayout,
+  initialTipo,
 }: {
   open: boolean;
   onClose: () => void;
@@ -362,6 +363,8 @@ export function InvoiceDialog({
   accounts: AccountingAccount[];
   editingInvoice?: Invoice | null;
   embedded?: boolean;
+  /** Tipo elegido en el Centro de Comprobantes antes de abrir este formulario. */
+  initialTipo?: string;
   /**
    * Renders the same form as one continuous page (Tipo/Condición → Datos del
    * emisor → Artículos → Impuestos y totales) matching EmitirFacturaDialog's
@@ -373,7 +376,17 @@ export function InvoiceDialog({
   unifiedLayout?: boolean;
 }) {
   const { toast } = useToast();
-  const [form, setForm] = useState(emptyForm());
+  const newForm = () => {
+    const result = emptyForm();
+    if (initialTipo) {
+      result.tipoComprobante = initialTipo;
+      if (["FACT-C", "NC-C", "ND-C", "RECIBO-C", "RETENCION"].includes(initialTipo)) {
+        result.alicuotaIva = "0";
+      }
+    }
+    return result;
+  };
+  const [form, setForm] = useState(newForm);
   const [step, setStep] = useState(0);
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -457,11 +470,11 @@ export function InvoiceDialog({
       setNetoLines(linesFromInvoice(editingInvoice));
       setStep(1);
     } else if (open && !editingInvoice) {
-      setForm(emptyForm());
+      setForm(newForm());
       setNetoLines([emptyNetoLine()]);
       setStep(0);
     }
-  }, [open, editingInvoice]);
+  }, [open, editingInvoice, initialTipo]);
 
   const quickCreateMut = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
@@ -521,7 +534,9 @@ export function InvoiceDialog({
       f("supplierId", id);
       f("proveedorNombre", s.razonSocial);
       f("proveedorCuit", s.cuit);
-      f("tipoComprobante", sugerirTipoPorCondicionIva(form.tipoComprobante, s.condicionIva));
+      if (!initialTipo) {
+        f("tipoComprobante", sugerirTipoPorCondicionIva(form.tipoComprobante, s.condicionIva));
+      }
       if (s.alicuotaIibb) f("alicuotaIibbProveedor", String(s.alicuotaIibb));
       if (!isReceivedRetention(form.tipoComprobante) && s.cuentaContableId) {
         f("cuentaContableId", String(s.cuentaContableId));
@@ -555,7 +570,7 @@ export function InvoiceDialog({
     return calculatePurchaseInvoiceTotal(form);
   }, [form]);
 
-  const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
+  const resetDialog = () => { onClose(); setForm(newForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
@@ -759,7 +774,7 @@ export function InvoiceDialog({
           <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Tipo de Comprobante</Label>
-                  <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
+                  <Select value={form.tipoComprobante} disabled={isEditing || !!initialTipo} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
                     if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
