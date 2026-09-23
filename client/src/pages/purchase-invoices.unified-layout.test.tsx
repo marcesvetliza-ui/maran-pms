@@ -100,15 +100,16 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.queryByTestId("select-centro-costo")).not.toBeInTheDocument();
   });
 
-  it("la sección Artículos (existente/nuevo) está visible sin tener que avanzar pasos", async () => {
+  it("la sección Artículos solo ofrece elegir un artículo existente", async () => {
     renderDialog({ unifiedLayout: true });
     expect(screen.getByText("Artículos")).toBeInTheDocument();
     expect(screen.getByTestId("btn-add-inv-item")).toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(screen.getByTestId("btn-add-inv-item"));
-    expect(screen.getByTestId("btn-mode-existing-0")).toBeInTheDocument();
-    expect(screen.getByTestId("btn-mode-new-0")).toBeInTheDocument();
+    expect(screen.getByTestId("select-existing-item-0")).toBeInTheDocument();
+    expect(screen.queryByTestId("btn-mode-new-0")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("input-inv-name-0")).not.toBeInTheDocument();
   });
 
   it('agrupa Netos/IVA, Retenciones y el Total bajo "Impuestos y totales", visibles a la vez', async () => {

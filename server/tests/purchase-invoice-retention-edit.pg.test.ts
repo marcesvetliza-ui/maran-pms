@@ -241,6 +241,72 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
     await pool.end();
   });
 
+  it("exige proveedor del ABM y total positivo para una factura, incluso al editarla", async () => {
+    if (!testPool) return;
+
+    const fixture = await createFixture();
+    try {
+      const payload = {
+        tipoComprobante: "FACT-A",
+        supplierId: fixture.supplierId,
+        proveedorNombre: "Nombre ingresado a mano",
+        proveedorCuit: "CUIT ingresado a mano",
+        numeroComprobante: `PG-VALID-${randomUUID()}`,
+        fechaEmision: "2026-08-31",
+        periodo: "08/2026",
+        condicionPago: "cuenta_corriente",
+        montoNeto: "0",
+      };
+
+      expect((await requestInvoice("POST", "/api/purchase-invoices", { ...payload, supplierId: null, montoNeto: "100" })).status).toBe(400);
+      expect((await requestInvoice("POST", "/api/purchase-invoices", { ...payload, supplierId: 999999999, montoNeto: "100" })).status).toBe(400);
+      expect((await requestInvoice("POST", "/api/purchase-invoices", payload)).status).toBe(400);
+
+      const created = await requestInvoice("POST", "/api/purchase-invoices", { ...payload, montoNeto: "100" });
+      expect(created.status).toBe(201);
+      fixture.facturaInvoiceId = Number(created.body.id);
+      const supplier = await testPool.query("SELECT razon_social, cuit FROM accounting_suppliers WHERE id = $1", [fixture.supplierId]);
+      const stored = await testPool.query("SELECT proveedor_nombre, proveedor_cuit, monto_total FROM purchase_invoices WHERE id = $1", [fixture.facturaInvoiceId]);
+      expect(stored.rows[0]).toMatchObject({
+        proveedor_nombre: supplier.rows[0].razon_social,
+        proveedor_cuit: supplier.rows[0].cuit,
+        monto_total: "100.00",
+      });
+
+      const rejected = await requestInvoice("PATCH", `/api/purchase-invoices/${fixture.facturaInvoiceId}`, { montoNeto: "0" });
+      expect(rejected.status).toBe(400);
+      const stillStored = await testPool.query("SELECT monto_total FROM purchase_invoices WHERE id = $1", [fixture.facturaInvoiceId]);
+      expect(stillStored.rows[0].monto_total).toBe("100.00");
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }, 15_000);
+
+  it("permite un Remito sin importe y conserva esa excepción al editar", async () => {
+    if (!testPool) return;
+
+    const fixture = await createFixture();
+    try {
+      const created = await requestInvoice("POST", "/api/purchase-invoices", {
+        tipoComprobante: "REMITO",
+        supplierId: fixture.supplierId,
+        numeroComprobante: `PG-REMITO-${randomUUID()}`,
+        fechaEmision: "2026-08-31",
+        condicionPago: "cuenta_corriente",
+      });
+      expect(created.status).toBe(201);
+      fixture.facturaInvoiceId = Number(created.body.id);
+      expect(created.body.monto_total).toBe("0.00");
+
+      const edited = await requestInvoice("PATCH", `/api/purchase-invoices/${fixture.facturaInvoiceId}`, { montoNeto: "0" });
+      expect(edited.status).toBe(200);
+      const stored = await testPool.query("SELECT monto_total, asiento_id FROM purchase_invoices WHERE id = $1", [fixture.facturaInvoiceId]);
+      expect(stored.rows[0]).toMatchObject({ monto_total: "0.00", asiento_id: null });
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }, 15_000);
+
   it("reemplaza el asiento de una LIQ-TARJETA editada sin practicar IIBB", async () => {
     if (!testPool) return;
 

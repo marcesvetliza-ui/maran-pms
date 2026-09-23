@@ -52,6 +52,7 @@ import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-cen
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 import {
   calculatePurchaseInvoiceTotal,
+  isValidPurchaseInvoiceTotal,
   isReceivedRetention,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
@@ -2930,6 +2931,19 @@ export async function registerRoutes(
   app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
+      const supplierId = Number(body.supplierId);
+      if (!Number.isSafeInteger(supplierId) || supplierId <= 0) {
+        return res.status(400).json({ error: "Elegí un proveedor cargado en el ABM." });
+      }
+      const supplierResult = await db.execute(sql`
+        SELECT razon_social, cuit FROM accounting_suppliers WHERE id = ${supplierId}
+      `);
+      if (!supplierResult.rows.length) {
+        return res.status(400).json({ error: "El proveedor seleccionado no existe en el ABM." });
+      }
+      body.supplierId = supplierId;
+      body.proveedorNombre = supplierResult.rows[0].razon_social;
+      body.proveedorCuit = supplierResult.rows[0].cuit;
       if (isReceivedRetention(body.tipoComprobante)) {
         body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
       }
@@ -2973,6 +2987,9 @@ export async function registerRoutes(
       // Calcular montoTotal
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal = calculatePurchaseInvoiceTotal(body);
+      if (!isValidPurchaseInvoiceTotal(body.tipoComprobante, montoTotal)) {
+        return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
+      }
 
       // Estado según condición de pago
       const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
@@ -3113,6 +3130,9 @@ export async function registerRoutes(
 
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal = calculatePurchaseInvoiceTotal({ ...body, tipoComprobante });
+      if (!isValidPurchaseInvoiceTotal(tipoComprobante, montoTotal)) {
+        return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
+      }
       const updatedInvoice = await db.transaction(async (tx) => {
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET

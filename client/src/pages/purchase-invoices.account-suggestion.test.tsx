@@ -35,6 +35,7 @@ const CATEGORIES = [
 ];
 const EXISTING_ITEMS = [
   { id: "item-1", name: "Papel Higiénico", categoryId: "cat-areas-publicas", currentStock: "5", unit: "unidad" },
+  { id: "item-2", name: "Otro insumo", categoryId: "cat-sin-cuenta", currentStock: "0", unit: "unidad" },
 ];
 
 function buildFetchMock() {
@@ -64,13 +65,13 @@ function renderDialog(props: { unifiedLayout?: boolean } = {}) {
   );
 }
 
-async function addNewItemRow(user: ReturnType<typeof userEvent.setup>) {
+async function addItemRow(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByTestId("btn-add-inv-item"));
 }
 
-async function selectCategoryOnRow(user: ReturnType<typeof userEvent.setup>, categoryName: string, rowIndex = 0) {
-  await user.click(await screen.findByTestId(`select-inv-category-${rowIndex}`));
-  await user.click(await screen.findByText(categoryName));
+async function selectItemOnRow(user: ReturnType<typeof userEvent.setup>, name: string, rowIndex = 0) {
+  await user.click(await screen.findByTestId(`select-existing-item-${rowIndex}`));
+  await user.click(await screen.findByText(name));
 }
 
 describe("InvoiceDialog — sugerencia de Cuenta Contable por categoría de artículo", () => {
@@ -89,24 +90,12 @@ describe("InvoiceDialog — sugerencia de Cuenta Contable por categoría de art�
     expect(screen.queryByTestId("select-centro-costo")).not.toBeInTheDocument();
   });
 
-  it("sugiere la cuenta contable al elegir la categoría de un artículo nuevo", async () => {
-    const user = userEvent.setup();
-    renderDialog({ unifiedLayout: true });
-
-    expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("— Sin clasificar —");
-
-    await addNewItemRow(user);
-    await selectCategoryOnRow(user, "Áreas Públicas");
-
-    expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("Housekeeping Áreas Públicas");
-  });
-
   it("no sugiere nada si la categoría no tiene cuenta configurada", async () => {
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
 
-    await addNewItemRow(user);
-    await selectCategoryOnRow(user, "Sin Mapear");
+    await addItemRow(user);
+    await selectItemOnRow(user, "Otro insumo");
 
     expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("— Sin clasificar —");
   });
@@ -115,10 +104,8 @@ describe("InvoiceDialog — sugerencia de Cuenta Contable por categoría de art�
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
 
-    await addNewItemRow(user);
-    await user.click(screen.getByTestId("btn-mode-existing-0"));
-    await user.click(screen.getByTestId("select-existing-item-0"));
-    await user.click(await screen.findByText("Papel Higiénico"));
+    await addItemRow(user);
+    await selectItemOnRow(user, "Papel Higiénico");
 
     expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("Housekeeping Áreas Públicas");
   });
@@ -131,8 +118,8 @@ describe("InvoiceDialog — sugerencia de Cuenta Contable por categoría de art�
     await user.click(await screen.findByRole("option", { name: /Librería/ }));
     expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("Librería");
 
-    await addNewItemRow(user);
-    await selectCategoryOnRow(user, "Áreas Públicas");
+    await addItemRow(user);
+    await selectItemOnRow(user, "Papel Higiénico");
 
     expect(screen.getByTestId("select-cuenta-contable")).toHaveTextContent("Librería");
   });
