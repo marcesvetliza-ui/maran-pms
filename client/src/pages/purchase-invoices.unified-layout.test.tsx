@@ -84,7 +84,7 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.getByTestId("select-condicion-pago")).toBeInTheDocument();
   });
 
-  it('agrupa Proveedor, Punto de Venta, Número, Fecha, Período, Cuenta Contable y Centro de Costo bajo "Datos del emisor", todo visible a la vez', async () => {
+  it('agrupa Proveedor, Punto de Venta, Número, Fecha, Período y Cuenta Contable bajo "Datos del emisor", todo visible a la vez', async () => {
     renderDialog({ unifiedLayout: true });
     expect(screen.getByText("Datos del emisor")).toBeInTheDocument();
     // Estos campos vivían en pasos separados (1 y 4) del asistente — ahora están
@@ -95,7 +95,9 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.getByTestId("input-fecha-emision")).toBeInTheDocument();
     expect(screen.getByTestId("input-periodo")).toBeInTheDocument();
     expect(screen.getByTestId("select-cuenta-contable")).toBeInTheDocument();
-    expect(screen.getByTestId("select-centro-costo")).toBeInTheDocument();
+    // Centro de Costo se eliminó: era puramente informativo y no lo usaba
+    // ningún reporte ni el asiento contable (ver InvoiceDialog).
+    expect(screen.queryByTestId("select-centro-costo")).not.toBeInTheDocument();
   });
 
   it("la sección Artículos (existente/nuevo) está visible sin tener que avanzar pasos", async () => {

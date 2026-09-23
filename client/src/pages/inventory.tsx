@@ -64,6 +64,7 @@ type ItemCategory = {
   area: string;
   isActive: string | null;
   isGroup: boolean;
+  accountId: number | null;
 };
 
 type AccountingSupplier = {
@@ -698,6 +699,7 @@ export default function InventoryPage() {
   const [catArea, setCatArea] = useState("general");
   const [catDescription, setCatDescription] = useState("");
   const [catParentId, setCatParentId] = useState<string>("");
+  const [catAccountId, setCatAccountId] = useState<string>("");
   // Group (Agrupamiento) state
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ItemCategory | null>(null);
@@ -739,6 +741,13 @@ export default function InventoryPage() {
   const { data: accountingSuppliers = [] } = useQuery<AccountingSupplier[]>({
     queryKey: ["/api/accounting-suppliers"],
   });
+
+  const { data: rawAccountingAccounts = [] } = useQuery<any[]>({
+    queryKey: ["/api/accounting-accounts"],
+  });
+  const expenseAccounts = rawAccountingAccounts
+    .filter((a: any) => a.tipo === "egreso")
+    .map((a: any) => ({ id: String(a.id), codigo: a.codigo as string, nombre: a.nombre as string }));
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<InventoryItem[]>({
     queryKey: ["/api/inventory/items"],
@@ -943,6 +952,7 @@ export default function InventoryPage() {
     setCatArea(cat?.area || "general");
     setCatDescription(cat?.description || "");
     setCatParentId(cat?.parentId || "");
+    setCatAccountId(cat?.accountId ? String(cat.accountId) : "");
     setIsCategoryDialogOpen(true);
   };
 
@@ -963,7 +973,7 @@ export default function InventoryPage() {
   };
 
   const saveCategoryMutation = useMutation({
-    mutationFn: async (data: { name: string; area: string; description: string; parentId?: string | null; isGroup: boolean }) => {
+    mutationFn: async (data: { name: string; area: string; description: string; parentId?: string | null; isGroup: boolean; accountId?: number | null }) => {
       const res = editingCategory
         ? await apiRequest("PATCH", `/api/inventory/categories/${editingCategory.id}`, data)
         : await apiRequest("POST", "/api/inventory/categories", data);
@@ -2408,6 +2418,23 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 data-testid="input-cat-description"
               />
             </div>
+            <div className="space-y-1">
+              <Label>Cuenta Contable de Gasto <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <Select value={catAccountId || "__none__"} onValueChange={(v) => setCatAccountId(v === "__none__" ? "" : v)}>
+                <SelectTrigger data-testid="select-cat-account">
+                  <SelectValue placeholder="Sin cuenta asociada" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin cuenta asociada</SelectItem>
+                  {expenseAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.codigo} — {a.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Se sugiere automáticamente al cargar una compra con artículos de esta categoría.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>Cancelar</Button>
@@ -2418,6 +2445,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 description: catDescription.trim(),
                 parentId: catParentId || null,
                 isGroup: false,
+                accountId: catAccountId ? parseInt(catAccountId) : null,
               })}
               disabled={saveCategoryMutation.isPending || !catName.trim()}
               data-testid="btn-save-category"

@@ -2667,6 +2667,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE item_categories ADD COLUMN is_group boolean NOT NULL DEFAULT false`)))
   );
 
+  // Cuenta Contable de Gasto sugerida por categoría de artículo, para
+  // auto-completar la carga de facturas de compra (ver purchase-invoices).
+  await withTimeout("item_categories.account_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE item_categories ADD COLUMN account_id integer REFERENCES accounting_accounts(id)`)))
+  );
+
   await withTimeout("email_config.banner_footer", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE email_config

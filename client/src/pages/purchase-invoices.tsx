@@ -234,7 +234,6 @@ const emptyForm = () => ({
   impuestosInternos: "",
   ley25413: "",
   cuentaContableId: "",
-  centroCosto: "",
   observaciones: "",
   subtipoRetencion: "",
 });
@@ -384,10 +383,6 @@ export function InvoiceDialog({
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
-  const { data: costCenters = [] } = useQuery<{ id: number; nombre: string }[]>({
-    queryKey: ["/api/cost-centers"],
-  });
-
   const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
   const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
@@ -456,7 +451,6 @@ export function InvoiceDialog({
         impuestosInternos: editingInvoice.impuestosInternos || "",
         ley25413: editingInvoice.ley25413 || "",
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
-        centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
       });
@@ -536,6 +530,26 @@ export function InvoiceDialog({
       f("supplierId", "");
     }
   };
+
+  // Si todavía no hay Cuenta Contable de Gasto asignada, la sugiere a partir
+  // de la categoría de los artículos cargados (cuando todos comparten una
+  // misma cuenta configurada en su categoría). No pisa un valor ya elegido
+  // (manual o por proveedor).
+  useEffect(() => {
+    if (isReceivedRetention(form.tipoComprobante) || form.cuentaContableId) return;
+    const resolvedAccountIds = new Set<string>();
+    for (const row of invItems) {
+      const categoryId = row.mode === "new"
+        ? row.categoryId
+        : existingInvItems.find((it: any) => String(it.id) === row.existingItemId)?.categoryId;
+      if (!categoryId) continue;
+      const accountId = itemCategories.find((c: any) => c.id === categoryId)?.accountId;
+      if (accountId) resolvedAccountIds.add(String(accountId));
+    }
+    if (resolvedAccountIds.size === 1) {
+      f("cuentaContableId", [...resolvedAccountIds][0]);
+    }
+  }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
   const total = useMemo(() => {
     return calculatePurchaseInvoiceTotal(form);
@@ -948,22 +962,7 @@ export function InvoiceDialog({
                   <p className="text-xs text-muted-foreground mt-1">
                     {isRetencion
                       ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
-                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".'}
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <Label>Centro de Costo</Label>
-                  <Select value={form.centroCosto || "__none__"} onValueChange={(v) => f("centroCosto", v === "__none__" ? "" : v)}>
-                    <SelectTrigger data-testid="select-centro-costo">
-                      <SelectValue placeholder="Seleccionar área..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
-                      {costCenters.map((c) => <SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Informativo. El reporte "Costos por Departamento" agrupa por la Cuenta Contable de Gasto, no por este campo.
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento". Se sugiere sola según la categoría de los artículos cargados.'}
                   </p>
                 </div>
             </div>
@@ -1069,7 +1068,7 @@ export function InvoiceDialog({
                             <div>
                               <Label className="text-xs mb-1 block">Categoría</Label>
                               <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-category-${i}`}><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__none__">— Sin categoría —</SelectItem>
                                   {(() => {
@@ -1745,22 +1744,7 @@ export function InvoiceDialog({
                   <p className="text-xs text-muted-foreground mt-1">
                     {isRetencion
                       ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
-                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".'}
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <Label>Centro de Costo</Label>
-                  <Select value={form.centroCosto || "__none__"} onValueChange={(v) => f("centroCosto", v === "__none__" ? "" : v)}>
-                    <SelectTrigger data-testid="select-centro-costo">
-                      <SelectValue placeholder="Seleccionar área..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
-                      {costCenters.map((c) => <SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Informativo. El reporte "Costos por Departamento" agrupa por la Cuenta Contable de Gasto, no por este campo.
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento". Se sugiere sola según la categoría de los artículos cargados.'}
                   </p>
                 </div>
                 <div className="col-span-2">
@@ -1880,7 +1864,7 @@ export function InvoiceDialog({
                             <div>
                               <Label className="text-xs mb-1 block">Categoría</Label>
                               <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
+                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-category-${i}`}><SelectValue placeholder="Sin categoría" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="__none__">— Sin categoría —</SelectItem>
                                   {(() => {
@@ -2168,12 +2152,6 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               </div>
             </div>
           </div>
-          {invoice.centroCosto && (
-            <div>
-              <div className="text-xs text-muted-foreground">Centro de costo</div>
-              <div className="text-sm">{invoice.centroCosto}</div>
-            </div>
-          )}
           {invoice.estado === "pagado" && (
             <>
               <Separator />

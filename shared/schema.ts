@@ -1487,6 +1487,9 @@ export const itemCategories = pgTable("item_categories", {
   area: text("area").$type<InventoryArea>().notNull().default("general"),
   isActive: text("is_active").default("true"),
   isGroup: boolean("is_group").notNull().default(false),
+  // Cuenta Contable de Gasto que sugiere esta categoría al cargar una compra
+  // (ver purchase-invoices: auto-sugerencia de cuentaContableId por artículo).
+  accountId: integer("account_id").references(() => accountingAccounts.id),
 });
 
 export const insertItemCategorySchema = createInsertSchema(itemCategories).omit({ id: true });
