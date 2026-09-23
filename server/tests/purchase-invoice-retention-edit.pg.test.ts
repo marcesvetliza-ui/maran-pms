@@ -542,4 +542,57 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       await cleanupFixture(fixture);
     }
   }, 15_000);
+
+  it("una Nota de Crédito M de compra resta al Debe, igual que las demás NC (no se comporta como Factura M)", async () => {
+    if (!testPool) return;
+
+    const fixture = await createFixture();
+    try {
+      const expenseAccount = await testPool.query<{ id: number }>(
+        "SELECT id FROM accounting_accounts WHERE codigo = '4.2.1.08.05.02'",
+      );
+      const accountId = expenseAccount.rows[0].id;
+
+      const created = await requestInvoice("POST", "/api/purchase-invoices", {
+        tipoComprobante: "NC-M",
+        supplierId: fixture.supplierId,
+        proveedorNombre: "Proveedor NC-M prueba",
+        proveedorCuit: fixture.supplierCuit,
+        numeroComprobante: `PG-NC-M-${randomUUID()}`,
+        fechaEmision: "2026-08-31",
+        periodo: "08/2026",
+        condicionPago: "contado",
+        montoNeto: "100.00",
+        cuentaContableId: accountId,
+      });
+      expect(created.status).toBe(201);
+      fixture.facturaInvoiceId = Number(created.body.id);
+
+      const ncmState = await testPool.query<{
+        asiento_id: number | null;
+        monto_total: string;
+      }>(
+        `SELECT asiento_id, monto_total
+         FROM purchase_invoices
+         WHERE id = $1`,
+        [fixture.facturaInvoiceId],
+      );
+      // El total guardado es siempre el importe absoluto — el signo negativo
+      // de una NC se aplica únicamente en el asiento contable.
+      expect(ncmState.rows[0].monto_total).toBe("100.00");
+      expect(ncmState.rows[0].asiento_id).toBeTruthy();
+
+      const lines = await readAccountingLines(Number(ncmState.rows[0].asiento_id));
+      const totals = accountingTotals(lines);
+      expect(totals.debe).toBeCloseTo(-100, 2);
+      expect(totals.haber).toBeCloseTo(-100, 2);
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          { codigo: "4.2.1.08.05.02", debe: "-100.00", haber: "0.00" },
+        ]),
+      );
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }, 15_000);
 });
