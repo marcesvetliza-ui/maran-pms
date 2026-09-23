@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { buildInventorySupplierUpdate } from "@/lib/inventory-supplier-association";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -525,62 +524,28 @@ export function InvoiceDialog({
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/purchase-invoices", data);
+      const res = await apiRequest("POST", "/api/purchase-invoices", {
+        ...data,
+        stockItems: invItems.map((row) => ({
+          itemId: row.existingItemId,
+          warehouseId: row.warehouseId || null,
+          quantity: row.quantity,
+          unitCost: row.costPrice,
+        })),
+      });
       return res.json();
     },
-    onSuccess: async (invoice: any) => {
-      let inventoryCount = 0;
-      const invoiceRef = `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`;
-
-      const validExisting = invItems.filter((r) => r.existingItemId);
-
-      // Add stock to existing inventory items
-      for (const row of validExisting) {
-        try {
-          if (row.warehouseId) {
-            await apiRequest("POST", `/api/inventory/warehouses/${row.warehouseId}/movements`, {
-              itemId: row.existingItemId,
-              movementType: "entrada",
-              quantity: row.quantity,
-              notes: invoiceRef,
-              unitCost: parseFloat(row.costPrice) > 0 ? row.costPrice : undefined,
-            });
-          } else {
-            await apiRequest("POST", "/api/inventory/movements", {
-              itemId: row.existingItemId,
-              type: "entrada",
-              quantity: row.quantity,
-              reason: invoiceRef,
-              sourceType: "purchase_invoice",
-              sourceId: String(invoice.id),
-            });
-          }
-
-          const existingItem = existingInvItems.find((item) => item.id === row.existingItemId);
-          const supplierUpdate = buildInventorySupplierUpdate(
-            existingItem?.suppliers ?? [],
-            form.supplierId ? parseInt(form.supplierId) : null,
-            row.costPrice,
-          );
-          if (Object.keys(supplierUpdate).length > 0) {
-            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, supplierUpdate);
-          }
-          inventoryCount++;
-        } catch (e) {
-          console.warn("Error updating existing inventory item:", e);
-        }
-      }
-
-      if (inventoryCount > 0) {
+    onSuccess: () => {
+      if (invItems.length > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       resetDialog();
-      const desc = inventoryCount > 0
-        ? `El asiento contable fue generado. Se ingresaron ${inventoryCount} artículo(s) al inventario.`
-        : "El asiento contable fue generado automáticamente.";
+      const desc = invItems.length > 0
+        ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
+        : "El comprobante fue registrado correctamente.";
       toast({ title: "Comprobante registrado", description: desc });
     },
     onError: (e: any) => {

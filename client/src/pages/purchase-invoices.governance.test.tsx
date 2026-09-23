@@ -82,4 +82,34 @@ describe("Compras: proveedores, artículos e importe", () => {
     await user.click(await screen.findByText("Proveedor Uno SA"));
     expect(screen.getByTestId("btn-submit-invoice")).toBeEnabled();
   });
+
+  it("envía los artículos dentro del mismo POST y no hace altas de stock posteriores", async () => {
+    const captured: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+      if (url.endsWith("/api/inventory/items") && !options?.method) {
+        return new Response(JSON.stringify([{ id: "item-1", name: "Filtro", unit: "unidad", currentStock: "1" }]), { status: 200 });
+      }
+      if (url.endsWith("/api/purchase-invoices") && options?.method === "POST") {
+        captured.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ id: 99 }), { status: 201 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Remito" }));
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.type(screen.getByTestId("input-numero-comprobante"), "R-123");
+    await user.click(screen.getByTestId("btn-add-inv-item"));
+    await user.click(screen.getByTestId("select-existing-item-0"));
+    await user.click(await screen.findByText("Filtro"));
+    await user.clear(screen.getByTestId("input-inv-qty-0"));
+    await user.type(screen.getByTestId("input-inv-qty-0"), "2");
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+    await waitFor(() => expect(captured).toHaveLength(1));
+    expect(captured[0].stockItems).toEqual([{ itemId: "item-1", warehouseId: null, quantity: "2", unitCost: "0" }]);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  });
 });

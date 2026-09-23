@@ -17,6 +17,7 @@ import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs 
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento, generarAsientoOP } from "./accounting";
+import { enterPurchaseInvoiceStock, parsePurchaseStockRows } from "./purchase-invoice-stock";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
@@ -2990,6 +2991,7 @@ export async function registerRoutes(
       if (!isValidPurchaseInvoiceTotal(body.tipoComprobante, montoTotal)) {
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
+      const stockRows = parsePurchaseStockRows(body.stockItems);
 
       // Estado según condición de pago
       const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
@@ -3000,7 +3002,8 @@ export async function registerRoutes(
         : body.numeroComprobante;
 
       // Insertar comprobante
-      const result = await db.execute(sql`
+      const rawInvoice = await db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
         INSERT INTO purchase_invoices (
           tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
           punto_venta, numero_comprobante, numero_comprobante_ext,
@@ -3073,13 +3076,9 @@ export async function registerRoutes(
       // Generar asiento automático — el Remito no tiene datos de facturación
       // (sin IVA ni total), así que no genera asiento contable.
       if (invoice.tipoComprobante !== "REMITO") {
-        try {
-          const entryId = await generarAsiento(invoice);
-          await db.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
-          invoice.asientoId = entryId;
-        } catch (ae) {
-          console.error("Error generando asiento:", ae);
-        }
+        const entryId = await generarAsiento(invoice, tx);
+        await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
+        rawInvoice.asiento_id = entryId;
       }
 
       // Si tiene retención IIBB → insertar en iibb_retentions
@@ -3088,18 +3087,17 @@ export async function registerRoutes(
         body.supplierId &&
         shouldRegisterPracticedIibbRetention(body.tipoComprobante)
       ) {
-        try {
-          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
+          const nroRes = await tx.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
           const nroConstancia = (nroRes.rows[0] as any).next;
-          await db.execute(sql`
+          await tx.execute(sql`
             INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, letra_factura, importe_base, alicuota, importe_retenido, invoice_id)
             VALUES (${nroConstancia}, ${body.supplierId}, ${body.proveedorCuit||""}, ${body.fechaEmision}, ${body.fechaEmision}, ${parseInt(body.numeroComprobante)||0}, ${body.tipoComprobante?.slice(-1)||null}, ${n("montoNeto")}, ${body.alicuotaIibbProveedor||0}, ${n("retencionIibb")}, ${invoice.id})
           `);
-        } catch (re) {
-          console.error("Error inserting iibb_retention:", re);
-        }
       }
-
+      await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
+        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`);
+      return rawInvoice;
+      });
       res.status(201).json(rawInvoice);
     } catch (e: any) {
       res.status(e?.statusCode || 500).json({ error: e.message });
@@ -3251,10 +3249,23 @@ export async function registerRoutes(
   app.delete("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await db.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);
+      const changed = await db.transaction(async (tx) => {
+        const invoice = await tx.execute(sql`SELECT id FROM purchase_invoices WHERE id = ${id} FOR UPDATE`);
+        if (!invoice.rows.length) return false;
+        const movements = await tx.execute(sql`
+          SELECT id FROM stock_movements
+          WHERE source_type = 'purchase_invoice' AND source_id = ${String(id)} LIMIT 1
+        `);
+        if (movements.rows.length) {
+          throw Object.assign(new Error("Este comprobante ingresó artículos al stock. La anulación requiere revertir primero esos movimientos."), { statusCode: 409 });
+        }
+        await tx.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);
+        return true;
+      });
+      if (!changed) return res.status(404).json({ error: "Comprobante no encontrado" });
       res.json({ ok: true });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e.statusCode || 500).json({ error: e.message });
     }
   });
 
