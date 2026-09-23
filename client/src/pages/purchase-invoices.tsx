@@ -127,6 +127,9 @@ const TIPOS = [
   { value: "NC-A", label: "Nota de Crédito A" },
   { value: "NC-B", label: "Nota de Crédito B" },
   { value: "NC-C", label: "Nota de Crédito C" },
+  { value: "ND-A", label: "Nota de Débito A" },
+  { value: "ND-B", label: "Nota de Débito B" },
+  { value: "ND-C", label: "Nota de Débito C" },
   { value: "RESUMEN-BANCO", label: "Resumen Bancario" },
   { value: "LIQ-TARJETA", label: "Liquidación Tarjeta" },
   { value: "RETENCION", label: "Retención Recibida" },
@@ -151,7 +154,7 @@ const LETRA_POR_CONDICION_IVA: Record<string, "A" | "B" | "C"> = {
   "Monotributo": "C",
   "Exento": "B",
 };
-const TIPOS_CON_LETRA = new Set(["FACT-A", "FACT-B", "FACT-C", "NC-A", "NC-B", "NC-C", "RECIBO-A", "RECIBO-B", "RECIBO-C"]);
+const TIPOS_CON_LETRA = new Set(["FACT-A", "FACT-B", "FACT-C", "NC-A", "NC-B", "NC-C", "ND-A", "ND-B", "ND-C", "RECIBO-A", "RECIBO-B", "RECIBO-C"]);
 function sugerirTipoPorCondicionIva(tipoActual: string, condicionIva: string | undefined | null): string {
   const letra = condicionIva ? LETRA_POR_CONDICION_IVA[condicionIva] : undefined;
   if (!letra || !TIPOS_CON_LETRA.has(tipoActual)) return tipoActual;
@@ -384,7 +387,7 @@ export function InvoiceDialog({
     queryKey: ["/api/cost-centers"],
   });
 
-  const TIPOS_C = ["FACT-C", "NC-C", "RECIBO-C"];
+  const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
   const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
 
@@ -691,7 +694,7 @@ export function InvoiceDialog({
   const isLiquidacionTarjeta = isCardSettlement(form.tipoComprobante);
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
-  const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
+  const isFacturaC = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"].includes(form.tipoComprobante);
   // Remito: solo existe en el layout unificado — llega mercadería sin datos de
   // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
   // los datos del emisor y los artículos recibidos.
@@ -743,7 +746,7 @@ export function InvoiceDialog({
                   <Label>Tipo de Comprobante</Label>
                   <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
-                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
+                    if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
                         ...p,
                         tipoComprobante: v,
@@ -1379,7 +1382,7 @@ export function InvoiceDialog({
                   <Label>Tipo de Comprobante</Label>
                   <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
-                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
+                    if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
                         ...p,
                         tipoComprobante: v,

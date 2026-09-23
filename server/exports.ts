@@ -94,6 +94,12 @@ function tipoInfo(tipo: string) {
     "NC-A":          { arca: "003", codcom: "3",   label: "PROV N.CRED -A-" },
     "NC-B":          { arca: "003", codcom: "3",   label: "PROV N.CRED -B-" },
     "NC-C":          { arca: "003", codcom: "3",   label: "PROV N.CRED -C-" },
+    // codcom "4" sigue el mismo patrón que esta tabla ya usa para NC (un
+    // bucket propio, compartido entre letras) — no confirmado todavía con el
+    // código real del sistema contable externo del usuario.
+    "ND-A":          { arca: "004", codcom: "4",   label: "PROV N.DEB -A-" },
+    "ND-B":          { arca: "004", codcom: "4",   label: "PROV N.DEB -B-" },
+    "ND-C":          { arca: "004", codcom: "4",   label: "PROV N.DEB -C-" },
     "RESUMEN-BANCO": { arca: "099", codcom: "183", label: "PROV RESUMEN BANCOS" },
     "LIQ-TARJETA":   { arca: "011", codcom: "195", label: "PROV LIQ TARJETA" },
   };
