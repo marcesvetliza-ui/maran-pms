@@ -897,6 +897,11 @@ export const INCREMENTAL_INDEX_DEFINITIONS = {
     createSql: "CREATE UNIQUE INDEX sales_invoices_spa_account_id_unique ON sales_invoices (spa_account_id) WHERE spa_account_id IS NOT NULL",
     fixtureSql: "CREATE TABLE IF NOT EXISTS sales_invoices (nota_credito_id integer, reconciliation_status text, group_id varchar, group_payment_id varchar, payment_id varchar, spa_account_id varchar)",
   },
+  warehouseStockWarehouseItemUnique: {
+    indexName: "warehouse_stock_warehouse_item_idx",
+    createSql: "CREATE UNIQUE INDEX warehouse_stock_warehouse_item_idx ON warehouse_stock (warehouse_id, item_id)",
+    fixtureSql: "CREATE TABLE IF NOT EXISTS warehouse_stock (warehouse_id varchar, item_id varchar, current_stock numeric, updated_at timestamp)",
+  },
 } as const satisfies Record<string, IncrementalIndexDefinition>;
 
 type IncrementalIndexKey = keyof typeof INCREMENTAL_INDEX_DEFINITIONS;
@@ -2671,6 +2676,38 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // auto-completar la carga de facturas de compra (ver purchase-invoices).
   await withTimeout("item_categories.account_id", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE item_categories ADD COLUMN account_id integer REFERENCES accounting_accounts(id)`)))
+  );
+
+  // warehouse_stock nunca tuvo el índice único (warehouse_id, item_id) que su
+  // propio upsert (INSERT ... ON CONFLICT, en /api/inventory/transfer y en
+  // movimientos internos) da por hecho — en una base sin ese índice, Postgres
+  // rechaza el ON CONFLICT de una (error 42P10), así que cualquier segundo
+  // movimiento de stock para el mismo artículo+depósito fallaba. Primero
+  // fusiona filas duplicadas si las hubiera (sumando su stock, no
+  // descartándolo) y recién ahí crea el índice.
+  await withTimeout("warehouse_stock.dedupe_before_unique_index", T, () =>
+    db.execute(sql`
+      WITH ranked AS (
+        SELECT id, warehouse_id, item_id,
+               ROW_NUMBER() OVER (PARTITION BY warehouse_id, item_id ORDER BY updated_at DESC NULLS LAST, id) AS rn,
+               SUM(current_stock::numeric) OVER (PARTITION BY warehouse_id, item_id) AS total_stock
+        FROM warehouse_stock
+      )
+      UPDATE warehouse_stock ws SET current_stock = ranked.total_stock
+      FROM ranked WHERE ranked.id = ws.id AND ranked.rn = 1 AND ranked.total_stock IS DISTINCT FROM ws.current_stock::numeric
+    `)
+  );
+  await withTimeout("warehouse_stock.delete_duplicates", T, () =>
+    db.execute(sql`
+      DELETE FROM warehouse_stock ws USING (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY warehouse_id, item_id ORDER BY updated_at DESC NULLS LAST, id) AS rn
+        FROM warehouse_stock
+      ) ranked
+      WHERE ranked.id = ws.id AND ranked.rn > 1
+    `)
+  );
+  await withTimeout("warehouse_stock.warehouse_item_unique_index", T, () =>
+    db.execute(sql.raw(incrementalIndexSql("warehouseStockWarehouseItemUnique")))
   );
 
   await withTimeout("email_config.banner_footer", T, () =>

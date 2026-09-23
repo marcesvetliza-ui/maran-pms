@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { Link } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -267,17 +267,18 @@ const movementTypeLabels: Record<string, string> = {
  * dos letras filtra por nombre o SKU en vez de tener que scrollear una
  * lista larga. Usado por TransferForm y por cada fila de InternalMovementForm.
  */
-function ItemCombobox({ items, value, onChange, placeholder = "Artículo...", testId, className = "h-9 text-sm" }: {
+function ItemCombobox({ items, value, onChange, placeholder = "Artículo...", testId, className = "h-9 text-sm", excludeIds }: {
   items: InventoryItem[];
   value: string;
   onChange: (id: string) => void;
   placeholder?: string;
   testId: string;
   className?: string;
+  excludeIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const activeItems = items.filter(i => i.id && i.isActive !== "false");
+  const activeItems = items.filter(i => i.id && i.isActive !== "false" && (i.id === value || !excludeIds?.includes(i.id)));
   const term = search.trim().toLowerCase();
   const filtered = term
     ? activeItems.filter(i =>
@@ -924,7 +925,7 @@ export default function InventoryPage() {
   });
 
   const transferMutation = useMutation({
-    mutationFn: async (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => {
+    mutationFn: async (data: { items: { itemId: string; quantity: number }[]; fromWarehouseId: string; toWarehouseId: string; notes?: string }) => {
       const res = await apiRequest("POST", "/api/inventory/transfer", data);
       return res.json();
     },
@@ -2738,6 +2739,82 @@ function NewItemForm({
   );
 }
 
+type TransferRowData = { itemId: string; quantity: number };
+
+function TransferItemRow({
+  index,
+  items,
+  excludeIds,
+  itemId,
+  quantity,
+  fromWarehouseId,
+  stockDisponible,
+  excedeStock,
+  onChangeItem,
+  onChangeQuantity,
+  onRemove,
+  canRemove,
+}: {
+  index: number;
+  items: InventoryItem[];
+  excludeIds: string[];
+  itemId: string;
+  quantity: number;
+  fromWarehouseId: string;
+  stockDisponible: number | null;
+  excedeStock: boolean;
+  onChangeItem: (id: string) => void;
+  onChangeQuantity: (q: number) => void;
+  onRemove: () => void;
+  canRemove: boolean;
+}) {
+  return (
+    <div data-testid={`row-transfer-item-${index}`}>
+      <div className="flex items-start gap-2">
+        <div className="flex-1 space-y-1">
+          <ItemCombobox
+            items={items}
+            value={itemId}
+            onChange={onChangeItem}
+            placeholder="Seleccionar artículo..."
+            testId={`select-transfer-item-${index}`}
+            excludeIds={excludeIds}
+          />
+          {itemId && fromWarehouseId && (
+            <p className={`text-xs ${excedeStock ? "text-destructive" : "text-muted-foreground"}`} data-testid={`text-stock-disponible-${index}`}>
+              Disponible: {stockDisponible ?? 0}
+            </p>
+          )}
+        </div>
+        <div className="w-28">
+          <Input
+            type="number"
+            min={0.001}
+            step="0.001"
+            value={quantity}
+            onChange={(e) => onChangeQuantity(parseFloat(e.target.value) || 0)}
+            data-testid={`input-transfer-qty-${index}`}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 text-destructive shrink-0"
+          onClick={onRemove}
+          disabled={!canRemove}
+          data-testid={`btn-remove-transfer-row-${index}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+      {excedeStock && (
+        <p className="text-xs text-destructive mt-1">La cantidad supera el stock disponible en el depósito origen.</p>
+      )}
+    </div>
+  );
+}
+
 function TransferForm({
   warehouses,
   items,
@@ -2751,37 +2828,43 @@ function TransferForm({
   items: InventoryItem[];
   preselectedItem: WarehouseStockRow | null;
   preselectedFromWarehouse: string | null;
-  onSubmit: (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => void;
+  onSubmit: (data: { items: TransferRowData[]; fromWarehouseId: string; toWarehouseId: string; notes?: string }) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
-  const [itemId, setItemId] = useState(preselectedItem?.item_id || "");
+  const [rows, setRows] = useState<TransferRowData[]>([
+    { itemId: preselectedItem?.item_id || "", quantity: 1 },
+  ]);
   const [fromWarehouseId, setFromWarehouseId] = useState(preselectedFromWarehouse || "");
   const [toWarehouseId, setToWarehouseId] = useState("");
-  const [quantity, setQuantity] = useState<number>(1);
   const [notes, setNotes] = useState("");
 
-  const { data: itemWarehouseStock = [] } = useQuery<{ warehouse_id: string; current_stock: string }[]>({
-    queryKey: ["/api/inventory/items", itemId, "warehouses"],
-    enabled: !!itemId,
+  const stockQueries = useQueries({
+    queries: rows.map((row) => ({
+      queryKey: ["/api/inventory/items", row.itemId, "warehouses"],
+      enabled: !!row.itemId,
+    })),
+  }) as { data?: { warehouse_id: string; current_stock: string }[] }[];
+
+  const stockPorFila = rows.map((row, i) => {
+    if (!fromWarehouseId) return null;
+    const stock = stockQueries[i]?.data?.find((r) => r.warehouse_id === fromWarehouseId)?.current_stock;
+    return stock !== undefined ? parseFloat(stock) : 0;
   });
-  const stockDisponible = fromWarehouseId
-    ? parseFloat(itemWarehouseStock.find(r => r.warehouse_id === fromWarehouseId)?.current_stock || "0")
-    : null;
-  const excedeStock = stockDisponible !== null && quantity > stockDisponible;
+  const excedeStockPorFila = rows.map((row, i) => stockPorFila[i] !== null && row.quantity > (stockPorFila[i] as number));
+
+  const itemIds = rows.map((r) => r.itemId).filter(Boolean);
+  const hayDuplicados = new Set(itemIds).size !== itemIds.length;
+  const filasCompletas = rows.every((r) => r.itemId && r.quantity > 0);
+  const algunaExcedeStock = excedeStockPorFila.some(Boolean);
+
+  const updateRow = (i: number, patch: Partial<TransferRowData>) =>
+    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addRow = () => setRows((prev) => [...prev, { itemId: "", quantity: 1 }]);
+  const removeRow = (i: number) => setRows((prev) => prev.filter((_, j) => j !== i));
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <Label>Artículo *</Label>
-        <ItemCombobox
-          items={items}
-          value={itemId}
-          onChange={setItemId}
-          placeholder="Seleccionar artículo..."
-          testId="select-transfer-item"
-        />
-      </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <Label>Desde *</Label>
@@ -2793,11 +2876,6 @@ function TransferForm({
               ))}
             </SelectContent>
           </Select>
-          {itemId && fromWarehouseId && (
-            <p className={`text-xs ${excedeStock ? "text-destructive" : "text-muted-foreground"}`} data-testid="text-stock-disponible">
-              Disponible: {stockDisponible ?? 0}
-            </p>
-          )}
         </div>
         <div className="space-y-1">
           <Label>Hacia *</Label>
@@ -2811,13 +2889,34 @@ function TransferForm({
           </Select>
         </div>
       </div>
-      <div className="space-y-1">
-        <Label>Cantidad *</Label>
-        <Input type="number" min={0.001} step="0.001" value={quantity} onChange={e => setQuantity(parseFloat(e.target.value) || 0)} data-testid="input-transfer-qty" />
-        {excedeStock && (
-          <p className="text-xs text-destructive">La cantidad supera el stock disponible en el depósito origen.</p>
+
+      <div className="space-y-2">
+        <Label>Artículos *</Label>
+        {rows.map((row, i) => (
+          <TransferItemRow
+            key={i}
+            index={i}
+            items={items}
+            excludeIds={itemIds}
+            itemId={row.itemId}
+            quantity={row.quantity}
+            fromWarehouseId={fromWarehouseId}
+            stockDisponible={stockPorFila[i]}
+            excedeStock={excedeStockPorFila[i]}
+            onChangeItem={(id) => updateRow(i, { itemId: id })}
+            onChangeQuantity={(q) => updateRow(i, { quantity: q })}
+            onRemove={() => removeRow(i)}
+            canRemove={rows.length > 1}
+          />
+        ))}
+        {hayDuplicados && (
+          <p className="text-xs text-destructive">Un mismo artículo no puede repetirse en dos filas.</p>
         )}
+        <Button type="button" variant="outline" size="sm" onClick={addRow} data-testid="btn-add-transfer-row">
+          <Plus className="h-4 w-4 mr-2" />Agregar artículo
+        </Button>
       </div>
+
       <div className="space-y-1">
         <Label>Notas (opcional)</Label>
         <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Motivo de la transferencia..." data-testid="input-transfer-notes" />
@@ -2825,8 +2924,8 @@ function TransferForm({
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>Cancelar</Button>
         <Button
-          onClick={() => onSubmit({ itemId, fromWarehouseId, toWarehouseId, quantity, notes: notes || undefined })}
-          disabled={isPending || !itemId || !fromWarehouseId || !toWarehouseId || quantity <= 0 || excedeStock}
+          onClick={() => onSubmit({ items: rows, fromWarehouseId, toWarehouseId, notes: notes || undefined })}
+          disabled={isPending || !fromWarehouseId || !toWarehouseId || !filasCompletas || hayDuplicados || algunaExcedeStock}
           data-testid="btn-confirm-transfer"
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -2861,7 +2960,7 @@ export function TransferStockForm({ embedded, open, onClose }: {
   });
 
   const transferMutation = useMutation({
-    mutationFn: async (data: { itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; notes?: string }) => {
+    mutationFn: async (data: { items: { itemId: string; quantity: number }[]; fromWarehouseId: string; toWarehouseId: string; notes?: string }) => {
       const res = await apiRequest("POST", "/api/inventory/transfer", data);
       return res.json();
     },

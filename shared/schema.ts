@@ -1580,7 +1580,11 @@ export const warehouseStock = pgTable("warehouse_stock", {
   itemId: varchar("item_id").notNull(),
   currentStock: decimal("current_stock", { precision: 10, scale: 3 }).default("0"),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  // El upsert de /api/inventory/transfer (server/routes/inventory.ts) depende
+  // de este índice para su ON CONFLICT (warehouse_id, item_id).
+  warehouseItemUnique: uniqueIndex("warehouse_stock_warehouse_item_idx").on(table.warehouseId, table.itemId),
+}));
 
 export const insertWarehouseStockSchema = createInsertSchema(warehouseStock).omit({ id: true, updatedAt: true });
 export type InsertWarehouseStock = z.infer<typeof insertWarehouseStockSchema>;
