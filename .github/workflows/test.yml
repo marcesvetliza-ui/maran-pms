@@ -62,5 +62,10 @@ jobs:
       - name: Preparar esquema de PostgreSQL para tests de integración
         run: npm run db:migrate:ci
 
+      - name: Verificar preventiva mensual por habitación sobre PostgreSQL vacío
+        env:
+          RUN_PREVENTIVE_ROOMS_PG_TESTS: "true"
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/preventive-rooms.pg.test.ts
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test

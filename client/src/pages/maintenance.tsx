@@ -34,6 +34,7 @@ import {
   Edit,
   Play,
   ChevronRight,
+  ChevronDown,
   Lock,
   CalendarRange,
   Calendar,
@@ -192,9 +193,89 @@ function freqLabel(freq: string, days: number) {
   return opt.label;
 }
 
+type RoomPreventiveRow = { room_id: string; room_number: string; floor: number; last_done_at: string | null; done_at_current_month: string | null };
+
+function RoomPreventiveCard({ task, today }: { task: any; today: string }) {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [selected, setSelected] = useState<RoomPreventiveRow | null>(null);
+  const [notes, setNotes] = useState("");
+  const [historyRoom, setHistoryRoom] = useState<RoomPreventiveRow | null>(null);
+  const key = ["/api/maintenance/preventive", task.id, "rooms"];
+  const { data: rooms = [], isLoading } = useQuery<RoomPreventiveRow[]>({
+    queryKey: key, enabled: expanded,
+    queryFn: async () => (await apiRequest("GET", `/api/maintenance/preventive/${task.id}/rooms`)).json(),
+  });
+  const { data: history = [] } = useQuery<any[]>({
+    queryKey: [...key, historyRoom?.room_id, "history"], enabled: !!historyRoom,
+    queryFn: async () => (await apiRequest("GET", `/api/maintenance/preventive/${task.id}/rooms/${historyRoom?.room_id}/history`)).json(),
+  });
+  const done = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", `/api/maintenance/preventive/${task.id}/rooms/${selected?.room_id}/done`, { notes });
+      if (!r.ok) throw new Error((await r.json()).error || "No se pudo registrar la limpieza");
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: key });
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      setSelected(null); setNotes("");
+      toast({ title: "Limpieza registrada" });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+  const visible = pendingOnly ? rooms.filter(r => !r.done_at_current_month) : rooms;
+  const fmt = (value: string | null) => value ? new Date(value + "T00:00:00").toLocaleDateString("es-AR") : "—";
+  return <Card className={task.next_due_at < today ? "border-l-4 border-l-red-500" : "border-l-4 border-l-green-500"}>
+    <CardContent className="p-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center flex-wrap gap-2"><strong>{task.name}</strong><Badge variant="outline">Mensual · mes calendario</Badge></div>
+          {task.description && <p className="text-sm text-muted-foreground">{task.description}</p>}
+          <p className="text-sm text-muted-foreground">{task.completed_count} de {task.room_count} habitaciones realizadas este mes · Vence {fmt(task.next_due_at)}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setExpanded(!expanded)}>
+          {expanded ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />} Habitaciones
+        </Button>
+      </div>
+      {expanded && <div className="space-y-2">
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} /> Solo pendientes de este mes</label>
+        {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : <div className="max-h-[420px] overflow-auto rounded border">
+          <Table><TableHeader><TableRow><TableHead>Habitación</TableHead><TableHead>Última limpieza</TableHead><TableHead>Este mes</TableHead><TableHead className="text-right">Acciones</TableHead></TableRow></TableHeader>
+            <TableBody>{visible.map(room => <TableRow key={room.room_id}>
+              <TableCell className="font-semibold">{room.room_number}</TableCell><TableCell>{fmt(room.last_done_at)}</TableCell>
+              <TableCell>{room.done_at_current_month ? <Badge className="bg-green-600">Realizada {fmt(room.done_at_current_month)}</Badge> : <Badge variant="outline">Pendiente</Badge>}</TableCell>
+              <TableCell className="text-right whitespace-nowrap">
+                <Button size="sm" variant="ghost" onClick={() => setHistoryRoom(room)}>Historial</Button>
+                {!room.done_at_current_month && <Button size="sm" onClick={() => setSelected(room)}>Marcar hecha</Button>}
+              </TableCell>
+            </TableRow>)}</TableBody></Table>
+        </div>}
+      </div>}
+    </CardContent>
+    <Dialog open={!!selected} onOpenChange={open => { if (!open) { setSelected(null); setNotes(""); } }}>
+      <DialogContent><DialogHeader><DialogTitle>Registrar limpieza · Hab. {selected?.room_number}</DialogTitle><DialogDescription>Se registrará la limpieza de filtros de este mes calendario y quedará en el historial.</DialogDescription></DialogHeader>
+        <Label>Observaciones (opcional)</Label><Textarea value={notes} onChange={e => setNotes(e.target.value)} />
+        <DialogFooter><Button variant="outline" onClick={() => setSelected(null)}>Cancelar</Button><Button disabled={done.isPending} onClick={() => done.mutate()}>Confirmar</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!historyRoom} onOpenChange={open => { if (!open) setHistoryRoom(null); }}>
+      <DialogContent><DialogHeader><DialogTitle>Historial · Hab. {historyRoom?.room_number}</DialogTitle></DialogHeader>
+        <div className="max-h-72 overflow-auto space-y-2">{history.length ? history.map((entry: any) => <div key={entry.period} className="border-b py-2 text-sm">
+          <strong>{entry.period?.slice(0, 7)}</strong> · {fmt(entry.performed_at)}{entry.notes && <p className="text-muted-foreground">{entry.notes}</p>}
+        </div>) : <p className="text-sm text-muted-foreground">Todavía no hay limpiezas registradas.</p>}</div>
+      </DialogContent>
+    </Dialog>
+  </Card>;
+}
+
 function PreventiveTab() {
   const { toast } = useToast();
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isRoomFormOpen, setIsRoomFormOpen] = useState(false);
+  const [roomTaskName, setRoomTaskName] = useState("");
+  const [roomTaskDescription, setRoomTaskDescription] = useState("");
   const [editingTask, setEditingTask] = useState<any | null>(null);
   const [doneTask, setDoneTask] = useState<any | null>(null);
   const [doneNotes, setDoneNotes] = useState("");
@@ -217,6 +298,20 @@ function PreventiveTab() {
     mutationFn: async (body: any) => { const r = await apiRequest("POST", "/api/maintenance/preventive", body); if (!r.ok) { const e = await r.json(); throw new Error(e.error); } return r.json(); },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] }); setIsFormOpen(false); resetForm(); toast({ title: "Tarea creada" }); },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const createRoomMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/maintenance/preventive/rooms", { name: roomTaskName, description: roomTaskDescription });
+      if (!r.ok) throw new Error((await r.json()).error || "No se pudo crear la preventiva");
+      return r.json();
+    },
+    onSuccess: (task: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/preventive"] });
+      setIsRoomFormOpen(false); setRoomTaskName(""); setRoomTaskDescription("");
+      toast({ title: "Preventiva creada", description: `${task.room_count} habitaciones incluidas` });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -308,7 +403,8 @@ function PreventiveTab() {
         </Card>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button variant="outline" onClick={() => setIsRoomFormOpen(true)}><Plus className="h-4 w-4 mr-2" /> Preventiva por habitación</Button>
         <Button onClick={() => { setEditingTask(null); resetForm(); setIsFormOpen(true); }} data-testid="btn-new-preventive">
           <Plus className="h-4 w-4 mr-2" /> Nueva tarea preventiva
         </Button>
@@ -326,7 +422,7 @@ function PreventiveTab() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {tasks.map(task => (
+          {tasks.map(task => task.room_count > 0 ? <RoomPreventiveCard key={task.id} task={task} today={today} /> : (
             <Card key={task.id} className={urgencyStyle(task)} data-testid={`preventive-task-${task.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -376,6 +472,14 @@ function PreventiveTab() {
           ))}
         </div>
       )}
+
+      <Dialog open={isRoomFormOpen} onOpenChange={setIsRoomFormOpen}>
+        <DialogContent><DialogHeader><DialogTitle>Nueva preventiva por habitación</DialogTitle><DialogDescription>Una sola tarea con seguimiento independiente de todas las habitaciones activas, una vez por mes calendario.</DialogDescription></DialogHeader>
+          <div className="space-y-3"><Label>Nombre *</Label><Input value={roomTaskName} onChange={e => setRoomTaskName(e.target.value)} placeholder="Limpieza de filtros AACC" />
+            <Label>Descripción (opcional)</Label><Textarea value={roomTaskDescription} onChange={e => setRoomTaskDescription(e.target.value)} /></div>
+          <DialogFooter><Button variant="outline" onClick={() => setIsRoomFormOpen(false)}>Cancelar</Button><Button disabled={!roomTaskName.trim() || createRoomMutation.isPending} onClick={() => createRoomMutation.mutate()}>Crear para todas las habitaciones</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog Nueva/Editar tarea */}
       <Dialog open={isFormOpen} onOpenChange={o => { if (!o) { setIsFormOpen(false); setEditingTask(null); resetForm(); } }}>
