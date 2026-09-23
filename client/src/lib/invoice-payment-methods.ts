@@ -2,6 +2,7 @@ export interface InvoicePaymentRow {
   method: string;
   amount: string;
   retencionEnabled?: boolean;
+  retencionTipo?: "iibb" | "ganancias" | "iva";
   retencionMonto?: string;
 }
 
@@ -116,10 +117,16 @@ export function buildInvoicePaymentMethods(
   for (const row of paymentRows) {
     const netAmount = Number(row.amount);
     const retentionAmount = row.retencionEnabled ? Number(row.retencionMonto) : 0;
-    const amount = (Number.isFinite(netAmount) ? netAmount : 0) +
-      (Number.isFinite(retentionAmount) ? retentionAmount : 0);
-    if (!row.method || amount <= 0.005) continue;
-    detail.push({ method: row.method, amount: Number(amount.toFixed(2)) });
+    // A retención is money the payer withheld, not money that reached Caja —
+    // it gets its own line (method "retencion_<tipo>") instead of being
+    // folded into the real payment method's amount, so Caja and the PDF
+    // don't record it as cash/transferencia/etc. that never arrived.
+    if (row.method && Number.isFinite(netAmount) && netAmount > 0.005) {
+      detail.push({ method: row.method, amount: Number(netAmount.toFixed(2)) });
+    }
+    if (row.retencionTipo && Number.isFinite(retentionAmount) && retentionAmount > 0.005) {
+      detail.push({ method: `retencion_${row.retencionTipo}`, amount: Number(retentionAmount.toFixed(2)) });
+    }
   }
 
   if (detail.length === 0) return {};

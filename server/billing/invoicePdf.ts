@@ -15,6 +15,7 @@ const INVOICE_PAYMENT_GRID_METHODS = [
   "transferencia",
   "cheque",
   "cuenta_corriente",
+  "retencion",
 ] as const;
 
 function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] | null {
@@ -26,6 +27,10 @@ function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METH
     : method === "cuenta_corriente" ? "cuenta_corriente"
     : method === "adelanto" ? "adelanto"
     : method === "efectivo" ? "efectivo"
+    // Una retención (IIBB/Ganancias/IVA) que nos practica quien nos paga: no
+    // es plata que haya entrado en Caja, así que tiene su propia columna —
+    // nunca debe contarse como efectivo/transferencia/etc.
+    : method.startsWith("retencion_") ? "retencion"
     : null;
 }
 
@@ -534,6 +539,7 @@ export async function generarFacturaPDF(
       cheque: "Cheque", tarjeta: "Tarjeta Cto.", debito: "Tarjeta Dbo.",
       mercadopago: "Mercado Pago", compensacion: "Compensación",
       cuenta_corriente: "Cta. Corriente", adelanto: "Adelantos", otro: "Otros",
+      retencion: "Retención",
     };
 
     // Grid de formas de pago
@@ -546,6 +552,7 @@ export async function generarFacturaPDF(
       { key: "transferencia", label: "Depósitos" },
       { key: "cheque",        label: "Cheques" },
       { key: "cuenta_corriente", label: "Cta. Corriente" },
+      { key: "retencion",     label: "Retención" },
     ];
 
     // Determine amounts

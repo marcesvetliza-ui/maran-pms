@@ -139,4 +139,21 @@ describe("ARCA invoice PDF compliance", () => {
       tarjeta: 0,
     });
   });
+
+  it("gives a retención practicada its own PDF cell instead of counting it as cash", () => {
+    expect(getInvoicePaymentAmounts("pago_dividido", [
+      { method: "transferencia", amount: 98000 },
+      { method: "retencion_ganancias", amount: 2000 },
+    ], 100000)).toMatchObject({
+      efectivo: 0,
+      transferencia: 98000,
+      retencion: 2000,
+    });
+    expect(getInvoicePaymentAmounts("pago_dividido", [
+      { method: "efectivo", amount: 48000 },
+      { method: "retencion_iibb", amount: 2000 },
+    ], 50000)).toMatchObject({
+      retencion: 2000,
+    });
+  });
 });

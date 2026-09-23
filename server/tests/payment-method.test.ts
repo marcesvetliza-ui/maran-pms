@@ -11,4 +11,14 @@ describe("reservation payment method classification", () => {
       });
     },
   );
+
+  it.each(["retencion_iibb", "retencion_ganancias", "retencion_iva"])(
+    "treats %s as informational — it settles the balance but never reached Caja",
+    (method) => {
+      expect(classifyReservationPaymentMethod(method)).toMatchObject({
+        method,
+        informational: true,
+      });
+    },
+  );
 });

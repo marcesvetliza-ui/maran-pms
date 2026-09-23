@@ -307,6 +307,15 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cuenta_corriente: "Cuenta Corriente",
 };
 
+// Retención practicada por quien nos paga: es su propia línea de cobro
+// histórico, no una forma de pago seleccionable — no forma parte del mapa
+// de arriba, que alimenta el selector "Forma de pago" de cada renglón.
+const RETENTION_METHOD_LABELS: Record<string, string> = {
+  retencion_iibb: "Retención IIBB",
+  retencion_ganancias: "Retención Ganancias",
+  retencion_iva: "Retención IVA",
+};
+
 const TIPO_OPTIONS = [
   { value: "FA",  label: "Factura A",           fiscal: true },
   { value: "FB",  label: "Factura B",           fiscal: true },
@@ -1372,27 +1381,49 @@ export function PrefacturaDialog({
         const netAmount = parseFloat(row.amount) || 0;
         const retMonto = row.retencionEnabled ? (parseFloat(row.retencionMonto) || 0) : 0;
         if (netAmount <= 0 && retMonto <= 0) continue;
-        const grossAmount = (netAmount + retMonto).toFixed(2);
-        const notes = retMonto > 0
-          ? JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } })
-          : null;
 
-        const res = await apiRequest("POST", "/api/payments", {
-          reservationId,
-          amount: grossAmount,
-          method: row.method,
-          date: getLocalToday(),
-          reference: null,
-          notes,
-          receiptType,
-          billingTarget,
-          companyId: billingTarget === "company" ? billingEntityId : null,
-          agencyId: billingTarget === "agency" ? billingEntityId : null,
-          invoiceData: invoiceRef,
-        });
-        const resBody = await res.json();
-        if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar el pago");
-        paymentCount++;
+        // A retención (IIBB/Ganancias) that whoever pays us withholds never
+        // reaches Caja: it's registered as its own informational payment
+        // (method "retencion_<tipo>"), not folded into the real payment
+        // method's amount — otherwise Caja and the comprobante would show
+        // money that was never actually received.
+        if (netAmount > 0) {
+          const res = await apiRequest("POST", "/api/payments", {
+            reservationId,
+            amount: netAmount.toFixed(2),
+            method: row.method,
+            date: getLocalToday(),
+            reference: null,
+            notes: null,
+            receiptType,
+            billingTarget,
+            companyId: billingTarget === "company" ? billingEntityId : null,
+            agencyId: billingTarget === "agency" ? billingEntityId : null,
+            invoiceData: invoiceRef,
+          });
+          const resBody = await res.json();
+          if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar el pago");
+          paymentCount++;
+        }
+        if (retMonto > 0) {
+          const notes = JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } });
+          const res = await apiRequest("POST", "/api/payments", {
+            reservationId,
+            amount: retMonto.toFixed(2),
+            method: `retencion_${row.retencionTipo}`,
+            date: getLocalToday(),
+            reference: null,
+            notes,
+            receiptType,
+            billingTarget,
+            companyId: billingTarget === "company" ? billingEntityId : null,
+            agencyId: billingTarget === "agency" ? billingEntityId : null,
+            invoiceData: invoiceRef,
+          });
+          const resBody = await res.json();
+          if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar la retención");
+          paymentCount++;
+        }
       }
       if (paymentCount > 0) setPaymentRegistered(true);
 
@@ -1802,7 +1833,7 @@ export function PrefacturaDialog({
                           <TableRow key={p.id} className="opacity-80">
                             <TableCell />
                             <TableCell className="text-sm">
-                              Cobro histórico · {PAYMENT_METHOD_LABELS[p.method] || p.method}
+                              Cobro histórico · {RETENTION_METHOD_LABELS[p.method] || PAYMENT_METHOD_LABELS[p.method] || p.method}
                               {p.date ? <span className="text-xs text-muted-foreground ml-2">{formatDateAR(p.date)}</span> : null}
                               {available?.releasedFromCreditedInvoice && (
                                 <span className="block text-xs text-amber-700 dark:text-amber-300">
@@ -2256,6 +2287,7 @@ export function PrefacturaDialog({
                         type="button" variant="ghost" size="sm"
                         className="h-6 px-2 text-xs text-muted-foreground"
                         onClick={() => updateRow(row.id, "retencionEnabled", true)}
+                        data-testid={`btn-add-retencion-${idx}`}
                       >
                         Agregar retención impositiva
                       </Button>
@@ -2271,7 +2303,7 @@ export function PrefacturaDialog({
                           <div>
                             <Label className="text-xs mb-1 block">Tipo</Label>
                             <Select value={row.retencionTipo} onValueChange={v => updateRow(row.id, "retencionTipo", v)}>
-                              <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                              <SelectTrigger className="h-7 text-xs" data-testid={`select-retencion-tipo-${idx}`}><SelectValue /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
                                 <SelectItem value="ganancias">Ganancias</SelectItem>
@@ -2280,7 +2312,7 @@ export function PrefacturaDialog({
                           </div>
                           <div>
                             <Label className="text-xs mb-1 block">Monto retenido</Label>
-                            <Input type="number" step="0.01" min="0" value={row.retencionMonto} onChange={e => updateRow(row.id, "retencionMonto", e.target.value)} placeholder="0.00" className="h-7 text-xs" />
+                            <Input type="number" step="0.01" min="0" value={row.retencionMonto} onChange={e => updateRow(row.id, "retencionMonto", e.target.value)} placeholder="0.00" className="h-7 text-xs" data-testid={`input-retencion-monto-${idx}`} />
                           </div>
                         </div>
                         {row.retencionMonto && parseFloat(row.retencionMonto) > 0 && row.amount && parseFloat(row.amount) > 0 && (
