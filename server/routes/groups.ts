@@ -19,6 +19,7 @@ import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-a
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { emitirFactura } from "../billing/invoiceService";
 import { assertInvoiceEmittedForLink, canonicalInvoiceReference } from "../billing/invoiceLinkIntegrity";
+import { countReservationExtraFolioCharges } from "../groupReservationExtraCharges";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -2438,13 +2439,7 @@ export function registerGroupsRoutes(app: Express) {
       await assertGroupStructureCanChange(groupId);
 
       // Verificar que no tenga cargos extras antes de desasignar
-      const chargesCheck = await db.execute(sql`
-        SELECT COUNT(*) as cnt FROM folio_movements
-        WHERE reservation_id = ${reservationId}
-          AND type = 'charge'
-          AND source_type NOT IN ('accommodation', 'transfer', 'transfer_reversal')
-      `);
-      const chargeCount = parseInt(String(chargesCheck.rows[0]?.cnt ?? "0"));
+      const chargeCount = await countReservationExtraFolioCharges(reservationId);
       if (chargeCount > 0) {
         return res.status(400).json({
           error: `Esta reserva tiene ${chargeCount} cargo(s) extra registrado(s). Eliminá o revertí los cargos antes de desasignarla del grupo.`
