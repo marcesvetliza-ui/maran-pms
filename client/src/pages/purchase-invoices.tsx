@@ -12,10 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
-  SelectSeparator, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -42,6 +39,7 @@ import {
   calculatePurchaseInvoiceTotal,
   isCardSettlement,
   isReceivedRetention,
+  isValidPurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   receivedRetentionAccountCode,
 } from "@shared/purchaseInvoiceTotals";
@@ -241,13 +239,7 @@ const emptyForm = () => ({
 // ─── Subcomponent: New Invoice Dialog ────────────────────────────────────────
 
 interface InvItemRow {
-  mode: "new" | "existing";
-  name: string;
   existingItemId: string;
-  categoryId: string;
-  supplierId: string;
-  itemKind: string;
-  minStock: string;
   quantity: string;
   unit: string;
   costPrice: string;
@@ -255,10 +247,6 @@ interface InvItemRow {
 }
 
 const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
-
-const emptyQuickSupplier = {
-  razonSocial: "", cuit: "", condicionIva: "Responsable Inscripto", cuentaContableId: "",
-};
 
 const IVA_MAP: Record<string, { field: string; rate: number }> = {
   "5":   { field: "montoIva5",   rate: 5 },
@@ -389,8 +377,6 @@ export function InvoiceDialog({
   const [form, setForm] = useState(newForm);
   const [step, setStep] = useState(0);
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
-  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const [quickForm, setQuickForm] = useState({ ...emptyQuickSupplier });
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
@@ -430,7 +416,6 @@ export function InvoiceDialog({
   const isEditing = !!editingInvoice;
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
-  const qf = (k: string, v: string) => setQuickForm((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
     if (open && editingInvoice) {
@@ -476,36 +461,6 @@ export function InvoiceDialog({
     }
   }, [open, editingInvoice, initialTipo]);
 
-  const quickCreateMut = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
-    onSuccess: (res: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
-      setQuickCreateOpen(false);
-      setQuickForm({ ...emptyQuickSupplier });
-      if (res?.id) {
-        f("supplierId", String(res.id));
-        f("proveedorNombre", res.razon_social || "");
-        f("proveedorCuit", res.cuit || "");
-        if (res.cuenta_contable_id) f("cuentaContableId", String(res.cuenta_contable_id));
-      }
-      toast({ title: "Proveedor creado y seleccionado" });
-    },
-    onError: (e: any) => toast({ title: "Error al crear proveedor", description: e.message, variant: "destructive" }),
-  });
-
-  const handleQuickCreateSubmit = () => {
-    if (!quickForm.razonSocial || !quickForm.cuit || !quickForm.condicionIva) {
-      toast({ title: "Complete razón social, CUIT y condición IVA", variant: "destructive" });
-      return;
-    }
-    quickCreateMut.mutate({
-      razonSocial: quickForm.razonSocial,
-      cuit: quickForm.cuit,
-      condicionIva: quickForm.condicionIva,
-      cuentaContableId: quickForm.cuentaContableId || null,
-    });
-  };
-
   const { data: itemCategories = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/categories"],
     enabled: open,
@@ -516,12 +471,10 @@ export function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", supplierId: "", itemKind: "materia_prima", minStock: "0", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
+  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
-  const toggleInvRowMode = (i: number, mode: "new" | "existing") =>
-    setInvItems((p) => p.map((r, j) => j === i ? { ...r, mode, name: "", existingItemId: "" } : r));
 
   const { data: existingInvItems = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/items"],
@@ -542,21 +495,19 @@ export function InvoiceDialog({
         f("cuentaContableId", String(s.cuentaContableId));
       }
     } else {
-      f("supplierId", "");
+      setForm((p) => ({ ...p, supplierId: "", proveedorNombre: "", proveedorCuit: "" }));
     }
   };
 
   // Si todavía no hay Cuenta Contable de Gasto asignada, la sugiere a partir
   // de la categoría de los artículos cargados (cuando todos comparten una
   // misma cuenta configurada en su categoría). No pisa un valor ya elegido
-  // (manual o por proveedor).
+  // (por proveedor o elegido en el formulario).
   useEffect(() => {
     if (isReceivedRetention(form.tipoComprobante) || form.cuentaContableId) return;
     const resolvedAccountIds = new Set<string>();
     for (const row of invItems) {
-      const categoryId = row.mode === "new"
-        ? row.categoryId
-        : existingInvItems.find((it: any) => String(it.id) === row.existingItemId)?.categoryId;
+      const categoryId = existingInvItems.find((it: any) => String(it.id) === row.existingItemId)?.categoryId;
       if (!categoryId) continue;
       const accountId = itemCategories.find((c: any) => c.id === categoryId)?.accountId;
       if (accountId) resolvedAccountIds.add(String(accountId));
@@ -581,41 +532,7 @@ export function InvoiceDialog({
       let inventoryCount = 0;
       const invoiceRef = `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`;
 
-      const validNew = invItems.filter((r) => r.mode === "new" && r.name.trim());
-      const validExisting = invItems.filter((r) => r.mode === "existing" && r.existingItemId);
-
-      // Create new inventory items
-      for (const row of validNew) {
-        try {
-          const itemRes = await apiRequest("POST", "/api/inventory/items", {
-            name: row.name.trim(),
-            categoryId: row.categoryId || undefined,
-            accountingSupplierIds: form.supplierId ? [parseInt(form.supplierId)] : [],
-            preferredAccountingSupplierId: form.supplierId ? parseInt(form.supplierId) : null,
-            unit: row.unit,
-            costPrice: row.costPrice,
-            currentStock: row.quantity,
-            minStock: parseInt(row.minStock) || 0,
-            itemKind: row.itemKind || "materia_prima",
-            warehouseId: row.warehouseId || undefined,
-          });
-          const item = await itemRes.json();
-          // Only create a generic movement if no warehouse was selected (warehouse route already recorded it)
-          if (!row.warehouseId) {
-            await apiRequest("POST", "/api/inventory/movements", {
-              itemId: item.id,
-              type: "entrada",
-              quantity: row.quantity,
-              reason: invoiceRef,
-              sourceType: "purchase_invoice",
-              sourceId: String(invoice.id),
-            });
-          }
-          inventoryCount++;
-        } catch (e) {
-          console.warn("Error creating inventory item:", e);
-        }
-      }
+      const validExisting = invItems.filter((r) => r.existingItemId);
 
       // Add stock to existing inventory items
       for (const row of validExisting) {
@@ -700,6 +617,10 @@ export function InvoiceDialog({
       setStep(0);
       return;
     }
+    if (!isValidPurchaseInvoiceTotal(form.tipoComprobante, total)) {
+      toast({ title: "El total del comprobante debe ser mayor a $0,00", variant: "destructive" });
+      return;
+    }
     if (isEditing) {
       patchMut.mutate({ ...form, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
       return;
@@ -708,9 +629,10 @@ export function InvoiceDialog({
       toast({ title: "Ingrese el número de comprobante", variant: "destructive" });
       return;
     }
-    const validItems = invItems.filter(
-      (r) => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)
-    );
+    if (!suppliers.some((supplier) => String(supplier.id) === form.supplierId)) {
+      toast({ title: "Elegí un proveedor cargado en el ABM", variant: "destructive" });
+      return;
+    }
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
     // (descuentos exclusivos, artículos sin cargo, etc.).
@@ -858,6 +780,7 @@ export function InvoiceDialog({
             <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
+                <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
                   <div className="flex gap-2 items-center">
                     <div className="relative flex-1">
                       <input
@@ -866,8 +789,6 @@ export function InvoiceDialog({
                         placeholder="Buscar proveedor..."
                         value={supplierDropdownOpen
                           ? supplierSearch
-                          : form.supplierId === "manual"
-                          ? "— Ingreso manual —"
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
@@ -879,13 +800,6 @@ export function InvoiceDialog({
                       />
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
-                          <div
-                            className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                            onMouseDown={() => { handleSupplierChange("manual"); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
-                          >
-                            <Check className={`h-4 w-4 shrink-0 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
-                            — Ingresar manual —
-                          </div>
                           {[...suppliers]
                             .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
@@ -909,30 +823,16 @@ export function InvoiceDialog({
                         </div>
                       )}
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onMouseDown={(e) => { e.preventDefault(); setSupplierDropdownOpen(false); setQuickCreateOpen(true); }}
-                      title="Crear nuevo proveedor"
-                      data-testid="btn-quick-create-supplier"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
-                {(form.supplierId === "manual" || !form.supplierId) && (
-                  <>
-                    <div>
-                      <Label>Razón Social</Label>
-                      <Input value={form.proveedorNombre} onChange={(e) => f("proveedorNombre", e.target.value)} data-testid="input-proveedor-nombre" />
-                    </div>
-                    <div>
-                      <Label>CUIT</Label>
-                      <Input value={form.proveedorCuit} onChange={(e) => f("proveedorCuit", e.target.value)} data-testid="input-proveedor-cuit" />
-                    </div>
-                  </>
-                )}
+                <div>
+                  <Label>Razón Social</Label>
+                  <Input value={form.proveedorNombre} readOnly data-testid="input-proveedor-nombre" />
+                </div>
+                <div>
+                  <Label>CUIT</Label>
+                  <Input value={form.proveedorCuit} readOnly data-testid="input-proveedor-cuit" />
+                </div>
                 <div>
                   <Label>Punto de Venta</Label>
                   <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
@@ -991,41 +891,20 @@ export function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Opcional — Agregá los productos recibidos. Podés sumar stock a artículos existentes o crear artículos nuevos.</span>
+                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
               </div>
 
               {invItems.length > 0 && (
                 <div className="space-y-3">
                   {invItems.map((row, i) => (
                     <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
-                      {/* Mode toggle */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex rounded-md border overflow-hidden text-xs">
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "existing" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "existing")}
-                            data-testid={`btn-mode-existing-${i}`}
-                          >
-                            Artículo existente
-                          </button>
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "new" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "new")}
-                            data-testid={`btn-mode-new-${i}`}
-                          >
-                            Artículo nuevo
-                          </button>
-                        </div>
-                        <div className="flex-1" />
+                      <div className="flex justify-end">
                         <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
 
                       {/* Article selector / name */}
-                      {row.mode === "existing" ? (
                         <div>
                           <Label className="text-xs mb-1 block">Artículo del inventario</Label>
                           <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
@@ -1073,68 +952,6 @@ export function InvoiceDialog({
                             </PopoverContent>
                           </Popover>
                         </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Nombre del artículo *</Label>
-                              <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Categoría</Label>
-                              <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-category-${i}`}><SelectValue placeholder="Sin categoría" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                  {(() => {
-                                    const cats = (itemCategories as any[]);
-                                    const groups = cats.filter((c: any) => c.isGroup);
-                                    const leafCats = cats.filter((c: any) => !c.isGroup && c.id);
-                                    const result: JSX.Element[] = [];
-                                    for (const g of groups) {
-                                      const children = leafCats.filter((c: any) => c.parentId === g.id);
-                                      if (!children.length) continue;
-                                      result.push(
-                                        <SelectGroup key={g.id}>
-                                          <SelectLabel>{g.name}</SelectLabel>
-                                          {children.map((cat: any) => (
-                                            <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                          ))}
-                                        </SelectGroup>
-                                      );
-                                    }
-                                    const ungrouped = leafCats.filter((c: any) => !c.parentId);
-                                    if (ungrouped.length) {
-                                      if (result.length) result.push(<SelectSeparator key="sep" />);
-                                      ungrouped.forEach((cat: any) => result.push(
-                                        <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                      ));
-                                    }
-                                    return result;
-                                  })()}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Tipo de artículo</Label>
-                              <Select value={row.itemKind || "materia_prima"} onValueChange={(v) => updateInvRow(i, "itemKind", v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-kind-${i}`}><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
-                                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
-                                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Stock mínimo</Label>
-                              <Input type="number" min="0" step="1" value={row.minStock} onChange={(e) => updateInvRow(i, "minStock", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-minstock-${i}`} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
 
                       {/* Quantity, unit, cost */}
                       <div className="grid grid-cols-3 gap-2">
@@ -1438,6 +1255,7 @@ export function InvoiceDialog({
                 </div>
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
+                <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
                   <div className="flex gap-2 items-center">
                     <div className="relative flex-1">
                       <input
@@ -1446,8 +1264,6 @@ export function InvoiceDialog({
                         placeholder="Buscar proveedor..."
                         value={supplierDropdownOpen
                           ? supplierSearch
-                          : form.supplierId === "manual"
-                          ? "— Ingreso manual —"
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
@@ -1459,13 +1275,6 @@ export function InvoiceDialog({
                       />
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
-                          <div
-                            className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                            onMouseDown={() => { handleSupplierChange("manual"); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
-                          >
-                            <Check className={`h-4 w-4 shrink-0 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
-                            — Ingresar manual —
-                          </div>
                           {[...suppliers]
                             .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
@@ -1489,30 +1298,16 @@ export function InvoiceDialog({
                         </div>
                       )}
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onMouseDown={(e) => { e.preventDefault(); setSupplierDropdownOpen(false); setQuickCreateOpen(true); }}
-                      title="Crear nuevo proveedor"
-                      data-testid="btn-quick-create-supplier"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
-                {(form.supplierId === "manual" || !form.supplierId) && (
-                  <>
-                    <div>
-                      <Label>Razón Social</Label>
-                      <Input value={form.proveedorNombre} onChange={(e) => f("proveedorNombre", e.target.value)} data-testid="input-proveedor-nombre" />
-                    </div>
-                    <div>
-                      <Label>CUIT</Label>
-                      <Input value={form.proveedorCuit} onChange={(e) => f("proveedorCuit", e.target.value)} data-testid="input-proveedor-cuit" />
-                    </div>
-                  </>
-                )}
+                <div>
+                  <Label>Razón Social</Label>
+                  <Input value={form.proveedorNombre} readOnly data-testid="input-proveedor-nombre" />
+                </div>
+                <div>
+                  <Label>CUIT</Label>
+                  <Input value={form.proveedorCuit} readOnly data-testid="input-proveedor-cuit" />
+                </div>
                 <div>
                   <Label>Punto de Venta</Label>
                   <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
@@ -1787,41 +1582,20 @@ export function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Opcional — Agregá los productos recibidos. Podés sumar stock a artículos existentes o crear artículos nuevos.</span>
+                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
               </div>
 
               {invItems.length > 0 && (
                 <div className="space-y-3">
                   {invItems.map((row, i) => (
                     <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
-                      {/* Mode toggle */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex rounded-md border overflow-hidden text-xs">
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "existing" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "existing")}
-                            data-testid={`btn-mode-existing-${i}`}
-                          >
-                            Artículo existente
-                          </button>
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "new" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "new")}
-                            data-testid={`btn-mode-new-${i}`}
-                          >
-                            Artículo nuevo
-                          </button>
-                        </div>
-                        <div className="flex-1" />
+                      <div className="flex justify-end">
                         <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
 
                       {/* Article selector / name */}
-                      {row.mode === "existing" ? (
                         <div>
                           <Label className="text-xs mb-1 block">Artículo del inventario</Label>
                           <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
@@ -1869,68 +1643,6 @@ export function InvoiceDialog({
                             </PopoverContent>
                           </Popover>
                         </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Nombre del artículo *</Label>
-                              <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Categoría</Label>
-                              <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-category-${i}`}><SelectValue placeholder="Sin categoría" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                  {(() => {
-                                    const cats = (itemCategories as any[]);
-                                    const groups = cats.filter((c: any) => c.isGroup);
-                                    const leafCats = cats.filter((c: any) => !c.isGroup && c.id);
-                                    const result: JSX.Element[] = [];
-                                    for (const g of groups) {
-                                      const children = leafCats.filter((c: any) => c.parentId === g.id);
-                                      if (!children.length) continue;
-                                      result.push(
-                                        <SelectGroup key={g.id}>
-                                          <SelectLabel>{g.name}</SelectLabel>
-                                          {children.map((cat: any) => (
-                                            <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                          ))}
-                                        </SelectGroup>
-                                      );
-                                    }
-                                    const ungrouped = leafCats.filter((c: any) => !c.parentId);
-                                    if (ungrouped.length) {
-                                      if (result.length) result.push(<SelectSeparator key="sep" />);
-                                      ungrouped.forEach((cat: any) => result.push(
-                                        <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                      ));
-                                    }
-                                    return result;
-                                  })()}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Tipo de artículo</Label>
-                              <Select value={row.itemKind || "materia_prima"} onValueChange={(v) => updateInvRow(i, "itemKind", v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-kind-${i}`}><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
-                                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
-                                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Stock mínimo</Label>
-                              <Input type="number" min="0" step="1" value={row.minStock} onChange={(e) => updateInvRow(i, "minStock", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-minstock-${i}`} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
 
                       {/* Quantity, unit, cost */}
                       <div className="grid grid-cols-3 gap-2">
@@ -1992,7 +1704,7 @@ export function InvoiceDialog({
           <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMut.isPending || patchMut.isPending}
+            disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
             data-testid="btn-submit-invoice"
           >
             {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -2013,7 +1725,7 @@ export function InvoiceDialog({
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={createMut.isPending || patchMut.isPending}
+                disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
                 data-testid="btn-submit-invoice"
               >
                 {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -2026,60 +1738,6 @@ export function InvoiceDialog({
         </div>
     </InvoiceFormShell>
 
-    {/* Quick-create supplier dialog — rendered OUTSIDE main Dialog to avoid Radix nesting issues */}
-    <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Nuevo Proveedor</DialogTitle>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-2">
-          <div className="col-span-2">
-            <Label>Razón Social *</Label>
-            <Input value={quickForm.razonSocial} onChange={(e) => qf("razonSocial", e.target.value)} data-testid="input-quick-razon-social" />
-          </div>
-          <div>
-            <Label>CUIT *</Label>
-            <Input value={quickForm.cuit} onChange={(e) => qf("cuit", e.target.value)} placeholder="20-12345678-9" data-testid="input-quick-cuit" />
-          </div>
-          <div>
-            <Label>Condición IVA *</Label>
-            <Select value={quickForm.condicionIva} onValueChange={(v) => qf("condicionIva", v)}>
-              <SelectTrigger data-testid="select-quick-condicion-iva">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["Responsable Inscripto","Monotributo","Exento","No Responsable","Consumidor Final"].map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="col-span-2">
-            <Label>Cuenta contable por defecto</Label>
-            <Select value={quickForm.cuentaContableId || "__none__"} onValueChange={(v) => qf("cuentaContableId", v === "__none__" ? "" : v)}>
-              <SelectTrigger data-testid="select-quick-cuenta-contable">
-                <SelectValue placeholder="Sin cuenta por defecto" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
-                {accounts.filter((a: any) => a.id).map((a) => (
-                  <SelectItem key={a.id} value={String(a.id)}>
-                    {a.codigo} — {a.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancelar</Button>
-          <Button onClick={handleQuickCreateSubmit} disabled={quickCreateMut.isPending} data-testid="btn-submit-quick-supplier">
-            {quickCreateMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-            Crear proveedor
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
     </>
   );
 }

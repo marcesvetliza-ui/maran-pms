@@ -161,6 +161,10 @@ export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput)
   return roundCurrency(baseAndTaxes + (isCardSettlement(input.tipoComprobante) ? retentions : -retentions));
 }
 
+export function isValidPurchaseInvoiceTotal(tipoComprobante: string | null | undefined, total: number): boolean {
+  return tipoComprobante === "REMITO" || (Number.isFinite(total) && total > 0);
+}
+
 export function purchaseInvoiceRetentionSide(tipoComprobante?: string | null): "debe" | "haber" {
   return isCardSettlement(tipoComprobante) || isReceivedRetention(tipoComprobante) ? "debe" : "haber";
 }
