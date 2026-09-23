@@ -1411,8 +1411,8 @@ export default function CheckInPage() {
           if (!open && !checkInMutation.isPending) postCheckInActionRef.current = "none";
         }}
       >
-        <AlertDialogContent className="max-w-lg">
-          <AlertDialogHeader>
+        <AlertDialogContent className="flex max-h-[90dvh] w-[calc(100vw-2rem)] max-w-lg flex-col overflow-hidden">
+          <AlertDialogHeader className="min-h-0 overflow-y-auto pr-1">
             <AlertDialogTitle>Confirmar Check-in</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div>
@@ -1538,10 +1538,10 @@ export default function CheckInPage() {
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2">
+          <AlertDialogFooter className="grid shrink-0 grid-cols-2 gap-2 border-t pt-3 sm:space-x-0">
             <Button
               variant="outline"
-              className="sm:mr-auto"
+              className="col-span-2 w-full"
               onClick={() => {
                 postCheckInActionRef.current = "billing";
                 void performCheckIn();
@@ -1553,12 +1553,14 @@ export default function CheckInPage() {
               Confirmar check-in y cobrar
             </Button>
             <AlertDialogCancel
+              className="mt-0 w-full sm:mt-0"
               onClick={() => { postCheckInActionRef.current = "none"; }}
               data-testid="button-cancel-checkin"
             >
               Volver
             </AlertDialogCancel>
             <AlertDialogAction
+              className="w-full"
               onClick={() => {
                 postCheckInActionRef.current = "none";
                 void performCheckIn();
