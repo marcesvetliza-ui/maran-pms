@@ -833,15 +833,22 @@ export function registerGroupsRoutes(app: Express) {
       if (!currentRes) {
         return res.status(404).json({ error: "Reserva no encontrada" });
       }
-      const inventoryConflict = await storage.evaluateReservationInventory({
-        roomTypeId: roomTypeId || currentRes.roomTypeId,
-        checkInDate: currentRes.checkInDate,
-        checkOutDate: currentRes.checkOutDate,
-        excludeReservationId: reservationId,
-        contextGroupId: groupId,
-      });
-      if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE") {
-        return res.status(409).json({ error: "El bloque grupal excede el inventario operativo", code: "GROUP_BLOCK_SHORTAGE", canOverride: false });
+      const effectiveRoomTypeId = roomTypeId || currentRes.roomTypeId;
+      const changesInventoryType = effectiveRoomTypeId !== currentRes.roomTypeId;
+      // Replacing the placeholder guest does not alter room demand. Revalidating
+      // the whole group here used to block harmless guest updates whenever the
+      // group already had an unrelated inventory shortage.
+      if (changesInventoryType) {
+        const inventoryConflict = await storage.evaluateReservationInventory({
+          roomTypeId: effectiveRoomTypeId,
+          checkInDate: currentRes.checkInDate,
+          checkOutDate: currentRes.checkOutDate,
+          excludeReservationId: reservationId,
+          contextGroupId: groupId,
+        });
+        if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE") {
+          return res.status(409).json({ error: "El bloque grupal excede el inventario operativo", code: "GROUP_BLOCK_SHORTAGE", warning: inventoryConflict, canOverride: false });
+        }
       }
 
       if (roomId) {
@@ -852,7 +859,7 @@ export function registerGroupsRoutes(app: Express) {
           }
           const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
           if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
-          const canonicalRoomTypeId = roomTypeId || currentRes.roomTypeId;
+          const canonicalRoomTypeId = effectiveRoomTypeId;
           if (!hasCanonicalRoomType(newRoom, canonicalRoomTypeId)) {
             return res.status(400).json({ error: "La habitación no corresponde al tipo del bloque" });
           }

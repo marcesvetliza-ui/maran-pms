@@ -1236,8 +1236,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async evaluateGroupInventoryForType(input: any): Promise<GroupInventoryConflict | null> {
-    const inventoryRooms = await db.select({ roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId));
-    return evaluateGroupInventory({
+    const [inventoryRooms, [roomType]] = await Promise.all([
+      db.select({ roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
+      db.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes).where(eq(roomTypes.id, input.roomTypeId)).limit(1),
+    ]);
+    const conflict = evaluateGroupInventory({
       roomTypeId: input.roomTypeId,
       checkIn: input.groupRows.find((group: any) => group.id === input.groupId).checkInDate,
       checkOut: input.groupRows.find((group: any) => group.id === input.groupId).checkOutDate,
@@ -1248,6 +1251,7 @@ export class DatabaseStorage implements IStorage {
       contextGroupId: input.groupId,
       candidateUnits: 0,
     });
+    return conflict ? { ...conflict, roomTypeName: roomType?.name || input.roomTypeId } : null;
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
@@ -2773,7 +2777,12 @@ export class DatabaseStorage implements IStorage {
       const allReservations = await tx.select().from(reservations);
       const allGroupLinks = await tx.select().from(groupReservationLinks);
       const groupByReservation = new Map(allGroupLinks.map(link => [link.reservationId, link.groupId]));
-      for (const roomTypeId of [...new Set(blocks.filter(block => block.groupId === id).map(block => block.roomTypeId))]) {
+      const targetRoomTypeIds = [...new Set(blocks.filter(block => block.groupId === id).map(block => block.roomTypeId))];
+      const targetRoomTypes = targetRoomTypeIds.length
+        ? await tx.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes).where(inArray(roomTypes.id, targetRoomTypeIds))
+        : [];
+      const roomTypeNameById = new Map(targetRoomTypes.map(roomType => [roomType.id, roomType.name]));
+      for (const roomTypeId of targetRoomTypeIds) {
         const inventoryRooms = await tx.select({
           id: rooms.id,
           roomNumber: rooms.roomNumber,
@@ -2799,7 +2808,8 @@ export class DatabaseStorage implements IStorage {
           contextGroupId: id,
         });
         if (conflict && (!conflict.canOverride || !override)) {
-          throw Object.assign(new Error("El compromiso del grupo excede el inventario operativo."), { statusCode: 409, response: { error: "El compromiso del grupo excede el inventario operativo.", code: conflict.code, warning: conflict, canOverride: conflict.canOverride } });
+          const detailedConflict = { ...conflict, roomTypeName: roomTypeNameById.get(roomTypeId) || roomTypeId };
+          throw Object.assign(new Error("El compromiso del grupo excede el inventario operativo."), { statusCode: 409, response: { error: "El compromiso del grupo excede el inventario operativo.", code: conflict.code, warning: detailedConflict, canOverride: conflict.canOverride } });
         }
       }
 

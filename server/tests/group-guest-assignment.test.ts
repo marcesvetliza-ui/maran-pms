@@ -148,6 +148,7 @@ describe("group guest assignment", () => {
       [{
         id: PLACEHOLDER_RESERVATION_ID,
         roomId: "room-101",
+        roomTypeId: "rt1",
         checkInDate: "2026-09-01",
         checkOutDate: "2026-09-03",
       }],
@@ -175,6 +176,7 @@ describe("group guest assignment", () => {
           guestId: EXISTING_GUEST_ID,
           guestFirstName: "Ana",
           guestLastName: "Pérez",
+          roomTypeId: "rt1",
         }),
       },
     );
@@ -185,6 +187,60 @@ describe("group guest assignment", () => {
       guestId: EXISTING_GUEST_ID,
     });
     expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockStorage.evaluateReservationInventory).not.toHaveBeenCalled();
+  });
+
+  it("does not block a guest-only replacement because of a pre-existing group shortage", async () => {
+    const selectedGuest = {
+      id: EXISTING_GUEST_ID,
+      firstName: "Marcelo",
+      lastName: "Svetliza",
+      codigo: "GUEST-702",
+    };
+    mockDbSelectRows = [
+      [{ groupId: GROUP_ID, reservationId: PLACEHOLDER_RESERVATION_ID }],
+      [{
+        id: PLACEHOLDER_RESERVATION_ID,
+        roomId: "room-702",
+        roomTypeId: "rt1",
+        checkInDate: "2026-09-24",
+        checkOutDate: "2026-09-25",
+      }],
+      [selectedGuest],
+    ];
+    mockStorage.evaluateReservationInventory.mockResolvedValueOnce({
+      code: "GROUP_BLOCK_SHORTAGE",
+      canOverride: false,
+      hardDemand: 42,
+      operationalInventory: 28,
+    });
+    mockStorage.updateReservation.mockResolvedValue({
+      id: PLACEHOLDER_RESERVATION_ID,
+      roomId: "room-702",
+      guestId: EXISTING_GUEST_ID,
+      guestName: "Svetliza Marcelo",
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/groups/${GROUP_ID}/placeholder-reservations/${PLACEHOLDER_RESERVATION_ID}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          guestId: EXISTING_GUEST_ID,
+          guestFirstName: "Marcelo",
+          guestLastName: "Svetliza",
+          roomTypeId: "rt1",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockStorage.evaluateReservationInventory).not.toHaveBeenCalled();
+    expect(mockStorage.updateReservation).toHaveBeenCalledWith(
+      PLACEHOLDER_RESERVATION_ID,
+      expect.objectContaining({ guestId: EXISTING_GUEST_ID, guestName: "Svetliza Marcelo" }),
+    );
   });
 
   it("passes the selected guest through when assigning a new rooming-list row", async () => {

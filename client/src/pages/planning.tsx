@@ -471,7 +471,12 @@ export default function PlanningPage() {
       const blockDays = data.days.filter(d => d >= block.checkIn && d < block.checkOut);
       if (blockDays.length === 0) continue;
 
-      const roomsOfType = data.rooms.filter(r => r.roomTypeId === block.roomTypeId);
+      const roomsOfType = data.rooms.filter(room =>
+        room.roomTypeId === block.roomTypeId &&
+        isOperationalInventoryRoom(room) &&
+        room.status !== "maintenance" &&
+        room.status !== "oos"
+      );
 
       // Find rooms that are fully available for the whole block period
       const availableRooms = roomsOfType.filter(room => {
@@ -1295,7 +1300,7 @@ export default function PlanningPage() {
                                               borderColor: `rgba(${r}, ${g}, ${b}, 0.5)`,
                                             };
                                           })()}
-                                          title={`Bloque sin asignar — ${ghostBlock.groupName}`}
+                                          title={`Pendiente de asignar — ${ghostBlock.groupName}`}
                                           data-testid={`cell-ghost-${room.id}-${day}`}
                                           onClick={() => navigate(`/groups/${ghostBlock.groupId}`)}
                                         >
@@ -1309,7 +1314,7 @@ export default function PlanningPage() {
                                               return { color: `rgb(${r}, ${g}, ${b})` };
                                             })()}
                                           >
-                                            {ghostBlock.groupName.substring(0, 5).toUpperCase()}
+                                            PEND.
                                           </span>
                                           <button
                                             className="hidden group-hover/ghost:flex items-center justify-center w-4 h-4 rounded-full bg-destructive/80 text-white text-[9px] font-bold flex-shrink-0 hover:bg-destructive transition-colors"
@@ -1409,7 +1414,8 @@ export default function PlanningPage() {
                                               <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
                                                 Grupo: {ghostBlock.groupName}
                                               </div>
-                                              <div className="text-muted-foreground text-[10px]">Bloque sin asignar — clic para ir al grupo</div>
+                                              <div className="font-medium text-amber-700 dark:text-amber-300">Pendiente de asignar</div>
+                                              <div className="text-muted-foreground text-[10px]">No es una reserva física — clic para ir al grupo</div>
                                             </div>
                                           </>
                                         ) : (

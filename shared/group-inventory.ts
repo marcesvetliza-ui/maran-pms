@@ -26,6 +26,7 @@ export type GroupInventoryConflict = {
   warnings: GroupInventoryWarning[];
   date?: string;
   roomTypeId?: string;
+  roomTypeName?: string;
   hardDemand?: number;
   operationalInventory?: number;
 };

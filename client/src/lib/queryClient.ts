@@ -37,6 +37,11 @@ type GroupInventoryWarningPayload = {
   canOverride?: boolean;
   warning?: {
     warnings?: Array<{ groupId: string; groupName?: string; date: string }>;
+    date?: string;
+    roomTypeId?: string;
+    roomTypeName?: string;
+    hardDemand?: number;
+    operationalInventory?: number;
   };
 };
 
@@ -108,7 +113,23 @@ export function parseApiError(err: unknown): string {
   if (match) {
     try {
       const parsed = JSON.parse(match[1]);
-      if (parsed?.error) return String(parsed.error);
+      if (parsed?.error) {
+        if (parsed.code === "GROUP_BLOCK_SHORTAGE" && parsed.warning) {
+          const warning = parsed.warning;
+          const details = [
+            warning.date ? `Fecha: ${warning.date}.` : "",
+            warning.roomTypeName || warning.roomTypeId
+              ? `Tipo: ${warning.roomTypeName || warning.roomTypeId}.`
+              : "",
+            Number.isFinite(warning.hardDemand) ? `Demanda confirmada: ${warning.hardDemand}.` : "",
+            Number.isFinite(warning.operationalInventory)
+              ? `Habitaciones operativas: ${warning.operationalInventory}.`
+              : "",
+          ].filter(Boolean).join(" ");
+          return details ? `${String(parsed.error)} ${details}` : String(parsed.error);
+        }
+        return String(parsed.error);
+      }
     } catch {
       return match[1].trim() || raw;
     }
