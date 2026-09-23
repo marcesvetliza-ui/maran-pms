@@ -54,6 +54,8 @@ runIfDatabaseIsConfigured("GET /api/account-movements/report — filtro fiscal d
     const cierreChargeId = randomUUID();
     const invoiceReapplicationId = randomUUID();
     const cashCollectionId = randomUUID();
+    const voidedCollectionId = randomUUID();
+    const voidReversalId = randomUUID();
 
     try {
       await testPool.query(
@@ -91,6 +93,20 @@ runIfDatabaseIsConfigured("GET /api/account-movements/report — filtro fiscal d
         [cashCollectionId, companyId, `Cobro en caja — ${razonSocial}`],
       );
 
+      await testPool.query(
+        `INSERT INTO account_movements
+         (id, entity_type, entity_id, date, type, description, amount, voided, voided_at, voided_by, void_reason)
+         VALUES ($1, 'company', $2, '2026-09-05', 'pago', 'Cobro directo anulado', '-20.00',
+                 true, NOW(), 'tester-admin', 'Error de carga')`,
+        [voidedCollectionId, companyId],
+      );
+      await testPool.query(
+        `INSERT INTO account_movements
+         (id, entity_type, entity_id, date, type, description, amount, reversal_of_movement_id)
+         VALUES ($1, 'company', $2, '2026-09-06', 'ajuste', 'Anulación de recibo', '20.00', $3)`,
+        [voidReversalId, companyId, voidedCollectionId],
+      );
+
       const response = await fetch(`${baseUrl}/api/account-movements/report?from=2026-09-01&to=2026-09-30`);
       expect(response.status).toBe(200);
       const body = await response.json() as Array<Record<string, unknown>>;
@@ -100,10 +116,12 @@ runIfDatabaseIsConfigured("GET /api/account-movements/report — filtro fiscal d
       expect(ids).not.toContain(cierreChargeId);
       expect(ids).toContain(invoiceReapplicationId);
       expect(ids).toContain(cashCollectionId);
+      expect(ids).not.toContain(voidedCollectionId);
+      expect(ids).not.toContain(voidReversalId);
     } finally {
       await testPool.query(
         "DELETE FROM account_movements WHERE id = ANY($1::varchar[])",
-        [[stayChargeId, cierreChargeId, invoiceReapplicationId, cashCollectionId]],
+        [[stayChargeId, cierreChargeId, invoiceReapplicationId, cashCollectionId, voidReversalId, voidedCollectionId]],
       );
       await testPool.query("DELETE FROM companies WHERE id = $1", [companyId]);
     }

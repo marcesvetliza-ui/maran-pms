@@ -37,6 +37,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 
 type Movement = {
   id: string;
@@ -49,6 +50,7 @@ type Movement = {
   date: string;
   type: string;
   paymentMethod?: string | null;
+  voided?: boolean;
 };
 
 type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;
@@ -68,6 +70,11 @@ type AccountMovement = {
   saldoPendiente?: number;
   area?: string | null;
   createdAt: string;
+  reservationId?: string | null;
+  paymentId?: string | null;
+  groupPaymentId?: string | null;
+  receiptNumber?: string | null;
+  voided?: boolean;
 };
 
 // Solo hacia adelante: los movimientos creados antes de este campo quedan en
@@ -725,7 +732,7 @@ export default function AdminCuentasPage() {
   const totalDebt = totalCompaniesDebt + totalAgenciesDebt + totalGuestsDebt;
 
   const reporteCharges = reporteMovements.filter(m => parseFloat(m.amount) > 0);
-  const reportePayments = reporteMovements.filter(m => parseFloat(m.amount) < 0);
+  const reportePayments = reporteMovements.filter(m => parseFloat(m.amount) < 0 && !m.voided);
   const reporteTotal = reporteMovements.reduce((sum, m) => sum + parseFloat(m.amount || "0"), 0);
 
   return (
@@ -1246,7 +1253,7 @@ export default function AdminCuentasPage() {
           <div className="flex items-center gap-2 mb-3 px-1">
             <span className="text-sm text-muted-foreground">Total cobrado en el período:</span>
             <span className="font-bold text-green-600 tabular-nums text-sm">
-              ${Math.abs(recibos.reduce((s, r) => s + parseFloat(r.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+              ${Math.abs(recibos.filter(r => !r.voided).reduce((s, r) => s + parseFloat(r.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
             </span>
           </div>
         )}
@@ -1295,17 +1302,21 @@ export default function AdminCuentasPage() {
                         ${Math.abs(parseFloat(r.amount)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </td>
                       <td className="px-1 py-1 text-center">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Ver / reimprimir recibo"
-                          onClick={() => window.open(`/api/account-movements/${r.id}/receipt-pdf`, "_blank")}
-                          data-testid={`button-reprint-recibo-${r.id}`}
-                        >
-                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {r.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Ver / reimprimir recibo"
+                            onClick={() => window.open(`/api/account-movements/${r.id}/receipt-pdf`, "_blank")}
+                            data-testid={`button-reprint-recibo-${r.id}`}
+                          >
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                          </Button>
+                          <CcVoidReceiptAction movement={r} entityLabel={r.entityName} />
+                        </div>
                       </td>
                     </tr>
                   );

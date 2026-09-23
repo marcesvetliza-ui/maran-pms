@@ -876,6 +876,11 @@ export interface IStorage {
     allocations: { cargoId: string; amount: string }[]
   ): Promise<{ movement: AccountMovement; allocations: AccountMovementAllocation[] }>;
   getAccountMovementAllocations(pagoId: string): Promise<AccountMovementAllocation[]>;
+  voidDirectAccountPayment(
+    movementId: string,
+    reason: string,
+    voidedBy: string,
+  ): Promise<{ original: AccountMovement; reversal: AccountMovement; releasedAllocations: number }>;
 
   // Gift Vouchers
   getGiftVouchers(filters?: { status?: string; area?: string; search?: string }): Promise<GiftVoucher[]>;

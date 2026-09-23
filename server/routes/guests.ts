@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
@@ -630,6 +630,20 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  app.post("/api/account-movements/:id/void", requireRole(["admin", "manager"]), async (req, res) => {
+    try {
+      assertFinancialSchemaReady();
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      if (!reason) return res.status(400).json({ error: "El motivo de anulación es obligatorio" });
+      if (reason.length > 500) return res.status(400).json({ error: "El motivo no puede superar los 500 caracteres" });
+      const operator = (req.user as any)?.username || (req.user as any)?.id || (req.user as any)?.fullName || "Sistema";
+      const result = await storage.voidDirectAccountPayment(req.params.id, reason, operator);
+      res.json(result);
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.message || "No se pudo anular el recibo" });
+    }
+  });
+
   // Receipts list — only pago movements, with filters
   app.get("/api/account-movements/receipts", async (req, res) => {
     try {
@@ -644,7 +658,8 @@ export function registerGuestsRoutes(app: Express) {
           if (search && !e.name.toLowerCase().includes(search.toLowerCase())) continue;
           const ms = await storage.getAccountMovements(typeKey as any, e.id);
           ms
-            .filter(m => m.type === "pago")
+            .filter(m => m.type === "pago"
+              && !m.reservationId && !m.paymentId && !m.groupPaymentId)
             .forEach(m => movements.push({ ...m, entityName: e.name, entityTypeName: typeName }));
         }
       };
@@ -705,6 +720,11 @@ export function registerGuestsRoutes(app: Express) {
       // estadía con factura emitida sí es un hecho fiscal y debe mostrarse.
       const isFiscalMovement = (movement: any) => {
         const desc = (movement.description || "").toLowerCase();
+        // Voiding a direct receipt is a ledger correction, not a new fiscal
+        // charge or an active collection. Both sides remain in account history
+        // but stay out of this billing-focused report.
+        if (movement.voided && movement.type === "pago") return false;
+        if (movement.reversalOfMovementId) return false;
         if (desc.includes("cierre")) return false;
         if (desc.startsWith("estadía ") || desc.startsWith("estadia ")) {
           return Boolean(movement.paymentId)

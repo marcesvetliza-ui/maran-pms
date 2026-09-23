@@ -8250,7 +8250,10 @@ export class DatabaseStorage implements IStorage {
 
     const allocs = await db.select()
       .from(accountMovementAllocations)
-      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+      .where(and(
+        inArray(accountMovementAllocations.cargoId, cargoIds),
+        eq(accountMovementAllocations.voided, false),
+      ));
 
     const allocatedByCargo = new Map<string, number>();
     for (const a of allocs) {
@@ -8300,7 +8303,10 @@ export class DatabaseStorage implements IStorage {
     const cargoIds = movements.map(m => m.id);
     const allocations = await db.select()
       .from(accountMovementAllocations)
-      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+      .where(and(
+        inArray(accountMovementAllocations.cargoId, cargoIds),
+        eq(accountMovementAllocations.voided, false),
+      ));
 
     const allocatedByCargo = new Map<string, number>();
     for (const a of allocations) {
@@ -8371,7 +8377,7 @@ export class DatabaseStorage implements IStorage {
         const allocatedResult = await tx.execute(sql`
           SELECT cargo_id, COALESCE(SUM(amount::numeric), 0) AS allocated
           FROM account_movement_allocations
-          WHERE cargo_id IN (${idsSql})
+          WHERE cargo_id IN (${idsSql}) AND voided = false
           GROUP BY cargo_id
         `);
         const cargoById = new Map(lockedCargos.map((cargo) => [cargo.id, parseFloat(cargo.amount)]));
@@ -8400,6 +8406,7 @@ export class DatabaseStorage implements IStorage {
         retentions: data.retentions,
         createdBy: data.createdBy,
         guestName: data.guestName ?? null,
+        receiptNumber: sql`'REC-' || EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::text || '-' || LPAD(nextval('account_movement_receipt_number_seq'::regclass)::text, 4, '0')`,
       } as any).returning();
 
       const createdAllocations: AccountMovementAllocation[] = [];
@@ -8420,6 +8427,112 @@ export class DatabaseStorage implements IStorage {
     return await db.select()
       .from(accountMovementAllocations)
       .where(eq(accountMovementAllocations.pagoId, pagoId));
+  }
+
+  async voidDirectAccountPayment(
+    movementId: string,
+    reason: string,
+    voidedBy: string,
+  ): Promise<{ original: AccountMovement; reversal: AccountMovement; releasedAllocations: number }> {
+    assertFinancialSchemaReady();
+    return await db.transaction(async (tx) => {
+      const originalResult = await tx.execute(sql`
+        SELECT * FROM account_movements WHERE id = ${movementId} FOR UPDATE
+      `);
+      const original = originalResult.rows[0] as any;
+      if (!original) throw Object.assign(new Error("Recibo no encontrado"), { statusCode: 404 });
+      const mapMovement = (row: any): AccountMovement => ({
+        ...row,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        reservationId: row.reservation_id,
+        reservationCode: row.reservation_code,
+        guestName: row.guest_name,
+        paymentMethod: row.payment_method,
+        paymentId: row.payment_id,
+        groupPaymentId: row.group_payment_id,
+        createdBy: row.created_by,
+        createdAt: row.created_at,
+        receiptNumber: row.receipt_number,
+        voided: row.voided,
+        voidedAt: row.voided_at,
+        voidedBy: row.voided_by,
+        voidReason: row.void_reason,
+        reversalMovementId: row.reversal_movement_id,
+        reversalOfMovementId: row.reversal_of_movement_id,
+      });
+
+      if (original.voided) {
+        const existing = original.reversal_movement_id
+          ? await tx.execute(sql`SELECT * FROM account_movements WHERE id = ${original.reversal_movement_id}`)
+          : await tx.execute(sql`SELECT * FROM account_movements WHERE reversal_of_movement_id = ${movementId}`);
+        const reversal = existing.rows[0] as any;
+        if (!reversal) throw Object.assign(new Error("El recibo figura anulado pero no tiene contraasiento"), { statusCode: 409 });
+        return { original: mapMovement(original), reversal: mapMovement(reversal), releasedAllocations: 0 };
+      }
+
+      if (!["company", "agency", "guest"].includes(String(original.entity_type))
+        || original.type !== "pago"
+        || original.reservation_id
+        || original.payment_id
+        || original.group_payment_id
+        || original.reversal_of_movement_id) {
+        throw Object.assign(new Error("Solo se pueden anular recibos directos de Cuenta Corriente"), { statusCode: 409 });
+      }
+
+      const allocationResult = await tx.execute(sql`
+        SELECT id, cargo_id FROM account_movement_allocations
+        WHERE pago_id = ${movementId} AND voided = false
+        FOR UPDATE
+      `);
+      const allocations = allocationResult.rows as { id: string; cargo_id: string }[];
+      const cargoIds = Array.from(new Set(allocations.map((allocation) => allocation.cargo_id))).sort();
+      // Match the payment path's deterministic cargo lock order. Two voids
+      // releasing allocations from the same cargos must wait, not deadlock.
+      for (const cargoId of cargoIds) {
+        await tx.execute(sql`
+          SELECT id FROM account_movements WHERE id = ${cargoId} FOR UPDATE
+        `);
+      }
+
+      const reversalResult = await tx.execute(sql`
+        INSERT INTO account_movements (
+          entity_type, entity_id, date, type, description, amount,
+          reference, payment_method, retentions, area, created_by,
+          reversal_of_movement_id
+        ) VALUES (
+          ${original.entity_type}, ${original.entity_id}, CURRENT_DATE, 'ajuste',
+          ${`Anulación de recibo ${original.receipt_number || original.id}`},
+          ${Math.abs(Number(original.amount)).toFixed(2)},
+          ${`reversal:${movementId}`}, ${original.payment_method || null},
+          NULL, ${original.area || null}, ${voidedBy},
+          ${movementId}
+        )
+        RETURNING *
+      `);
+      const reversal = reversalResult.rows[0] as any;
+
+      await tx.execute(sql`
+        UPDATE account_movement_allocations
+        SET voided = true, voided_at = NOW(), voided_by = ${voidedBy}, void_reason = ${reason}
+        WHERE pago_id = ${movementId} AND voided = false
+      `);
+      const updated = await tx.execute(sql`
+        UPDATE account_movements
+        SET voided = true, voided_at = NOW(), voided_by = ${voidedBy},
+            void_reason = ${reason}, reversal_movement_id = ${reversal.id}
+        WHERE id = ${movementId} AND voided = false
+        RETURNING *
+      `);
+      if (updated.rows.length !== 1) {
+        throw Object.assign(new Error("El recibo fue anulado por otra operación"), { statusCode: 409 });
+      }
+      return {
+        original: mapMovement(updated.rows[0]),
+        reversal: mapMovement(reversal),
+        releasedAllocations: allocations.length,
+      };
+    });
   }
 
   async getAccountSummary(area?: string | null): Promise<{

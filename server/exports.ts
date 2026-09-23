@@ -1153,14 +1153,22 @@ export function registerExportRoutes(app: Express) {
       const createdAt = new Date(mov.created_at);
       const year = createdAt.getFullYear();
 
-      const numResult = await db.execute(sql`
-        SELECT COUNT(*)::int AS num FROM account_movements
-        WHERE type = 'pago'
-          AND EXTRACT(YEAR FROM created_at) = ${year}
-          AND created_at <= ${mov.created_at}
-      `);
-      const recNum = parseInt((numResult.rows[0] as any).num) || 1;
-      const recibo = `REC-${year}-${String(recNum).padStart(4, "0")}`;
+      // Assigned at creation and backfilled once by migrate.ts. It must not
+      // change when a previous receipt is voided.
+      let recibo = mov.receipt_number as string | null;
+      if (!recibo) {
+        // Linked reservation/group payments are outside this feature and may
+        // still have no durable number. Preserve their legacy PDF numbering
+        // instead of changing them to an ID-derived fallback.
+        const numResult = await db.execute(sql`
+          SELECT COUNT(*)::int AS num FROM account_movements
+          WHERE type = 'pago'
+            AND EXTRACT(YEAR FROM created_at) = ${year}
+            AND created_at <= ${mov.created_at}
+        `);
+        const recNum = parseInt((numResult.rows[0] as any).num) || 1;
+        recibo = `REC-${year}-${String(recNum).padStart(4, "0")}`;
+      }
 
       let entityName = "";
       let entityDoc = "";
@@ -1234,6 +1242,13 @@ export function registerExportRoutes(app: Express) {
           .text("RECIBO", pageW - 145, 18, { width: 120, align: "right" });
         doc.font("Helvetica-Bold").fontSize(10)
           .text(`Nº ${recibo}`, pageW - 145, 48, { width: 120, align: "right" });
+        if (mov.voided) {
+          doc.save();
+          doc.rotate(-12, { origin: [pageW / 2, 75] });
+          doc.fillColor("#d32f2f").opacity(0.85).font("Helvetica-Bold").fontSize(38)
+            .text("ANULADO", 185, 60, { width: 250, align: "center" });
+          doc.restore();
+        }
 
         // ─── Bloque: Recibimos de ─────────────────────────────────────────
         let y = 128;
@@ -1325,6 +1340,12 @@ export function registerExportRoutes(app: Express) {
         doc.font("Helvetica").fontSize(9).fill("#333")
           .text(`Fecha de pago: ${fDate(mov.date || mov.created_at)}`, x0, y)
           .text(`Registrado: ${fDate(mov.created_at)}`, x0, y + 14);
+        if (mov.voided) {
+          doc.font("Helvetica-Bold").fontSize(9).fill("#b91c1c")
+            .text(`ANULADO: ${fDate(mov.voided_at)} · ${mov.voided_by || "—"}`, x0, y + 30);
+          doc.font("Helvetica").fontSize(8).fill("#7f1d1d")
+            .text(`Motivo: ${mov.void_reason || "—"}`, x0, y + 44, { width: pageW - 100 });
+        }
 
         // ─── Líneas de firma ──────────────────────────────────────────────
         const sigY = y + 60;

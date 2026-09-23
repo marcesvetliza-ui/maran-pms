@@ -2418,6 +2418,8 @@ export type AccountMovementArea = "recepcion" | "restaurant" | "eventos" | "spa"
 
 export type AccountRetention = { concepto: string; monto: number };
 
+export const accountMovementReceiptNumberSequence = pgSequence("account_movement_receipt_number_seq");
+
 export const accountMovements = pgTable("account_movements", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   entityType: text("entity_type").$type<AccountEntityType>().notNull(),
@@ -2442,6 +2444,13 @@ export const accountMovements = pgTable("account_movements", {
   area: text("area").$type<AccountMovementArea>(),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  receiptNumber: text("receipt_number"),
+  voided: boolean("voided").notNull().default(false),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: varchar("voided_by"),
+  voidReason: text("void_reason"),
+  reversalMovementId: varchar("reversal_movement_id"),
+  reversalOfMovementId: varchar("reversal_of_movement_id"),
 });
 
 export const insertAccountMovementSchema = createInsertSchema(accountMovements).omit({ id: true, createdAt: true });
@@ -2454,6 +2463,10 @@ export const accountMovementAllocations = pgTable("account_movement_allocations"
   cargoId: varchar("cargo_id").notNull().references(() => accountMovements.id),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  voided: boolean("voided").notNull().default(false),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: varchar("voided_by"),
+  voidReason: text("void_reason"),
 });
 
 export const insertAccountMovementAllocationSchema = createInsertSchema(accountMovementAllocations).omit({ id: true, createdAt: true });

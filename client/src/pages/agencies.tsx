@@ -21,6 +21,7 @@ import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, Ca
 import { insertAgencySchema, type Agency, type AccountMovement, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
 import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
 import { isOverdue } from "@/lib/account-aging";
@@ -793,15 +794,19 @@ export default function AgenciesPage() {
                           {parseFloat(mov.amount) > 0 ? "cargo" : "pago"}
                         </span>
                         {parseFloat(mov.amount) < 0 && (
-                          <a
-                            href={`/api/account-movements/${mov.id}/receipt-pdf`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5 font-normal"
-                            data-testid={`btn-receipt-${mov.id}`}
-                          >
-                            <FileText className="h-3 w-3" /> Recibo PDF
-                          </a>
+                          <div className="flex items-center justify-end gap-1">
+                            {mov.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
+                            <a
+                              href={`/api/account-movements/${mov.id}/receipt-pdf`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5 font-normal"
+                              data-testid={`btn-receipt-${mov.id}`}
+                            >
+                              <FileText className="h-3 w-3" /> Recibo PDF
+                            </a>
+                            <CcVoidReceiptAction movement={mov} entityLabel={viewingAccountAgency?.nombreFantasia || viewingAccountAgency?.razonSocial || ""} />
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>

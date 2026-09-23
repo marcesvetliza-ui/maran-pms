@@ -36,6 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { AccountMovement } from "@shared/schema";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
 import { isOverdue } from "@/lib/account-aging";
 
@@ -271,15 +272,19 @@ export default function CcHuespedesPage() {
                             {parseFloat(m.amount) > 0 ? "Cargo" : "Pago"}
                           </p>
                           {parseFloat(m.amount) < 0 && (
-                            <a
-                              href={`/api/account-movements/${m.id}/receipt-pdf`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5"
-                              data-testid={`btn-receipt-${m.id}`}
-                            >
-                              <FileText className="h-3 w-3" /> Recibo PDF
-                            </a>
+                            <div className="flex items-center justify-end gap-1">
+                              {m.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
+                              <a
+                                href={`/api/account-movements/${m.id}/receipt-pdf`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5"
+                                data-testid={`btn-receipt-${m.id}`}
+                              >
+                                <FileText className="h-3 w-3" /> Recibo PDF
+                              </a>
+                              <CcVoidReceiptAction movement={m} entityLabel={viewingGuest?.name || ""} />
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>

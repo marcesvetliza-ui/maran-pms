@@ -1152,8 +1152,24 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "amount",
       "payment_method",
       "group_payment_id",
+      "receipt_number",
+      "voided",
+      "voided_at",
+      "voided_by",
+      "void_reason",
+      "reversal_movement_id",
+      "reversal_of_movement_id",
     ],
-    account_movement_allocations: ["id", "pago_id", "cargo_id", "amount"],
+    account_movement_allocations: [
+      "id",
+      "pago_id",
+      "cargo_id",
+      "amount",
+      "voided",
+      "voided_at",
+      "voided_by",
+      "void_reason",
+    ],
     group_payments: [
       "id",
       "group_id",
@@ -1188,6 +1204,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     account_movements: [
       "idx_account_movements_entity",
       "account_movements_group_payment_id_idx",
+      "account_movements_receipt_number_unique",
+      "account_movements_reversal_of_unique",
     ],
     account_movement_allocations: [
       "idx_account_movement_allocations_cargo",
@@ -1433,6 +1451,55 @@ export async function verifyFinancialSchema(): Promise<FinancialSchemaStatus> {
   }
 
   return financialSchemaStatus;
+}
+
+export async function backfillAccountMovementReceiptNumbers(): Promise<void> {
+  await db.execute(sql`
+    WITH population AS (
+      SELECT id, receipt_number, created_at, entity_type,
+             reservation_id, payment_id, group_payment_id,
+             EXTRACT(YEAR FROM created_at)::int AS year,
+             ROW_NUMBER() OVER (
+               PARTITION BY EXTRACT(YEAR FROM created_at)
+               ORDER BY created_at, id
+             ) AS population_number
+      FROM account_movements
+      WHERE type = 'pago'
+    ),
+    existing AS (
+      SELECT year,
+             COALESCE(MAX(SUBSTRING(receipt_number FROM '-([0-9]+)$')::bigint), 0) AS max_number
+      FROM population
+      WHERE receipt_number IS NOT NULL
+      GROUP BY year
+    ),
+    missing AS (
+      SELECT population.id,
+             population.year,
+             population.population_number,
+             ROW_NUMBER() OVER (
+               PARTITION BY population.year
+               ORDER BY population.population_number
+             ) AS missing_number
+      FROM population
+      WHERE population.receipt_number IS NULL
+        AND population.entity_type IN ('company', 'agency', 'guest')
+        AND population.reservation_id IS NULL
+        AND population.payment_id IS NULL
+        AND population.group_payment_id IS NULL
+    )
+    UPDATE account_movements m
+    SET receipt_number = 'REC-' || missing.year::text || '-' ||
+      LPAD((
+        CASE
+          WHEN existing.max_number IS NULL THEN missing.population_number
+          ELSE existing.max_number + missing.missing_number
+        END
+      )::text, 4, '0')
+    FROM missing
+    LEFT JOIN existing ON existing.year = missing.year
+    WHERE m.id = missing.id AND m.receipt_number IS NULL
+  `);
 }
 
 export async function runMigrations() {
@@ -2413,6 +2480,56 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("account_movement_allocations.idx_pago", T, () =>
     db.execute(sql.raw(incrementalIndexSql("accountMovementAllocationsPago")))
   );
+  await withTimeout("account_movements.receipt_voiding_cols", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE account_movements
+        ADD COLUMN receipt_number text,
+        ADD COLUMN voided boolean NOT NULL DEFAULT false,
+        ADD COLUMN voided_at timestamp,
+        ADD COLUMN voided_by varchar,
+        ADD COLUMN void_reason text,
+        ADD COLUMN reversal_movement_id varchar,
+        ADD COLUMN reversal_of_movement_id varchar
+    `)))
+  );
+  await withTimeout("account_movements.receipt_sequence", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE SEQUENCE account_movement_receipt_number_seq
+    `)))
+  );
+  await withTimeout("account_movements.receipt_unique", T, () =>
+    db.execute(sql`
+      DO $$
+      BEGIN
+        IF to_regclass('account_movements_receipt_number_unique') IS NULL THEN
+          CREATE UNIQUE INDEX account_movements_receipt_number_unique
+            ON account_movements (receipt_number)
+            WHERE receipt_number IS NOT NULL;
+        END IF;
+      END $$;
+    `)
+  );
+  await withTimeout("account_movements.reversal_unique", T, () =>
+    db.execute(sql`
+      DO $$
+      BEGIN
+        IF to_regclass('account_movements_reversal_of_unique') IS NULL THEN
+          CREATE UNIQUE INDEX account_movements_reversal_of_unique
+            ON account_movements (reversal_of_movement_id)
+            WHERE reversal_of_movement_id IS NOT NULL;
+        END IF;
+      END $$;
+    `)
+  );
+  await withTimeout("account_movement_allocations.voiding_cols", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      ALTER TABLE account_movement_allocations
+        ADD COLUMN voided boolean NOT NULL DEFAULT false,
+        ADD COLUMN voided_at timestamp,
+        ADD COLUMN voided_by varchar,
+        ADD COLUMN void_reason text
+    `)))
+  );
 
   // Credit notes for reservation folios are persisted before ARCA authorization.
   // The reconciliation fields make a post-authorization Folio correction
@@ -2433,6 +2550,26 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(
       `ALTER TABLE sales_invoices ADD COLUMN credit_reapplication_intent jsonb`
     )))
+  );
+  await withTimeout("account_movements.receipt_immutable", T, () =>
+    db.execute(sql`
+      CREATE OR REPLACE FUNCTION prevent_account_movement_receipt_number_change()
+      RETURNS trigger AS $$
+      BEGIN
+        -- The one-time historical backfill may initialize a missing number.
+        -- Once assigned, the receipt identity can never change or be cleared.
+        IF OLD.receipt_number IS NOT NULL
+           AND NEW.receipt_number IS DISTINCT FROM OLD.receipt_number THEN
+          RAISE EXCEPTION 'account movement receipt_number is immutable';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS account_movements_receipt_number_immutable ON account_movements;
+      CREATE TRIGGER account_movements_receipt_number_immutable
+        BEFORE UPDATE ON account_movements
+        FOR EACH ROW EXECUTE FUNCTION prevent_account_movement_receipt_number_change();
+    `)
   );
 
   await withTimeout("reservations.checked_out_at", T, () =>
@@ -4014,6 +4151,35 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       ADD COLUMN payment_id varchar
     `)))
   );
+  // The legacy PDF sequence counted every pago in the year, including linked
+  // reservation/group movements. Number the same population once so already
+  // issued direct receipts keep the identity users saw before this migration.
+  await withTimeout("account_movements.receipt_backfill", T, async () => {
+    await backfillAccountMovementReceiptNumbers();
+    await db.execute(sql`
+      DO $$
+      DECLARE
+        max_number bigint;
+        current_number bigint;
+        current_called boolean;
+      BEGIN
+        SELECT MAX(SUBSTRING(receipt_number FROM '-([0-9]+)$')::bigint)
+          INTO max_number
+          FROM account_movements
+          WHERE receipt_number IS NOT NULL;
+        SELECT last_value, is_called
+          INTO current_number, current_called
+          FROM account_movement_receipt_number_seq;
+        IF max_number IS NOT NULL THEN
+          PERFORM setval(
+            'account_movement_receipt_number_seq'::regclass,
+            GREATEST(max_number, CASE WHEN current_called THEN current_number ELSE 0 END),
+            true
+          );
+        END IF;
+      END $$;
+    `);
+  });
 
   // generateFolioCodigo() used to derive the numeric suffix from COUNT(*) —
   // two concurrent first-charges to the same (brand-new) entity could both
