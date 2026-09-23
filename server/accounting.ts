@@ -45,7 +45,7 @@ function getConcepto(tipoComprobante: string): string {
   if (tipoComprobante.startsWith("NC")) return "Prov N.Credito A/M";
   if (tipoComprobante === "RESUMEN-BANCO") return "Prov. Resumen Banco";
   if (tipoComprobante === "LIQ-TARJETA") return "Prov.Liq.Tarjeta";
-  if (tipoComprobante === "FACT-A") return "Prov Fac/NDebito A/M";
+  if (tipoComprobante === "FACT-A" || tipoComprobante === "ND-A") return "Prov Fac/NDebito A/M";
   return "Prov Fac/Deb B/C/Rec";
 }
 

@@ -116,6 +116,16 @@ describe("InvoiceDialog — sugerencia de letra por condición IVA", () => {
     expect(screen.getByTestId("select-tipo-comprobante")).toHaveTextContent("Nota de Crédito A");
   });
 
+  it("también aplica a Notas de Débito", async () => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+
+    await selectTipo(user, "Nota de Débito B");
+    await selectSupplier(user, "Proveedor Mono SRL");
+
+    expect(screen.getByTestId("select-tipo-comprobante")).toHaveTextContent("Nota de Débito C");
+  });
+
   it("no afecta a comprobantes sin letra (Factura M, Remito)", async () => {
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
