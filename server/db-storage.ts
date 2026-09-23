@@ -2160,7 +2160,8 @@ export class DatabaseStorage implements IStorage {
     );
     const pendingReservations = pendingResult[0]?.cnt ?? 0;
 
-    // Desayunos mañana = pax en reservas checked_in que pasan la noche de hoy
+    // Desayunos mañana = pax que pasarán la noche de hoy:
+    // huéspedes ya alojados que continúan + llegadas operativas previstas para hoy.
     const tonightRows = await db.execute(sql`
       SELECT
         COALESCE(SUM(r.number_of_guests), 0) AS pax,
@@ -2169,7 +2170,13 @@ export class DatabaseStorage implements IStorage {
       JOIN rooms rm ON rm.id = r.room_id
       WHERE r.check_in_date <= ${today}
         AND r.check_out_date > ${today}
-        AND r.status = 'checked_in'
+        AND (
+          r.status = 'checked_in'
+          OR (
+            r.check_in_date = ${today}
+            AND r.status IN ('confirmed', 'web_checkin', 'pending')
+          )
+        )
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
