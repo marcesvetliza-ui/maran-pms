@@ -541,7 +541,7 @@ export async function registerRoutes(
     }
   });
 
-  // Breakfast list for tomorrow: reservations staying tonight (checked_in, non-virtual rooms)
+  // Breakfast list for tomorrow: guests staying tonight, including today's pending arrivals.
   app.get(
     "/api/dashboard/breakfasts",
     requireRole(["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"]),
@@ -563,7 +563,13 @@ export async function registerRoutes(
         LEFT JOIN guests g ON g.id = r.guest_id
         WHERE r.check_in_date <= ${today}
           AND r.check_out_date > ${today}
-          AND r.status = 'checked_in'
+          AND (
+            r.status = 'checked_in'
+            OR (
+              r.check_in_date = ${today}
+              AND r.status IN ('confirmed', 'web_checkin', 'pending')
+            )
+          )
           AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
         ORDER BY rm.room_number
       `);
