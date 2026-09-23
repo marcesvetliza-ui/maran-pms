@@ -75,5 +75,20 @@ suite("preventiva mensual por habitación con PostgreSQL real", () => {
     expect(result.rows[0].next_due_at).toBe(calendarMonthEnd(current, true));
     const history = await (await fetch(`${endpoint}/${taskId}/rooms/${roomIds[0]}/history`)).json();
     expect(history).toMatchObject([{ notes: "Filtro limpio", performed_by: "preventiva-test" }]);
+
+    const edit = await fetch(`${endpoint}/${taskId}/rooms`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `Filtros editados ${suffix}`, description: "Limpieza mensual" }),
+    });
+    expect(edit.status).toBe(200);
+    expect((await edit.json()).name).toBe(`Filtros editados ${suffix}`);
+    expect((await pool!.query("SELECT count(*)::int AS n FROM preventive_room_completions WHERE task_id = $1", [taskId])).rows[0].n).toBe(2);
+
+    const archived = await fetch(`${endpoint}/${taskId}/rooms`, { method: "DELETE" });
+    expect(archived.status).toBe(200);
+    const active = await (await fetch(endpoint)).json();
+    expect(active.some((row: any) => row.id === taskId)).toBe(false);
+    expect((await pool!.query("SELECT count(*)::int AS n FROM preventive_room_completions WHERE task_id = $1", [taskId])).rows[0].n).toBe(2);
+    expect((await post(`/${taskId}/rooms/${roomIds[0]}/done`, {})).status).toBe(404);
   });
 });

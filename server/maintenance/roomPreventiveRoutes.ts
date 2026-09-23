@@ -39,6 +39,52 @@ export function registerRoomPreventiveRoutes(app: Express) {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  app.patch("/api/maintenance/preventive/:id/rooms", requireAuth, async (req, res) => {
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const description = req.body?.description;
+    if (!name || name.length > 255 || (description != null && typeof description !== "string")) {
+      return res.status(400).json({ error: "Ingresá un nombre válido y una descripción de texto" });
+    }
+    try {
+      const outcome = await db.transaction(async tx => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${name.toLowerCase()}))`);
+        const existing = await tx.execute(sql`
+          SELECT p.id FROM preventive_tasks p WHERE p.id = ${req.params.id} AND p.active = true
+          AND EXISTS (SELECT 1 FROM preventive_room_slots s WHERE s.task_id = p.id) FOR UPDATE
+        `);
+        if (!existing.rows.length) return { status: "missing" };
+        const duplicate = await tx.execute(sql`
+          SELECT p.id FROM preventive_tasks p WHERE p.id <> ${req.params.id}
+          AND p.active = true AND lower(p.name) = ${name.toLowerCase()}
+          AND EXISTS (SELECT 1 FROM preventive_room_slots s WHERE s.task_id = p.id) LIMIT 1
+        `);
+        if (duplicate.rows.length) return { status: "duplicate" };
+        const updated = await tx.execute(sql`
+          UPDATE preventive_tasks SET name = ${name}, description = ${description?.trim() || null}, updated_at = now()
+          WHERE id = ${req.params.id} RETURNING *
+        `);
+        return { status: "updated", task: updated.rows[0] };
+      });
+      if (outcome.status === "missing") return res.status(404).json({ error: "Preventiva no encontrada" });
+      if (outcome.status === "duplicate") return res.status(409).json({ error: "Ya existe una preventiva por habitación con ese nombre" });
+      res.json(outcome.task);
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // "Eliminar" la quita de la lista y de las alertas sin destruir el historial.
+  app.delete("/api/maintenance/preventive/:id/rooms", requireAuth, async (req, res) => {
+    try {
+      const archived = await db.execute(sql`
+        UPDATE preventive_tasks p SET active = false, updated_at = now()
+        WHERE p.id = ${req.params.id} AND p.active = true
+        AND EXISTS (SELECT 1 FROM preventive_room_slots s WHERE s.task_id = p.id)
+        RETURNING p.id
+      `);
+      if (!archived.rows.length) return res.status(404).json({ error: "Preventiva no encontrada o ya eliminada" });
+      res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get("/api/maintenance/preventive/:id/rooms", requireAuth, async (req, res) => {
     try {
       const result = await db.execute(sql`
