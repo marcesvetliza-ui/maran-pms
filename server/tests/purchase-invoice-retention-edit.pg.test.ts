@@ -416,7 +416,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
     }
   }, 15_000);
 
-  it("mantiene retenciones practicadas y restadas para FACT-A", async () => {
+  it("rechaza retenciones en facturas nuevas y en la edición de facturas sin retenciones históricas", async () => {
     if (!testPool) return;
 
     const fixture = await createFixture();
@@ -426,59 +426,36 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       );
       const accountId = expenseAccount.rows[0].id;
 
-      const created = await requestInvoice("POST", "/api/purchase-invoices", {
+      const invoiceBody = {
         tipoComprobante: "FACT-A",
         supplierId: fixture.supplierId,
-        proveedorNombre: "Proveedor FACT-A prueba",
-        proveedorCuit: fixture.supplierCuit,
         numeroComprobante: `PG-FACT-A-${randomUUID()}`,
         fechaEmision: "2026-08-31",
         periodo: "08/2026",
         condicionPago: "contado",
         montoNeto: "100.00",
-        retencionIibb: "10.00",
-        retencionMunicipal: "6.00",
         cuentaContableId: accountId,
-        alicuotaIibbProveedor: "3.00",
+      };
+      const rejected = await requestInvoice("POST", "/api/purchase-invoices", {
+        ...invoiceBody, retencionIibb: "10.00", retencionMunicipal: "6.00",
       });
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error).toMatch(/Orden de Pago/);
+      expect((await testPool.query("SELECT id FROM purchase_invoices WHERE numero_comprobante = $1", [invoiceBody.numeroComprobante])).rowCount).toBe(0);
+
+      const created = await requestInvoice("POST", "/api/purchase-invoices", invoiceBody);
       expect(created.status).toBe(201);
       fixture.facturaInvoiceId = Number(created.body.id);
-
-      const facturaState = await testPool.query<{
-        asiento_id: number | null;
-        monto_total: string;
-      }>(
-        `SELECT asiento_id, monto_total
-         FROM purchase_invoices
-         WHERE id = $1`,
-        [fixture.facturaInvoiceId],
+      const rejectedEdit = await requestInvoice("PATCH", `/api/purchase-invoices/${fixture.facturaInvoiceId}`, {
+        ...invoiceBody, retencionSuss: "2.00",
+      });
+      expect(rejectedEdit.status).toBe(400);
+      expect(rejectedEdit.body.error).toMatch(/Orden de Pago/);
+      const saved = await testPool.query<{ monto_total: string; retencion_suss: string }>(
+        "SELECT monto_total, retencion_suss FROM purchase_invoices WHERE id = $1", [fixture.facturaInvoiceId],
       );
-      expect(facturaState.rows[0].monto_total).toBe("84.00");
-      expect(facturaState.rows[0].asiento_id).toBeTruthy();
-
-      const lines = await readAccountingLines(Number(facturaState.rows[0].asiento_id));
-      const totals = accountingTotals(lines);
-      expect(totals.debe).toBeCloseTo(100, 2);
-      expect(totals.haber).toBeCloseTo(100, 2);
-      expect(lines).toEqual(
-        expect.arrayContaining([
-          { codigo: "1.1.4.01.08.01", debe: "0.00", haber: "10.00" },
-          { codigo: "1.1.4.01.11", debe: "0.00", haber: "6.00" },
-        ]),
-      );
-
-      const practicedIibb = await testPool.query<{
-        importe_retenido: string;
-        invoice_id: number;
-      }>(
-        `SELECT importe_retenido, invoice_id
-         FROM iibb_retentions
-         WHERE invoice_id = $1`,
-        [fixture.facturaInvoiceId],
-      );
-      expect(practicedIibb.rows).toEqual([
-        { importe_retenido: "10.00", invoice_id: fixture.facturaInvoiceId },
-      ]);
+      expect(saved.rows[0]).toMatchObject({ monto_total: "100.00", retencion_suss: "0.00" });
+      expect((await testPool.query("SELECT id FROM iibb_retentions WHERE invoice_id = $1", [fixture.facturaInvoiceId])).rowCount).toBe(0);
     } finally {
       await cleanupFixture(fixture);
     }
@@ -504,11 +481,17 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
         periodo: "08/2026",
         condicionPago: "cuenta_corriente",
         montoNeto: "100.00",
-        retencionMunicipal: "4.00",
         cuentaContableId: accountId,
       });
       expect(created.status).toBe(201);
       fixture.facturaInvoiceId = Number(created.body.id);
+
+      // Simula un comprobante anterior al cambio: el importe histórico queda
+      // disponible para corregirlo, aunque hoy ya no se permita cargarlo nuevo.
+      await testPool.query(
+        "UPDATE purchase_invoices SET retencion_municipal = 4.00, monto_total = 96.00 WHERE id = $1",
+        [fixture.facturaInvoiceId],
+      );
 
       const updated = await requestInvoice(
         "PATCH",

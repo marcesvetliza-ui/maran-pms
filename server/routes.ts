@@ -91,6 +91,17 @@ function normalizeReceivedRetentionAmounts(body: any, tipoComprobante: string): 
   };
 }
 
+const PURCHASE_RETENTION_FIELDS = [
+  "retencionIibb", "retencionGanancias", "retencionIva", "retencionSuss", "retencionMunicipal",
+] as const;
+
+function hasPurchaseRetentions(values: Record<string, unknown>): boolean {
+  return PURCHASE_RETENTION_FIELDS.some((field) => {
+    const value = values[field];
+    return value !== null && value !== undefined && value !== "" && Number(value) !== 0;
+  });
+}
+
 async function resolveReceivedRetentionAccountId(body: any): Promise<number> {
   const accountCode = receivedRetentionAccountCode(body.subtipoRetencion);
   if (!accountCode) {
@@ -2936,6 +2947,9 @@ export async function registerRoutes(
   app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
+      if (isSupplierPayableDocument(body.tipoComprobante) && hasPurchaseRetentions(body)) {
+        return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
+      }
       const supplierId = Number(body.supplierId);
       if (!Number.isSafeInteger(supplierId) || supplierId <= 0) {
         return res.status(400).json({ error: "Elegí un proveedor cargado en el ABM." });
@@ -3116,13 +3130,24 @@ export async function registerRoutes(
   app.patch("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const existing = await db.execute(sql`SELECT estado, tipo_comprobante FROM purchase_invoices WHERE id = ${id}`);
+      const existing = await db.execute(sql`
+        SELECT estado, tipo_comprobante, retencion_iibb AS "retencionIibb",
+          retencion_ganancias AS "retencionGanancias", retencion_iva AS "retencionIva",
+          retencion_suss AS "retencionSuss", retencion_municipal AS "retencionMunicipal"
+        FROM purchase_invoices WHERE id = ${id}
+      `);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
       if ((existing.rows[0] as any).estado !== "pendiente") {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
       const body = normalizeReceivedRetentionAmounts(req.body, tipoComprobante);
+      // Las correcciones de comprobantes históricos conservan sus retenciones;
+      // uno que nunca las tuvo no puede incorporarlas desde este formulario.
+      if (isSupplierPayableDocument(tipoComprobante) &&
+          !hasPurchaseRetentions(existing.rows[0] as Record<string, unknown>) && hasPurchaseRetentions(body)) {
+        return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
+      }
       if (isReceivedRetention(tipoComprobante)) {
         body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
       }
