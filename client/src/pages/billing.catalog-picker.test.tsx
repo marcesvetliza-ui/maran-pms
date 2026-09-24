@@ -171,6 +171,33 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     expect(screen.getByTestId("item-row-1")).toBeInTheDocument();
   });
 
+  it("el Centro exige un concepto seleccionado y permite revisar después de elegirlo", async () => {
+    const user = userEvent.setup();
+    renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
+    await user.click(screen.getByTestId("button-consumidor-final"));
+    expect(screen.queryByTestId("btn-add-item")).not.toBeInTheDocument();
+    expect(screen.getByTestId("item-description-0")).toHaveAttribute("readonly");
+
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    expect(screen.getByTestId("catalog-error-0")).toHaveTextContent("Elegí el concepto");
+    expect(screen.queryByTestId("btn-confirmar-emitir")).not.toBeInTheDocument();
+
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(await screen.findByTestId("catalog-item-mi-1"));
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    expect(screen.getByTestId("btn-confirmar-emitir")).toBeInTheDocument();
+  });
+
+  it("permite quitar el único concepto seleccionado y exige volver a elegir uno", async () => {
+    const user = userEvent.setup();
+    renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(await screen.findByTestId("catalog-item-mi-1"));
+    await user.click(screen.getByText("Quitar"));
+    expect(screen.getByTestId("item-description-0")).toHaveValue("");
+    expect(screen.getByTestId("item-description-0")).toHaveAttribute("readonly");
+  });
+
   describe("Turnos vendidos — el comprobante recuerda qué tratamiento fue", () => {
     // Elegir un tratamiento del catálogo de Spa (a diferencia de alojamiento o
     // restaurant) manda su id en el comprobante, para que el servidor pueda
