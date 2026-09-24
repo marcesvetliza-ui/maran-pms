@@ -36,6 +36,32 @@ export type PurchaseInvoiceNetLine = {
   alicuota: string;
 };
 
+export type PurchaseInvoiceArticleAmount = {
+  quantity: string | number;
+  unitPrice: string | number;
+  vatRate?: string | null;
+};
+
+/** A usa precio neto y discrimina IVA; B usa precio final y no suma IVA encima. */
+export function suggestPurchaseAmountsFromArticles(
+  articles: PurchaseInvoiceArticleAmount[],
+  tipoComprobante: string,
+): { lines: Array<{ neto: string; alicuota: string }>; fields: Record<string, string>; articleTotal: number } {
+  const totals = new Map<string, number>();
+  const grossPrice = tipoComprobante === "FACT-B" || tipoComprobante === "FACT-C";
+  for (const article of articles) {
+    const subtotal = roundCurrency(amount(article.quantity) * amount(article.unitPrice));
+    const rate = grossPrice ? "0" : article.vatRate === "2.5" ? "25" : article.vatRate || "0";
+    totals.set(rate, roundCurrency((totals.get(rate) || 0) + subtotal));
+  }
+  const lines = [...totals].map(([alicuota, neto]) => ({ alicuota, neto: neto.toFixed(2) }));
+  const fields = grossPrice
+    ? { montoNeto: [...totals.values()].reduce((sum, value) => sum + value, 0).toFixed(2),
+        montoIva5: "", montoIva25: "", montoIva105: "", montoIva21: "", montoIva27: "" }
+    : calculatePurchaseInvoiceAmountsFromNetLines(lines);
+  return { lines, fields, articleTotal: calculatePurchaseInvoiceTotal({ tipoComprobante, ...fields }) };
+}
+
 const IVA_FIELD_BY_RATE: Record<string, keyof PurchaseInvoiceAmountInput> = {
   "5": "montoIva5",
   "10.5": "montoIva105",

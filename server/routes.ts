@@ -2923,7 +2923,10 @@ export async function registerRoutes(
         WHERE poi.invoice_id = ${id}
         ORDER BY po.fecha DESC, po.id DESC
       `);
-      res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows });
+      const articleLines = await db.execute(sql`
+        SELECT * FROM purchase_invoice_lines WHERE invoice_id = ${id} ORDER BY line_number
+      `);
+      res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows, articleLines: articleLines.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

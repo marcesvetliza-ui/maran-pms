@@ -6,9 +6,32 @@ import {
   purchaseInvoiceRetentionSide,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
+  suggestPurchaseAmountsFromArticles,
 } from "@shared/purchaseInvoiceTotals";
 
 describe("purchase invoice totals", () => {
+  it("suggests grouped net amounts and VAT for A, with per-line currency rounding", () => {
+    const suggestion = suggestPurchaseAmountsFromArticles([
+      { quantity: 2, unitPrice: 100, vatRate: "21" },
+      { quantity: 1, unitPrice: 50, vatRate: "21" },
+      { quantity: 1, unitPrice: 100, vatRate: "10.5" },
+    ], "FACT-A");
+    expect(suggestion.lines).toEqual([
+      { alicuota: "21", neto: "250.00" },
+      { alicuota: "10.5", neto: "100.00" },
+    ]);
+    expect(suggestion.fields).toMatchObject({ montoNeto: "350.00", montoIva21: "52.50", montoIva105: "10.50" });
+    expect(suggestion.articleTotal).toBe(413);
+  });
+
+  it("treats B article prices as final even when a VAT rate is recorded", () => {
+    const suggestion = suggestPurchaseAmountsFromArticles([
+      { quantity: 2, unitPrice: 121, vatRate: "21" },
+    ], "FACT-B");
+    expect(suggestion.articleTotal).toBe(242);
+    expect(calculatePurchaseInvoiceTotal({ tipoComprobante: "FACT-B", ...suggestion.fields })).toBe(242);
+    expect(suggestion.fields.montoIva21).toBe("");
+  });
   it("adds suffered retentions to a card settlement total", () => {
     const amounts = calculatePurchaseInvoiceAmountsFromNetLines([
       { neto: "112837.20", alicuota: "21" },

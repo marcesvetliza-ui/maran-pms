@@ -1193,6 +1193,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
     invoice_counters: [],
     purchase_invoices: ["subtipo_retencion"],
+    purchase_invoice_lines: ["id", "invoice_id", "line_number", "item_id", "item_name", "item_sku", "quantity", "unit_price", "vat_rate", "line_total", "warehouse_id"],
   },
   indexes: {
     sales_invoices: [
@@ -1214,6 +1215,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     group_payments: ["group_payments_group_id_idx", "group_payments_receipt_number_unique"],
     payments: ["payments_group_payment_id_idx"],
     invoice_counters: ["invoice_counters_tipo_comprobante_punto_venta_unique"],
+    purchase_invoice_lines: ["purchase_invoice_lines_invoice_position_unique"],
   },
 } as const;
 
@@ -1540,6 +1542,29 @@ export async function runMigrations() {
   await withTimeout("purchase_invoices.subtipo_retencion", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN subtipo_retencion text`)))
   );
+
+  // Requerida para el nuevo desglose de artículos, antes de atender solicitudes.
+  await db.execute(sql.raw(serializeIncrementalDdl(`
+    DO $purchase_lines$
+    BEGIN
+    IF to_regclass('public.purchase_invoice_lines') IS NULL THEN
+    CREATE TABLE purchase_invoice_lines (
+      id serial PRIMARY KEY,
+      invoice_id integer NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+      line_number integer NOT NULL,
+      item_id varchar NOT NULL REFERENCES inventory_items(id),
+      item_name text NOT NULL,
+      item_sku text,
+      quantity numeric(10,3) NOT NULL CHECK (quantity > 0),
+      unit_price numeric(14,2) NOT NULL CHECK (unit_price >= 0),
+      vat_rate text,
+      line_total numeric(14,2) NOT NULL,
+      warehouse_id varchar,
+      CONSTRAINT purchase_invoice_lines_invoice_position_unique UNIQUE (invoice_id, line_number)
+    );
+    END IF;
+    END $purchase_lines$;
+  `)));
 
   // Older databases allowed more than one counter for the same fiscal
   // document/point-of-sale pair. Keep the row that has issued the furthest
