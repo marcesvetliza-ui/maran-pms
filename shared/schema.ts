@@ -2615,6 +2615,7 @@ export const paymentOrders = pgTable("payment_orders", {
   retencionIva: numeric("retencion_iva", { precision: 14, scale: 2 }).default("0"),
   retencionProfLibs: numeric("retencion_prof_libs", { precision: 14, scale: 2 }).default("0"),
   compensacion: numeric("compensacion", { precision: 14, scale: 2 }).default("0"),
+  alicuotaIibbOp: numeric("alicuota_iibb_op", { precision: 6, scale: 4 }).default("0"),
   totalAbonado: numeric("total_abonado", { precision: 14, scale: 2 }).notNull(),
   asientoId: integer("asiento_id"),
   observaciones: text("observaciones"),

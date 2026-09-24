@@ -38,6 +38,7 @@ import {
   calculatePurchaseInvoiceTotal,
   isCardSettlement,
   isReceivedRetention,
+  isSupplierPayableDocument,
   isValidPurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   receivedRetentionAccountCode,
@@ -211,7 +212,7 @@ const emptyForm = () => ({
   numeroComprobante: "",
   fechaEmision: getLocalToday(),
   periodo: calcPeriodo(getLocalToday()),
-  condicionPago: "contado",
+  condicionPago: "cuenta_corriente",
   alicuotaIva: "21",
   montoNeto: "",
   montoIva21: "",
@@ -445,7 +446,7 @@ export function InvoiceDialog({
         numeroComprobante: editingInvoice.numeroComprobante || "",
         fechaEmision: editingInvoice.fechaEmision || "",
         periodo: editingInvoice.periodo || "",
-        condicionPago: editingInvoice.condicionPago || "contado",
+        condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
         alicuotaIva: "21",
         montoNeto: editingInvoice.montoNeto || "",
         montoIva21: editingInvoice.montoIva21 || "",
@@ -683,6 +684,7 @@ export function InvoiceDialog({
   // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
   // los datos del emisor y los artículos recibidos.
   const isRemito = form.tipoComprobante === "REMITO";
+  const isSupplierPayable = isSupplierPayableDocument(form.tipoComprobante);
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
   const isImporteUnico = isFacturaC || isRetencion || (form.tipoComprobante === "FACT-B" && !isEditing);
@@ -775,18 +777,22 @@ export function InvoiceDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Condición de Pago</Label>
-                  <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
-                    <SelectTrigger data-testid="select-condicion-pago">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="contado">Contado</SelectItem>
-                      <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {isSupplierPayable ? (
+                  <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                    El pago se registra desde la cuenta corriente del proveedor.
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Condición de Pago</Label>
+                    <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
+                      <SelectTrigger data-testid="select-condicion-pago"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
           </div>
               {isRetencion && (
                 <div>
@@ -1247,7 +1253,7 @@ export function InvoiceDialog({
                     <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    Condición: {form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}
+                    {isSupplierPayable ? "Pendiente de pago en cuenta corriente" : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
                 </CardContent>
               </Card>
@@ -1293,18 +1299,22 @@ export function InvoiceDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Condición de Pago</Label>
-                  <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
-                    <SelectTrigger data-testid="select-condicion-pago">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="contado">Contado</SelectItem>
-                      <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {isSupplierPayable ? (
+                  <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                    El pago se registra desde la cuenta corriente del proveedor.
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Condición de Pago</Label>
+                    <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
+                      <SelectTrigger data-testid="select-condicion-pago"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
                 <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
@@ -1623,7 +1633,7 @@ export function InvoiceDialog({
                     <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    Condición: {form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}
+                    {isSupplierPayable ? "Pendiente de pago en cuenta corriente" : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
                 </CardContent>
               </Card>

@@ -55,6 +55,7 @@ import {
   calculatePurchaseInvoiceTotal,
   isValidPurchaseInvoiceTotal,
   isReceivedRetention,
+  isSupplierPayableDocument,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
 } from "@shared/purchaseInvoiceTotals";
@@ -2996,8 +2997,13 @@ export async function registerRoutes(
       }
       const stockRows = parsePurchaseStockRows(body.stockItems);
 
-      // Estado según condición de pago
-      const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
+      // Las facturas, notas y recibos se pagan desde la cuenta corriente del
+      // proveedor. Ignorar "contado" enviado por clientes anteriores: cargar
+      // un comprobante no equivale a registrar una salida de dinero.
+      const condicionPago = isSupplierPayableDocument(body.tipoComprobante)
+        ? "cuenta_corriente"
+        : body.condicionPago || "contado";
+      const estado = condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
 
       // Formatear numero comprobante ext
       const numeroComprobanteExt = body.puntoVenta && body.numeroComprobante
@@ -3020,7 +3026,7 @@ export async function registerRoutes(
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
-          ${body.fechaEmision}, ${body.periodo||null}, ${body.condicionPago||"contado"},
+          ${body.fechaEmision}, ${body.periodo||null}, ${condicionPago},
           ${n("montoNeto")}, ${body.alicuotaIva||"21"}, ${n("montoIva27")}, ${n("montoIva21")}, ${n("montoIva105")},
           ${n("montoIva5")}, ${n("montoIva25")}, ${n("montoExento")}, ${n("montoNoGravado")},
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},

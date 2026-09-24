@@ -78,10 +78,12 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.queryByText("1. Encabezado")).not.toBeInTheDocument();
   });
 
-  it("Tipo de Comprobante y Condición de Pago están visibles juntos desde el inicio", async () => {
+  it("las facturas se pagan desde la cuenta corriente y no ofrecen contado al cargarlas", async () => {
     renderDialog({ unifiedLayout: true });
     expect(screen.getByTestId("select-tipo-comprobante")).toBeInTheDocument();
-    expect(screen.getByTestId("select-condicion-pago")).toBeInTheDocument();
+    expect(screen.getByTestId("supplier-payment-notice")).toHaveTextContent("cuenta corriente del proveedor");
+    expect(screen.queryByTestId("select-condicion-pago")).not.toBeInTheDocument();
+    expect(screen.getByText("Pendiente de pago en cuenta corriente")).toBeInTheDocument();
   });
 
   it('agrupa Proveedor, Punto de Venta, Número, Fecha, Período y Cuenta Contable bajo "Datos del emisor", todo visible a la vez', async () => {
