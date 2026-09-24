@@ -1138,6 +1138,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "group_payment_intent",
       "credit_reapplication_intent",
       "spa_account_id",
+      "recipient_entity_type",
+      "recipient_entity_id",
       "reconciliation_status",
       "reconciliation_error",
       "reconciliation_updated_at",
@@ -3121,6 +3123,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   await withTimeout("sales_invoices.observaciones", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN observaciones text`)))
+  );
+
+  await withTimeout("sales_invoices.recipient_entity_type", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN recipient_entity_type text`)))
+  );
+  await withTimeout("sales_invoices.recipient_entity_id", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN recipient_entity_id varchar`)))
   );
 
   await withTimeout("group_payments.receipt_type", T, () =>

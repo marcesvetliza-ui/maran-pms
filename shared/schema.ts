@@ -2789,6 +2789,10 @@ export const salesInvoices = pgTable("sales_invoices", {
   clienteDocumentType: text("cliente_document_type"),
   clienteCondicionIva: text("cliente_condicion_iva").notNull(),
   clienteDomicilio: text("cliente_domicilio"),
+  // Ficha elegida al emitir desde el Centro de Comprobantes. El nombre y el
+  // documento anteriores siguen siendo la foto fiscal del momento de emisión.
+  recipientEntityType: text("recipient_entity_type"),
+  recipientEntityId: varchar("recipient_entity_id"),
   montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull(),
   montoIva21: numeric("monto_iva21", { precision: 14, scale: 2 }).default("0"),
   montoIva105: numeric("monto_iva105", { precision: 14, scale: 2 }).default("0"),
