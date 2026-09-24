@@ -72,7 +72,7 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       expect((await pool.query("SELECT id FROM purchase_invoices WHERE numero_comprobante = $1", [numero])).rowCount).toBe(0);
       expect((await pool.query("SELECT id FROM stock_movements WHERE item_id = $1", [itemId])).rowCount).toBe(0);
       expect((await pool.query("SELECT id FROM item_price_history WHERE item_id = $1", [itemId])).rowCount).toBe(0);
-      expect((await pool.query("SELECT id FROM inventory_item_suppliers WHERE item_id = $1", [itemId])).rowCount).toBe(0);
+      expect((await pool.query("SELECT item_id FROM inventory_item_suppliers WHERE item_id = $1", [itemId])).rowCount).toBe(0);
       const stock = await pool.query("SELECT current_stock, cost_price FROM inventory_items WHERE id = $1", [itemId]);
       expect(Number(stock.rows[0].current_stock)).toBe(3);
       expect(Number(stock.rows[0].cost_price)).toBe(9);
