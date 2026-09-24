@@ -125,35 +125,42 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       const [from, to] = blockDates(block, group);
       return from <= date && date < to;
     });
+    // Blocks of the same type and group add their quantities, while linked
+    // reservations consume their combined commitment only once.
+    const blocksByGroup = new Map<string, { group: InventoryGroup; quantity: number }>();
+    for (const { block, group } of blocks) {
+      const previous = blocksByGroup.get(block.groupId);
+      blocksByGroup.set(block.groupId, {
+        group: group!,
+        quantity: (previous?.quantity ?? 0) + block.quantity,
+      });
+    }
     const candidateUnits = Math.max(0, input.candidateUnits ?? 1);
-    const candidateInBlock = input.contextGroupId && blocks.some(({ block }) => block.groupId === input.contextGroupId);
+    const candidateInBlock = !!input.contextGroupId && blocksByGroup.has(input.contextGroupId);
     const normalDemand = active.filter(reservation => {
       if (!(reservation.checkInDate <= date && date < reservation.checkOutDate)) return false;
-      const linkedBlock = reservation.groupId
-        ? blocks.find(({ block }) => block.groupId === reservation.groupId)
-        : undefined;
-      return !linkedBlock;
+      return !reservation.groupId || !blocksByGroup.has(reservation.groupId);
     }).length + (candidateInBlock ? 0 : candidateUnits);
 
     let hardDemand = normalDemand;
     const softRows: Array<{
-      block: InventoryBlock;
       group: InventoryGroup;
+      quantity: number;
       remaining: number;
     }> = [];
-    for (const { block, group } of blocks) {
+    for (const [groupId, { group, quantity }] of blocksByGroup) {
       const linkedCount = active.filter(reservation =>
-        reservation.groupId === block.groupId &&
+        reservation.groupId === groupId &&
         reservation.checkInDate <= date && date < reservation.checkOutDate,
       ).length;
-      const isCandidateInBlock = input.contextGroupId === block.groupId;
+      const isCandidateInBlock = input.contextGroupId === groupId;
       const effectiveLinkedCount = linkedCount + (isCandidateInBlock ? candidateUnits : 0);
-      if (HARD_GROUP_STATUSES.has(group!.status)) {
-        hardDemand += Math.max(block.quantity, effectiveLinkedCount);
-      } else if (SOFT_GROUP_STATUSES.has(group!.status)) {
+      if (HARD_GROUP_STATUSES.has(group.status)) {
+        hardDemand += Math.max(quantity, effectiveLinkedCount);
+      } else if (SOFT_GROUP_STATUSES.has(group.status)) {
         hardDemand += effectiveLinkedCount;
-        const remaining = Math.max(block.quantity - effectiveLinkedCount, 0);
-        if (remaining > 0) softRows.push({ block, group: group!, remaining });
+        const remaining = Math.max(quantity - effectiveLinkedCount, 0);
+        if (remaining > 0) softRows.push({ group, quantity, remaining });
       }
     }
     if (hardDemand > input.operationalInventory) {
@@ -169,15 +176,15 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     }
     const totalSoftRemaining = softRows.reduce((sum, row) => sum + row.remaining, 0);
     if (hardDemand + totalSoftRemaining > input.operationalInventory) {
-      for (const { block, group, remaining } of softRows) {
+      for (const { group, quantity, remaining } of softRows) {
         warningRows.push({
           code: GROUP_BLOCK_WARNING_CODE,
           roomTypeId: input.roomTypeId,
           date,
-          groupId: block.groupId,
+          groupId: group.id,
           groupName: group.name,
           requested: remaining,
-          blockQuantity: block.quantity,
+          blockQuantity: quantity,
           availableOperational: input.operationalInventory,
           canOverride: true,
         });

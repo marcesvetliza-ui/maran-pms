@@ -247,16 +247,26 @@ function AddBlockDialog({
     queryKey: ["/api/room-types"],
   });
 
-  const fetchAvailability = async (rtId: string, ci: string, co: string) => {
-    if (!rtId || !ci || !co || co <= ci) { setAvailableCount(null); return; }
-    try {
-      const res = await fetch(`/api/rooms/available?checkIn=${ci}&checkOut=${co}&roomTypeId=${rtId}`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableCount(Array.isArray(data) ? data.length : null);
-      }
-    } catch { setAvailableCount(null); }
-  };
+  useEffect(() => {
+    const ci = useCustomDates ? blockCheckInDate : group.checkInDate;
+    const co = useCustomDates ? blockCheckOutDate : group.checkOutDate;
+    setAvailableCount(null);
+    if (!open || !roomTypeId || !ci || !co || co <= ci) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ checkIn: ci, checkOut: co, roomTypeId });
+    fetch(`/api/rooms/available?${params}`, { credentials: "include", signal: controller.signal })
+      .then(async res => {
+        if (!res.ok) throw new Error("No se pudo consultar disponibilidad");
+        return res.json();
+      })
+      .then(data => {
+        if (!controller.signal.aborted) setAvailableCount(Array.isArray(data) ? data.length : null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAvailableCount(null);
+      });
+    return () => controller.abort();
+  }, [open, roomTypeId, useCustomDates, blockCheckInDate, blockCheckOutDate, group.checkInDate, group.checkOutDate]);
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans/by-room-type", roomTypeId],
@@ -325,12 +335,7 @@ function AddBlockDialog({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Tipo de Habitación *</Label>
-              <Select value={roomTypeId} onValueChange={(v) => {
-                setRoomTypeId(v);
-                const ci = useCustomDates ? blockCheckInDate : group.checkInDate;
-                const co = useCustomDates ? blockCheckOutDate : group.checkOutDate;
-                fetchAvailability(v, ci, co);
-              }}>
+              <Select value={roomTypeId} onValueChange={setRoomTypeId}>
                 <SelectTrigger data-testid="select-block-room-type">
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
@@ -348,23 +353,19 @@ function AddBlockDialog({
               <Label>
                 Cantidad *
                 {availableCount !== null && (
-                  <span className={`ml-1 font-normal text-xs ${availableCount === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                    ({availableCount} disponibles)
+                  <span className="ml-1 font-normal text-xs text-muted-foreground">
+                    ({availableCount} hab. físicas libres)
                   </span>
                 )}
               </Label>
               <Input
                 type="number"
                 min={1}
-                max={availableCount ?? undefined}
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
                 data-testid="input-block-quantity"
-                className={availableCount !== null && quantity > availableCount ? 'border-destructive' : ''}
               />
-              {availableCount !== null && quantity > availableCount && (
-                <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
-              )}
+              <p className="text-xs text-muted-foreground mt-1">El cupo de bloques confirmados se verifica al guardar.</p>
             </div>
           </div>
 
