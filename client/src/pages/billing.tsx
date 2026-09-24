@@ -209,6 +209,23 @@ export default function BillingPage() {
     staleTime: 30_000,
   });
   const [showNC, setShowNC] = useState<number | null>(null);
+  const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
+  async function retryCenterSettlement(invoiceId: number) {
+    setRetryingCenterInvoiceId(invoiceId);
+    try {
+      await apiRequest("POST", `/api/billing/invoices/${invoiceId}/settle-center`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] }),
+      ]);
+      toast({ title: "Cobro registrado", description: "Caja y Cuenta Corriente quedaron conciliadas con la factura." });
+    } catch (error: any) {
+      toast({ title: "El cobro sigue pendiente", description: parseApiError(error), variant: "destructive" });
+    } finally {
+      setRetryingCenterInvoiceId(null);
+    }
+  }
   const [filtroDesde, setFiltroDesde] = useState(firstOfCurrentMonth());
   const [filtroHasta, setFiltroHasta] = useState(today());
   const [filtroTipo, setFiltroTipo] = useState("");
@@ -463,7 +480,9 @@ export default function BillingPage() {
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
                               <td className="px-3 py-2">
-                                {isInvoiceReconciliationPending(f) ? (
+                                {f.center_settlement_status === "pending" ? (
+                                  <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
+                                ) : isInvoiceReconciliationPending(f) ? (
                                   <div>
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
@@ -482,6 +501,9 @@ export default function BillingPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex gap-1 justify-end">
+                                  {f.center_settlement_status === "pending" && (
+                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
+                                  )}
                                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
@@ -756,6 +778,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
+  const [centerPaymentRows, setCenterPaymentRows] = useState([{ id: 1, method: "efectivo", amount: "" }]);
   const [ccEntityType, setCcEntityType] = useState<"guest" | "company" | "agency">("company");
   const [ccEntityId, setCcEntityId] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
@@ -1048,7 +1071,21 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
       }
     });
-    if (cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
+    if (requireLinkedRecipient) {
+      const methods = centerPaymentRows.map(row => row.method);
+      const retention = Number(retencionMonto || 0);
+      const defaultAmount = centerPaymentRows.length === 1 ? Math.max(0, totalPreview - retention) : 0;
+      const amounts = centerPaymentRows.map(row => Number(row.amount || defaultAmount));
+      const total = amounts.reduce((sum, amount) => sum + Math.round(amount * 100), Math.round(retention * 100));
+      if (new Set(methods).size !== methods.length || (retencionMonto !== "" && (!/^\d+(?:\.\d{1,2})?$/.test(retencionMonto) || retention < 0)) || amounts.some((amount, idx) => !Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(centerPaymentRows[idx].amount || defaultAmount.toFixed(2)))) {
+        errs.centerPayments = "Ingresá un importe positivo, con dos decimales como máximo, para cada medio sin repetirlo.";
+      } else if (total !== Math.round(totalPreview * 100)) {
+        errs.centerPayments = "La suma de cobros y retenciones debe coincidir con el total del comprobante.";
+      } else if (methods.includes("cuenta_corriente") && !selectedEntityInfo) {
+        errs.centerPayments = "Cuenta Corriente requiere un huésped, empresa o agencia elegido como receptor.";
+      }
+    }
+    if (!requireLinkedRecipient && cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
       errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : ccEntityType === "agency" ? "una agencia" : "un huésped"}`;
     }
     return errs;
@@ -1220,6 +1257,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       });
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
+      if (requireLinkedRecipient && data.cashMovementError) {
+        setEmittedInvoiceData(data);
+        setLinkError(true);
+        toast({ title: "Factura emitida; cobro pendiente", description: data.cashMovementError, variant: "destructive" });
+        return;
+      }
 
       // Persist only changes the operator explicitly confirmed. This keeps the
       // reservation's guest/company/agency profile aligned with the receipt.
@@ -1384,7 +1427,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setTipo(tipos.includes("FB") ? "FB" : tipos[0]); setRazonSocial(""); setCuit(""); setDni("");
     setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
-    setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
+    setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCenterPaymentRows([{ id: 1, method: "efectivo", amount: "" }]); setCcEntityType("company"); setCcEntityId("");
     setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
     setShowRecipientChangeWarning(false); setPendingEntity(null); setShowEntityChangeWarning(false);
@@ -1590,6 +1633,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     const groupSourceAmounts = resolvedGroupId
       ? allocateGroupInvoiceSources(groupInvoiceSources || [], grossItemsTotal(items))
       : undefined;
+    const centerRetention = Number(retencionMonto || 0);
+    const centerPaymentDetail = requireLinkedRecipient ? [
+      ...centerPaymentRows.map(row => ({ method: row.method, amount: Number(row.amount || (totalPreview - centerRetention).toFixed(2)) })),
+      ...(centerRetention > 0 ? [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: centerRetention }] : []),
+    ] : [];
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
@@ -1613,7 +1661,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       ...((cashArea || showPaymentMethod || cashFormaPago === "cuenta_corriente")
         ? {
             ...(cashArea ? { cashArea } : {}),
-            cashFormaPago,
+            cashFormaPago: requireLinkedRecipient ? (centerPaymentDetail.length === 1 ? centerPaymentDetail[0].method : "pago_dividido") : cashFormaPago,
               ...(cashArea ? {
               cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}${
                 parseFloat(retencionMonto) > 0
@@ -1621,13 +1669,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   : ""
               }`,
             } : {}),
-              ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              ...(!requireLinkedRecipient && cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              ...(requireLinkedRecipient ? { cashFormaPagoDetalle: centerPaymentDetail } : {}),
                // An existing reservation advance has already been collected.
                // Its invoice must describe that payment in full, not collect
                // it again. The server requires detail summing to the invoice.
-               ...(reservationId && paymentId
+               ...(!requireLinkedRecipient && reservationId && paymentId
                  ? { cashFormaPagoDetalle: [{ method: cashFormaPago, amount: grossItemsTotal(items) }] }
-                 : parseFloat(retencionMonto) > 0
+                 : !requireLinkedRecipient && parseFloat(retencionMonto) > 0
                    ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
                    : {}),
           }
@@ -1683,6 +1732,25 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <p className="text-blue-700 dark:text-blue-400 text-xs mt-0.5">Por favor espere. No cierre este diálogo.</p>
               </div>
             </div>
+          </div>
+        ) : linkError && emittedInvoiceData && requireLinkedRecipient ? (
+          <div className="space-y-3 p-3" data-testid="center-settlement-pending">
+            <p className="font-semibold text-amber-700">Factura emitida; registro del cobro pendiente</p>
+            <p className="text-sm">La factura {emittedInvoiceData.tipo_comprobante} {padNum(emittedInvoiceData.punto_venta, 4)}-{padNum(emittedInvoiceData.numero, 8)} ya existe. No vuelvas a emitirla. Podés reintentar el registro de Caja y Cuenta Corriente sin pedir otro CAE.</p>
+            <Button disabled={linkRetrying} onClick={async () => {
+              setLinkRetrying(true);
+              try {
+                await apiRequest("POST", `/api/billing/invoices/${emittedInvoiceData.id}/settle-center`);
+                queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+                toast({ title: "Cobro registrado", description: "La factura y sus movimientos ya están conciliados." });
+                onClose(); resetForm();
+              } catch (error: any) {
+                toast({ title: "Cobro todavía pendiente", description: parseApiError(error), variant: "destructive" });
+              } finally {
+                setLinkRetrying(false);
+              }
+            }} data-testid="center-retry-settlement">{linkRetrying ? "Reintentando…" : "Reintentar registro del cobro"}</Button>
           </div>
         ) : linkError && emittedInvoiceData ? (
           <div className="space-y-4 py-2">
@@ -1844,7 +1912,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               )}
               {(cashArea || showPaymentMethod) && (
                 <div className="text-xs text-muted-foreground pt-1 border-t">
-                  Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}
+                  {requireLinkedRecipient ? <>Cobro: {centerPaymentRows.map(row => `${row.method.replaceAll("_", " ")} $${fPeso(Number(row.amount || (totalPreview - Number(retencionMonto || 0)).toFixed(2)))}`).join(" · ")}{Number(retencionMonto) > 0 ? ` · Retención $${fPeso(retencionMonto)}` : ""}</> : <>Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}</>}
                 </div>
               )}
             </div>
@@ -1941,7 +2009,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           )}
         </div>
 
-        {(cashArea || showPaymentMethod) && (
+        {!requireLinkedRecipient && (cashArea || showPaymentMethod) && (
           <div className="space-y-1">
             <Label>Forma de pago</Label>
             <Select disabled={!!paymentId} value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
@@ -2251,7 +2319,44 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           </div>
         </div>
 
-        {(cashArea || showPaymentMethod) && cashFormaPago !== "cuenta_corriente" && (
+        {requireLinkedRecipient && (
+          <div className="space-y-3 border rounded-lg p-3" data-testid="center-payment-split">
+            <div className="flex justify-between items-center">
+              <Label className="font-semibold">Formas de cobro</Label>
+              <span className="text-sm font-semibold">Total: ${fPeso(totalPreview)}</span>
+            </div>
+            {centerPaymentRows.map((row, index) => (
+              <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                <Select value={row.method} onValueChange={method => setCenterPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, method } : r))}>
+                  <SelectTrigger className="col-span-6" data-testid={`center-method-${index}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {([
+                      ["efectivo", "Efectivo"], ["tarjeta_debito", "Tarjeta Débito"], ["tarjeta_credito", "Tarjeta Crédito"],
+                      ["transferencia", "Transferencia"], ["mercadopago", "MercadoPago"], ["cuenta_corriente", "Cuenta Corriente"],
+                    ] as const).map(([method, label]) => (
+                      <SelectItem key={method} value={method} disabled={centerPaymentRows.some(other => other.id !== row.id && other.method === method) || (method === "cuenta_corriente" && !selectedEntityInfo)}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input className="col-span-5" type="number" step="0.01" min="0" value={row.amount}
+                  onChange={e => setCenterPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, amount: e.target.value } : r))}
+                  placeholder={centerPaymentRows.length === 1 ? `Total ${fPeso(Math.max(0, totalPreview - Number(retencionMonto || 0)))}` : "Importe"}
+                  data-testid={`center-amount-${index}`} />
+                <Button type="button" variant="ghost" size="icon" className="col-span-1" disabled={centerPaymentRows.length === 1}
+                  onClick={() => setCenterPaymentRows(rows => rows.filter(r => r.id !== row.id))}>×</Button>
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="outline" disabled={centerPaymentRows.length >= (selectedEntityInfo ? 6 : 5)} onClick={() => setCenterPaymentRows(rows => [
+              ...rows.map(row => row.amount ? row : { ...row, amount: Math.max(0, totalPreview - Number(retencionMonto || 0)).toFixed(2) }),
+              { id: Math.max(...rows.map(row => row.id)) + 1, method: ["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago", "cuenta_corriente"].find(method => !rows.some(row => row.method === method) && (method !== "cuenta_corriente" || selectedEntityInfo)) || "efectivo", amount: "" },
+            ])} data-testid="center-add-payment">Agregar forma de cobro</Button>
+            {centerPaymentRows.length === 1 && !centerPaymentRows[0].amount && <p className="text-xs text-muted-foreground">Si usás un solo medio, se toma el importe restante hasta completar el total.</p>}
+            {centerPaymentRows.some(row => row.method === "cuenta_corriente") && <p className="text-xs text-muted-foreground">Solo el importe indicado como Cuenta Corriente se cargará como deuda a la ficha del receptor.</p>}
+            {fieldErrors.centerPayments && <p className="text-xs text-red-500" data-testid="center-payment-error">{fieldErrors.centerPayments}</p>}
+          </div>
+        )}
+
+        {(cashArea || showPaymentMethod) && (requireLinkedRecipient || cashFormaPago !== "cuenta_corriente") && (
           <div className="space-y-1">
             <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
               <div className="flex items-center justify-between">

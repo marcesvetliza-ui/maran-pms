@@ -7,6 +7,7 @@ import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGif
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
+import { settleCenterSaleInvoice, validateCenterSalePaymentDetail } from "./centerSaleSettlement";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -1059,6 +1060,18 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
+  // Reintenta únicamente la liquidación persistida; jamás vuelve a pedir CAE.
+  app.post("/api/billing/invoices/:id/settle-center", requireAuth, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Factura inválida" });
+    try {
+      await settleCenterSaleInvoice(id, (req as any).user?.id || (req as any).user?.username);
+      return res.json({ ok: true, invoiceId: id });
+    } catch (error: any) {
+      return res.status(error?.statusCode || 409).json({ error: error?.message || "No se pudo completar el cobro" });
+    }
+  });
+
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
@@ -1078,6 +1091,7 @@ export function registerBillingRoutes(app: Express) {
       if (recipientMode === "centro_comprobantes") {
         const catalogError = await verifySaleCatalog(items);
         if (catalogError) return res.status(400).json({ error: catalogError });
+        validateCenterSalePaymentDetail(cashFormaPagoDetalle, calcularMontos(items, tipoComprobante).montoTotal, cashArea, recipientEntity);
       }
       let verifiedRecipientEntity: NewInvoiceData["recipientEntity"];
       if (recipientEntity !== undefined) {
@@ -1131,8 +1145,8 @@ export function registerBillingRoutes(app: Express) {
             entry.method.length > 0 && Number.isFinite(entry.amount) && entry.amount > 0)
         : undefined;
       const isReservationCcSettlement =
-        reservationSettlementMethod === "cuenta_corriente" ||
-        cashFormaPago === "cuenta_corriente";
+        recipientMode !== "centro_comprobantes" && (reservationSettlementMethod === "cuenta_corriente" ||
+        cashFormaPago === "cuenta_corriente");
       if (isReservationCcSettlement &&
         (!["guest", "company", "agency"].includes(String(ccEntityType)) || !ccEntityId) && !rawPaymentId) {
         return res.status(400).json({ error: "Seleccione un huésped, empresa o agencia para cargar a Cuenta Corriente" });
@@ -1782,6 +1796,7 @@ export function registerBillingRoutes(app: Express) {
           tipoComprobante,
           cliente: persistedCliente,
           recipientEntity: verifiedRecipientEntity,
+          centerSettlementArea: recipientMode === "centro_comprobantes" ? String(cashArea) : undefined,
           items: persistedItems,
           reservaId: reservationId || undefined,
           paymentId: paymentId || undefined,
@@ -1965,7 +1980,7 @@ export function registerBillingRoutes(app: Express) {
       // create a second Caja/CC movement.
       if (reservationId && creditOperationId) {
         await reconcileReservationCreditSettlement(Number(factura.id));
-      } else if (!existingCcPayment && !groupId && isReservationCcSettlement && ccEntityType && ccEntityId) {
+      } else if (recipientMode !== "centro_comprobantes" && !existingCcPayment && !groupId && isReservationCcSettlement && ccEntityType && ccEntityId) {
         const total = uncoveredSettlement;
         if (total > 0) {
           const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
@@ -2038,6 +2053,16 @@ export function registerBillingRoutes(app: Express) {
               } as any);
             }
           }
+        }
+      } else if (recipientMode === "centro_comprobantes") {
+        try {
+          await settleCenterSaleInvoice(Number(factura.id), user?.id || user?.username);
+        } catch (cashErr: any) {
+          cashMovementError = String(cashErr?.message || "No se pudo completar el cobro");
+          await audit(req, "update", "sales_invoices",
+            `Factura ${factura.tipoComprobante} ${factura.numero} emitida; cobro pendiente de conciliación`,
+            { entityType: "sales_invoice", entityId: String(factura.id), details: { error: cashMovementError } },
+          ).catch(() => undefined);
         }
       } else if (!reusedExistingClaim && !paymentId && !groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área. La factura ya
