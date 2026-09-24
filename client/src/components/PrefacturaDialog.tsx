@@ -196,7 +196,9 @@ export function getEffectiveFolioItemAmounts(
   for (const charge of folio.charges || []) {
     const id = String(charge.id);
     const amount = parseFloat(String(charge.amount)) || 0;
-    if (charge.category === "adjustment") continue;
+    // Ordinary positive adjustments (e.g. a surcharge) are real folio charges.
+    // Only tagged credit-note adjustments are fiscal audit history.
+    if (isReservationCreditNoteAdjustment(charge)) continue;
     if (charge.category !== "transfer_out" && charge.category !== "transfer_in") {
       amounts[id] = amount;
     }
@@ -229,7 +231,7 @@ export function getSelectedFolioItems(
   }
 
   for (const charge of folio.charges || []) {
-    if (charge.category === "transfer_out" || charge.category === "transfer_in" || charge.category === "adjustment") continue;
+    if (charge.category === "transfer_out" || charge.category === "transfer_in" || isReservationCreditNoteAdjustment(charge)) continue;
     const originalAmount = parseFloat(charge.amount);
     const id = String(charge.id);
     const amount = remainingAmounts?.[id] ?? effectiveAmounts[id] ?? originalAmount;
@@ -255,7 +257,7 @@ export function getAllBillableFolioItems(
   const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
   if (effectiveAmounts.accommodation > 0) allIds.add("accommodation");
   for (const charge of folio.charges || []) {
-    if (charge.category !== "transfer_out" && charge.category !== "transfer_in" && charge.category !== "adjustment" &&
+    if (charge.category !== "transfer_out" && charge.category !== "transfer_in" && !isReservationCreditNoteAdjustment(charge) &&
       (effectiveAmounts[String(charge.id)] ?? 0) > 0) {
       allIds.add(String(charge.id));
     }
@@ -1778,7 +1780,7 @@ export function PrefacturaDialog({
                         const m = c.description?.match(/\[rev:([^\]]+)\]/);
                         if (m) reversedIds.add(m[1]);
                       });
-                      return (folio.charges || []).filter((charge: any) => charge.category !== "adjustment").map((charge: any) => {
+                      return (folio.charges || []).filter((charge: any) => !isReservationCreditNoteAdjustment(charge)).map((charge: any) => {
                         const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
                         const isReversal = charge.description?.includes("[rev:") ?? false;
                         const alreadyReversed = reversedIds.has(String(charge.id));
@@ -1853,6 +1855,10 @@ export function PrefacturaDialog({
                 </Table>
                 {/* Totals row */}
                  <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
+                   <div className="text-right">
+                     <div className="text-muted-foreground text-xs">Saldo total del folio</div>
+                     <div className="font-semibold" data-testid="folio-operational-balance">${fmtMoney(operationalBalance)}</div>
+                   </div>
                    <div className="text-right rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/20">
                       <div className="font-medium text-xs text-blue-700 dark:text-blue-300">Importe a facturar</div>
                      <div className="font-bold text-lg text-blue-800 dark:text-blue-200" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
@@ -1879,6 +1885,12 @@ export function PrefacturaDialog({
                     </div>
                   </div>
                 </div>
+                {mode === "checkout" && operationalBalance > 0.01 && allBillableItems.length === 0 && (
+                  <div className="mx-4 mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="alert">
+                    El folio tiene ${fmtMoney(operationalBalance)} pendientes, pero no hay cargos disponibles para facturar.
+                    Revisá los cobros y comprobantes de la reserva; no se puede finalizar la salida con este saldo.
+                  </div>
+                )}
                  <div className="border-t px-4 py-2 flex items-center justify-end gap-2 text-xs">
                    <Checkbox
                      id="apply-released-credit"

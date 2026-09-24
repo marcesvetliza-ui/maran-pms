@@ -23,6 +23,7 @@ import {
 } from "./groupInvoiceScope";
 import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
+import { isInvoiceableReservationCharge } from "@shared/reservationFolio";
 import { assertFinancialSchemaReady } from "../migrate";
 import { withInvoiceAdvisoryLock } from "./invoiceAdvisoryLock";
 import { exposeInvoiceReconciliation } from "./reconciliationPresentation";
@@ -1513,13 +1514,9 @@ export function registerBillingRoutes(app: Express) {
           originalAmounts[`payment:${paymentId}`] = existingPaymentAmount;
         }
         for (const charge of charges) {
-          if (charge.category === "adjustment") {
-            // NC adjustments are audit history. The credit itself restores
-            // fiscal capacity through monto_acreditado/source allocations;
-            // subtracting it here would make the restored charge impossible
-            // to invoice again.
-            continue;
-          } else if (charge.category !== "transfer_in" && charge.category !== "transfer_out") {
+          // A normal positive adjustment is billable. A tagged NC adjustment
+          // is audit-only: the credit restores fiscal capacity on its source.
+          if (isInvoiceableReservationCharge(charge)) {
             originalAmounts[String(charge.id)] = parseFloat(charge.amount) || 0;
           }
         }

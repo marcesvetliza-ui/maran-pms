@@ -84,13 +84,18 @@ const RESERVATION = {
   room: { roomNumber: "301" },
 } as any;
 
-function buildFetchMock(folio: any, checkoutStatus = 200) {
+function buildFetchMock(folio: any, checkoutStatus = 200, invoices: any[] = []) {
   return vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
     const strUrl = url.toString();
     const method = options?.method?.toUpperCase() ?? "GET";
 
     if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
       return new Response(JSON.stringify(folio), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/invoices`)) {
+      return new Response(JSON.stringify(invoices), {
         status: 200, headers: { "Content-Type": "application/json" },
       });
     }
@@ -187,5 +192,75 @@ describe("PrefacturaDialog — check-out de reserva sin nada para facturar (tari
     await screen.findByTestId("button-registrar-emitir");
     expect(screen.queryByRole("button", { name: /dar check-out/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/esta reserva no tiene nada para facturar/i)).not.toBeInTheDocument();
+  });
+
+  it("permite seleccionar un recargo positivo de ajuste en vez de bloquear el check-out", async () => {
+    vi.stubGlobal("fetch", buildFetchMock({
+      ...ZERO_RATE_FOLIO,
+      charges: [{
+        id: "surcharge",
+        description: "Recargo de cuotas",
+        amount: "77000.00",
+        category: "adjustment",
+        status: "active",
+        date: "2026-09-24",
+      }],
+      totalCharges: 77000,
+      grandTotal: 77000,
+      balance: 77000,
+      financialSummary: { operationalFolioBalance: 77000 },
+    }));
+    renderDialog();
+
+    const submit = await screen.findByTestId("button-registrar-emitir");
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(screen.queryByRole("button", { name: /dar check-out/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Recargo de cuotas")).toBeInTheDocument();
+  });
+
+  it("muestra los $77.000 a facturar y cobrar cuando los otros $744.000 ya están facturados y pagados", async () => {
+    const charges = [
+      ["parking-a", "Cochera", "7500.00", "otros"],
+      ["surcharge", "RECAR CUOTAS", "77000.00", "adjustment"],
+      ["parking-b", "Cochera", "2500.00", "otros"],
+      ["spa", "SPA / Masaje", "70000.00", "spa"],
+      ["restaurant", "Consumo restaurante", "160000.00", "otros"],
+    ].map(([id, description, amount, category]) => ({
+      id, description, amount, category, status: "active", date: "2026-09-24",
+    }));
+    const paidSources = {
+      accommodation: 504000,
+      "parking-a": 7500,
+      "parking-b": 2500,
+      spa: 70000,
+      restaurant: 160000,
+    };
+    vi.stubGlobal("fetch", buildFetchMock({
+      ...ZERO_RATE_FOLIO,
+      roomTotal: 504000,
+      charges,
+      payments: [
+        { id: "room-payment", amount: "514000.00", status: "active", invoiceRef: '{"id":1}' },
+        { id: "services-payment", amount: "230000.00", status: "active", invoiceRef: '{"id":2}' },
+      ],
+      totalPayments: 744000,
+      totalCharges: 317000,
+      grandTotal: 821000,
+      balance: 77000,
+      financialSummary: { operationalFolioBalance: 77000, pendingInvoicing: 77000 },
+    }, 200, [{
+      id: 1,
+      source_charge_amounts: paidSources,
+      monto_total: "744000",
+      monto_acreditado: "0",
+      estado: "emitida",
+    }]));
+    renderDialog();
+
+    await screen.findByText("RECAR CUOTAS");
+    await waitFor(() => expect(screen.getByTestId("folio-operational-balance")).toHaveTextContent("$77.000,00"));
+    expect(screen.getByText("Importe a facturar").parentElement).toHaveTextContent("$77.000,00");
+    expect(screen.getByText("Nuevo cobro requerido").parentElement).toHaveTextContent("$77.000,00");
+    expect(screen.getByTestId("button-registrar-emitir")).toBeEnabled();
   });
 });
