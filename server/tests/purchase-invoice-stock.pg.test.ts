@@ -75,7 +75,7 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       const op = await request("POST", "/api/payment-orders", {
         supplierId, facturaIds: [invoiceId], fecha: "2026-09-23", formaPago: "transferencia",
       });
-      expect(op.status).toBe(201);
+      expect(op.status, JSON.stringify(op.body)).toBe(201);
       opId = Number(op.body.id);
       expect((await pool.query("SELECT estado FROM purchase_invoices WHERE id = $1", [invoiceId])).rows[0].estado).toBe("pagado");
       expect((await pool.query("SELECT importe_cancelado FROM payment_order_items WHERE invoice_id = $1", [invoiceId])).rows[0].importe_cancelado).toBe("100.00");
