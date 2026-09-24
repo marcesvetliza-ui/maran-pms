@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Receipt, ArrowLeft } from "lucide-react";
+import { Receipt, ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
-import { InvoiceDialog, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
+import { InvoiceDialog, PurchaseInventoryPicker, type PurchaseInventoryOption, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 import { PrefacturaDialog, isArgentineNationality } from "@/components/PrefacturaDialog";
 
@@ -108,6 +108,12 @@ const TIPOS_COMPRA: { value: string; label: string }[] = [
 ];
 
 const SOLO_GASTO = new Set(["RESUMEN-BANCO", "RETENCION"]);
+type ExpenseRow = { itemId: string; quantity: string; unitPrice: string; vatRate: string };
+const expenseRow = (): ExpenseRow => ({ itemId: "", quantity: "1", unitPrice: "", vatRate: "" });
+const suggestedVat = (sku?: string | null) => {
+  const normalized = (sku ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return ({ VARIOS21: "21", VARIOS105: "10.5", VARIOS27: "27", VARIOSEXENTO: "exento", VARIOSNOGRAV: "no_gravado" } as Record<string, string>)[normalized] ?? "";
+};
 
 function RegistroGastoCompra({ tipo, suppliers, accounts, onClose }: {
   tipo: string; suppliers: Supplier[]; accounts: AccountingAccount[]; onClose: () => void;
@@ -116,17 +122,24 @@ function RegistroGastoCompra({ tipo, suppliers, accounts, onClose }: {
   const [supplierId, setSupplierId] = useState("");
   const [numero, setNumero] = useState("");
   const [fecha, setFecha] = useState(getLocalToday());
-  const [importe, setImporte] = useState("");
+  const [rows, setRows] = useState<ExpenseRow[]>([expenseRow()]);
+  const [pickerOpen, setPickerOpen] = useState<Record<number, boolean>>({});
+  const { data: inventoryItems = [] } = useQuery<PurchaseInventoryOption[]>({ queryKey: ["/api/inventory/items"] });
   const [observaciones, setObservaciones] = useState("");
   const supplier = suppliers.find(s => String(s.id) === supplierId);
   const account = accounts.find(a => a.id === supplier?.cuentaContableId && a.tipo === "egreso");
-  const amount = Number(importe);
-  const valid = !!account && !!numero.trim() && !!fecha && Number.isFinite(amount) && amount > 0;
+  const amountCents = rows.reduce((sum, row) => sum + Math.round(Number(row.quantity) * Number(row.unitPrice) * 100), 0);
+  const validRows = rows.length > 0 && rows.every(row => row.itemId && /^\d+(?:\.\d{1,3})?$/.test(row.quantity) && Number(row.quantity) > 0 && Number(row.quantity) <= 9999999 &&
+    /^\d+(?:\.\d{1,2})?$/.test(row.unitPrice) && Number(row.unitPrice) >= 0 &&
+    (!row.vatRate || ["2.5", "5", "10.5", "21", "27", "exento", "no_gravado"].includes(row.vatRate)));
+  const valid = !!account && !!numero.trim() && !!fecha && validRows && amountCents > 0;
+  const updateRow = (index: number, change: Partial<ExpenseRow>) => setRows(current => current.map((row, i) => i === index ? { ...row, ...change } : row));
   const create = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/purchase-invoices", {
         tipoComprobante: tipo, supplierId: Number(supplierId), numeroComprobante: numero.trim(),
-        fechaEmision: fecha, montoNeto: importe, observaciones,
+        fechaEmision: fecha, montoNeto: (amountCents / 100).toFixed(2), observaciones,
+        expenseItems: rows.map(row => ({ itemId: row.itemId, quantity: row.quantity, unitPrice: row.unitPrice, vatRate: row.vatRate || null })),
       });
       return response.json();
     },
@@ -152,8 +165,25 @@ function RegistroGastoCompra({ tipo, suppliers, accounts, onClose }: {
         <div><Label>Número de comprobante</Label><Input value={numero} onChange={e => setNumero(e.target.value)} data-testid="input-numero-gasto" /></div>
         <div><Label>Fecha</Label><Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} data-testid="input-fecha-gasto" /></div>
         <div className="sm:col-span-2"><Label>Cuenta de gasto asignada</Label><Input readOnly value={account ? `${account.codigo} — ${account.nombre}` : "Sin cuenta de gasto asignada al emisor"} data-testid="input-cuenta-gasto" /></div>
-        <div><Label>Importe</Label><Input type="number" min="0.01" step="0.01" value={importe} onChange={e => setImporte(e.target.value)} data-testid="input-importe-gasto" /></div>
         <div className="sm:col-span-2"><Label>Detalle</Label><Input value={observaciones} onChange={e => setObservaciones(e.target.value)} data-testid="input-detalle-gasto" /></div>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between"><Label>Artículos del gasto</Label><Button type="button" variant="outline" size="sm" onClick={() => setRows(current => [...current, expenseRow()])}><Plus className="h-4 w-4 mr-1" />Agregar artículo</Button></div>
+        {rows.map((row, index) => (
+          <div key={index} className="rounded-md border p-3 space-y-2" data-testid={`gasto-articulo-${index}`}>
+            <div className="flex items-start gap-2">
+              <div className="flex-1"><PurchaseInventoryPicker items={inventoryItems.filter(item => item.isActive !== "false")} selectedId={row.itemId} open={!!pickerOpen[index]} onOpenChange={open => setPickerOpen(current => ({ ...current, [index]: open }))} onSelect={id => { const selected = inventoryItems.find(item => item.id === id); updateRow(index, { itemId: id, vatRate: suggestedVat(selected?.sku) }); setPickerOpen(current => ({ ...current, [index]: false })); }} index={index} /></div>
+              <Button type="button" variant="ghost" size="icon" aria-label="Quitar artículo" onClick={() => setRows(current => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div><Label>Cantidad</Label><Input type="number" min="0.001" step="0.001" value={row.quantity} onChange={e => updateRow(index, { quantity: e.target.value })} /></div>
+              <div><Label>Importe unitario final</Label><Input type="number" min="0" step="0.01" value={row.unitPrice} onChange={e => updateRow(index, { unitPrice: e.target.value })} /></div>
+              <div><Label>IVA informativo</Label><Select value={row.vatRate || "sin_dato"} onValueChange={vatRate => updateRow(index, { vatRate: vatRate === "sin_dato" ? "" : vatRate })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sin_dato">Sin dato</SelectItem><SelectItem value="21">21%</SelectItem><SelectItem value="10.5">10,5%</SelectItem><SelectItem value="27">27%</SelectItem><SelectItem value="5">5%</SelectItem><SelectItem value="2.5">2,5%</SelectItem><SelectItem value="exento">Exento</SelectItem><SelectItem value="no_gravado">No gravado</SelectItem></SelectContent></Select></div>
+            </div>
+            <p className="text-sm text-right">Subtotal: ${fmtMoney(Number(row.quantity) * Number(row.unitPrice) || 0)}</p>
+          </div>
+        ))}
+        <p className="text-right font-semibold" data-testid="total-gasto">Total del gasto: ${fmtMoney(amountCents / 100)}</p>
       </div>
       {supplier && !account && <p className="text-sm text-destructive">Asigná primero una cuenta de gasto activa a este emisor en el ABM.</p>}
       <Button disabled={!valid || create.isPending} onClick={() => create.mutate()} data-testid="btn-registrar-gasto">Registrar gasto</Button>

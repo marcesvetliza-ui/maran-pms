@@ -168,9 +168,10 @@ const FORMAS_PAGO = [
   { value: "dep_bancario", label: "Depósito Bancario" },
 ];
 
-type PurchaseInventoryOption = {
+export type PurchaseInventoryOption = {
   id: string;
   name: string;
+  isActive?: string | null;
   sku?: string | null;
   category?: { name: string } | null;
   currentStock?: string | null;
@@ -178,7 +179,7 @@ type PurchaseInventoryOption = {
   costPrice?: string | null;
 };
 
-function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index }: {
+export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index }: {
   items: PurchaseInventoryOption[];
   selectedId: string;
   open: boolean;

@@ -2966,7 +2966,33 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Elegí emisor, número, fecha e importe positivo con hasta dos decimales." });
         }
         if (input.stockItems !== undefined && (!Array.isArray(input.stockItems) || input.stockItems.length > 0)) {
-          return res.status(400).json({ error: "Los registros de gasto no admiten artículos ni movimientos de stock." });
+          return res.status(400).json({ error: "Los registros de gasto no admiten movimientos de stock." });
+        }
+        // Las líneas son descriptivas: se vinculan al artículo existente sin
+        // invocar enterPurchaseInvoiceStock ni alterar costo, proveedor o stock.
+        const expenseItems = input.expenseItems === undefined ? [] : input.expenseItems;
+        if (!Array.isArray(expenseItems) || expenseItems.length > 500) {
+          return res.status(400).json({ error: "La lista de artículos del gasto es inválida." });
+        }
+        const lines: { itemId: string; quantity: number; unitPrice: number; vatRate: string | null; total: number }[] = [];
+        for (const [index, row] of expenseItems.entries()) {
+          const itemId = typeof row?.itemId === "string" ? row.itemId.trim() : "";
+          const quantityText = String(row?.quantity ?? "");
+          const priceText = String(row?.unitPrice ?? "");
+          const quantity = Number(quantityText);
+          const unitPrice = Number(priceText);
+          const vatRate = row?.vatRate == null || row.vatRate === "" ? null : String(row.vatRate);
+          const total = Math.round(quantity * unitPrice * 100) / 100;
+          if (!itemId || !/^\d+(?:\.\d{1,3})?$/.test(quantityText) || quantity <= 0 || quantity > 9999999 ||
+              !/^\d+(?:\.\d{1,2})?$/.test(priceText) || unitPrice < 0 || unitPrice > 99999999 ||
+              (vatRate && !["2.5", "5", "10.5", "21", "27", "exento", "no_gravado"].includes(vatRate)) ||
+              !Number.isFinite(total) || total > 999999999999.99) {
+            return res.status(400).json({ error: `Artículo ${index + 1}: verificá artículo, cantidad, importe y alícuota.` });
+          }
+          lines.push({ itemId, quantity, unitPrice, vatRate, total });
+        }
+        if (lines.length && Math.round(lines.reduce((sum, row) => sum + row.total, 0) * 100) !== Math.round(amount * 100)) {
+          return res.status(400).json({ error: "El total del gasto debe coincidir con la suma de sus artículos." });
         }
         const emitter = await db.execute(sql`
           SELECT s.razon_social, s.cuit, aa.id AS account_id
@@ -2988,7 +3014,7 @@ export async function registerRoutes(
           if (duplicate.rows.length) {
             throw Object.assign(new Error("Este registro ya existe para el emisor y número indicados."), { statusCode: 409 });
           }
-          return tx.execute(sql`
+          const inserted = await tx.execute(sql`
             INSERT INTO purchase_invoices (
               tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
               numero_comprobante, fecha_emision, periodo, condicion_pago,
@@ -3000,6 +3026,21 @@ export async function registerRoutes(
               ${typeof input.observaciones === "string" ? input.observaciones.trim() : null}
             ) RETURNING *
           `);
+          for (const [index, row] of lines.entries()) {
+            const item = await tx.execute(sql`
+              SELECT id, name, sku FROM inventory_items WHERE id = ${row.itemId} AND is_active = 'true'
+            `);
+            if (!item.rows.length) {
+              throw Object.assign(new Error(`Artículo ${index + 1}: no existe o está inactivo.`), { statusCode: 400 });
+            }
+            await tx.execute(sql`
+              INSERT INTO purchase_invoice_lines
+                (invoice_id, line_number, item_id, item_name, item_sku, quantity, unit_price, vat_rate, line_total)
+              VALUES (${inserted.rows[0].id}, ${index + 1}, ${row.itemId}, ${item.rows[0].name}, ${item.rows[0].sku},
+                ${row.quantity}, ${row.unitPrice}, ${row.vatRate}, ${row.total})
+            `);
+          }
+          return inserted;
         });
         return res.status(201).json(result.rows[0]);
       }
