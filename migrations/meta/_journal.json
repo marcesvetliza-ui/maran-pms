@@ -15,6 +15,13 @@
       "when": 1778881778624,
       "tag": "0001_cash_movement_receipt_sequence",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0006_payment_order_iibb_rate",
+      "breakpoints": true
     }
   ]
 }
