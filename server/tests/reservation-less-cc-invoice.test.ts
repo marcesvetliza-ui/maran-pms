@@ -130,6 +130,18 @@ beforeEach(() => {
 });
 
 describe("Cuenta Corriente invoice with no reservation", () => {
+  it("impide emitir desde el Centro con una descripción libre aun con Consumidor Final", async () => {
+    await withServer(async url => {
+      const result = await post(url, body({
+        recipientMode: "centro_comprobantes", recipientConsumerFinal: true,
+        cliente: { razonSocial: "Consumidor Final", condicionIva: "Consumidor Final" },
+      }));
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/catálogo/);
+      expect(emitirFactura).not.toHaveBeenCalled();
+    });
+  });
+
   it("rechaza el texto libre del Centro de Comprobantes sin ficha seleccionada", async () => {
     await withServer(async url => {
       const result = await post(url, body({ recipientMode: "centro_comprobantes" }));

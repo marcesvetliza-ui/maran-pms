@@ -596,6 +596,8 @@ type Item = {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Origen elegido en el catálogo del Centro de Comprobantes. */
+  catalogItem?: { source: "accommodation" | "restaurant" | "spa"; id: string };
   /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
    * permite registrar la venta como turno vendido pendiente de agendar. */
   spaTreatmentId?: string;
@@ -828,14 +830,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     enabled: open,
   });
   const skuByInventoryId = new Map(inventoryCatalogData.map((item: any) => [String(item.id), String(item.sku || "")]));
-  type CatalogItem = { id: string; descripcion: string; precioUnitario: number; codigo?: string; spaTreatmentId?: string };
+  type CatalogItem = { id: string; source: "accommodation" | "restaurant" | "spa"; descripcion: string; precioUnitario: number; codigo?: string; spaTreatmentId?: string };
   const catalogGroups: { label: string; options: CatalogItem[] }[] = [
-    { label: "Alojamiento", options: [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
+    { label: "Alojamiento", options: [{ id: "alojamiento", source: "accommodation" as const, descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
     {
       label: "Restaurant (Café Justo)",
       options: menuItemsData
         .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
-        .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0,
+        .map((m: any) => ({ id: m.id, source: "restaurant" as const, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0,
           codigo: skuByInventoryId.get(String(m.inventoryItemId)) || undefined })),
     },
     {
@@ -844,7 +846,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       // es la única fuente del catálogo que registra "turno vendido" al elegirse.
       options: spaTreatmentsData
         .filter((t: any) => t.isActive !== "false")
-        .map((t: any) => ({ id: t.id, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
+        .map((t: any) => ({ id: t.id, source: "spa" as const, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
     },
   ].filter(g => g.options.length > 0);
   const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
@@ -1040,6 +1042,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
+      if (requireLinkedRecipient && !it.catalogItem) errs[`catalog_${i}`] = "Elegí el concepto desde el catálogo antes de revisar.";
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
       if (it.giftBeneficiaryName !== undefined && !it.giftBeneficiaryName.trim()) {
         errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
@@ -1109,9 +1112,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
   // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
   // elige del catálogo sin haber tocado nada todavía.
-  function addCatalogItem(descripcion: string, precioUnitario: number, spaTreatmentId?: string) {
+  function addCatalogItem(option: CatalogItem) {
+    const { descripcion, precioUnitario, spaTreatmentId, source, id } = option;
     const built = computeItemTotals({
       descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
+      catalogItem: { source, id },
       alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
       subtotalNeto: 0, subtotal: 0,
     });
@@ -1126,7 +1131,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     });
   }
 
-  function removeItem(idx: number) { setItems(prev => prev.filter((_, i) => i !== idx)); }
+  function removeItem(idx: number) { setItems(prev => prev.length === 1 ? [newItem()] : prev.filter((_, i) => i !== idx)); }
 
   // Mirrors calcularMontos() in server/billing/invoiceService.ts: accumulate the
   // *gross* per-bucket amounts first, then round once at the aggregate level.
@@ -2147,7 +2152,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                                   value={o.id}
                                   onMouseDown={(e) => e.preventDefault()}
                                   onSelect={() => {
-                                    addCatalogItem(o.descripcion, o.precioUnitario, o.spaTreatmentId);
+                                    addCatalogItem(o);
                                     setCatalogPickerOpen(false);
                                     setCatalogSearch("");
                                   }}
@@ -2169,7 +2174,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   </PopoverContent>
                 </Popover>
               )}
-              {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+              {!requireLinkedRecipient && !hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
             </div>
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
@@ -2179,8 +2184,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
-                      <Input data-testid={`item-description-${idx}`} disabled={false} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
+                      <Input data-testid={`item-description-${idx}`} readOnly={requireLinkedRecipient} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder={requireLinkedRecipient ? "Elegí un concepto del catálogo" : "Hospedaje habitación..."} className={fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""} />
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
+                    {fieldErrors[`catalog_${idx}`] && <p className="text-xs text-red-500" data-testid={`catalog-error-${idx}`}>{fieldErrors[`catalog_${idx}`]}</p>}
                   </div>
                    <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input data-testid={`item-quantity-${idx}`} disabled={lockItems} type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
                   <div className="col-span-2 space-y-1">
@@ -2238,7 +2244,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                       ? `Total (sin IVA): $${fPeso(item.subtotal)}`
                       : `Total con IVA: $${fPeso(item.subtotal)} (neto: $${fPeso(item.subtotalNeto)})`}
                   </span>
-                   {!lockItems && items.length > 1 && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
+                   {!lockItems && (items.length > 1 || (requireLinkedRecipient && !!item.catalogItem)) && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
                 </div>
               </div>
             ))}

@@ -14,6 +14,8 @@ export interface InvoiceItem {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Fuente elegida al emitir desde el Centro de Comprobantes. */
+  catalogItem?: { source: "accommodation" | "restaurant" | "spa"; id: string };
   /** Tratamiento de spa_treatments elegido del catálogo — permite registrar
    * la venta como "turno vendido" pendiente de agendar. */
   spaTreatmentId?: string;

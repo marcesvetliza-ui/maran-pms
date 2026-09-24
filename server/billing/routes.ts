@@ -6,6 +6,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { verifySaleCatalog } from "./verifySaleCatalog";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -1073,6 +1074,10 @@ export function registerBillingRoutes(app: Express) {
         && !cliente.cuit && !cliente.dni
       )) {
         return res.status(400).json({ error: "Elegí una ficha real o Consumidor Final para Factura B antes de emitir" });
+      }
+      if (recipientMode === "centro_comprobantes") {
+        const catalogError = await verifySaleCatalog(items);
+        if (catalogError) return res.status(400).json({ error: catalogError });
       }
       let verifiedRecipientEntity: NewInvoiceData["recipientEntity"];
       if (recipientEntity !== undefined) {
