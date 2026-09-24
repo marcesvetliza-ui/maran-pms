@@ -808,14 +808,23 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     queryKey: ["/api/spa/treatments"],
     enabled: open,
   });
-  type CatalogItem = { id: string; descripcion: string; precioUnitario: number; spaTreatmentId?: string };
+  // Los platos tienen un artículo espejo en Inventario; los tratamientos y el
+  // alojamiento no tienen SKU propio. Consultar sólo el código, sin convertir
+  // artículos de stock en nuevos conceptos facturables.
+  const { data: inventoryCatalogData = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/items"],
+    enabled: open,
+  });
+  const skuByInventoryId = new Map(inventoryCatalogData.map((item: any) => [String(item.id), String(item.sku || "")]));
+  type CatalogItem = { id: string; descripcion: string; precioUnitario: number; codigo?: string; spaTreatmentId?: string };
   const catalogGroups: { label: string; options: CatalogItem[] }[] = [
     { label: "Alojamiento", options: [{ id: "alojamiento", descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
     {
       label: "Restaurant (Café Justo)",
       options: menuItemsData
         .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
-        .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0 })),
+        .map((m: any) => ({ id: m.id, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0,
+          codigo: skuByInventoryId.get(String(m.inventoryItemId)) || undefined })),
     },
     {
       label: "Spa",
@@ -2080,7 +2089,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="end">
                     <Command shouldFilter={false}>
                       <CommandInput
-                        placeholder="Buscar en el catálogo..."
+                        placeholder="Buscar por nombre o código..."
                         value={catalogSearch}
                         onValueChange={setCatalogSearch}
                         data-testid="input-catalog-search"
@@ -2090,7 +2099,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                         {catalogGroups.map(group => {
                           const term = catalogSearch.trim().toLowerCase();
                           const matches = term
-                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term))
+                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
                             : group.options;
                           if (matches.length === 0) return null;
                           return (
@@ -2107,7 +2116,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                                   }}
                                   data-testid={`catalog-item-${o.id}`}
                                 >
-                                  <span className="flex-1">{o.descripcion}</span>
+                                  <span className="min-w-0 flex-1 break-words">{o.descripcion}
+                                    {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
+                                  </span>
                                   {o.precioUnitario > 0 && (
                                     <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
                                   )}

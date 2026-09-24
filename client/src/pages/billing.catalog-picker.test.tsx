@@ -28,7 +28,7 @@ const { EmitirFacturaDialog } = await import("./billing");
 const FAKE_CONFIG = { arcaAmbiente: "ficticio" };
 
 const MENU_ITEMS = [
-  { id: "mi-1", name: "Café Justo", price: "2500.00", isAvailable: "true", isActive: "true" },
+  { id: "mi-1", name: "Café Justo", price: "2500.00", inventoryItemId: "inv-mi-1", isAvailable: "true", isActive: "true" },
   { id: "mi-2", name: "Medialunas (x3)", price: "1800.00", isAvailable: "true", isActive: "true" },
   { id: "mi-3", name: "Plato fuera de carta", price: "9999.00", isAvailable: "false", isActive: "true" },
 ];
@@ -46,6 +46,9 @@ function buildFetchMock() {
     }
     if (strUrl.endsWith("/api/spa/treatments")) {
       return new Response(JSON.stringify(SPA_TREATMENTS), { status: 200 });
+    }
+    if (strUrl.endsWith("/api/inventory/items")) {
+      return new Response(JSON.stringify([{ id: "inv-mi-1", sku: "JUSTO-CAF-01", name: "Café Justo" }]), { status: 200 });
     }
     return new Response(JSON.stringify([]), { status: 200 });
   });
@@ -138,6 +141,20 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
       expect(screen.queryByTestId("catalog-item-tr-1")).not.toBeInTheDocument();
       expect(screen.queryByTestId("catalog-item-alojamiento")).not.toBeInTheDocument();
     });
+  });
+
+  it("encuentra un plato por el SKU de su artículo espejo sin ofrecer artículos de stock sueltos", async () => {
+    const user = userEvent.setup();
+    renderDialog({ allowedTipos: ["FA"], cashArea: "restaurant" });
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.type(screen.getByTestId("input-catalog-search"), "justo-caf-01");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-item-mi-1")).toHaveTextContent("JUSTO-CAF-01");
+      expect(screen.queryByTestId("catalog-item-mi-2")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("catalog-item-inv-mi-1")).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("catalog-item-mi-1"));
+    expect(screen.getByTestId("item-description-0")).toHaveValue("Café Justo");
   });
 
   it("también aparece cuando no hay cashArea (ítems libres)", async () => {
