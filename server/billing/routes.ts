@@ -1143,6 +1143,14 @@ export function registerBillingRoutes(app: Express) {
         }
         existingCcPayment = String(existing.method) === "cuenta_corriente";
         existingPaymentAmount = Number(existing.amount);
+        if (Math.abs(existingPaymentAmount - calcularMontos(items, tipoComprobante).montoTotal) > 0.02) {
+          return res.status(409).json({ error: "El total de la factura debe coincidir con el anticipo" });
+        }
+        if (normalizedCashFormaPagoDetalle?.length !== 1 ||
+            normalizedCashFormaPagoDetalle[0].method !== String(existing.method) ||
+            Math.abs(normalizedCashFormaPagoDetalle[0].amount - existingPaymentAmount) > 0.02) {
+          return res.status(409).json({ error: "El desglose de pago debe coincidir con el anticipo registrado" });
+        }
         if (existingCcPayment) {
           const requestedType = String(ccEntityType || "");
           const requestedId = String(ccEntityId || "");
@@ -1167,9 +1175,6 @@ export function registerBillingRoutes(app: Express) {
             ccEntityType = trustedType;
             ccEntityId = String(trustedId);
           }
-          if (Math.abs(Number(existing.amount) - calcularMontos(items, tipoComprobante).montoTotal) > 0.02) {
-            return res.status(409).json({ error: "El total de la factura debe coincidir con el anticipo" });
-          }
         }
       }
       if (spaAccountId && (cashArea !== "spa" || !cashFormaPago)) {
@@ -1191,7 +1196,7 @@ export function registerBillingRoutes(app: Express) {
             .map(([id, amount]) => [id, Number(amount)])
         )
         : {};
-      if (existingCcPayment && paymentId && existingPaymentAmount !== null) {
+      if (paymentId && existingPaymentAmount !== null) {
         // An advance is its own fiscal source. Ignore stale room-charge
         // selections from the browser, but retain the exact locked amount.
         normalizedSourceChargeIds = [`payment:${paymentId}`];
@@ -1510,7 +1515,7 @@ export function registerBillingRoutes(app: Express) {
           ? savedRoomTotal
           : (parseFloat((reservation as any).finalRatePerNight || "0") * ((reservation as any).nights || 0));
         const originalAmounts: Record<string, number> = { accommodation: accommodationTotal };
-        if (existingCcPayment && paymentId && existingPaymentAmount !== null) {
+        if (paymentId && existingPaymentAmount !== null) {
           originalAmounts[`payment:${paymentId}`] = existingPaymentAmount;
         }
         for (const charge of charges) {

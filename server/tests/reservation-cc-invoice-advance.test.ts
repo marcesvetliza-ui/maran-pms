@@ -143,6 +143,44 @@ beforeEach(() => {
 });
 
 describe("advance Cuenta Corriente invoice route", () => {
+  it("invoices an existing cash advance as its own source without collecting cash again", async () => {
+    state.payment = {
+      id: "pay-cash", reservation_id: "res-1", amount: "77000", method: "efectivo",
+      billing_target: "guest", company_id: null, agency_id: null,
+    };
+    emitirFactura.mockImplementation(async (data: any) => {
+      const invoice = { id: state.emitted.length + 1, tipoComprobante: data.tipoComprobante, puntoVenta: 1, numero: 1, montoTotal: "77000" };
+      state.emitted.push(invoice);
+      state.existingInvoice = { ...invoice, estado: "emitida" };
+      return invoice;
+    });
+    const cashBody = body({
+      paymentId: "pay-cash",
+      items: [{ descripcion: "Anticipo", cantidad: 1, precioUnitario: 77000, subtotal: 77000 }],
+      cashFormaPago: "efectivo",
+      cashFormaPagoDetalle: [{ method: "efectivo", amount: 77000 }],
+      cashArea: "reception",
+      ccEntityType: undefined,
+      ccEntityId: undefined,
+      sourceChargeIds: [],
+      sourceChargeAmounts: {},
+    });
+    await withServer(async url => {
+      const first = await post(url, cashBody);
+      expect(first.status).toBe(201);
+      expect(emitirFactura).toHaveBeenCalledWith(expect.objectContaining({
+        paymentId: "pay-cash",
+        sourceChargeIds: ["payment:pay-cash"],
+        sourceChargeAmounts: { "payment:pay-cash": 77000 },
+        cashFormaPagoDetalle: [{ method: "efectivo", amount: 77000 }],
+      }));
+      expect(registerCashMovement).not.toHaveBeenCalled();
+      expect(createReservationPaymentWithLedger).not.toHaveBeenCalled();
+      expect((await post(url, cashBody)).status).toBe(201);
+      expect(emitirFactura).toHaveBeenCalledOnce();
+    });
+  });
+
   it("issues against the existing CC advance, links it server-side, and retry is idempotent", async () => {
     await withServer(async url => {
       const first = await post(url, body());
