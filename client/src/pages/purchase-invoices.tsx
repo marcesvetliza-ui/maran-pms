@@ -1,7 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { buildInventorySupplierUpdate } from "@/lib/inventory-supplier-association";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -379,6 +378,12 @@ export function InvoiceDialog({
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const supplierBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSupplierBlur = () => {
+    if (supplierBlurTimer.current) clearTimeout(supplierBlurTimer.current);
+    supplierBlurTimer.current = null;
+  };
+  useEffect(() => () => cancelSupplierBlur(), []);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
@@ -525,62 +530,28 @@ export function InvoiceDialog({
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/purchase-invoices", data);
+      const res = await apiRequest("POST", "/api/purchase-invoices", {
+        ...data,
+        stockItems: invItems.map((row) => ({
+          itemId: row.existingItemId,
+          warehouseId: row.warehouseId || null,
+          quantity: row.quantity,
+          unitCost: row.costPrice,
+        })),
+      });
       return res.json();
     },
-    onSuccess: async (invoice: any) => {
-      let inventoryCount = 0;
-      const invoiceRef = `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`;
-
-      const validExisting = invItems.filter((r) => r.existingItemId);
-
-      // Add stock to existing inventory items
-      for (const row of validExisting) {
-        try {
-          if (row.warehouseId) {
-            await apiRequest("POST", `/api/inventory/warehouses/${row.warehouseId}/movements`, {
-              itemId: row.existingItemId,
-              movementType: "entrada",
-              quantity: row.quantity,
-              notes: invoiceRef,
-              unitCost: parseFloat(row.costPrice) > 0 ? row.costPrice : undefined,
-            });
-          } else {
-            await apiRequest("POST", "/api/inventory/movements", {
-              itemId: row.existingItemId,
-              type: "entrada",
-              quantity: row.quantity,
-              reason: invoiceRef,
-              sourceType: "purchase_invoice",
-              sourceId: String(invoice.id),
-            });
-          }
-
-          const existingItem = existingInvItems.find((item) => item.id === row.existingItemId);
-          const supplierUpdate = buildInventorySupplierUpdate(
-            existingItem?.suppliers ?? [],
-            form.supplierId ? parseInt(form.supplierId) : null,
-            row.costPrice,
-          );
-          if (Object.keys(supplierUpdate).length > 0) {
-            await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, supplierUpdate);
-          }
-          inventoryCount++;
-        } catch (e) {
-          console.warn("Error updating existing inventory item:", e);
-        }
-      }
-
-      if (inventoryCount > 0) {
+    onSuccess: () => {
+      if (invItems.length > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       resetDialog();
-      const desc = inventoryCount > 0
-        ? `El asiento contable fue generado. Se ingresaron ${inventoryCount} artículo(s) al inventario.`
-        : "El asiento contable fue generado automáticamente.";
+      const desc = invItems.length > 0
+        ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
+        : "El comprobante fue registrado correctamente.";
       toast({ title: "Comprobante registrado", description: desc });
     },
     onError: (e: any) => {
@@ -792,9 +763,10 @@ export function InvoiceDialog({
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
-                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
                         data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -808,7 +780,7 @@ export function InvoiceDialog({
                               <div
                                 key={s.id}
                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
@@ -1267,9 +1239,10 @@ export function InvoiceDialog({
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
-                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
                         data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -1283,7 +1256,7 @@ export function InvoiceDialog({
                               <div
                                 key={s.id}
                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
