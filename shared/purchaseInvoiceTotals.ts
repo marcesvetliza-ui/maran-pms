@@ -99,6 +99,11 @@ export function isReceivedRetention(tipoComprobante?: string | null): boolean {
   return tipoComprobante === RECEIVED_RETENTION_TYPE;
 }
 
+/** Los comprobantes del proveedor se cancelan mediante su Orden de Pago. */
+export function isSupplierPayableDocument(tipoComprobante?: string | null): boolean {
+  return /^(FACT|NC|ND|RECIBO)-/.test(tipoComprobante || "");
+}
+
 export function receivedRetentionAccountCode(subtipo?: string | null): string | null {
   return RECEIVED_RETENTION_ACCOUNT_CODES[
     String(subtipo || "").toLowerCase() as keyof typeof RECEIVED_RETENTION_ACCOUNT_CODES

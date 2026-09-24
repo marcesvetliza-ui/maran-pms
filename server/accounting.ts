@@ -179,6 +179,16 @@ export async function generarAsiento(
   } else {
     // Cuenta corriente: haber = proveedores a pagar
     if (acProv) lines.push({ accountId: acProv, debe: 0, haber: total * sign });
+    // Comprobantes históricos con retenciones cargadas directamente conservan
+    // esos importes; sin estos créditos el asiento quedaría desbalanceado al
+    // registrarse la deuda neta. La pantalla nueva no ofrece esa carga.
+    if (!retentionsAreSuffered) {
+      if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: 0, haber: retIva * sign });
+      if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
+      if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
+      if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+      if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: 0, haber: retMunicipal * sign });
+    }
   }
 
   // Insert lines

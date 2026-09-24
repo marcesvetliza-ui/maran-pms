@@ -42,6 +42,62 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
     await pool?.end();
   });
 
+  it("carga una factura como deuda aunque un cliente antiguo envíe contado, y la cancela recién con una OP", async () => {
+    if (!pool) return;
+    const suffix = randomUUID();
+    const supplier = await pool.query<{ id: number }>(
+      "INSERT INTO accounting_suppliers (razon_social, cuit, condicion_iva) VALUES ($1, $2, 'responsable_inscripto') RETURNING id",
+      [`Proveedor pago ${suffix}`, `30${suffix.replaceAll("-", "").slice(0, 9)}`],
+    );
+    const supplierId = supplier.rows[0].id;
+    let invoiceId: number | undefined;
+    let invoiceEntryId: number | undefined;
+    let opId: number | undefined;
+    try {
+      const created = await request("POST", "/api/purchase-invoices", {
+        tipoComprobante: "FACT-A", supplierId,
+        numeroComprobante: `PAGO-${suffix}`, fechaEmision: "2026-09-23",
+        condicionPago: "contado", montoNeto: "100.00",
+      });
+      expect(created.status).toBe(201);
+      invoiceId = Number(created.body.id);
+      invoiceEntryId = Number(created.body.asiento_id);
+      expect(created.body).toMatchObject({ condicion_pago: "cuenta_corriente", estado: "pendiente" });
+      const lines = await pool.query<{ codigo: string; haber: string }>(
+        `SELECT aa.codigo, ael.haber FROM accounting_entry_lines ael
+         JOIN accounting_accounts aa ON aa.id = ael.account_id
+         WHERE ael.entry_id = $1`, [invoiceEntryId],
+      );
+      expect(lines.rows).toEqual(expect.arrayContaining([{ codigo: "2.1.1.01", haber: "100.00" }]));
+      expect(lines.rows.some((line) => line.codigo === "1.1.1.01" && Number(line.haber) > 0)).toBe(false);
+      expect((await pool.query("SELECT id FROM payment_order_items WHERE invoice_id = $1", [invoiceId])).rowCount).toBe(0);
+
+      const op = await request("POST", "/api/payment-orders", {
+        supplierId, facturaIds: [invoiceId], fecha: "2026-09-23", formaPago: "transferencia",
+      });
+      expect(op.status).toBe(201);
+      opId = Number(op.body.id);
+      expect((await pool.query("SELECT estado FROM purchase_invoices WHERE id = $1", [invoiceId])).rows[0].estado).toBe("pagado");
+      expect((await pool.query("SELECT importe_cancelado FROM payment_order_items WHERE invoice_id = $1", [invoiceId])).rows[0].importe_cancelado).toBe("100.00");
+    } finally {
+      if (opId) {
+        const opEntry = await pool.query<{ asiento_id: number | null }>("SELECT asiento_id FROM payment_orders WHERE id = $1", [opId]);
+        await pool.query("DELETE FROM payment_order_items WHERE payment_order_id = $1", [opId]);
+        await pool.query("DELETE FROM payment_orders WHERE id = $1", [opId]);
+        if (opEntry.rows[0]?.asiento_id) {
+          await pool.query("DELETE FROM accounting_entry_lines WHERE entry_id = $1", [opEntry.rows[0].asiento_id]);
+          await pool.query("DELETE FROM accounting_entries WHERE id = $1", [opEntry.rows[0].asiento_id]);
+        }
+      }
+      if (invoiceEntryId) {
+        await pool.query("DELETE FROM accounting_entry_lines WHERE entry_id = $1", [invoiceEntryId]);
+        await pool.query("DELETE FROM accounting_entries WHERE id = $1", [invoiceEntryId]);
+      }
+      if (invoiceId) await pool.query("DELETE FROM purchase_invoices WHERE id = $1", [invoiceId]);
+      await pool.query("DELETE FROM accounting_suppliers WHERE id = $1", [supplierId]);
+    }
+  });
+
   it("revierte factura, asiento y primera entrada si falla el segundo artículo", async () => {
     if (!pool) return;
     const suffix = randomUUID();
