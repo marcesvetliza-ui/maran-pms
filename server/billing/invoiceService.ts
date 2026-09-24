@@ -416,11 +416,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       await insertPendingInvoice();
     }
 
-    const now = new Date();
-    const fecha =
-      `${now.getFullYear()}` +
-      `${String(now.getMonth() + 1).padStart(2, "0")}` +
-      `${String(now.getDate()).padStart(2, "0")}`;
+    // The fiscal dates must use the same Argentina calendar day stored on the invoice.
+    const fecha = getArgentinaToday().replace(/-/g, "");
 
     try {
       const { feCAESolicitar, feCompConsultar } = await import("./wsfevClient");
