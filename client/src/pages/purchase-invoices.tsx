@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -378,6 +378,12 @@ export function InvoiceDialog({
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const supplierBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSupplierBlur = () => {
+    if (supplierBlurTimer.current) clearTimeout(supplierBlurTimer.current);
+    supplierBlurTimer.current = null;
+  };
+  useEffect(() => () => cancelSupplierBlur(), []);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
 
@@ -757,9 +763,10 @@ export function InvoiceDialog({
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
-                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
                         data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -773,7 +780,7 @@ export function InvoiceDialog({
                               <div
                                 key={s.id}
                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
@@ -1232,9 +1239,10 @@ export function InvoiceDialog({
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
-                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
                         data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -1248,7 +1256,7 @@ export function InvoiceDialog({
                               <div
                                 key={s.id}
                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
