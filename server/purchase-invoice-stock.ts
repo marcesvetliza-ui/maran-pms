@@ -8,6 +8,7 @@ export type PurchaseStockRow = {
   warehouseId: string | null;
   quantity: number;
   unitCost: number;
+  vatRate: string | null;
 };
 
 export function parsePurchaseStockRows(value: unknown): PurchaseStockRow[] {
@@ -18,12 +19,14 @@ export function parsePurchaseStockRows(value: unknown): PurchaseStockRow[] {
     const warehouseId = row?.warehouseId == null || row.warehouseId === "" ? null : row.warehouseId;
     const quantity = Number(row?.quantity);
     const unitCost = Number(row?.unitCost);
+    const vatRate = row?.vatRate == null || row.vatRate === "" ? null : String(row.vatRate);
     if (!itemId || (warehouseId !== null && typeof warehouseId !== "string") ||
       !Number.isFinite(quantity) || quantity <= 0 || quantity > 9999999 ||
-      !Number.isFinite(unitCost) || unitCost < 0 || unitCost > 99999999) {
+      !Number.isFinite(unitCost) || unitCost < 0 || unitCost > 99999999 ||
+      (vatRate !== null && !["2.5", "5", "10.5", "21", "27"].includes(vatRate))) {
       throw Object.assign(new Error(`Artículo ${index + 1}: comprobá artículo, depósito, cantidad y costo.`), { statusCode: 400 });
     }
-    return { itemId, warehouseId, quantity, unitCost };
+    return { itemId, warehouseId, quantity, unitCost, vatRate };
   });
 }
 
@@ -38,13 +41,20 @@ export async function enterPurchaseInvoiceStock(
   for (const [index, row] of rows.entries()) {
     // Serialize updates to the same item, including repeated rows in this invoice.
     const itemResult = await tx.execute(sql`
-      SELECT id, current_stock, cost_price FROM inventory_items
+      SELECT id, sku, name, current_stock, cost_price FROM inventory_items
       WHERE id = ${row.itemId} AND is_active = 'true' FOR UPDATE
     `);
     if (!itemResult.rows.length) {
       throw Object.assign(new Error(`Artículo ${index + 1}: no existe o está inactivo.`), { statusCode: 400 });
     }
     const item = itemResult.rows[0] as any;
+    await tx.execute(sql`
+      INSERT INTO purchase_invoice_lines
+        (invoice_id, line_number, item_id, item_name, item_sku, quantity, unit_price, vat_rate, line_total, warehouse_id)
+      VALUES (${invoiceId}, ${index + 1}, ${row.itemId}, ${item.name}, ${item.sku},
+        ${row.quantity}, ${row.unitCost}, ${row.vatRate},
+        ${Math.round((row.quantity * row.unitCost + Number.EPSILON) * 100) / 100}, ${row.warehouseId})
+    `);
     const previousGlobal = Number(item.current_stock ?? 0);
     let previousStock = previousGlobal;
     if (row.warehouseId) {

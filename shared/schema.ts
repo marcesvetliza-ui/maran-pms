@@ -2583,6 +2583,22 @@ export const insertPurchaseInvoiceSchema = createInsertSchema(purchaseInvoices).
 export type InsertPurchaseInvoice = z.infer<typeof insertPurchaseInvoiceSchema>;
 export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
 
+// Las líneas se guardan sólo para comprobantes nuevos: los históricos no se infieren
+// a partir de movimientos de stock porque éstos no contienen la alícuota original.
+export const purchaseInvoiceLines = pgTable("purchase_invoice_lines", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").notNull().references(() => purchaseInvoices.id, { onDelete: "cascade" }),
+  lineNumber: integer("line_number").notNull(),
+  itemId: varchar("item_id").notNull().references(() => inventoryItems.id),
+  itemName: text("item_name").notNull(),
+  itemSku: text("item_sku"),
+  quantity: numeric("quantity", { precision: 10, scale: 3 }).notNull(),
+  unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull(),
+  vatRate: text("vat_rate"),
+  lineTotal: numeric("line_total", { precision: 14, scale: 2 }).notNull(),
+  warehouseId: varchar("warehouse_id"),
+});
+
 // Órdenes de Pago
 export const paymentOrders = pgTable("payment_orders", {
   id: serial("id").primaryKey(),

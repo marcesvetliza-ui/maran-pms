@@ -61,7 +61,7 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       tipoComprobante: "FACT-A", supplierId, numeroComprobante: numero,
       fechaEmision: "2026-09-23", periodo: "09/2026", condicionPago: "cuenta_corriente",
       montoNeto: "100", stockItems: [
-        { itemId, quantity: "2", unitCost: "15", warehouseId: null },
+        { itemId, quantity: "2", unitCost: "15", vatRate: "21", warehouseId: null },
         { itemId: randomUUID(), quantity: "1", unitCost: "12", warehouseId: null },
       ],
     };
@@ -70,6 +70,7 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       expect(rejected.status).toBe(400);
       expect(String(rejected.body.error)).toMatch(/Artículo 2/);
       expect((await pool.query("SELECT id FROM purchase_invoices WHERE numero_comprobante = $1", [numero])).rowCount).toBe(0);
+      expect((await pool.query("SELECT id FROM purchase_invoice_lines WHERE item_id = $1", [itemId])).rowCount).toBe(0);
       expect((await pool.query("SELECT id FROM stock_movements WHERE item_id = $1", [itemId])).rowCount).toBe(0);
       expect((await pool.query("SELECT id FROM item_price_history WHERE item_id = $1", [itemId])).rowCount).toBe(0);
       expect((await pool.query("SELECT item_id FROM inventory_item_suppliers WHERE item_id = $1", [itemId])).rowCount).toBe(0);
@@ -82,6 +83,10 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       });
       expect(created.status).toBe(201);
       expect(created.body.asiento_id).toBeTruthy();
+      const lines = await pool.query("SELECT line_number, quantity, unit_price, vat_rate, line_total FROM purchase_invoice_lines WHERE invoice_id = $1", [created.body.id]);
+      expect(lines.rows).toMatchObject([{ line_number: 1, quantity: "2.000", unit_price: "15.00", vat_rate: "21", line_total: "30.00" }]);
+      const detail = await request("GET", `/api/purchase-invoices/${created.body.id}`);
+      expect(detail.body.articleLines).toHaveLength(1);
       const movement = await pool.query(
         "SELECT movement_type, source_type, source_id, new_stock, unit_cost FROM stock_movements WHERE item_id = $1",
         [itemId],

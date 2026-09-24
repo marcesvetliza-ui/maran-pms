@@ -109,7 +109,66 @@ describe("Compras: proveedores, artículos e importe", () => {
     await user.type(screen.getByTestId("input-inv-qty-0"), "2");
     await user.click(screen.getByTestId("btn-submit-invoice"));
     await waitFor(() => expect(captured).toHaveLength(1));
-    expect(captured[0].stockItems).toEqual([{ itemId: "item-1", warehouseId: null, quantity: "2", unitCost: "0" }]);
+    expect(captured[0].stockItems).toEqual([{ itemId: "item-1", warehouseId: null, quantity: "2", unitCost: "0", vatRate: null }]);
     expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+  });
+
+  it("sugiere importes desde artículos, deja corregirlos y guarda alícuota y SKU visible", async () => {
+    const captured: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+      if (url.endsWith("/api/inventory/items") && !options?.method) {
+        return new Response(JSON.stringify([{ id: "item-1", name: "Filtro", sku: "FIL-01", unit: "unidad", currentStock: "1" }]), { status: 200 });
+      }
+      if (url.endsWith("/api/purchase-invoices") && options?.method === "POST") {
+        captured.push(JSON.parse(String(options.body)));
+        return new Response(JSON.stringify({ id: 100 }), { status: 201 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.type(screen.getByTestId("input-numero-comprobante"), "A-123");
+    await user.click(screen.getByTestId("btn-add-inv-item"));
+    await user.click(screen.getByTestId("select-existing-item-0"));
+    await user.click(await screen.findByRole("option", { name: /Filtro/ }));
+    expect(screen.getByText("SKU: FIL-01")).toBeInTheDocument();
+    await user.clear(screen.getByTestId("input-inv-cost-0"));
+    await user.type(screen.getByTestId("input-inv-cost-0"), "100");
+    await user.click(screen.getByTestId("select-inv-vat-0"));
+    await user.click(await screen.findByRole("option", { name: "21%" }));
+    await waitFor(() => expect(screen.getByTestId("input-neto-line-0")).toHaveValue(100));
+    expect(screen.getByTestId("article-amount-comparison")).toHaveTextContent("121");
+    await user.clear(screen.getByTestId("input-neto-line-0"));
+    await user.type(screen.getByTestId("input-neto-line-0"), "90");
+    expect(screen.getByTestId("article-amount-comparison")).toHaveTextContent("Diferencia");
+    await user.click(screen.getByRole("button", { name: "Volver a sugerir desde artículos" }));
+    await waitFor(() => expect(screen.getByTestId("input-neto-line-0")).toHaveValue(100));
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+    await waitFor(() => expect(captured).toHaveLength(1));
+    expect(captured[0].stockItems[0]).toMatchObject({ itemId: "item-1", vatRate: "21", unitCost: "100" });
+    expect(captured[0]).toMatchObject({ montoNeto: "100.00", montoIva21: "21.00" });
+  });
+
+  it("en Factura B toma el precio del artículo como final sin agregar IVA", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.endsWith("/api/inventory/items") ? [{ id: "item-b", name: "Repuesto", sku: "REP-1", currentStock: "0" }] : [],
+    ), { status: 200 })));
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Factura B" }));
+    await user.click(screen.getByTestId("btn-add-inv-item"));
+    await user.click(screen.getByTestId("select-existing-item-0"));
+    await user.click(await screen.findByRole("option", { name: /Repuesto/ }));
+    await user.clear(screen.getByTestId("input-inv-cost-0"));
+    await user.type(screen.getByTestId("input-inv-cost-0"), "121");
+    await waitFor(() => expect(screen.getByTestId("input-neto-line-0")).toHaveValue(121));
+    expect(screen.getByTestId("article-amount-comparison")).toHaveTextContent("121");
+    expect(screen.queryByText("IVA desagregado por alícuota")).not.toBeInTheDocument();
+    expect(screen.getByText("Precio final unit. ($)")).toBeInTheDocument();
   });
 });

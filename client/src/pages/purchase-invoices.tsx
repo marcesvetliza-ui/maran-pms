@@ -41,6 +41,7 @@ import {
   isValidPurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   receivedRetentionAccountCode,
+  suggestPurchaseAmountsFromArticles,
 } from "@shared/purchaseInvoiceTotals";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -243,6 +244,7 @@ interface InvItemRow {
   unit: string;
   costPrice: string;
   warehouseId: string;
+  vatRate: string;
 }
 
 const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
@@ -386,6 +388,7 @@ export function InvoiceDialog({
   useEffect(() => () => cancelSupplierBlur(), []);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
+  const [automaticNetos, setAutomaticNetos] = useState(true);
 
   const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
@@ -393,7 +396,7 @@ export function InvoiceDialog({
 
   const applyNetoLines = (updated: NetoLine[]) => {
     setForm(p => {
-      if (TIPOS_IMPORTE_UNICO.includes(p.tipoComprobante)) {
+      if (TIPOS_IMPORTE_UNICO.includes(p.tipoComprobante) || (p.tipoComprobante === "FACT-B" && !isEditing)) {
         // Factura C / Retención Recibida: no IVA — el importe cargado es el total, no calcular IVA
         const netoTotal = updated.reduce((sum, l) => sum + (parseFloat(l.neto) || 0), 0);
         return { ...p, montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "", ...ALL_IVA_FIELDS };
@@ -403,14 +406,16 @@ export function InvoiceDialog({
   };
 
   const updateNetoLine = (i: number, field: keyof NetoLine, val: string) => {
+    setAutomaticNetos(false);
     setNetoLines(prev => {
       const updated = prev.map((l, j) => j === i ? { ...l, [field]: val } : l);
       applyNetoLines(updated);
       return updated;
     });
   };
-  const addNetoLine = () => setNetoLines(prev => [...prev, emptyNetoLine()]);
+  const addNetoLine = () => { setAutomaticNetos(false); setNetoLines(prev => [...prev, emptyNetoLine()]); };
   const removeNetoLine = (i: number) => {
+    setAutomaticNetos(false);
     setNetoLines(prev => {
       const updated = prev.filter((_, j) => j !== i);
       applyNetoLines(updated);
@@ -458,10 +463,12 @@ export function InvoiceDialog({
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
       });
       setNetoLines(linesFromInvoice(editingInvoice));
+      setAutomaticNetos(false);
       setStep(1);
     } else if (open && !editingInvoice) {
       setForm(newForm());
       setNetoLines([emptyNetoLine()]);
+      setAutomaticNetos(true);
       setStep(0);
     }
   }, [open, editingInvoice, initialTipo]);
@@ -476,7 +483,7 @@ export function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
+  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "", vatRate: "" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
@@ -485,6 +492,26 @@ export function InvoiceDialog({
     queryKey: ["/api/inventory/items"],
     enabled: open && (unifiedLayout || step === 4),
   });
+
+  const canSuggestArticles = !isEditing && ["FACT-A", "FACT-B", "FACT-M", "FACT-C"].includes(form.tipoComprobante);
+  const completedArticles = invItems.filter(row => row.existingItemId && Number(row.quantity) > 0 && Number(row.costPrice) >= 0);
+  const vatSelectionComplete = ["FACT-B", "FACT-C"].includes(form.tipoComprobante) || completedArticles.every(row => row.vatRate);
+  const articleSuggestion = useMemo(() => suggestPurchaseAmountsFromArticles(
+    completedArticles.map(row => ({ quantity: row.quantity, unitPrice: row.costPrice, vatRate: row.vatRate })),
+    form.tipoComprobante,
+  ), [invItems, form.tipoComprobante]);
+
+  useEffect(() => {
+    if (!canSuggestArticles || !automaticNetos || !completedArticles.length || !vatSelectionComplete) return;
+    setNetoLines(articleSuggestion.lines);
+    setForm(previous => ({ ...previous, ...articleSuggestion.fields }));
+  }, [articleSuggestion, automaticNetos, canSuggestArticles, vatSelectionComplete]);
+
+  const restoreArticleSuggestion = () => {
+    setAutomaticNetos(true);
+    setNetoLines(articleSuggestion.lines);
+    setForm(previous => ({ ...previous, ...articleSuggestion.fields }));
+  };
 
   const handleSupplierChange = (id: string) => {
     const s = suppliers.find((x) => String(x.id) === id);
@@ -526,7 +553,18 @@ export function InvoiceDialog({
     return calculatePurchaseInvoiceTotal(form);
   }, [form]);
 
-  const resetDialog = () => { onClose(); setForm(newForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
+  const articleAmountComparison = canSuggestArticles && completedArticles.length > 0 && vatSelectionComplete && (
+    <div className={`rounded-md border p-3 text-xs ${Math.abs(total - articleSuggestion.articleTotal) > 0.01 ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`} data-testid="article-amount-comparison">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>Artículos: ${fmt(articleSuggestion.articleTotal)} · Total comprobante: ${fmt(total)}</span>
+        {!automaticNetos && <Button type="button" size="sm" variant="outline" onClick={restoreArticleSuggestion}>Volver a sugerir desde artículos</Button>}
+      </div>
+      {Math.abs(total - articleSuggestion.articleTotal) > 0.01 && <p className="mt-1">Diferencia: ${fmt(total - articleSuggestion.articleTotal)}. Revisá artículos, servicios, percepciones o ajustes manuales antes de guardar.</p>}
+      {automaticNetos && <p className="mt-1 text-muted-foreground">Importes sugeridos desde artículos; podés corregirlos manualmente.</p>}
+    </div>
+  );
+
+  const resetDialog = () => { onClose(); setForm(newForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); setAutomaticNetos(true); };
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
@@ -537,6 +575,7 @@ export function InvoiceDialog({
           warehouseId: row.warehouseId || null,
           quantity: row.quantity,
           unitCost: row.costPrice,
+          vatRate: row.vatRate || null,
         })),
       });
       return res.json();
@@ -604,6 +643,10 @@ export function InvoiceDialog({
       toast({ title: "Elegí un proveedor cargado en el ABM", variant: "destructive" });
       return;
     }
+    if (canSuggestArticles && completedArticles.length > 0 && !vatSelectionComplete) {
+      toast({ title: "Elegí la alícuota de IVA de cada artículo", variant: "destructive" });
+      return;
+    }
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
     // (descuentos exclusivos, artículos sin cargo, etc.).
@@ -624,7 +667,7 @@ export function InvoiceDialog({
   const isRemito = form.tipoComprobante === "REMITO";
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
-  const isImporteUnico = isFacturaC || isRetencion;
+  const isImporteUnico = isFacturaC || isRetencion || (form.tipoComprobante === "FACT-B" && !isEditing);
 
   useEffect(() => {
     if (!isRetencion) return;
@@ -914,7 +957,7 @@ export function InvoiceDialog({
                                           }}
                                         >
                                           <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                                          <span className="flex-1">{item.name}</span>
+                                          <span className="flex-1">{item.name} {item.sku && <span className="text-muted-foreground">({item.sku})</span>}</span>
                                           <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
                                         </CommandItem>
                                       ))}
@@ -924,6 +967,7 @@ export function InvoiceDialog({
                             </PopoverContent>
                           </Popover>
                         </div>
+                      {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
                       <div className="grid grid-cols-3 gap-2">
@@ -941,10 +985,25 @@ export function InvoiceDialog({
                           </Select>
                         </div>
                         <div>
-                          <Label className="text-xs mb-1 block">Costo unit. ($)</Label>
+                          <Label className="text-xs mb-1 block">{form.tipoComprobante === "FACT-B" ? "Precio final unit. ($)" : "Costo unit. neto ($)"}</Label>
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
+                        <div>
+                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                              <SelectItem value="27">27%</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
 
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
@@ -969,6 +1028,8 @@ export function InvoiceDialog({
               <Button type="button" variant="outline" size="sm" onClick={addInvRow} data-testid="btn-add-inv-item">
                 <Plus className="h-4 w-4 mr-2" />Agregar artículo
               </Button>
+
+              {articleAmountComparison}
 
               {invItems.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-2">
@@ -1606,7 +1667,7 @@ export function InvoiceDialog({
                                           }}
                                         >
                                           <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                                          <span className="flex-1">{item.name}</span>
+                                          <span className="flex-1">{item.name} {item.sku && <span className="text-muted-foreground">({item.sku})</span>}</span>
                                           <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
                                         </CommandItem>
                                       ))}
@@ -1616,6 +1677,7 @@ export function InvoiceDialog({
                             </PopoverContent>
                           </Popover>
                         </div>
+                      {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
                       <div className="grid grid-cols-3 gap-2">
@@ -1633,10 +1695,25 @@ export function InvoiceDialog({
                           </Select>
                         </div>
                         <div>
-                          <Label className="text-xs mb-1 block">Costo unit. ($)</Label>
+                          <Label className="text-xs mb-1 block">{form.tipoComprobante === "FACT-B" ? "Precio final unit. ($)" : "Costo unit. neto ($)"}</Label>
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
+                        <div>
+                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                              <SelectItem value="27">27%</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
 
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
@@ -1661,6 +1738,8 @@ export function InvoiceDialog({
               <Button type="button" variant="outline" size="sm" onClick={addInvRow} data-testid="btn-add-inv-item">
                 <Plus className="h-4 w-4 mr-2" />Agregar artículo
               </Button>
+
+              {articleAmountComparison}
 
               {invItems.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-2">
