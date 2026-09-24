@@ -127,6 +127,25 @@ function parseCaeResult(response: string): FECAEResult | null {
   };
 }
 
+function buildServiceDates(fecha: string): string {
+  const year = Number(fecha.slice(0, 4));
+  const month = Number(fecha.slice(4, 6));
+  const day = Number(fecha.slice(6, 8));
+  const emission = new Date(Date.UTC(year, month - 1, day));
+  if (!/^\d{8}$/.test(fecha) || Number.isNaN(emission.getTime()) ||
+      emission.toISOString().slice(0, 10).replace(/-/g, "") !== fecha) {
+    throw new Error("Fecha de emisión inválida para las fechas de prestación de ARCA");
+  }
+  const format = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, "");
+  const nextDay = new Date(emission);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dueDate = new Date(emission);
+  dueDate.setUTCDate(dueDate.getUTCDate() + 60);
+  return `<ar:FchServDesde>${fecha}</ar:FchServDesde>` +
+    `<ar:FchServHasta>${format(nextDay)}</ar:FchServHasta>` +
+    `<ar:FchVtoPago>${format(dueDate)}</ar:FchVtoPago>`;
+}
+
 /**
  * Consults the exact voucher number before retrying an interrupted
  * authorization. Returning null means ARCA explicitly reported no authorized
@@ -180,6 +199,7 @@ export async function feCAESolicitar(
   const impIva   = (req.montoIva21 + req.montoIva105).toFixed(2);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
   const cbtesAsocBlock = buildCbtesAsocBlock(req.cbteAsoc);
+  const serviceDates = req.tipo === "FA" || req.tipo === "FB" ? buildServiceDates(req.fecha) : "";
 
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?>` +
@@ -209,6 +229,7 @@ export async function feCAESolicitar(
     `<ar:ImpOpEx>${req.montoExento.toFixed(2)}</ar:ImpOpEx>` +
     `<ar:ImpIVA>${impIva}</ar:ImpIVA>` +
     `<ar:ImpTrib>0.00</ar:ImpTrib>` +
+    serviceDates +
     `<ar:MonId>PES</ar:MonId>` +
     `<ar:MonCotiz>1</ar:MonCotiz>` +
     `${cbtesAsocBlock}` +
