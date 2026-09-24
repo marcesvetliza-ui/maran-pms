@@ -427,6 +427,13 @@ export function InvoiceDialog({
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
+  // Si se abandona una liquidación antes de guardar, sus retenciones no deben
+  // quedar ocultas en otro tipo de comprobante y alterar el total enviado.
+  const clearCardRetentions = (previous: ReturnType<typeof emptyForm>, nextType: string) =>
+    previous.tipoComprobante === "LIQ-TARJETA" && nextType !== "LIQ-TARJETA"
+      ? { retencionIibb: "", retencionGanancias: "", retencionIva: "", retencionSuss: "", retencionMunicipal: "" }
+      : {};
+
   useEffect(() => {
     if (open && editingInvoice) {
       setForm({
@@ -658,6 +665,17 @@ export function InvoiceDialog({
     : ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isLiquidacionTarjeta = isCardSettlement(form.tipoComprobante);
+  const hasHistoricalRetentions = isEditing && !isLiquidacionTarjeta && !isReceivedRetention(form.tipoComprobante) &&
+    [form.retencionIibb, form.retencionGanancias, form.retencionIva, form.retencionSuss, form.retencionMunicipal]
+      .some((value) => Number(value) !== 0);
+  const historicalRetentionsNote = hasHistoricalRetentions && (
+    <p className="text-xs text-muted-foreground" data-testid="historical-purchase-retentions">
+      Este comprobante conserva retenciones cargadas anteriormente por ${fmt(
+        $n(form.retencionIibb) + $n(form.retencionGanancias) + $n(form.retencionIva) +
+        $n(form.retencionSuss) + $n(form.retencionMunicipal)
+      )}. Siguen descontándose del total; consultá el detalle antes de modificarlo.
+    </p>
+  );
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"].includes(form.tipoComprobante);
@@ -715,6 +733,7 @@ export function InvoiceDialog({
                     if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
                         ...p,
+                        ...clearCardRetentions(p, v),
                         tipoComprobante: v,
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
@@ -745,7 +764,7 @@ export function InvoiceDialog({
                       }));
                       setNetoLines([emptyNetoLine()]);
                     } else {
-                      f("tipoComprobante", v);
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -1197,17 +1216,13 @@ export function InvoiceDialog({
                 <div><Label>Percep. IVA</Label><Input type="number" step="0.01" value={form.percepcionIva} onChange={(e) => f("percepcionIva", e.target.value)} data-testid="input-percep-iva" /></div>
                 <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
               </div>
-              <Separator />
-              <p className="text-sm font-semibold text-muted-foreground">
-                {isLiquidacionTarjeta
-                  ? "Retenciones sufridas (DEBE — suman al total)"
-                  : "Retenciones (HABER — descuentan el pago)"}
-              </p>
               {isLiquidacionTarjeta && (
+              <>
+              <Separator />
+              <p className="text-sm font-semibold text-muted-foreground">Retenciones sufridas (DEBE — suman al total)</p>
                 <p className="text-xs text-muted-foreground">
                   Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
                 </p>
-              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
@@ -1215,6 +1230,9 @@ export function InvoiceDialog({
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
                 <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
               </div>
+              </>
+              )}
+              {historicalRetentionsNote}
                 </>
               )}
                 <div className="col-span-2">
@@ -1250,6 +1268,7 @@ export function InvoiceDialog({
                     if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
                         ...p,
+                        ...clearCardRetentions(p, v),
                         tipoComprobante: v,
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
@@ -1257,7 +1276,7 @@ export function InvoiceDialog({
                         ...ALL_IVA_FIELDS,
                       }));
                     } else {
-                      f("tipoComprobante", v);
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -1533,17 +1552,13 @@ export function InvoiceDialog({
                 <div><Label>Percep. IVA</Label><Input type="number" step="0.01" value={form.percepcionIva} onChange={(e) => f("percepcionIva", e.target.value)} data-testid="input-percep-iva" /></div>
                 <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
               </div>
-              <Separator />
-              <p className="text-sm font-semibold text-muted-foreground">
-                {isLiquidacionTarjeta
-                  ? "Retenciones sufridas (DEBE — suman al total)"
-                  : "Retenciones (HABER — descuentan el pago)"}
-              </p>
               {isLiquidacionTarjeta && (
+              <>
+              <Separator />
+              <p className="text-sm font-semibold text-muted-foreground">Retenciones sufridas (DEBE — suman al total)</p>
                 <p className="text-xs text-muted-foreground">
                   Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
                 </p>
-              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
@@ -1551,6 +1566,9 @@ export function InvoiceDialog({
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
                 <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
               </div>
+              </>
+              )}
+              {historicalRetentionsNote}
                 </>
               )}
             </>
