@@ -1061,9 +1061,43 @@ export function registerBillingRoutes(app: Express) {
   // POST /api/billing/invoices
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
-      let { tipoComprobante, cliente, items, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
+      }
+      if (recipientMode === "centro_comprobantes" && !recipientEntity && !(
+        recipientConsumerFinal === true
+        && ["FB", "FMB"].includes(tipoComprobante)
+        && String(cliente.razonSocial || "").trim().toLowerCase() === "consumidor final"
+        && String(cliente.condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_") === "consumidor_final"
+        && !cliente.cuit && !cliente.dni
+      )) {
+        return res.status(400).json({ error: "Elegí una ficha real o Consumidor Final para Factura B antes de emitir" });
+      }
+      let verifiedRecipientEntity: NewInvoiceData["recipientEntity"];
+      if (recipientEntity !== undefined) {
+        const type = recipientEntity?.type;
+        const id = recipientEntity?.id;
+        if (!["guest", "company", "agency"].includes(type) || typeof id !== "string" || !id.trim()) {
+          return res.status(400).json({ error: "La ficha del receptor no es válida" });
+        }
+        const rows = type === "guest"
+          ? await db.execute(sql`SELECT first_name || ' ' || last_name AS name, cuil_cuit AS cuit, document_number AS dni, vat_condition AS iva FROM guests WHERE id = ${id} AND active = true LIMIT 1`)
+          : type === "company"
+            ? await db.execute(sql`SELECT razon_social AS name, cuil_cuit AS cuit, NULL::text AS dni, condicion_iva AS iva FROM companies WHERE id = ${id} LIMIT 1`)
+            : await db.execute(sql`SELECT razon_social AS name, cuil_cuit AS cuit, NULL::text AS dni, condicion_iva AS iva FROM agencies WHERE id = ${id} LIMIT 1`);
+        const record = rows.rows[0] as { name: string; cuit: string | null; dni: string | null; iva: string | null } | undefined;
+        if (!record) return res.status(400).json({ error: "La ficha del receptor no existe o está inactiva" });
+        const normalizedName = (v: unknown) => String(v || "").trim().replace(/\s+/g, " ").toLocaleLowerCase("es");
+        const digits = (v: unknown) => String(v || "").replace(/\D/g, "");
+        const normalizedIva = (v: unknown) => String(v || "").trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/^monotributista$/, "monotributo");
+        if (normalizedName(cliente.razonSocial) !== normalizedName(record.name)
+          || digits(cliente.cuit) !== digits(record.cuit)
+          || (record.dni && String(cliente.dni || "").trim() !== record.dni)
+          || (record.iva && normalizedIva(cliente.condicionIva) !== normalizedIva(record.iva))) {
+          return res.status(400).json({ error: "Los datos del receptor no coinciden con la ficha elegida. Volvé a seleccionarla antes de emitir." });
+        }
+        verifiedRecipientEntity = { type, id };
       }
       // Las Notas de Crédito/Débito siempre deben asociarse a una factura existente
       // (exigencia de ARCA). Este endpoint genérico no tiene ese vínculo — deben
@@ -1742,6 +1776,7 @@ export function registerBillingRoutes(app: Express) {
         const emitted = await emitirFactura({
           tipoComprobante,
           cliente: persistedCliente,
+          recipientEntity: verifiedRecipientEntity,
           items: persistedItems,
           reservaId: reservationId || undefined,
           paymentId: paymentId || undefined,

@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { queryClient } from "@/lib/queryClient";
+import type React from "react";
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: vi.fn(), toasts: [], dismiss: vi.fn() }),
@@ -29,20 +30,22 @@ const COMPANIES = [
 const AGENCIES = [
   { id: "a-1", razonSocial: "Agencia Monotributo", cuilCuit: "20-98765432-1", condicionIva: "monotributo", domicilio: "" },
 ];
+const GUESTS = [{ id: "g-1", firstName: "MARIA", lastName: "PEREZ", documentNumber: "12345678", cuilCuit: null, vatCondition: "consumidor_final", direccion: "Calle 1", active: true }];
 
 function buildFetchMock() {
   return vi.fn(async (url: string | URL | Request) => {
     const strUrl = url.toString();
     if (strUrl.endsWith("/api/companies")) return new Response(JSON.stringify(COMPANIES), { status: 200 });
     if (strUrl.endsWith("/api/agencies")) return new Response(JSON.stringify(AGENCIES), { status: 200 });
+    if (strUrl.includes("/api/guests/search?q=")) return new Response(JSON.stringify(GUESTS), { status: 200 });
     return new Response(JSON.stringify([]), { status: 200 });
   });
 }
 
-function renderDialog() {
+function renderDialog(props: Partial<React.ComponentProps<typeof EmitirFacturaDialog>> = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
-      <EmitirFacturaDialog embedded open onClose={vi.fn()} config={FAKE_CONFIG} allowedTipos={["FA", "FB"]} />
+      <EmitirFacturaDialog embedded open onClose={vi.fn()} config={FAKE_CONFIG} allowedTipos={["FA", "FB"]} {...props} />
     </QueryClientProvider>,
   );
 }
@@ -79,5 +82,43 @@ describe("EmitirFacturaDialog — Condición IVA al elegir empresa/agencia del b
     await user.click(await screen.findByText("Agencia Monotributo"));
 
     await waitFor(() => expect(screen.getByTestId("select-condicion-iva")).toHaveTextContent("Monotributista"));
+  });
+});
+
+describe("Centro de Comprobantes — receptor vinculado", () => {
+  beforeEach(() => {
+    queryClient.clear();
+    vi.stubGlobal("fetch", buildFetchMock());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("busca la ficha de Huéspedes y mantiene su identidad al revisar", async () => {
+    const user = userEvent.setup();
+    renderDialog({ requireLinkedRecipient: true, allowedTipos: ["FB"] });
+    await user.type(screen.getByTestId("input-entity-search"), "maria");
+    await user.click(await screen.findByText("MARIA PEREZ"));
+    expect(screen.getByTestId("recipient-linked")).toHaveTextContent("Huésped");
+    expect(screen.getByTestId("input-razon-social")).toHaveValue("MARIA PEREZ");
+    expect(screen.getByTestId("input-razon-social")).toHaveAttribute("readonly");
+    expect(screen.getByTestId("input-dni")).toHaveValue("12345678");
+  });
+
+  it("no avanza al revisar con un nombre escrito sin elegir una ficha", async () => {
+    const user = userEvent.setup();
+    renderDialog({ requireLinkedRecipient: true, allowedTipos: ["FB"] });
+    await user.type(screen.getByTestId("input-razon-social"), "Nombre suelto");
+    await user.type(screen.getByTestId("item-description-0"), "Alojamiento");
+    await user.type(screen.getByTestId("item-price-0"), "100");
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    expect(screen.getByTestId("recipient-entity-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("btn-confirmar-emitir")).not.toBeInTheDocument();
+  });
+
+  it("permite elegir explícitamente Consumidor Final para Factura B", async () => {
+    const user = userEvent.setup();
+    renderDialog({ requireLinkedRecipient: true, allowedTipos: ["FB"] });
+    await user.click(screen.getByTestId("button-consumidor-final"));
+    expect(screen.getByTestId("input-razon-social")).toHaveValue("Consumidor Final");
+    expect(screen.getByTestId("input-razon-social")).toHaveAttribute("readonly");
   });
 });

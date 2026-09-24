@@ -40,6 +40,7 @@ export interface NewInvoiceData {
     condicionIva: string;
     domicilio?: string;
   };
+  recipientEntity?: { type: "guest" | "company" | "agency"; id: string };
   items: InvoiceItem[];
   reservaId?: string;
   /** Reservation payment this document must be linked to after authorization. */
@@ -313,6 +314,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       clienteDocumentType: data.cliente.documentType || null,
       clienteCondicionIva: data.cliente.condicionIva,
       clienteDomicilio: data.cliente.domicilio || null,
+      recipientEntityType: data.recipientEntity?.type || null,
+      recipientEntityId: data.recipientEntity?.id || null,
       montoNeto: String(montos.montoNeto),
       montoIva21: String(montos.montoIva21),
       montoIva105: String(montos.montoIva105),
@@ -514,6 +517,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     clienteDocumentType: data.cliente.documentType || null,
     clienteCondicionIva: data.cliente.condicionIva,
     clienteDomicilio: data.cliente.domicilio || null,
+    recipientEntityType: data.recipientEntity?.type || null,
+    recipientEntityId: data.recipientEntity?.id || null,
     montoNeto: String(montos.montoNeto),
     montoIva21: String(montos.montoIva21),
     montoIva105: String(montos.montoIva105),

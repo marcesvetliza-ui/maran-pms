@@ -130,6 +130,24 @@ beforeEach(() => {
 });
 
 describe("Cuenta Corriente invoice with no reservation", () => {
+  it("rechaza el texto libre del Centro de Comprobantes sin ficha seleccionada", async () => {
+    await withServer(async url => {
+      const result = await post(url, body({ recipientMode: "centro_comprobantes" }));
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/ficha real/);
+      expect(emitirFactura).not.toHaveBeenCalled();
+    });
+  });
+
+  it("rechaza un receptor enlazado inexistente antes de emitir", async () => {
+    await withServer(async url => {
+      const result = await post(url, body({ recipientEntity: { type: "guest", id: "guest-inexistente" } }));
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/ficha del receptor/);
+      expect(emitirFactura).not.toHaveBeenCalled();
+    });
+  });
+
   it("settles directly against the entity's cuenta corriente instead of requiring a reservation", async () => {
     await withServer(async url => {
       const result = await post(url, body());

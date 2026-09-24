@@ -678,7 +678,7 @@ function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
   );
 }
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded }: {
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded, requireLinkedRecipient = false }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -747,6 +747,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
    * as real overlays in both modes.
    */
   embedded?: boolean;
+  /** Centro de Comprobantes: exigir ficha elegida o Consumidor Final explícito. */
+  requireLinkedRecipient?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
@@ -768,6 +770,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
   const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
+  const [manualConsumerFinal, setManualConsumerFinal] = useState(false);
   const originalDomicilioRef = useRef<string>("");
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
   const [entitySearch, setEntitySearch] = useState("");
@@ -794,6 +797,15 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+  const { data: guestMatches = [] } = useQuery<any[]>({
+    queryKey: ["/api/guests/search", entitySearch.trim()],
+    queryFn: async () => {
+      const response = await fetch(`/api/guests/search?q=${encodeURIComponent(entitySearch.trim())}`, { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudo buscar en Huéspedes");
+      return response.json();
+    },
+    enabled: open && requireLinkedRecipient && entitySearch.trim().length >= 2,
+  });
 
   // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
   // fuentes siempre, sin importar cashArea: una factura de recepción a
@@ -845,7 +857,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
         const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
         return name.includes(entitySearch.toLowerCase()) || cuitVal.includes(entitySearch.replace(/-/g, ""));
-      }).slice(0, 8)
+      }).slice(0, 8).concat(requireLinkedRecipient ? guestMatches.filter((g: any) => g.active !== false).map((g: any) => ({
+        ...g, _type: "Huésped", razonSocial: `${g.firstName || ""} ${g.lastName || ""}`.trim(),
+        condicionIva: g.vatCondition, domicilio: g.direccion, dni: g.documentNumber,
+      })) : [])
     : [];
 
   const dialogOperationKey = JSON.stringify({
@@ -966,13 +981,15 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     const domVal = entity.domicilio || entity.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
+    setDni(entity.dni || "");
     setCondicionIva(condVal);
     const nextDom = domVal || "";
     setDomicilio(nextDom);
     originalDomicilioRef.current = nextDom;
     // Track the entity so we can update its address if domicilio is edited
-    const eType: "company" | "agency" = entity._type === "Agencia" ? "agency" : "company";
+    const eType: "guest" | "company" | "agency" = entity._type === "Huésped" ? "guest" : entity._type === "Agencia" ? "agency" : "company";
     setSelectedEntityInfo({ type: eType, id: entity.id });
+    setManualConsumerFinal(false);
     if (isRiOrExento(condVal) || condVal === "Monotributista") {
       // Responsable Inscripto/Exento may only receive FA/MiPyme A (never FB),
       // regardless of whether CUIT is present yet — a missing CUIT surfaces
@@ -991,7 +1008,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   }
 
   function selectEntity(entity: any) {
-    const entityType = entity._type === "Agencia" ? "agency" : "company";
+    const entityType = entity._type === "Huésped" ? "guest" : entity._type === "Agencia" ? "agency" : "company";
     const isChangingAssociatedRecipient = !!recipientProfile
       && recipientProfile.type !== "guest"
       && (recipientProfile.type !== entityType || recipientProfile.id !== entity.id);
@@ -1005,6 +1022,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
   function validateForm(): Record<string, string> {
     const errs: Record<string, string> = {};
+    if (requireLinkedRecipient && !selectedEntityInfo && !(manualConsumerFinal && (tipo === "FB" || tipo === "FMB"))) {
+      errs.recipientEntity = "Elegí una ficha de Empresa, Agencia o Huésped; para Factura B también podés usar Consumidor Final.";
+    }
     if (!razonSocial.trim()) errs.razonSocial = "Requerido";
     if (tipo === "FA") {
       const cuitClean = cuit.replace(/-/g, "");
@@ -1366,6 +1386,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
     setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
+    setManualConsumerFinal(false);
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
     setRetencionTipo("iibb"); setRetencionMonto("");
   }
@@ -1567,6 +1588,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
+      ...(requireLinkedRecipient ? { recipientMode: "centro_comprobantes", recipientConsumerFinal: manualConsumerFinal } : {}),
+      ...(requireLinkedRecipient && selectedEntityInfo ? { recipientEntity: selectedEntityInfo } : {}),
       items,
       ...(paymentId ? { paymentId } : {}),
       ...(reservationId ? { reservaId: reservationId } : {}),
@@ -1973,14 +1996,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           <Label className="text-sm font-semibold">Datos del receptor</Label>
 
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground flex items-center gap-1"><Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1"><Search className="w-3 h-3" /> Buscar empresa, agencia o huésped para autocompletar</Label>
             <div className="relative">
               <Input
                 value={entitySearch}
                 onChange={e => { setEntitySearch(e.target.value); setShowEntityDropdown(true); }}
                 onFocus={() => setShowEntityDropdown(true)}
                 onBlur={() => setTimeout(() => setShowEntityDropdown(false), 200)}
-                placeholder="Nombre o CUIT de empresa/agencia..."
+                placeholder="Nombre, CUIT o documento..."
                 className="text-sm"
                 data-testid="input-entity-search"
               />
@@ -1988,7 +2011,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
                   {entityResults.map((e: any) => (
                     <button
-                      key={e.id}
+                      key={`${e._type}-${e.id}`}
                       type="button"
                       className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
                       onMouseDown={() => selectEntity(e)}
@@ -1997,7 +2020,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                         <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
                         <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
                       </span>
-                      {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                      {(e.cuilCuit || e.dni) && <span className="text-muted-foreground text-xs">{e.cuilCuit || e.dni}</span>}
                     </button>
                   ))}
                 </div>
@@ -2008,6 +2031,20 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 </div>
               )}
             </div>
+            {requireLinkedRecipient && (
+              <div className="space-y-1">
+                {(tipo === "FB" || tipo === "FMB") && (
+                  <Button type="button" variant="outline" size="sm" onClick={() => {
+                    setManualConsumerFinal(true); setSelectedEntityInfo(null);
+                    setRazonSocial("Consumidor Final"); setCuit(""); setDni(""); setDomicilio("");
+                    setCondicionIva("Consumidor Final"); setFieldErrors({});
+                    setEntitySearch(""); setShowEntityDropdown(false);
+                  }} data-testid="button-consumidor-final">Usar Consumidor Final</Button>
+                )}
+                {selectedEntityInfo && <p className="text-xs text-muted-foreground" data-testid="recipient-linked">Ficha vinculada: {selectedEntityInfo.type === "guest" ? "Huésped" : selectedEntityInfo.type === "company" ? "Empresa" : "Agencia"}</p>}
+                {fieldErrors.recipientEntity && <p className="text-xs text-red-500" data-testid="recipient-entity-error">{fieldErrors.recipientEntity}</p>}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -2019,23 +2056,23 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   <Input value={guestFirstName} onChange={e => { const value = e.target.value; setGuestFirstName(value); setRazonSocial(`${guestLastName} ${value}`.trim()); }} placeholder="Nombre" data-testid="input-guest-first-name" />
                 </div>
               ) : (
-                <Input value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
+                <Input readOnly={requireLinkedRecipient && (!!selectedEntityInfo || manualConsumerFinal)} value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
               )}
               {fieldErrors.razonSocial && <p className="text-xs text-red-500">{fieldErrors.razonSocial}</p>}
             </div>
             {isFA ? (
               <div className="space-y-1">
                 <Label className="text-xs">CUIT *</Label>
-                <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
+                <Input readOnly={requireLinkedRecipient && !!selectedEntityInfo} value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
                 {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
                 {initialValues?.documentType && dni && <p className="text-[11px] text-muted-foreground">{initialValues.documentType}: {dni}</p>}
               </div>
             ) : (
-              <div className="space-y-1"><Label className="text-xs">{initialValues?.documentType || "DNI"} (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
+              <div className="space-y-1"><Label className="text-xs">{initialValues?.documentType || "DNI"} (opcional)</Label><Input readOnly={requireLinkedRecipient && !!selectedEntityInfo} value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
             )}
             <div className="space-y-1">
               <Label className="text-xs">Condición IVA</Label>
-              {lockCondicionIva ? (
+              {lockCondicionIva || (requireLinkedRecipient && !!selectedEntityInfo && !!condicionIva) ? (
                 <div className="h-9 flex items-center px-3 border rounded-md bg-muted/30 text-sm text-muted-foreground">{condicionIva}</div>
               ) : (
                 <Select value={condicionIva} onValueChange={v => {

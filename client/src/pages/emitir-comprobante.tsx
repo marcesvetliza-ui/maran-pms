@@ -356,6 +356,7 @@ export default function EmitirComprobantePage() {
                   allowedTipos={[tipo]}
                   cashArea={area}
                   showPaymentMethod
+                  requireLinkedRecipient
                   operationKey={`centro-comprobantes-venta-${area}-${tipo}`}
                 />
               )}
