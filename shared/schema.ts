@@ -2793,6 +2793,9 @@ export const salesInvoices = pgTable("sales_invoices", {
   // documento anteriores siguen siendo la foto fiscal del momento de emisión.
   recipientEntityType: text("recipient_entity_type"),
   recipientEntityId: varchar("recipient_entity_id"),
+  /** Área de Caja para la liquidación dividida del Centro de Comprobantes. */
+  centerSettlementArea: text("center_settlement_area"),
+  centerSettlementStatus: text("center_settlement_status"),
   montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull(),
   montoIva21: numeric("monto_iva21", { precision: 14, scale: 2 }).default("0"),
   montoIva105: numeric("monto_iva105", { precision: 14, scale: 2 }).default("0"),

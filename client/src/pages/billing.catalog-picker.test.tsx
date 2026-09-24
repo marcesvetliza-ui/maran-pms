@@ -198,6 +198,27 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     expect(screen.getByTestId("item-description-0")).toHaveAttribute("readonly");
   });
 
+  it("solo permite revisar si los cobros divididos completan el total", async () => {
+    const user = userEvent.setup();
+    renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true, cashArea: "recepcion", showPaymentMethod: true });
+    await user.click(screen.getByTestId("button-consumidor-final"));
+    await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(await screen.findByTestId("catalog-item-mi-1"));
+
+    await user.click(screen.getByTestId("center-add-payment"));
+    await user.clear(screen.getByTestId("center-amount-0"));
+    await user.type(screen.getByTestId("center-amount-0"), "1000");
+    await user.type(screen.getByTestId("center-amount-1"), "1000");
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    expect(screen.getByTestId("center-payment-error")).toHaveTextContent("coincidir con el total");
+    expect(screen.queryByTestId("btn-confirmar-emitir")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByTestId("center-amount-1"));
+    await user.type(screen.getByTestId("center-amount-1"), "1500");
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    expect(screen.getByTestId("btn-confirmar-emitir")).toBeInTheDocument();
+  });
+
   describe("Turnos vendidos — el comprobante recuerda qué tratamiento fue", () => {
     // Elegir un tratamiento del catálogo de Spa (a diferencia de alojamiento o
     // restaurant) manda su id en el comprobante, para que el servidor pueda

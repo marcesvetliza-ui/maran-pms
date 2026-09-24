@@ -1140,6 +1140,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "spa_account_id",
       "recipient_entity_type",
       "recipient_entity_id",
+      "center_settlement_area",
+      "center_settlement_status",
       "reconciliation_status",
       "reconciliation_error",
       "reconciliation_updated_at",
@@ -3130,6 +3132,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
   await withTimeout("sales_invoices.recipient_entity_id", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN recipient_entity_id varchar`)))
+  );
+  await withTimeout("sales_invoices.center_settlement_area", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN center_settlement_area text`)))
+  );
+  await withTimeout("sales_invoices.center_settlement_status", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE sales_invoices ADD COLUMN center_settlement_status text`)))
   );
 
   await withTimeout("group_payments.receipt_type", T, () =>
