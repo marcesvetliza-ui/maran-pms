@@ -89,6 +89,27 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
   });
 
   it.each([
+    ["Resumen Bancario (gasto)", "RESUMEN-BANCO"],
+    ["Retenciones (gasto)", "RETENCION"],
+  ])("%s usa un registro sin artículos ni cobros", async (label, type) => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    queryClient.setQueryData(["/api/accounting-suppliers"], [{ id: 331, razon_social: "Banco prueba", cuit: "30111222333", cuenta_contable_id: 440 }]);
+    queryClient.setQueryData(["/api/accounting-accounts"], [{ id: 440, codigo: "4.2.1.08.18", nombre: "Gastos bancarios", tipo: "egreso" }]);
+    renderPage();
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Compras" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Compra" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: label }));
+    expect(screen.getByTestId("registro-gasto-compra")).toBeInTheDocument();
+    expect(screen.getByTestId("btn-registrar-gasto")).toBeDisabled();
+    expect(screen.queryByTestId("btn-add-inv-item")).not.toBeInTheDocument();
+    expect(screen.getByText(new RegExp(type === "RETENCION" ? "Retenciones" : "Resumen Bancario"))).toBeInTheDocument();
+  });
+
+  it.each([
     ["Factura B", "Factura B"],
     ["Factura C", "Factura C"],
     ["Nota de Crédito B", "Nota de Crédito B"],

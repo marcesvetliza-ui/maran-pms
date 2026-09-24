@@ -2946,6 +2946,63 @@ export async function registerRoutes(
 
   app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
+      // Estos dos registros alimentan los informes por cuenta de gasto; el
+      // emisor identifica su origen, pero nunca queda como acreedor ni se mueve
+      // Caja, banco, stock o el Libro IVA. Las filas históricas de esos mismos
+      // tipos conservan su tratamiento anterior y se distinguen por estado.
+      if (["RESUMEN-BANCO", "RETENCION"].includes(req.body.tipoComprobante)) {
+        const input = req.body;
+        const supplierId = Number(input.supplierId);
+        const numero = typeof input.numeroComprobante === "string" ? input.numeroComprobante.trim() : "";
+        const fecha = input.fechaEmision;
+        const amountText = String(input.montoNeto ?? "");
+        const amount = Number(amountText);
+        const date = typeof fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+          ? new Date(`${fecha}T12:00:00Z`) : null;
+        if (!Number.isSafeInteger(supplierId) || supplierId <= 0 || !numero || !date ||
+            Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== fecha ||
+            !/^\d+(?:\.\d{1,2})?$/.test(amountText) ||
+            !Number.isFinite(amount) || amount <= 0 || amount > 999999999999.99) {
+          return res.status(400).json({ error: "Elegí emisor, número, fecha e importe positivo con hasta dos decimales." });
+        }
+        if (input.stockItems !== undefined && (!Array.isArray(input.stockItems) || input.stockItems.length > 0)) {
+          return res.status(400).json({ error: "Los registros de gasto no admiten artículos ni movimientos de stock." });
+        }
+        const emitter = await db.execute(sql`
+          SELECT s.razon_social, s.cuit, aa.id AS account_id
+          FROM accounting_suppliers s
+          LEFT JOIN accounting_accounts aa ON aa.id = s.cuenta_contable_id
+            AND aa.tipo = 'egreso' AND aa.activo = true
+          WHERE s.id = ${supplierId} AND s.activo = true
+        `);
+        if (!emitter.rows.length || !emitter.rows[0].account_id) {
+          return res.status(400).json({ error: "El emisor debe estar activo y tener una cuenta de gasto activa asignada en el ABM." });
+        }
+        const period = `${fecha.slice(5, 7)}/${fecha.slice(0, 4)}`;
+        const result = await db.transaction(async (tx) => {
+          const duplicate = await tx.execute(sql`
+            SELECT id FROM purchase_invoices
+            WHERE tipo_comprobante = ${input.tipoComprobante} AND supplier_id = ${supplierId}
+              AND numero_comprobante = ${numero} AND estado != 'anulado' LIMIT 1
+          `);
+          if (duplicate.rows.length) {
+            throw Object.assign(new Error("Este registro ya existe para el emisor y número indicados."), { statusCode: 409 });
+          }
+          return tx.execute(sql`
+            INSERT INTO purchase_invoices (
+              tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
+              numero_comprobante, fecha_emision, periodo, condicion_pago,
+              monto_neto, monto_total, cuenta_contable_id, estado, observaciones
+            ) VALUES (
+              ${input.tipoComprobante}, ${supplierId}, ${emitter.rows[0].razon_social}, ${emitter.rows[0].cuit},
+              ${numero}, ${fecha}, ${period}, 'registro',
+              ${amount}, ${amount}, ${emitter.rows[0].account_id}, 'registrado',
+              ${typeof input.observaciones === "string" ? input.observaciones.trim() : null}
+            ) RETURNING *
+          `);
+        });
+        return res.status(201).json(result.rows[0]);
+      }
       const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
       if (isSupplierPayableDocument(body.tipoComprobante) && hasPurchaseRetentions(body)) {
         return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });

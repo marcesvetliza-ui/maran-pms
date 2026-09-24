@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { fmtMoney } from "@/lib/utils";
+import { fmtMoney, getLocalToday } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,7 +103,63 @@ const TIPOS_COMPRA: { value: string; label: string }[] = [
   { value: "NC-B", label: "Nota de Crédito B" },
   { value: "NC-C", label: "Nota de Crédito C" },
   { value: "REMITO", label: "Remito" },
+  { value: "RESUMEN-BANCO", label: "Resumen Bancario (gasto)" },
+  { value: "RETENCION", label: "Retenciones (gasto)" },
 ];
+
+const SOLO_GASTO = new Set(["RESUMEN-BANCO", "RETENCION"]);
+
+function RegistroGastoCompra({ tipo, suppliers, accounts, onClose }: {
+  tipo: string; suppliers: Supplier[]; accounts: AccountingAccount[]; onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [supplierId, setSupplierId] = useState("");
+  const [numero, setNumero] = useState("");
+  const [fecha, setFecha] = useState(getLocalToday());
+  const [importe, setImporte] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const supplier = suppliers.find(s => String(s.id) === supplierId);
+  const account = accounts.find(a => a.id === supplier?.cuentaContableId && a.tipo === "egreso");
+  const amount = Number(importe);
+  const valid = !!account && !!numero.trim() && !!fecha && Number.isFinite(amount) && amount > 0;
+  const create = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/purchase-invoices", {
+        tipoComprobante: tipo, supplierId: Number(supplierId), numeroComprobante: numero.trim(),
+        fechaEmision: fecha, montoNeto: importe, observaciones,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
+      toast({ title: "Gasto registrado" });
+      onClose();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo registrar", description: error.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4" data-testid="registro-gasto-compra">
+      <p className="text-sm text-muted-foreground">Registro para informes mensuales. No genera deuda, pago, asiento de Caja ni movimiento de stock.</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <Label>Banco u organismo</Label>
+          <Select value={supplierId} onValueChange={setSupplierId}>
+            <SelectTrigger data-testid="select-emisor-gasto"><SelectValue placeholder="Elegir del ABM de proveedores" /></SelectTrigger>
+            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.razonSocial} — {s.cuit}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div><Label>Número de comprobante</Label><Input value={numero} onChange={e => setNumero(e.target.value)} data-testid="input-numero-gasto" /></div>
+        <div><Label>Fecha</Label><Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} data-testid="input-fecha-gasto" /></div>
+        <div className="sm:col-span-2"><Label>Cuenta de gasto asignada</Label><Input readOnly value={account ? `${account.codigo} — ${account.nombre}` : "Sin cuenta de gasto asignada al emisor"} data-testid="input-cuenta-gasto" /></div>
+        <div><Label>Importe</Label><Input type="number" min="0.01" step="0.01" value={importe} onChange={e => setImporte(e.target.value)} data-testid="input-importe-gasto" /></div>
+        <div className="sm:col-span-2"><Label>Detalle</Label><Input value={observaciones} onChange={e => setObservaciones(e.target.value)} data-testid="input-detalle-gasto" /></div>
+      </div>
+      {supplier && !account && <p className="text-sm text-destructive">Asigná primero una cuenta de gasto activa a este emisor en el ABM.</p>}
+      <Button disabled={!valid || create.isPending} onClick={() => create.mutate()} data-testid="btn-registrar-gasto">Registrar gasto</Button>
+    </div>
+  );
+}
 
 const TIPOS_MOVIMIENTO: { value: string; label: string }[] = [
   { value: "desayuno", label: "Desayuno" },
@@ -282,7 +338,11 @@ export default function EmitirComprobantePage() {
                 <FacturaTSearch onClose={resetSeleccion} />
               )}
 
-              {operacion === "compra" && (
+              {operacion === "compra" && SOLO_GASTO.has(tipo) && (
+                <RegistroGastoCompra key={tipo} tipo={tipo} suppliers={suppliers} accounts={accounts} onClose={resetSeleccion} />
+              )}
+
+              {operacion === "compra" && !SOLO_GASTO.has(tipo) && (
                 <InvoiceDialog
                   embedded
                   unifiedLayout

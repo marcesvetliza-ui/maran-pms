@@ -361,6 +361,7 @@ export function registerExportRoutes(app: Express) {
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
         WHERE pi.periodo = ${periodo} AND pi.estado != 'anulado'
+          AND pi.estado != 'registrado'
         ORDER BY pi.fecha_emision, pi.numero_comprobante
       `)).rows as any[];
 

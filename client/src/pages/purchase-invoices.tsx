@@ -74,7 +74,7 @@ interface Invoice {
   impuestosInternos?: string;
   ley25413?: string;
   montoTotal: string;
-  estado: "pendiente" | "pagado" | "anulado";
+  estado: "pendiente" | "pagado" | "registrado" | "anulado";
   centroCosto?: string;
   observaciones?: string;
   supplierId?: number;
@@ -1297,7 +1297,7 @@ export function InvoiceDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {TIPOS.filter(t => isEditing || !["RESUMEN-BANCO", "RETENCION"].includes(t.value)).map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                       {/* Un Remito solo se crea desde el Centro de Comprobantes (layout
                           unificado) — esta opción no se ofrece acá, solo se muestra si
                           se está editando uno ya existente para no dejar el select en blanco. */}
@@ -2564,6 +2564,7 @@ export default function PurchaseInvoices() {
   const estadoBadge = (estado: string) => {
     if (estado === "pendiente") return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pendiente</Badge>;
     if (estado === "pagado") return <Badge variant="outline" className="border-green-500 text-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Pagado</Badge>;
+    if (estado === "registrado") return <Badge variant="outline">Solo gasto</Badge>;
     return <Badge variant="secondary">Anulado</Badge>;
   };
 
@@ -2723,15 +2724,13 @@ export default function PurchaseInvoices() {
                                   >
                                     <Pencil className="h-4 w-4 text-muted-foreground" />
                                   </Button>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    onClick={() => setAnularId(inv.id)}
-                                    title="Anular"
-                                    data-testid={`btn-anular-invoice-${inv.id}`}
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
                                 </>
+                              )}
+                              {(inv.estado === "pendiente" || inv.estado === "registrado") && (
+                                <Button variant="ghost" size="icon" onClick={() => setAnularId(inv.id)}
+                                  title="Anular" data-testid={`btn-anular-invoice-${inv.id}`}>
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
                               )}
                             </div>
                           </TableCell>

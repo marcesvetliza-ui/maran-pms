@@ -197,6 +197,8 @@ app.use((req, res, next) => {
 
     try {
       await runMigrations();
+      const { ensureSupplierExpenseSchema } = await import("./accounting/supplierExpenseSchema");
+      await ensureSupplierExpenseSchema();
       const { ensureRoomPreventiveSchema } = await import("./maintenance/roomPreventiveSchema");
       await ensureRoomPreventiveSchema();
     } catch (err: any) {

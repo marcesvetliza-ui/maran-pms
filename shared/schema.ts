@@ -2492,6 +2492,7 @@ export const accountingSuppliers = pgTable("accounting_suppliers", {
   alicuotaIva: numeric("alicuota_iva", { precision: 6, scale: 4 }).default("0"),
   cbu: text("cbu"),
   banco: text("banco"),
+  cuentaContableId: integer("cuenta_contable_id").references(() => accountingAccounts.id),
   activo: boolean("activo").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

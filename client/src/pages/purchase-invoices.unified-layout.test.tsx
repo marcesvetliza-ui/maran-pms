@@ -203,18 +203,22 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.getByTestId("input-ret-iibb")).toHaveValue(null);
   });
 
-  it.each([true, false])("la retención recibida conserva su mensaje, en layout unificado: %s", async (unifiedLayout) => {
+  it("la retención recibida conserva su mensaje en el formulario existente", async () => {
     const user = userEvent.setup();
-    renderDialog({ unifiedLayout });
+    renderDialog({ unifiedLayout: true });
     await user.click(screen.getByTestId("select-tipo-comprobante"));
     await user.click(await screen.findByRole("option", { name: "Retención Recibida" }));
-    if (!unifiedLayout) {
-      await user.click(screen.getByTestId("btn-next-step"));
-      await user.click(screen.getByTestId("btn-next-step"));
-    }
     expect(screen.getByText(/Una retención recibida ya representa el crédito fiscal final/)).toBeInTheDocument();
     expect(screen.queryByTestId("input-ret-iibb")).not.toBeInTheDocument();
     expect(screen.queryByTestId("input-percep-iibb")).not.toBeInTheDocument();
+  });
+
+  it("el asistente original ya no permite crear gastos bancarios ni retenciones", async () => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: false });
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    expect(screen.queryByRole("option", { name: "Resumen Bancario" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Retención Recibida" })).not.toBeInTheDocument();
   });
 
   it("conserva y señala las retenciones históricas al editar una factura común", () => {
