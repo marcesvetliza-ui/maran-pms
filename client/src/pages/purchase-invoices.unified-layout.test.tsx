@@ -46,7 +46,7 @@ function buildFetchMock(capture?: { body: any }) {
   });
 }
 
-function renderDialog(props: { unifiedLayout?: boolean; embedded?: boolean } = {}) {
+function renderDialog(props: { unifiedLayout?: boolean; embedded?: boolean; editingInvoice?: any } = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
       <InvoiceDialog
@@ -112,12 +112,12 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.queryByTestId("input-inv-name-0")).not.toBeInTheDocument();
   });
 
-  it('agrupa Netos/IVA, Retenciones y el Total bajo "Impuestos y totales", visibles a la vez', async () => {
+  it('muestra netos y percepciones, pero reserva las retenciones para Liquidación de Tarjeta', async () => {
     renderDialog({ unifiedLayout: true });
     expect(screen.getByText("Impuestos y totales")).toBeInTheDocument();
     expect(screen.getByTestId("input-neto-line-0")).toBeInTheDocument();
     expect(screen.getByTestId("input-percep-iibb")).toBeInTheDocument();
-    expect(screen.getByTestId("input-ret-iibb")).toBeInTheDocument();
+    expect(screen.queryByTestId("input-ret-iibb")).not.toBeInTheDocument();
     expect(screen.getByText("Total Comprobante")).toBeInTheDocument();
   });
 
@@ -148,27 +148,82 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(capture.body.tipoComprobante).toBe("FACT-A");
   });
 
-  it("Ret. Municipal se envía y reduce el Total Comprobante como las otras retenciones", async () => {
+  it("la retención municipal sufrida en una Liquidación de Tarjeta se envía y suma al total", async () => {
     const capture: { body: any } = { body: undefined };
     vi.stubGlobal("fetch", buildFetchMock(capture));
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
 
-    expect(screen.getByTestId("input-ret-municipal")).toBeInTheDocument();
-
     await user.click(screen.getByTestId("select-supplier"));
     await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Liquidación Tarjeta" }));
+    expect(screen.getByTestId("input-ret-municipal")).toBeInTheDocument();
     await user.type(screen.getByTestId("input-numero-comprobante"), "00000124");
     await user.type(screen.getByTestId("input-neto-line-0"), "1000");
     await user.type(screen.getByTestId("input-ret-municipal"), "50");
 
-    // Neto 1000 + IVA 21% automático (210) − Ret. Municipal (50) = 1160.
-    expect(screen.getByText(/1\.160,00/)).toBeInTheDocument();
+    // Neto 1000 + IVA 21% automático (210) + retención sufrida (50) = 1260.
+    expect(screen.getByText(/1\.260,00/)).toBeInTheDocument();
 
     await user.click(screen.getByTestId("btn-submit-invoice"));
 
     await waitFor(() => expect(capture.body).toBeTruthy());
     expect(capture.body.retencionMunicipal).toBe("50");
+  });
+
+  it.each([true, false])("mantiene sólo en la liquidación los cinco campos, en layout unificado: %s", async (unifiedLayout) => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout });
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Liquidación Tarjeta" }));
+    if (!unifiedLayout) {
+      await user.click(screen.getByTestId("btn-next-step"));
+      await user.click(screen.getByTestId("btn-next-step"));
+    }
+    for (const key of ["iibb", "ganancias", "iva", "suss", "municipal"]) {
+      expect(screen.getByTestId(`input-ret-${key}`)).toBeInTheDocument();
+    }
+    expect(screen.getByText(/Retenciones sufridas/)).toBeInTheDocument();
+  });
+
+  it("al cambiar de Liquidación de Tarjeta a Factura A borra las retenciones ocultas", async () => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Liquidación Tarjeta" }));
+    await user.type(screen.getByTestId("input-ret-iibb"), "50");
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Factura A" }));
+    expect(screen.queryByTestId("input-ret-iibb")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Liquidación Tarjeta" }));
+    expect(screen.getByTestId("input-ret-iibb")).toHaveValue(null);
+  });
+
+  it.each([true, false])("la retención recibida conserva su mensaje, en layout unificado: %s", async (unifiedLayout) => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout });
+    await user.click(screen.getByTestId("select-tipo-comprobante"));
+    await user.click(await screen.findByRole("option", { name: "Retención Recibida" }));
+    if (!unifiedLayout) {
+      await user.click(screen.getByTestId("btn-next-step"));
+      await user.click(screen.getByTestId("btn-next-step"));
+    }
+    expect(screen.getByText(/Una retención recibida ya representa el crédito fiscal final/)).toBeInTheDocument();
+    expect(screen.queryByTestId("input-ret-iibb")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("input-percep-iibb")).not.toBeInTheDocument();
+  });
+
+  it("conserva y señala las retenciones históricas al editar una factura común", () => {
+    renderDialog({ unifiedLayout: true, editingInvoice: {
+      id: 15, tipoComprobante: "FACT-A", numeroComprobante: "123", fechaEmision: "2026-09-20",
+      condicionPago: "cuenta_corriente", montoNeto: "100", retencionIibb: "10",
+      estado: "pendiente",
+    } });
+    expect(screen.queryByTestId("input-ret-iibb")).not.toBeInTheDocument();
+    expect(screen.getByTestId("historical-purchase-retentions")).toHaveTextContent("conserva retenciones");
+    expect(screen.getByText(/90,00/)).toBeInTheDocument();
   });
 
   it("el asistente original (sin unifiedLayout) sigue mostrando los pasos de a uno, sin cambios", async () => {
