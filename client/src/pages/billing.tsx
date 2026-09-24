@@ -1585,15 +1585,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               }`,
             } : {}),
               ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
-              // La retención impositiva no cambia el total facturado ni el
-              // monto de caja — es referencia (mismo criterio que ya usa
-              // PrefacturaDialog: la parte retenida se considera cubierta sin
-              // ser dinero recibido). cashFormaPagoDetalle ya existe en el
-              // comprobante como metadata informativa; no altera el registro
-              // de caja, que sigue usando cashFormaPago/cashArea tal cual.
-              ...(parseFloat(retencionMonto) > 0
-                ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
-                : {}),
+               // An existing reservation advance has already been collected.
+               // Its invoice must describe that payment in full, not collect
+               // it again. The server requires detail summing to the invoice.
+               ...(reservationId && paymentId
+                 ? { cashFormaPagoDetalle: [{ method: cashFormaPago, amount: grossItemsTotal(items) }] }
+                 : parseFloat(retencionMonto) > 0
+                   ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
+                   : {}),
           }
         : {}),
     });

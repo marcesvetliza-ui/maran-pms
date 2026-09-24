@@ -45,9 +45,36 @@ describe("EmitirFacturaDialog — existing Cuenta Corriente advance", () => {
 
     await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("POST", "/api/billing/invoices", expect.objectContaining({
       cashFormaPago: "cuenta_corriente", ccEntityType: "company", ccEntityId: "company-1",
+      cashFormaPagoDetalle: [{ method: "cuenta_corriente", amount: 144000 }],
       items: [expect.objectContaining({ descripcion: "Alojamiento editado" })],
     })));
     expect(apiRequestMock.mock.calls.some(([method, path]) => method === "PATCH" && path === "/api/payments/pay-cc")).toBe(false);
     expect(apiRequestMock).toHaveBeenCalledWith("PATCH", "/api/payments/pay-cc/invoice", expect.anything());
+  });
+
+  it("sends the recorded cash advance as invoice metadata, without requesting another cash collection", async () => {
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <EmitirFacturaDialog
+        open onClose={vi.fn()} config={{ puntoVenta: 1 }} skipReview showPaymentMethod lockItems
+        paymentId="pay-cash" reservationId="res-706"
+        initialValues={{
+          razonSocial: "Huésped", condicionIva: "Consumidor Final", paymentMethod: "efectivo",
+          items: [{ descripcion: "Anticipo — Reserva", precioUnitario: 77000 }],
+        }}
+      />
+    </QueryClientProvider>);
+
+    expect(screen.getByTestId("select-cash-forma-pago")).toBeDisabled();
+    await user.click(screen.getByTestId("btn-emitir-confirmar"));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("POST", "/api/billing/invoices", expect.objectContaining({
+      reservaId: "res-706",
+      paymentId: "pay-cash",
+      cashFormaPago: "efectivo",
+      cashFormaPagoDetalle: [{ method: "efectivo", amount: 77000 }],
+    })));
+    const invoiceBody = apiRequestMock.mock.calls.find(([method, path]) =>
+      method === "POST" && path === "/api/billing/invoices")?.[2];
+    expect(invoiceBody).not.toHaveProperty("cashArea");
   });
 });

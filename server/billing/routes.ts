@@ -1994,7 +1994,7 @@ export function registerBillingRoutes(app: Express) {
             }
           }
         }
-      } else if (!reusedExistingClaim && !groupId && cashArea && cashFormaPago && !spaAccountId) {
+      } else if (!reusedExistingClaim && !paymentId && !groupId && cashArea && cashFormaPago && !spaAccountId) {
         // Registrar movimiento de caja si se especificó un área. La factura ya
         // está emitida (y puede tener CAE real de ARCA) en este punto — no hay
         // forma segura de "deshacerla" si esto falla, así que la respuesta
