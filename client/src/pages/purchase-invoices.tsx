@@ -168,6 +168,60 @@ const FORMAS_PAGO = [
   { value: "dep_bancario", label: "Depósito Bancario" },
 ];
 
+type PurchaseInventoryOption = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  category?: { name: string } | null;
+  currentStock?: string | null;
+  unit?: string | null;
+  costPrice?: string | null;
+};
+
+function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index }: {
+  items: PurchaseInventoryOption[];
+  selectedId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (id: string) => void;
+  index: number;
+}) {
+  const selected = items.find(item => String(item.id) === selectedId);
+  return (
+    <div>
+      <Label className="text-xs mb-1 block">Artículo del inventario</Label>
+      <Popover modal={true} open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-8 text-sm" data-testid={`select-existing-item-${index}`}>
+            <span className="truncate">{selected?.name || "Seleccionar artículo..."}</span>
+            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(520px,calc(100vw-2rem))] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Buscar por nombre o SKU..." />
+            <CommandList>
+              <CommandEmpty>No se encontraron artículos</CommandEmpty>
+              <CommandGroup>
+                {[...items].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
+                  <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => onSelect(String(item.id))} className="items-start gap-2 py-2">
+                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium break-words">{item.name}</span>
+                      <span className="block text-xs text-muted-foreground break-words">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span>
+                      <span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span>
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 const $n = (v: string | undefined | null) => parseFloat(v || "0") || 0;
 const fmt = (v: string | number) =>
   Number(v).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -945,53 +999,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                        <div>
-                          <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-                          <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between font-normal h-8 text-sm"
-                                data-testid={`select-existing-item-${i}`}
-                              >
-                                <span className="truncate">
-                                  {row.existingItemId
-                                    ? (existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.name || "Seleccionar artículo..."
-                                    : "Seleccionar artículo..."}
-                                </span>
-                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[340px] p-0" align="start">
-                              <Command>
-                                <CommandInput placeholder="Buscar artículo..." />
-                                <CommandList>
-                                  <CommandEmpty>No se encontraron artículos</CommandEmpty>
-                                  <CommandGroup>
-                                    {[...existingInvItems]
-                                      .sort((a: any, b: any) => a.name.localeCompare(b.name, "es"))
-                                      .map((item: any) => (
-                                        <CommandItem
-                                          key={item.id}
-                                          value={item.name}
-                                          onMouseDown={(e) => e.preventDefault()}
-                                          onSelect={() => {
-                                            updateInvRow(i, "existingItemId", String(item.id));
-                                            setExistingItemOpen((p) => ({ ...p, [i]: false }));
-                                          }}
-                                        >
-                                          <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                                          <span className="flex-1">{item.name} {item.sku && <span className="text-muted-foreground">({item.sku})</span>}</span>
-                                          <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
-                                        </CommandItem>
-                                      ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { updateInvRow(i, "existingItemId", id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1658,53 +1666,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                        <div>
-                          <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-                          <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between font-normal h-8 text-sm"
-                                data-testid={`select-existing-item-${i}`}
-                              >
-                                <span className="truncate">
-                                  {row.existingItemId
-                                    ? (existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.name || "Seleccionar artículo..."
-                                    : "Seleccionar artículo..."}
-                                </span>
-                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[340px] p-0" align="start">
-                              <Command>
-                                <CommandInput placeholder="Buscar artículo..." />
-                                <CommandList>
-                                  <CommandEmpty>No se encontraron artículos</CommandEmpty>
-                                  <CommandGroup>
-                                    {[...existingInvItems]
-                                      .sort((a: any, b: any) => a.name.localeCompare(b.name, "es"))
-                                      .map((item: any) => (
-                                        <CommandItem
-                                          key={item.id}
-                                          value={item.name}
-                                          onMouseDown={(e) => e.preventDefault()}
-                                          onSelect={() => {
-                                            updateInvRow(i, "existingItemId", String(item.id));
-                                            setExistingItemOpen((p) => ({ ...p, [i]: false }));
-                                          }}
-                                        >
-                                          <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                                          <span className="flex-1">{item.name} {item.sku && <span className="text-muted-foreground">({item.sku})</span>}</span>
-                                          <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
-                                        </CommandItem>
-                                      ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { updateInvRow(i, "existingItemId", id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}

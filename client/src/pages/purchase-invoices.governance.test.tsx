@@ -26,6 +26,32 @@ describe("Compras: proveedores, artículos e importe", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([true, false])("busca por SKU y muestra categoría, stock y costo registrado (layout unificado: %s)", async (unified) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.endsWith("/api/inventory/items") ? [
+        { id: "item-1", name: "Filtro de aire", sku: "AACC-207", category: { name: "Mantenimiento" }, currentStock: "6.000", unit: "unidad", costPrice: "15200.50" },
+        { id: "item-2", name: "Filtro de agua", sku: "AGUA-01", category: { name: "Cocina" }, currentStock: "2.000", unit: "unidad", costPrice: "5000.00" },
+      ] : [],
+    ), { status: 200 })));
+    const user = userEvent.setup();
+    renderDialog(unified);
+    if (!unified) {
+      for (let step = 0; step < 4; step++) await user.click(screen.getByTestId("btn-next-step"));
+    }
+    await user.click(screen.getByTestId("btn-add-inv-item"));
+    await user.click(screen.getByTestId("select-existing-item-0"));
+    const search = await screen.findByPlaceholderText("Buscar por nombre o SKU...");
+    await user.type(search, "AACC-207");
+    const option = await screen.findByRole("option", { name: /Filtro de aire/ });
+    expect(option).toHaveTextContent("Mantenimiento");
+    expect(option).toHaveTextContent("Stock: 6.000 unidad");
+    expect(option).toHaveTextContent("Costo registrado: $15.200,50");
+    expect(screen.queryByRole("option", { name: /Filtro de agua/ })).not.toBeInTheDocument();
+    await user.click(option);
+    expect(screen.getByTestId("select-existing-item-0")).toHaveTextContent("Filtro de aire");
+    expect(screen.getByText("SKU: AACC-207")).toBeInTheDocument();
+  });
+
   it.each([true, false])("usa el ABM en vez de altas rápidas o artículos nuevos (layout unificado: %s)", async (unified) => {
     const user = userEvent.setup();
     renderDialog(unified);
