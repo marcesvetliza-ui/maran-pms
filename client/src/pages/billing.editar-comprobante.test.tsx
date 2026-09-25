@@ -61,6 +61,15 @@ const restaurantCashInvoice = {
   cash_forma_pago: "efectivo", cash_forma_pago_detalle: [{ method: "efectivo", amount: 500 }],
 };
 
+const eventCashInvoice = {
+  id: 16, tipo_comprobante: "FB", punto_venta: 5, numero: 12,
+  cliente_razon_social: "Consumidor Final", cliente_condicion_iva: "Consumidor Final",
+  monto_total: "800.00", estado: "emitida",
+  center_settlement_area: null, center_settlement_status: null,
+  event_id: "event-1", event_payment_method: "efectivo",
+  cash_forma_pago: null, cash_forma_pago_detalle: null,
+};
+
 const registradaInvoice = {
   id: 12, tipo_comprobante: "FT", punto_venta: 20, numero: 5,
   cliente_razon_social: "Cliente Registrado", cliente_condicion_iva: "Consumidor Final",
@@ -172,6 +181,31 @@ describe("EditarComprobanteDialog — pedido de Restaurante cobrado en Caja", ()
     renderDialog(restaurantCashInvoice);
 
     await user.click(await screen.findByTestId("select-edit-restaurant-fp"));
+    expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EditarComprobanteDialog — factura de Evento cobrada en Caja", () => {
+  it("permite corregir entre medios reales de Caja, precargada con el pago real del evento", async () => {
+    const user = userEvent.setup();
+    renderDialog(eventCashInvoice);
+
+    const select = await screen.findByTestId("select-edit-event-fp");
+    expect(select).toHaveTextContent("Efectivo");
+    await user.click(select);
+    await user.click(screen.getByRole("option", { name: "Transferencia" }));
+    await user.click(screen.getByTestId("btn-guardar-edicion-fp-event"));
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", "/api/billing/invoices/16", {
+      cashFormaPago: "transferencia",
+    }));
+  });
+
+  it("no ofrece Cuenta Corriente como opción", async () => {
+    const user = userEvent.setup();
+    renderDialog(eventCashInvoice);
+
+    await user.click(await screen.findByTestId("select-edit-event-fp"));
     expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
   });
 });

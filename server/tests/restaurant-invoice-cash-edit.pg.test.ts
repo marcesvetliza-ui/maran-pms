@@ -38,6 +38,20 @@ async function request(method: string, path: string, body?: unknown) {
   return { status: response.status, body: (await response.json()) as any };
 }
 
+// El cierre de pedido escribe el pago del folio en un .then() sin esperarlo
+// (fire-and-forget, server/routes/restaurant.ts) — hay que sondear en vez de
+// asumir que ya está escrito apenas responde el POST /close.
+async function waitForFolioPayment(orderId: string) {
+  for (let i = 0; i < 20; i++) {
+    const row = await pool!.query(`
+      SELECT total_payments FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1
+    `, [orderId]);
+    if (parseFloat(row.rows[0]?.total_payments ?? "0") > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Folio del pedido ${orderId} nunca reflejó el pago (fire-and-forget no completó a tiempo)`);
+}
+
 async function createOpenOrder(total: string): Promise<string> {
   const orderId = randomUUID();
   await pool!.query(
@@ -105,6 +119,7 @@ suite("PostgreSQL real: edición de forma de pago de facturas de Restaurante", (
       const oldCash = await pool.query("SELECT id FROM cash_movements WHERE source_type = 'restaurant_order' AND source_id = $1 AND anulado = false", [orderId]);
       expect(oldCash.rows).toHaveLength(1);
 
+      await waitForFolioPayment(orderId);
       const folioBefore = await pool.query(`
         SELECT total_charges, total_payments, balance FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1
       `, [orderId]);

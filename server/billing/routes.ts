@@ -10,6 +10,7 @@ import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
 import { editRestaurantInvoiceCashMethod } from "./restaurantInvoicePaymentEdit";
+import { editEventInvoiceCashMethod } from "./eventInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -1026,11 +1027,18 @@ export function registerBillingRoutes(app: Express) {
                  SELECT 1
                  FROM group_payments gp
                  WHERE gp.invoice_id = si.id
-               ) AS group_reconciliation_linked
+               ) AS group_reconciliation_linked,
+               ev.id AS event_id,
+               (
+                 SELECT ep.method FROM event_payments ep
+                 WHERE ep.event_id = ev.id AND ep.status = 'active'
+                 ORDER BY ep.paid_at LIMIT 1
+               ) AS event_payment_method
         FROM sales_invoices si
         LEFT JOIN sales_invoices orig
                ON orig.id = si.nota_credito_id
               AND si.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
+        LEFT JOIN events ev ON ev.invoice_id = si.id
         WHERE si.id = ${id}
       `);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
@@ -2188,7 +2196,11 @@ export function registerBillingRoutes(app: Express) {
   //  · Pedido de Restaurante cobrado con UN medio real de Caja: ídem,
   //    revirtiendo y rehaciendo también el pago del folio del pedido
   //    (editRestaurantInvoiceCashMethod).
-  //  · Eventos/Spa/Grupo: todavía afuera de este alcance.
+  //  · Factura de Evento con UN único pago activo, con un medio real de
+  //    Caja: ídem, revirtiendo y rehaciendo también el event_payment y el
+  //    pago del folio del evento (editEventInvoiceCashMethod). El vínculo
+  //    acá es al revés (events.invoice_id, no una columna en sales_invoices).
+  //  · Spa/Grupo/"Evento por Mesa": todavía afuera de este alcance.
   //  · Comprobante "registrado" (cargado a mano, sin CAE real): solo forma
   //    de pago, puramente informativa (nunca generó movimientos reales).
   //  · Voucher no fiscal: solo los datos del cliente.
@@ -2269,7 +2281,17 @@ export function registerBillingRoutes(app: Express) {
         return res.json(updated);
       }
 
-      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva o pedido de Restaurante — todavía no se puede editar la forma de pago desde acá." });
+      const linkedEvent = await db.execute(sql`SELECT id FROM events WHERE invoice_id = ${id} LIMIT 1`);
+      if (linkedEvent.rows.length > 0) {
+        const { cashFormaPago } = req.body;
+        if (!String(cashFormaPago || "").trim()) return res.status(400).json({ error: "Falta la forma de pago" });
+        const updated = await editEventInvoiceCashMethod(id, String(cashFormaPago), operator);
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante de evento ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPago } });
+        return res.json(updated);
+      }
+
+      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva, pedido de Restaurante o Evento — todavía no se puede editar la forma de pago desde acá." });
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (Number(status) >= 400) return res.status(status).json({ error: e.message });
