@@ -793,6 +793,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  // Buscador de catálogo propio de cada renglón — a diferencia del botón único
+  // "Agregar desde catálogo" (que agrega o completa la primera fila vacía), deja
+  // buscar y cambiar el concepto de una fila puntual sin tener que quitarla y
+  // volver a agregarla desde arriba.
+  const [rowCatalogPickerOpen, setRowCatalogPickerOpen] = useState<number | null>(null);
+  const [rowCatalogSearch, setRowCatalogSearch] = useState("");
   const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
   const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
@@ -1168,6 +1174,22 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       }
       return [...prev, built];
     });
+  }
+
+  // Elegir (o cambiar) el concepto de UN renglón puntual desde su propio buscador
+  // inline — a diferencia de addCatalogItem (botón único arriba de la lista, que
+  // siempre completa la primera fila vacía), esto reemplaza exactamente la fila
+  // en la que se hizo clic, sin importar si ya tenía otro concepto cargado.
+  function selectCatalogItemForRow(idx: number, option: CatalogItem) {
+    const { descripcion, precioUnitario, spaTreatmentId, source, id } = option;
+    const built = computeItemTotals({
+      descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
+      catalogItem: { source, id },
+      alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
+      subtotalNeto: 0, subtotal: 0,
+    });
+    setItems(prev => prev.map((it, i) => i === idx ? built : it));
+    if (fieldErrors[`catalog_${idx}`]) setFieldErrors(p => ({ ...p, [`catalog_${idx}`]: "" }));
   }
 
   function removeItem(idx: number) { setItems(prev => prev.length === 1 ? [newItem()] : prev.filter((_, i) => i !== idx)); }
@@ -2254,7 +2276,62 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
+                    <div className="flex gap-1">
                       <Input data-testid={`item-description-${idx}`} readOnly={requireLinkedRecipient} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder={requireLinkedRecipient ? "Elegí un concepto del catálogo" : "Hospedaje habitación..."} className={fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""} />
+                      {requireLinkedRecipient && !lockItems && catalogOptions.length > 0 && (
+                        <Popover open={rowCatalogPickerOpen === idx} onOpenChange={o => { setRowCatalogPickerOpen(o ? idx : null); if (!o) setRowCatalogSearch(""); }}>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" aria-label="Buscar en el catálogo" data-testid={`btn-item-catalog-${idx}`}>
+                              <Search className="h-3.5 w-3.5" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="start">
+                            <Command shouldFilter={false}>
+                              <CommandInput
+                                placeholder="Buscar por nombre o código..."
+                                value={rowCatalogSearch}
+                                onValueChange={setRowCatalogSearch}
+                                data-testid={`input-item-catalog-search-${idx}`}
+                              />
+                              <CommandList>
+                                <CommandEmpty>Sin resultados.</CommandEmpty>
+                                {catalogGroups.map(group => {
+                                  const term = rowCatalogSearch.trim().toLowerCase();
+                                  const matches = term
+                                    ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
+                                    : group.options;
+                                  if (matches.length === 0) return null;
+                                  return (
+                                    <CommandGroup key={group.label} heading={group.label}>
+                                      {matches.slice(0, 50).map(o => (
+                                        <CommandItem
+                                          key={o.id}
+                                          value={o.id}
+                                          onMouseDown={(e) => e.preventDefault()}
+                                          onSelect={() => {
+                                            selectCatalogItemForRow(idx, o);
+                                            setRowCatalogPickerOpen(null);
+                                            setRowCatalogSearch("");
+                                          }}
+                                          data-testid={`item-catalog-option-${idx}-${o.id}`}
+                                        >
+                                          <span className="min-w-0 flex-1 break-words">{o.descripcion}
+                                            {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
+                                          </span>
+                                          {o.precioUnitario > 0 && (
+                                            <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                          )}
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  );
+                                })}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
                     {fieldErrors[`catalog_${idx}`] && <p className="text-xs text-red-500" data-testid={`catalog-error-${idx}`}>{fieldErrors[`catalog_${idx}`]}</p>}
                   </div>
@@ -2730,7 +2807,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-md max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+      <DialogContent className="max-w-2xl max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4"><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-3">
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
@@ -2789,9 +2866,9 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
                   </Button>
                 </div>
               ) : (
-                <div className="rounded-md border divide-y max-h-48 overflow-y-auto">
+                <div className="rounded-md border divide-y max-h-80 overflow-y-auto">
                   {ncItems.map(item => (
-                    <div key={item.sourceId} className="flex items-center gap-2 p-2.5">
+                    <div key={item.sourceId} className={`flex items-center gap-2 p-2.5 ${item.selected ? "bg-orange-50 dark:bg-orange-950/20" : ""}`}>
                       <input
                         type="checkbox"
                         checked={item.selected}
