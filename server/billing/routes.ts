@@ -5,9 +5,9 @@ import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
-import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
+import { buildComprobanteAsociado, calcularMontos, emitirFactura, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
-import { settleCenterSaleInvoice, validateCenterSalePaymentDetail } from "./centerSaleSettlement";
+import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -2169,6 +2169,82 @@ export function registerBillingRoutes(app: Express) {
 
       res.status(201).json(created);
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Edición post-emisión de un comprobante de venta. Alcance deliberadamente
+  // acotado a lo que se puede corregir sin arriesgar la integridad contable
+  // (investigado antes de escribir esto: emitirFactura() nunca toca Caja/CC
+  // por sí sola, cada circuito de venta lo hace distinto — ver
+  // editCenterSaleInvoicePaymentMethod en centerSaleSettlement.ts):
+  //  · Comprobante ARCA cobrado desde el Centro de Comprobantes: solo forma
+  //    de pago, revirtiendo y rehaciendo los movimientos reales de Caja/CC.
+  //    Es el único circuito donde cash_forma_pago_detalle es la fuente real
+  //    de esos movimientos — en reserva/restaurant/eventos/spa/grupo el
+  //    cobro ya pasó por otro sistema (queda afuera de este alcance).
+  //  · Comprobante "registrado" (cargado a mano, sin CAE real): solo forma
+  //    de pago, puramente informativa (nunca generó movimientos reales).
+  //  · Voucher no fiscal: solo los datos del cliente.
+  //  · NC/ND: no se editan — se corrigen emitiendo otra si hace falta.
+  app.patch("/api/billing/invoices/:id", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
+      const invoice = existing.rows[0] as any;
+      if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if (invoice.estado === "anulada") return res.status(403).json({ error: "No se puede editar un comprobante anulado" });
+
+      const tipo = String(invoice.tipo_comprobante);
+      const NC_ND_TYPES = new Set(["NCA", "NCB", "NCC", "NCT", "NCM", "NCMB", "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB"]);
+      if (NC_ND_TYPES.has(tipo)) {
+        return res.status(403).json({ error: "Las Notas de Crédito/Débito no se editan — emití otra si hace falta corregir algo." });
+      }
+
+      const user = (req as any).user;
+      const operator = user?.fullName || user?.username || "sistema";
+
+      if ((NON_FISCAL_TIPOS as readonly string[]).includes(tipo)) {
+        const { cliente } = req.body;
+        if (!cliente || typeof cliente !== "object" || !String(cliente.razonSocial || "").trim()) {
+          return res.status(400).json({ error: "La razón social del cliente es requerida" });
+        }
+        const [updated] = await db.update(salesInvoices).set({
+          clienteRazonSocial: String(cliente.razonSocial).trim(),
+          clienteCuit: cliente.cuit ? String(cliente.cuit).trim() : null,
+          clienteDni: cliente.dni ? String(cliente.dni).trim() : null,
+          clienteCondicionIva: cliente.condicionIva ? String(cliente.condicionIva) : invoice.cliente_condicion_iva,
+          clienteDomicilio: cliente.domicilio ? String(cliente.domicilio).trim() : null,
+        }).where(eq(salesInvoices.id, id)).returning();
+        await audit(req, "update", "sales_invoices", `Datos de cliente editados — comprobante ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { razonSocial: cliente.razonSocial } });
+        return res.json(updated);
+      }
+
+      if (invoice.estado === "registrada") {
+        const { cashFormaPago, cashFormaPagoDetalle } = req.body;
+        if (!String(cashFormaPago || "").trim()) return res.status(400).json({ error: "Falta la forma de pago" });
+        const detalle = Array.isArray(cashFormaPagoDetalle) && cashFormaPagoDetalle.length
+          ? cashFormaPagoDetalle
+          : [{ method: cashFormaPago, amount: Number(invoice.monto_total) }];
+        const [updated] = await db.update(salesInvoices).set({
+          cashFormaPago: String(cashFormaPago),
+          cashFormaPagoDetalle: detalle,
+        }).where(eq(salesInvoices.id, id)).returning();
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante registrado ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPago } });
+        return res.json(updated);
+      }
+
+      const { cashFormaPagoDetalle } = req.body;
+      if (!Array.isArray(cashFormaPagoDetalle)) return res.status(400).json({ error: "Falta el detalle de forma de pago" });
+      const updated = await editCenterSaleInvoicePaymentMethod(id, cashFormaPagoDetalle, operator);
+      await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante ${tipo} ${id}`,
+        { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPagoDetalle } });
+      res.json(updated);
+    } catch (e: any) {
+      const status = e?.statusCode || e?.status;
+      if (Number(status) >= 400) return res.status(status).json({ error: e.message });
       res.status(500).json({ error: e.message });
     }
   });

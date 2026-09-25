@@ -11,7 +11,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -209,6 +209,7 @@ export default function BillingPage() {
     staleTime: 30_000,
   });
   const [showNC, setShowNC] = useState<number | null>(null);
+  const [showEdit, setShowEdit] = useState<number | null>(null);
   const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
   async function retryCenterSettlement(invoiceId: number) {
     setRetryingCenterInvoiceId(invoiceId);
@@ -509,6 +510,11 @@ export default function BillingPage() {
                                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
+                                  {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button
                                       variant="ghost"
@@ -607,6 +613,7 @@ export default function BillingPage() {
       )}
 
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
+      {showEdit !== null && <EditarComprobanteDialog invoiceId={showEdit} onClose={() => setShowEdit(null)} />}
     </div>
   );
 }
@@ -2936,6 +2943,185 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
             {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNCLabel}`}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Editar un comprobante ya emitido ──────────────────────────────────────────
+// Alcance acotado a propósito (ver PATCH /api/billing/invoices/:id en
+// server/billing/routes.ts): un comprobante ARCA cobrado desde el Centro de
+// Comprobantes solo permite corregir la forma de pago (revirtiendo y
+// rehaciendo Caja/Cta Cte reales); uno "registrado" (cargado a mano) también
+// solo la forma de pago, pero puramente informativa; un voucher no fiscal
+// solo permite corregir los datos del cliente. Las NC/ND nunca se editan.
+const EDIT_PAYMENT_METHODS = [
+  ["efectivo", "Efectivo"], ["tarjeta_debito", "Tarjeta Débito"], ["tarjeta_credito", "Tarjeta Crédito"],
+  ["transferencia", "Transferencia"], ["mercadopago", "MercadoPago"], ["cuenta_corriente", "Cuenta Corriente"],
+] as const;
+
+export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
+  const { toast } = useToast();
+  const { data: invoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", invoiceId],
+    queryFn: () => fetch(`/api/billing/invoices/${invoiceId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!invoiceId,
+  });
+
+  const isNonFiscal = invoice ? NON_FISCAL_TIPOS_SET.has(invoice.tipo_comprobante) : false;
+  const isRegistrada = invoice?.estado === "registrada";
+  const isArcaSinCentro = invoice && !isNonFiscal && !isRegistrada && !invoice.center_settlement_area;
+
+  const [razonSocial, setRazonSocial] = useState("");
+  const [cuit, setCuit] = useState("");
+  const [dni, setDni] = useState("");
+  const [condicionIva, setCondicionIva] = useState("Consumidor Final");
+  const [domicilio, setDomicilio] = useState("");
+  const [registradaMethod, setRegistradaMethod] = useState("efectivo");
+  const [paymentRows, setPaymentRows] = useState<{ id: number; method: string; amount: string }[]>([{ id: 1, method: "efectivo", amount: "" }]);
+
+  useEffect(() => {
+    if (!invoice) return;
+    setRazonSocial(invoice.cliente_razon_social || "");
+    setCuit(invoice.cliente_cuit || "");
+    setDni(invoice.cliente_dni || "");
+    setCondicionIva(invoice.cliente_condicion_iva || "Consumidor Final");
+    setDomicilio(invoice.cliente_domicilio || "");
+    setRegistradaMethod(invoice.cash_forma_pago || "efectivo");
+    const detalle = Array.isArray(invoice.cash_forma_pago_detalle) ? invoice.cash_forma_pago_detalle : null;
+    setPaymentRows(detalle && detalle.length
+      ? detalle.map((row: { method: string; amount: number }, i: number) => ({ id: i + 1, method: row.method, amount: String(row.amount) }))
+      : [{ id: 1, method: invoice.cash_forma_pago || "efectivo", amount: String(invoice.monto_total || "") }]);
+  }, [invoice]);
+
+  const montoTotal = parseFloat(invoice?.monto_total || "0") || 0;
+  const hasRecipient = !!invoice?.recipient_entity_id;
+  const rowsTotal = paymentRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+  const paymentRowsValid = paymentRows.length > 0 && paymentRows.every(row => parseFloat(row.amount) > 0) &&
+    Math.abs(rowsTotal - montoTotal) < 0.01 && new Set(paymentRows.map(row => row.method)).size === paymentRows.length;
+
+  const mutation = useMutation({
+    mutationFn: async (body: any) => {
+      const response = await apiRequest("PATCH", `/api/billing/invoices/${invoiceId}`, body);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({ title: "Comprobante actualizado" });
+      onClose();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo editar", description: error.message, variant: "destructive" }),
+  });
+
+  if (!invoice) return null;
+
+  return (
+    <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Editar comprobante</DialogTitle></DialogHeader>
+        <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+          <div className="font-medium">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)}</div>
+          <div className="text-muted-foreground text-xs">{invoice.cliente_razon_social} · Total: ${fPeso(invoice.monto_total)}</div>
+        </div>
+
+        {isNonFiscal ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Voucher no fiscal — solo se pueden corregir los datos del cliente.</p>
+            <div><Label className="text-xs">Razón Social *</Label><Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} data-testid="input-edit-razon-social" /></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">CUIT</Label><Input value={cuit} onChange={e => setCuit(e.target.value)} data-testid="input-edit-cuit" /></div>
+              <div><Label className="text-xs">DNI</Label><Input value={dni} onChange={e => setDni(e.target.value)} data-testid="input-edit-dni" /></div>
+            </div>
+            <div>
+              <Label className="text-xs">Condición IVA</Label>
+              <Select value={condicionIva} onValueChange={setCondicionIva}>
+                <SelectTrigger data-testid="select-edit-condicion-iva"><SelectValue /></SelectTrigger>
+                <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Domicilio</Label><Input value={domicilio} onChange={e => setDomicilio(e.target.value)} data-testid="input-edit-domicilio" /></div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={!razonSocial.trim() || mutation.isPending}
+                onClick={() => mutation.mutate({ cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined } })}
+                data-testid="btn-guardar-edicion-cliente"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isRegistrada ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Comprobante registrado — la forma de pago es informativa, no genera movimientos de Caja.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={registradaMethod} onValueChange={setRegistradaMethod}>
+                <SelectTrigger data-testid="select-edit-registrada-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: registradaMethod })}
+                data-testid="btn-guardar-edicion-fp-registrada"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isArcaSinCentro ? (
+          <div className="space-y-3">
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+              Este comprobante no se cobró desde el Centro de Comprobantes — no se puede editar la forma de pago desde acá.
+            </div>
+            <DialogFooter><Button variant="outline" onClick={onClose}>Cerrar</Button></DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Corrige la forma de pago y revierte/rehace los movimientos reales de Caja y Cuenta Corriente.</p>
+            <div className="space-y-2 border rounded-lg p-3">
+              <div className="flex justify-between items-center">
+                <Label className="font-semibold text-xs">Formas de cobro</Label>
+                <span className="text-xs font-semibold">Total: ${fPeso(montoTotal)}</span>
+              </div>
+              {paymentRows.map((row, index) => (
+                <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                  <Select value={row.method} onValueChange={method => setPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, method } : r))}>
+                    <SelectTrigger className="col-span-6" data-testid={`edit-fp-method-${index}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {EDIT_PAYMENT_METHODS.map(([method, label]) => (
+                        <SelectItem key={method} value={method} disabled={paymentRows.some(other => other.id !== row.id && other.method === method) || (method === "cuenta_corriente" && !hasRecipient)}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input className="col-span-5" type="number" step="0.01" min="0" value={row.amount}
+                    onChange={e => setPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, amount: e.target.value } : r))}
+                    data-testid={`edit-fp-amount-${index}`} />
+                  <Button type="button" variant="ghost" size="icon" className="col-span-1" disabled={paymentRows.length === 1}
+                    onClick={() => setPaymentRows(rows => rows.filter(r => r.id !== row.id))}>×</Button>
+                </div>
+              ))}
+              <Button type="button" size="sm" variant="outline" disabled={paymentRows.length >= (hasRecipient ? 6 : 5)} onClick={() => setPaymentRows(rows => [
+                ...rows,
+                { id: Math.max(...rows.map(row => row.id)) + 1, method: EDIT_PAYMENT_METHODS.map(([m]) => m).find(method => !rows.some(row => row.method === method) && (method !== "cuenta_corriente" || hasRecipient)) || "efectivo", amount: "" },
+              ])} data-testid="edit-fp-add">Agregar forma de cobro</Button>
+              {!paymentRowsValid && <p className="text-xs text-red-500" data-testid="edit-fp-error">La suma de los importes debe coincidir con el total, sin repetir forma de pago.</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={!paymentRowsValid || mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPagoDetalle: paymentRows.map(row => ({ method: row.method, amount: Number(row.amount) })) })}
+                data-testid="btn-guardar-edicion-fp"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
