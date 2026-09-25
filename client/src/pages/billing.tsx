@@ -2524,6 +2524,12 @@ function parseAdminNcJson(value: unknown): unknown {
   try { return JSON.parse(value); } catch { return null; }
 }
 
+const NC_PAYMENT_METHOD_LABELS: Record<string, string> = {
+  efectivo: "Efectivo", tarjeta_debito: "Tarjeta Débito", tarjeta_credito: "Tarjeta Crédito",
+  transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cuenta Corriente",
+  retencion_iibb: "Retención IIBB", retencion_ganancias: "Retención Ganancias",
+};
+
 export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId: number; onClose: () => void; onSuccess?: (ncData: any) => void }) {
   const { toast } = useToast();
   const { data: invoice } = useQuery<any>({
@@ -2743,11 +2749,24 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
               <div className="text-muted-foreground">Heredado y bloqueado</div>
             </div>
             <div className="rounded border bg-muted/20 p-2">
-              <div className="text-muted-foreground">Forma de pago</div>
-              <div className="font-medium">{invoice.cash_forma_pago || "No informada"}</div>
+              <div className="text-muted-foreground">Cómo se cobró</div>
+              {Array.isArray(invoice.cash_forma_pago_detalle) && invoice.cash_forma_pago_detalle.length > 0 ? (
+                <div className="font-medium space-y-0.5">
+                  {invoice.cash_forma_pago_detalle.map((row: { method: string; amount: number }, i: number) => (
+                    <div key={i}>{NC_PAYMENT_METHOD_LABELS[row.method] ?? row.method}: ${fPeso(row.amount)}</div>
+                  ))}
+                </div>
+              ) : (
+                <div className="font-medium">{invoice.cash_forma_pago || "No informada"}</div>
+              )}
               <div className="text-muted-foreground">Heredada y bloqueada</div>
             </div>
           </div>
+          {Array.isArray(invoice.cash_forma_pago_detalle) && invoice.cash_forma_pago_detalle.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-2.5 text-xs text-amber-800 dark:text-amber-200" data-testid="nc-payment-untouched-warning">
+              Esta Nota de Crédito no modifica los cobros de la factura original ni el saldo de Cuenta Corriente. Si corresponde reintegrar dinero o ajustar un saldo, hacelo como una operación aparte.
+            </div>
+          )}
           {isSourceMappedInvoice ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
