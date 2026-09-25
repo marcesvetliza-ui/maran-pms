@@ -43,6 +43,15 @@ const reservaInvoice = {
   ...centroInvoice, id: 11, center_settlement_area: null, center_settlement_status: null,
 };
 
+const reservationCashInvoice = {
+  id: 14, tipo_comprobante: "FB", punto_venta: 21, numero: 60,
+  cliente_razon_social: "Huésped Recepción", cliente_condicion_iva: "Consumidor Final",
+  monto_total: "1000.00", estado: "emitida",
+  center_settlement_area: null, center_settlement_status: null,
+  reserva_id: "reserva-1",
+  cash_forma_pago: "efectivo", cash_forma_pago_detalle: [{ method: "efectivo", amount: 1000 }],
+};
+
 const registradaInvoice = {
   id: 12, tipo_comprobante: "FT", punto_venta: 20, numero: 5,
   cliente_razon_social: "Cliente Registrado", cliente_condicion_iva: "Consumidor Final",
@@ -105,6 +114,31 @@ describe("EditarComprobanteDialog — ARCA sin Centro de Comprobantes", () => {
     renderDialog(reservaInvoice);
     expect(await screen.findByText(/no se cobró desde el Centro de Comprobantes/)).toBeInTheDocument();
     expect(screen.queryByTestId("edit-fp-add")).not.toBeInTheDocument();
+  });
+});
+
+describe("EditarComprobanteDialog — factura de reserva cobrada en Caja", () => {
+  it("permite corregir entre medios reales de Caja, precargada con el actual", async () => {
+    const user = userEvent.setup();
+    renderDialog(reservationCashInvoice);
+
+    const select = await screen.findByTestId("select-edit-reserva-fp");
+    expect(select).toHaveTextContent("Efectivo");
+    await user.click(select);
+    await user.click(screen.getByRole("option", { name: "Transferencia" }));
+    await user.click(screen.getByTestId("btn-guardar-edicion-fp-reserva"));
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", "/api/billing/invoices/14", {
+      cashFormaPago: "transferencia",
+    }));
+  });
+
+  it("no ofrece Cuenta Corriente como opción", async () => {
+    const user = userEvent.setup();
+    renderDialog(reservationCashInvoice);
+
+    await user.click(await screen.findByTestId("select-edit-reserva-fp"));
+    expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
   });
 });
 

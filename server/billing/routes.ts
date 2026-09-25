@@ -8,6 +8,7 @@ import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
+import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -2236,12 +2237,25 @@ export function registerBillingRoutes(app: Express) {
         return res.json(updated);
       }
 
-      const { cashFormaPagoDetalle } = req.body;
-      if (!Array.isArray(cashFormaPagoDetalle)) return res.status(400).json({ error: "Falta el detalle de forma de pago" });
-      const updated = await editCenterSaleInvoicePaymentMethod(id, cashFormaPagoDetalle, operator);
-      await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante ${tipo} ${id}`,
-        { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPagoDetalle } });
-      res.json(updated);
+      if (invoice.center_settlement_area) {
+        const { cashFormaPagoDetalle } = req.body;
+        if (!Array.isArray(cashFormaPagoDetalle)) return res.status(400).json({ error: "Falta el detalle de forma de pago" });
+        const updated = await editCenterSaleInvoicePaymentMethod(id, cashFormaPagoDetalle, operator);
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPagoDetalle } });
+        return res.json(updated);
+      }
+
+      if (invoice.reserva_id) {
+        const { cashFormaPago } = req.body;
+        if (!String(cashFormaPago || "").trim()) return res.status(400).json({ error: "Falta la forma de pago" });
+        const updated = await editReservationInvoiceCashMethod(id, String(cashFormaPago), operator);
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante de reserva ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPago } });
+        return res.json(updated);
+      }
+
+      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva — todavía no se puede editar la forma de pago desde acá." });
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (Number(status) >= 400) return res.status(status).json({ error: e.message });
