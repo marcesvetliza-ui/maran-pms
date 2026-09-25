@@ -8,6 +8,10 @@ export type CreatePaymentOrderInput = {
   supplierId: number;
   fecha?: string | null;
   facturaIds: number[];
+  // Solo válido cuando facturaIds tiene una sola factura (no NC): paga esa
+  // parte ahora y deja el resto con saldo pendiente en cuenta corriente
+  // (estado "parcial") en vez de cancelar el saldo completo.
+  montoParcial?: number | null;
   retencionIibb?: string | number | null;
   retencionGanancias?: string | number | null;
   retencionIva?: string | number | null;
@@ -43,15 +47,15 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   }
   const idsSQL = sql.raw(idsInt.join(","));
   const facturasRes = await tx.execute(sql`
-    SELECT id, monto_total, monto_neto, tipo_comprobante, estado, supplier_id FROM purchase_invoices
-    WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
+    SELECT id, monto_total, monto_neto, saldo_pendiente, tipo_comprobante, estado, supplier_id FROM purchase_invoices
+    WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado IN ('pendiente', 'parcial')
   `);
   if (facturasRes.rows.length !== idsInt.length) {
     const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
     const todosRes = await tx.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id IN (${idsSQL})`);
     const noEncontradas = idsInt.filter((id) => !todosRes.rows.find((r: any) => Number(r.id) === id));
     const noPendientes = todosRes.rows
-      .filter((r: any) => r.estado !== "pendiente" && !idsEncontrados.includes(Number(r.id)))
+      .filter((r: any) => !["pendiente", "parcial"].includes(r.estado) && !idsEncontrados.includes(Number(r.id)))
       .map((r: any) => `#${r.id} (${r.estado})`);
     let errorMsg = "No se pudo generar la OP: ";
     if (noEncontradas.length > 0) errorMsg += `Facturas no encontradas: ${noEncontradas.join(", ")}. `;
@@ -60,10 +64,26 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
     throw Object.assign(new Error(errorMsg), { statusCode: 400 });
   }
 
-  // Calcular totales — las NC (Notas de Crédito) restan del total a abonar
   const isNC = (r: any) => (r.tipo_comprobante || "").startsWith("NC");
+  const montoParcial = input.montoParcial != null ? Number(input.montoParcial) : null;
+  if (montoParcial != null) {
+    if (idsInt.length !== 1 || isNC(facturasRes.rows[0])) {
+      throw Object.assign(new Error("El pago parcial solo se puede aplicar a una sola factura (no Nota de Crédito)."), { statusCode: 400 });
+    }
+    const saldo = parseFloat((facturasRes.rows[0] as any).saldo_pendiente);
+    if (!Number.isFinite(montoParcial) || montoParcial <= 0 || montoParcial > saldo + 0.005) {
+      throw Object.assign(new Error("El monto parcial debe ser mayor a $0,00 y no puede superar el saldo pendiente de la factura."), { statusCode: 400 });
+    }
+  }
+  // Cuánto se cancela de cada factura en esta OP: el saldo pendiente
+  // completo, salvo que se pidió un pago parcial de la única factura elegida.
+  const amountFor = (r: any) => montoParcial != null && Number(r.id) === idsInt[0]
+    ? montoParcial
+    : parseFloat(r.saldo_pendiente);
+
+  // Calcular totales — las NC (Notas de Crédito) restan del total a abonar
   const totalFacturas = facturasRes.rows.reduce((s: number, r: any) =>
-    isNC(r) ? s - parseFloat(r.monto_total) : s + parseFloat(r.monto_total), 0);
+    isNC(r) ? s - amountFor(r) : s + amountFor(r), 0);
   const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) =>
     isNC(r) ? s : s + parseFloat(r.monto_neto || "0"), 0);
   const retIibb = parseFloat(String(input.retencionIibb ?? "0")) || 0;
@@ -93,14 +113,16 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   `);
   const op = opRes.rows[0] as any;
 
-  // Marcar facturas como pagadas e insertar ítems
-  // Las NC se insertan con importe_cancelado negativo (reducen el total de la OP)
+  // Marcar facturas como pagadas (o parciales, si queda saldo) e insertar
+  // ítems. Las NC se insertan con importe_cancelado negativo y siempre se
+  // consumen enteras (no admiten pago parcial, validado más arriba).
   for (const fid of idsInt) {
     const factura = facturasRes.rows.find((r: any) => Number(r.id) === fid) as any;
-    const importeCancelado = isNC(factura)
-      ? -Math.abs(parseFloat(factura.monto_total))
-      : parseFloat(factura.monto_total);
-    await tx.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
+    const cancelado = amountFor(factura);
+    const importeCancelado = isNC(factura) ? -Math.abs(cancelado) : cancelado;
+    const nuevoSaldo = isNC(factura) ? 0 : Math.max(Math.round((parseFloat(factura.saldo_pendiente) - cancelado) * 100) / 100, 0);
+    const nuevoEstado = nuevoSaldo > 0.005 ? "parcial" : "pagado";
+    await tx.execute(sql`UPDATE purchase_invoices SET estado = ${nuevoEstado}, saldo_pendiente = ${nuevoSaldo} WHERE id = ${fid}`);
     await tx.execute(sql`
       INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
       VALUES (${op.id}, ${fid}, ${importeCancelado})

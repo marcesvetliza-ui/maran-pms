@@ -2576,6 +2576,11 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   cuentaContableId: integer("cuenta_contable_id").references(() => accountingAccounts.id),
   centroCosto: text("centro_costo"),
   estado: text("estado").notNull().default("pendiente"),
+  // Lo que todavía se le debe al proveedor por este comprobante. Arranca
+  // igual a montoTotal en pendiente, 0 en pagado, y queda entre medio si se
+  // paga una parte al cargarlo o con una OP parcial (estado "parcial") —
+  // ver server/paymentOrder.ts.
+  saldoPendiente: numeric("saldo_pendiente", { precision: 14, scale: 2 }).notNull().default("0"),
   asientoId: integer("asiento_id"),
   observaciones: text("observaciones"),
   subtipoRetencion: text("subtipo_retencion"),

@@ -131,6 +131,7 @@ export function mapPurchaseInvoiceAmountFields(row: Record<string, unknown>) {
     retencionSuss: formAmount(row.retencion_suss),
     retencionMunicipal: formAmount(row.retencion_municipal),
     montoTotal: formAmount(row.monto_total),
+    saldoPendiente: formAmount(row.saldo_pendiente),
   };
 }
 

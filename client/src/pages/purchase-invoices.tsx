@@ -74,7 +74,8 @@ interface Invoice {
   impuestosInternos?: string;
   ley25413?: string;
   montoTotal: string;
-  estado: "pendiente" | "pagado" | "registrado" | "anulado";
+  saldoPendiente?: string;
+  estado: "pendiente" | "parcial" | "pagado" | "registrado" | "anulado";
   centroCosto?: string;
   observaciones?: string;
   supplierId?: number;
@@ -269,6 +270,7 @@ const emptyForm = () => ({
   periodo: calcPeriodo(getLocalToday()),
   condicionPago: "cuenta_corriente",
   formaPagoInmediata: "cuenta_corriente",
+  montoPagadoAhora: "",
   alicuotaIva: "21",
   montoNeto: "",
   montoIva21: "",
@@ -504,6 +506,7 @@ export function InvoiceDialog({
         periodo: editingInvoice.periodo || "",
         condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
         formaPagoInmediata: "cuenta_corriente",
+        montoPagadoAhora: "",
         alicuotaIva: "21",
         montoNeto: editingInvoice.montoNeto || "",
         montoIva21: editingInvoice.montoIva21 || "",
@@ -726,6 +729,11 @@ export function InvoiceDialog({
       toast({ title: "Elegí la alícuota de IVA de cada artículo", variant: "destructive" });
       return;
     }
+    if (form.formaPagoInmediata !== "cuenta_corriente" &&
+        (!form.montoPagadoAhora || $n(form.montoPagadoAhora) <= 0 || $n(form.montoPagadoAhora) > total + 0.005)) {
+      toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
+      return;
+    }
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
     // (descuentos exclusivos, artículos sin cargo, etc.).
@@ -734,6 +742,7 @@ export function InvoiceDialog({
       supplierId: form.supplierId ? parseInt(form.supplierId) : null,
       cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
       formaPago: form.formaPagoInmediata !== "cuenta_corriente" ? form.formaPagoInmediata : null,
+      montoPagadoAhora: form.formaPagoInmediata !== "cuenta_corriente" ? form.montoPagadoAhora : null,
     });
   };
 
@@ -861,17 +870,37 @@ export function InvoiceDialog({
                   ) : (
                     <div>
                       <Label>Forma de Pago</Label>
-                      <Select value={form.formaPagoInmediata} onValueChange={(v) => f("formaPagoInmediata", v)}>
+                      <Select
+                        value={form.formaPagoInmediata}
+                        onValueChange={(v) => setForm((p) => ({
+                          ...p,
+                          formaPagoInmediata: v,
+                          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
+                        }))}
+                      >
                         <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
                           {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                      {form.formaPagoInmediata !== "cuenta_corriente" && (
+                        <div className="mt-2">
+                          <Label>Monto a pagar ahora ($)</Label>
+                          <Input
+                            type="number" min="0" step="0.01" max={total}
+                            value={form.montoPagadoAhora}
+                            onChange={(e) => f("montoPagadoAhora", e.target.value)}
+                            data-testid="input-monto-pagado-ahora"
+                          />
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground mt-1">
-                        {form.formaPagoInmediata !== "cuenta_corriente"
-                          ? "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."
-                          : "El pago se registra desde la cuenta corriente del proveedor."}
+                        {form.formaPagoInmediata === "cuenta_corriente"
+                          ? "El pago se registra desde la cuenta corriente del proveedor."
+                          : $n(form.montoPagadoAhora) < total - 0.005
+                            ? `Se genera la OP por $${fmt(form.montoPagadoAhora)} y el resto ($${fmt(total - $n(form.montoPagadoAhora))}) queda pendiente en cuenta corriente.`
+                            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
                       </p>
                     </div>
                   )
@@ -1303,7 +1332,9 @@ export function InvoiceDialog({
                   <div className="text-xs text-muted-foreground mt-1">
                     {isSupplierPayable
                       ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
-                        ? `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`
+                        ? ($n(form.montoPagadoAhora) < total - 0.005
+                          ? `Se paga $${fmt(form.montoPagadoAhora)} al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata}); resto en cuenta corriente`
+                          : `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`)
                         : "Pendiente de pago en cuenta corriente")
                       : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
@@ -1359,17 +1390,37 @@ export function InvoiceDialog({
                   ) : (
                     <div>
                       <Label>Forma de Pago</Label>
-                      <Select value={form.formaPagoInmediata} onValueChange={(v) => f("formaPagoInmediata", v)}>
+                      <Select
+                        value={form.formaPagoInmediata}
+                        onValueChange={(v) => setForm((p) => ({
+                          ...p,
+                          formaPagoInmediata: v,
+                          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
+                        }))}
+                      >
                         <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
                           {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                      {form.formaPagoInmediata !== "cuenta_corriente" && (
+                        <div className="mt-2">
+                          <Label>Monto a pagar ahora ($)</Label>
+                          <Input
+                            type="number" min="0" step="0.01" max={total}
+                            value={form.montoPagadoAhora}
+                            onChange={(e) => f("montoPagadoAhora", e.target.value)}
+                            data-testid="input-monto-pagado-ahora"
+                          />
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground mt-1">
-                        {form.formaPagoInmediata !== "cuenta_corriente"
-                          ? "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."
-                          : "El pago se registra desde la cuenta corriente del proveedor."}
+                        {form.formaPagoInmediata === "cuenta_corriente"
+                          ? "El pago se registra desde la cuenta corriente del proveedor."
+                          : $n(form.montoPagadoAhora) < total - 0.005
+                            ? `Se genera la OP por $${fmt(form.montoPagadoAhora)} y el resto ($${fmt(total - $n(form.montoPagadoAhora))}) queda pendiente en cuenta corriente.`
+                            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
                       </p>
                     </div>
                   )
@@ -1705,7 +1756,9 @@ export function InvoiceDialog({
                   <div className="text-xs text-muted-foreground mt-1">
                     {isSupplierPayable
                       ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
-                        ? `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`
+                        ? ($n(form.montoPagadoAhora) < total - 0.005
+                          ? `Se paga $${fmt(form.montoPagadoAhora)} al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata}); resto en cuenta corriente`
+                          : `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`)
                         : "Pendiente de pago en cuenta corriente")
                       : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
@@ -2024,9 +2077,10 @@ function PaymentOrderDialog({
 
   const selectedFacturas = facturas.filter((inv) => selectedInvoices.includes(inv.id));
   const isNC = (inv: Invoice) => (inv.tipoComprobante || "").startsWith("NC");
-  // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones
+  // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones.
+  // Para una factura "parcial" se usa el saldo pendiente, no el total original.
   const totalSelected = selectedFacturas.reduce(
-    (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.montoTotal), 0);
+    (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.saldoPendiente ?? inv.montoTotal), 0);
   const baseNetosIibb = selectedFacturas.reduce(
     (s, inv) => isNC(inv) ? s : s + $n(inv.montoNeto), 0);
 
@@ -2177,11 +2231,15 @@ function PaymentOrderDialog({
                       <div className="text-sm font-medium flex items-center gap-1.5">
                         {inv.tipoComprobante} {inv.numeroComprobanteExt || inv.numeroComprobante}
                         {esNC && <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 px-1.5 py-0.5 rounded font-normal">resta del total</span>}
+                        {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
-                      <div className="text-xs text-muted-foreground">{inv.fechaEmision}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {inv.fechaEmision}
+                        {inv.estado === "parcial" && ` · Total ${fmt(inv.montoTotal)}, ya pagado ${fmt($n(inv.montoTotal) - $n(inv.saldoPendiente))}`}
+                      </div>
                     </div>
                     <div className={`font-semibold ${esNC ? "text-orange-600 dark:text-orange-400" : ""}`}>
-                      {esNC ? "−" : ""}${fmt(inv.montoTotal)}
+                      {esNC ? "−" : ""}${fmt(esNC ? inv.montoTotal : (inv.saldoPendiente ?? inv.montoTotal))}
                     </div>
                   </div>
                 );
@@ -2629,6 +2687,7 @@ export default function PurchaseInvoices() {
 
   const estadoBadge = (estado: string) => {
     if (estado === "pendiente") return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pendiente</Badge>;
+    if (estado === "parcial") return <Badge variant="outline" className="border-blue-500 text-blue-600"><Clock className="h-3 w-3 mr-1" />Parcial</Badge>;
     if (estado === "pagado") return <Badge variant="outline" className="border-green-500 text-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Pagado</Badge>;
     if (estado === "registrado") return <Badge variant="outline">Solo gasto</Badge>;
     return <Badge variant="secondary">Anulado</Badge>;
@@ -2671,14 +2730,14 @@ export default function PurchaseInvoices() {
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-amber-600">{invoices.filter((i) => i.estado === "pendiente").length}</div>
+              <div className="text-2xl font-bold text-amber-600">{invoices.filter((i) => i.estado === "pendiente" || i.estado === "parcial").length}</div>
               <div className="text-xs text-muted-foreground">Pendientes de pago</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold text-destructive">
-                ${invoices.filter((i) => i.estado === "pendiente").reduce((s, i) => s + $n(i.montoTotal), 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
+                ${invoices.filter((i) => i.estado === "pendiente" || i.estado === "parcial").reduce((s, i) => s + $n(i.saldoPendiente ?? i.montoTotal), 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
               </div>
               <div className="text-xs text-muted-foreground">Deuda total en CC</div>
             </CardContent>
@@ -2721,6 +2780,7 @@ export default function PurchaseInvoices() {
                     <SelectContent>
                       <SelectItem value="todos">Todos</SelectItem>
                       <SelectItem value="pendiente">Pendiente</SelectItem>
+                      <SelectItem value="parcial">Parcial</SelectItem>
                       <SelectItem value="pagado">Pagado</SelectItem>
                       <SelectItem value="anulado">Anulado</SelectItem>
                     </SelectContent>

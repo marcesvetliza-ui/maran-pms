@@ -120,6 +120,7 @@ describe("purchase invoice totals", () => {
       retencion_suss: "10.00",
       retencion_municipal: "11.00",
       monto_total: "217.00",
+      saldo_pendiente: "217.00",
     })).toEqual({
       montoNeto: "100.00",
       montoIva21: "21.00",
@@ -140,6 +141,7 @@ describe("purchase invoice totals", () => {
       retencionSuss: "10.00",
       retencionMunicipal: "11.00",
       montoTotal: "217.00",
+      saldoPendiente: "217.00",
     });
   });
 });

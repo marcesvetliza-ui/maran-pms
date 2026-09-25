@@ -2733,9 +2733,9 @@ export async function registerRoutes(
     try {
       const result = await db.execute(sql`
         SELECT s.*,
-          COALESCE(SUM(CASE WHEN pi.estado = 'pendiente' THEN pi.monto_total::numeric ELSE 0 END), 0) AS saldo_cc
+          COALESCE(SUM(CASE WHEN pi.estado IN ('pendiente', 'parcial') THEN pi.saldo_pendiente::numeric ELSE 0 END), 0) AS saldo_cc
         FROM accounting_suppliers s
-        LEFT JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+        LEFT JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado IN ('pendiente', 'parcial')
         WHERE s.activo = true
         GROUP BY s.id
         ORDER BY s.razon_social
@@ -2756,22 +2756,22 @@ export async function registerRoutes(
           ? sql`
               SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
                 COUNT(pi.id) AS facturas_pendientes,
-                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+                COALESCE(SUM(pi.saldo_pendiente::numeric), 0) AS total_saldo
               FROM accounting_suppliers s
               INNER JOIN purchase_invoices pi
                 ON pi.supplier_id = s.id
-                AND pi.estado = 'pendiente'
+                AND pi.estado IN ('pendiente', 'parcial')
                 AND pi.fecha_emision <= ${fechaCorte}::date
               GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
-              HAVING COALESCE(SUM(pi.monto_total::numeric), 0) > 0
+              HAVING COALESCE(SUM(pi.saldo_pendiente::numeric), 0) > 0
               ORDER BY total_saldo DESC
             `
           : sql`
               SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
                 COUNT(pi.id) AS facturas_pendientes,
-                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+                COALESCE(SUM(pi.saldo_pendiente::numeric), 0) AS total_saldo
               FROM accounting_suppliers s
-              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado IN ('pendiente', 'parcial')
               GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
               ORDER BY total_saldo DESC
             `
@@ -2801,7 +2801,7 @@ export async function registerRoutes(
 
       const facturas = await db.execute(sql`
         SELECT * FROM purchase_invoices
-        WHERE supplier_id = ${id} AND estado = 'pendiente'
+        WHERE supplier_id = ${id} AND estado IN ('pendiente', 'parcial')
         ORDER BY fecha_emision DESC
       `);
 
@@ -3118,6 +3118,23 @@ export async function registerRoutes(
         : body.condicionPago || "contado";
       const estado = condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
 
+      // Si se eligió una forma de pago real (no Cuenta Corriente), se paga
+      // total o parcialmente al cargarla — ver el bloque más abajo, dentro
+      // de la transacción. Las NC quedan afuera: no tiene sentido "pagarlas"
+      // solas, se aplican contra otra factura pendiente desde la OP manual.
+      const formaPagoInmediata = ["transferencia", "efectivo", "cheque", "dep_bancario"].includes(body.formaPago)
+        ? body.formaPago : null;
+      const pagaAlCargar = !!formaPagoInmediata && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC");
+      let montoPagadoAhora = montoTotal;
+      if (pagaAlCargar && body.montoPagadoAhora !== undefined && body.montoPagadoAhora !== null && body.montoPagadoAhora !== "") {
+        const parsed = Number(body.montoPagadoAhora);
+        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > montoTotal + 0.005) {
+          return res.status(400).json({ error: "El monto a pagar ahora debe ser mayor a $0,00 y no puede superar el total del comprobante." });
+        }
+        montoPagadoAhora = Math.min(parsed, montoTotal);
+      }
+      const esPagoParcial = pagaAlCargar && montoPagadoAhora < montoTotal - 0.005;
+
       // Formatear numero comprobante ext
       const numeroComprobanteExt = body.puntoVenta && body.numeroComprobante
         ? `${String(body.puntoVenta).padStart(5, "0")}-${String(body.numeroComprobante).padStart(8, "0")}`
@@ -3135,7 +3152,7 @@ export async function registerRoutes(
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
           percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
           retencion_suss, retencion_municipal, monotributo_comp_bc,
-          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
@@ -3145,7 +3162,8 @@ export async function registerRoutes(
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
-          ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null}
+          ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null},
+          ${estado === "pendiente" ? montoTotal : 0}
         )
         RETURNING *
       `);
@@ -3220,24 +3238,25 @@ export async function registerRoutes(
         `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`);
 
       // Si se eligió una forma de pago real (no Cuenta Corriente), generar
-      // de una la Orden de Pago de esta factura para que quede pagada al
-      // cargarla, en vez de quedar pendiente hasta una OP manual aparte. Las
-      // NC quedan afuera: no tiene sentido "pagarlas" solas, se aplican
-      // contra otra factura pendiente desde la OP manual.
-      const formaPagoInmediata = ["transferencia", "efectivo", "cheque", "dep_bancario"].includes(body.formaPago)
-        ? body.formaPago : null;
-      if (formaPagoInmediata && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC")) {
+      // de una la Orden de Pago de esta factura para que quede pagada (total
+      // o parcialmente) al cargarla, en vez de quedar pendiente hasta una OP
+      // manual aparte. Si es parcial, el resto queda con saldo pendiente en
+      // cuenta corriente — ver createPaymentOrder.
+      if (pagaAlCargar) {
         const { op } = await createPaymentOrder(tx, {
           supplierId,
           fecha: body.fechaEmision,
           facturaIds: [invoice.id],
+          montoParcial: esPagoParcial ? montoPagadoAhora : undefined,
           formaPago: formaPagoInmediata,
-          depBancario: formaPagoInmediata === "dep_bancario" ? montoTotal : 0,
-          efectivo: formaPagoInmediata === "efectivo" ? montoTotal : 0,
-          cheques: formaPagoInmediata === "cheque" ? montoTotal : 0,
-          observaciones: "OP automática al cargar el comprobante",
+          depBancario: formaPagoInmediata === "dep_bancario" ? montoPagadoAhora : 0,
+          efectivo: formaPagoInmediata === "efectivo" ? montoPagadoAhora : 0,
+          cheques: formaPagoInmediata === "cheque" ? montoPagadoAhora : 0,
+          observaciones: esPagoParcial ? "OP automática (pago parcial) al cargar el comprobante" : "OP automática al cargar el comprobante",
         }, getArgentinaToday);
-        rawInvoice.estado = "pagado";
+        const updated = await tx.execute(sql`SELECT estado, saldo_pendiente FROM purchase_invoices WHERE id = ${invoice.id}`);
+        rawInvoice.estado = (updated.rows[0] as any).estado;
+        rawInvoice.saldo_pendiente = (updated.rows[0] as any).saldo_pendiente;
         rawInvoice.orden_pago_id = op.id;
         rawInvoice.orden_pago_numero = op.numero;
       }

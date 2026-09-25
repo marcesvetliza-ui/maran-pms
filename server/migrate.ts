@@ -2882,6 +2882,21 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN iva_rate text`)))
   );
 
+  // Saldo pendiente por comprobante de compra, para soportar pago parcial
+  // (una parte con forma de pago real, el resto queda en cuenta corriente) —
+  // ver server/paymentOrder.ts. Se agrega con default 0 y se completa acá
+  // mismo para las filas existentes: el total para las pendientes/parciales,
+  // 0 para el resto.
+  await withTimeout("purchase_invoices.saldo_pendiente", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN saldo_pendiente numeric(14,2) NOT NULL DEFAULT 0`)))
+  );
+  await withTimeout("purchase_invoices.saldo_pendiente.backfill", T, () =>
+    db.execute(sql`
+      UPDATE purchase_invoices SET saldo_pendiente = monto_total
+      WHERE estado IN ('pendiente', 'parcial') AND saldo_pendiente = 0 AND monto_total > 0
+    `)
+  );
+
   await withTimeout("email_config.banner_footer", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE email_config
