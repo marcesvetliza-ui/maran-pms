@@ -79,6 +79,15 @@ const spaCashInvoice = {
   cash_forma_pago: "efectivo", cash_forma_pago_detalle: [{ method: "efectivo", amount: 650 }],
 };
 
+const groupCashInvoice = {
+  id: 18, tipo_comprobante: "FB", punto_venta: 3, numero: 40,
+  cliente_razon_social: "Empresa de Grupo SA", cliente_condicion_iva: "Responsable Inscripto",
+  monto_total: "900.00", estado: "emitida",
+  center_settlement_area: null, center_settlement_status: null,
+  group_payment_id: "group-payment-1", group_payment_method: "efectivo",
+  cash_forma_pago: null, cash_forma_pago_detalle: null,
+};
+
 const registradaInvoice = {
   id: 12, tipo_comprobante: "FT", punto_venta: 20, numero: 5,
   cliente_razon_social: "Cliente Registrado", cliente_condicion_iva: "Consumidor Final",
@@ -240,6 +249,31 @@ describe("EditarComprobanteDialog — factura de SPA cobrada en Caja", () => {
     renderDialog(spaCashInvoice);
 
     await user.click(await screen.findByTestId("select-edit-spa-fp"));
+    expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EditarComprobanteDialog — factura de Grupo cobrada en Caja", () => {
+  it("permite corregir entre medios reales de Caja, precargada con el actual", async () => {
+    const user = userEvent.setup();
+    renderDialog(groupCashInvoice);
+
+    const select = await screen.findByTestId("select-edit-group-fp");
+    expect(select).toHaveTextContent("Efectivo");
+    await user.click(select);
+    await user.click(screen.getByRole("option", { name: "Transferencia" }));
+    await user.click(screen.getByTestId("btn-guardar-edicion-fp-group"));
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", "/api/billing/invoices/18", {
+      cashFormaPago: "transferencia",
+    }));
+  });
+
+  it("no ofrece Cuenta Corriente como opción", async () => {
+    const user = userEvent.setup();
+    renderDialog(groupCashInvoice);
+
+    await user.click(await screen.findByTestId("select-edit-group-fp"));
     expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
   });
 });
