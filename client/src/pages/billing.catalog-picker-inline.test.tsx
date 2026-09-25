@@ -5,8 +5,13 @@
  * lista, que además solo completa la primera fila vacía. Para cambiar el
  * concepto de una fila ya cargada había que quitarla y volver a agregarla
  * desde ese botón, lejos de la fila que se quería editar — más difícil
- * cuantos más ítems tiene la factura. Ahora cada fila tiene su propio
- * botón de búsqueda que reemplaza esa fila puntual, sin tocar el resto.
+ * cuantos más ítems tiene la factura.
+ *
+ * La fila entera es ahora un combobox — igual al patrón ya usado en
+ * Compras (PurchaseInventoryPicker, purchase-invoices.tsx): un solo botón
+ * a lo ancho del renglón que abre la búsqueda al tocarlo en cualquier
+ * parte, no un input de solo lectura con un ícono aparte al costado (esa
+ * primera versión no reaccionaba al tocar el cuadro en sí, solo el ícono).
  */
 
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -61,20 +66,22 @@ describe("EmitirFacturaDialog — buscador de catálogo inline por renglón", ()
     vi.unstubAllGlobals();
   });
 
-  it("cada fila del Centro de Comprobantes tiene su propio botón de búsqueda", async () => {
+  it("la fila entera del Centro de Comprobantes es un combobox clickeable, no un input de solo lectura", async () => {
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
-    await waitFor(() => expect(screen.getByTestId("btn-item-catalog-0")).toBeInTheDocument());
+    const trigger = await screen.findByTestId("item-description-0");
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).toHaveTextContent("Elegí un concepto del catálogo");
   });
 
-  it("elegir un concepto desde el botón de la fila lo carga en esa misma fila", async () => {
+  it("tocar la fila (en cualquier parte del cuadro) abre la búsqueda y elegir un concepto lo carga en esa misma fila", async () => {
     const user = userEvent.setup();
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
 
-    await user.click(await screen.findByTestId("btn-item-catalog-0"));
+    await user.click(await screen.findByTestId("item-description-0"));
     await user.click(await screen.findByTestId("item-catalog-option-0-mi-1"));
 
     const row = screen.getByTestId("item-row-0");
-    expect(within(row).getByTestId("item-description-0")).toHaveValue("Café Justo");
+    expect(within(row).getByTestId("item-description-0")).toHaveTextContent("Café Justo");
     expect(within(row).getByTestId("item-price-0")).toHaveValue(2500);
     expect(screen.queryByTestId("item-row-1")).not.toBeInTheDocument();
   });
@@ -84,21 +91,21 @@ describe("EmitirFacturaDialog — buscador de catálogo inline por renglón", ()
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
 
     // Cargar dos filas distintas primero.
-    await user.click(await screen.findByTestId("btn-item-catalog-0"));
+    await user.click(await screen.findByTestId("item-description-0"));
     await user.click(await screen.findByTestId("item-catalog-option-0-mi-1"));
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
     await user.click(await screen.findByTestId("catalog-item-tr-1"));
 
-    expect(within(screen.getByTestId("item-row-0")).getByTestId("item-description-0")).toHaveValue("Café Justo");
-    expect(within(screen.getByTestId("item-row-1")).getByTestId("item-description-1")).toHaveValue("Masaje Relajante 60min");
+    expect(within(screen.getByTestId("item-row-0")).getByTestId("item-description-0")).toHaveTextContent("Café Justo");
+    expect(within(screen.getByTestId("item-row-1")).getByTestId("item-description-1")).toHaveTextContent("Masaje Relajante 60min");
 
-    // Cambiar el concepto de la fila 0 usando su propio buscador — no debe
+    // Cambiar el concepto de la fila 0 tocando esa misma fila — no debe
     // tocar la fila 1 ni agregar una fila nueva.
-    await user.click(screen.getByTestId("btn-item-catalog-0"));
+    await user.click(screen.getByTestId("item-description-0"));
     await user.click(await screen.findByTestId("item-catalog-option-0-mi-2"));
 
-    expect(within(screen.getByTestId("item-row-0")).getByTestId("item-description-0")).toHaveValue("Medialunas (x3)");
-    expect(within(screen.getByTestId("item-row-1")).getByTestId("item-description-1")).toHaveValue("Masaje Relajante 60min");
+    expect(within(screen.getByTestId("item-row-0")).getByTestId("item-description-0")).toHaveTextContent("Medialunas (x3)");
+    expect(within(screen.getByTestId("item-row-1")).getByTestId("item-description-1")).toHaveTextContent("Masaje Relajante 60min");
     expect(screen.queryByTestId("item-row-2")).not.toBeInTheDocument();
   });
 
@@ -106,7 +113,7 @@ describe("EmitirFacturaDialog — buscador de catálogo inline por renglón", ()
     const user = userEvent.setup();
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
 
-    await user.click(await screen.findByTestId("btn-item-catalog-0"));
+    await user.click(await screen.findByTestId("item-description-0"));
     await waitFor(() => expect(screen.getByTestId("item-catalog-option-0-mi-2")).toBeInTheDocument());
 
     await user.type(screen.getByTestId("input-item-catalog-search-0"), "café");
@@ -117,9 +124,10 @@ describe("EmitirFacturaDialog — buscador de catálogo inline por renglón", ()
     });
   });
 
-  it("no aparece el buscador por fila fuera del Centro de Comprobantes (texto libre)", async () => {
+  it("fuera del Centro de Comprobantes, la descripción sigue siendo texto libre (sin combobox)", async () => {
     renderDialog({ allowedTipos: ["FA"], cashArea: "restaurant" });
     await waitFor(() => expect(screen.getByTestId("btn-add-item-from-catalog")).toBeInTheDocument());
-    expect(screen.queryByTestId("btn-item-catalog-0")).not.toBeInTheDocument();
+    const description = screen.getByTestId("item-description-0");
+    expect(description.tagName).toBe("INPUT");
   });
 });

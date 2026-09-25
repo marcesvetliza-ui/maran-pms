@@ -107,7 +107,9 @@ describe("Centro de Comprobantes — receptor vinculado", () => {
     const user = userEvent.setup();
     renderDialog({ requireLinkedRecipient: true, allowedTipos: ["FB"] });
     await user.type(screen.getByTestId("input-razon-social"), "Nombre suelto");
-    await user.type(screen.getByTestId("item-description-0"), "Alojamiento");
+    await user.click(screen.getByTestId("item-description-0"));
+    await user.click(await screen.findByTestId("item-catalog-option-0-alojamiento"));
+    await user.clear(screen.getByTestId("item-price-0"));
     await user.type(screen.getByTestId("item-price-0"), "100");
     await user.click(screen.getByTestId("btn-emitir-confirmar"));
     expect(screen.getByTestId("recipient-entity-error")).toBeInTheDocument();

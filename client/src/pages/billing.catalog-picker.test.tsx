@@ -176,7 +176,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true });
     await user.click(screen.getByTestId("button-consumidor-final"));
     expect(screen.queryByTestId("btn-add-item")).not.toBeInTheDocument();
-    expect(screen.getByTestId("item-description-0")).toHaveAttribute("readonly");
+    expect(screen.getByTestId("item-description-0")).toHaveTextContent("Elegí un concepto del catálogo");
 
     await user.click(screen.getByTestId("btn-emitir-confirmar"));
     expect(screen.getByTestId("catalog-error-0")).toHaveTextContent("Elegí el concepto");
@@ -194,8 +194,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
     await user.click(await screen.findByTestId("catalog-item-mi-1"));
     await user.click(screen.getByText("Quitar"));
-    expect(screen.getByTestId("item-description-0")).toHaveValue("");
-    expect(screen.getByTestId("item-description-0")).toHaveAttribute("readonly");
+    expect(screen.getByTestId("item-description-0")).toHaveTextContent("Elegí un concepto del catálogo");
   });
 
   it("solo permite revisar si los cobros divididos completan el total", async () => {

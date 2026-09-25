@@ -2276,62 +2276,68 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
-                    <div className="flex gap-1">
+                    {requireLinkedRecipient && !lockItems && catalogOptions.length > 0 ? (
+                      <Popover open={rowCatalogPickerOpen === idx} onOpenChange={o => { setRowCatalogPickerOpen(o ? idx : null); if (!o) setRowCatalogSearch(""); }}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            className={`w-full justify-between font-normal h-9 text-sm ${fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""}`}
+                            data-testid={`item-description-${idx}`}
+                          >
+                            <span className={`truncate ${item.descripcion ? "" : "text-muted-foreground"}`}>{item.descripcion || "Elegí un concepto del catálogo"}</span>
+                            <Search className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="start">
+                          <Command shouldFilter={false}>
+                            <CommandInput
+                              placeholder="Buscar por nombre o código..."
+                              value={rowCatalogSearch}
+                              onValueChange={setRowCatalogSearch}
+                              data-testid={`input-item-catalog-search-${idx}`}
+                            />
+                            <CommandList>
+                              <CommandEmpty>Sin resultados.</CommandEmpty>
+                              {catalogGroups.map(group => {
+                                const term = rowCatalogSearch.trim().toLowerCase();
+                                const matches = term
+                                  ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
+                                  : group.options;
+                                if (matches.length === 0) return null;
+                                return (
+                                  <CommandGroup key={group.label} heading={group.label}>
+                                    {matches.slice(0, 50).map(o => (
+                                      <CommandItem
+                                        key={o.id}
+                                        value={o.id}
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onSelect={() => {
+                                          selectCatalogItemForRow(idx, o);
+                                          setRowCatalogPickerOpen(null);
+                                          setRowCatalogSearch("");
+                                        }}
+                                        data-testid={`item-catalog-option-${idx}-${o.id}`}
+                                      >
+                                        <span className="min-w-0 flex-1 break-words">{o.descripcion}
+                                          {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
+                                        </span>
+                                        {o.precioUnitario > 0 && (
+                                          <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                        )}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                );
+                              })}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    ) : (
                       <Input data-testid={`item-description-${idx}`} readOnly={requireLinkedRecipient} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder={requireLinkedRecipient ? "Elegí un concepto del catálogo" : "Hospedaje habitación..."} className={fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""} />
-                      {requireLinkedRecipient && !lockItems && catalogOptions.length > 0 && (
-                        <Popover open={rowCatalogPickerOpen === idx} onOpenChange={o => { setRowCatalogPickerOpen(o ? idx : null); if (!o) setRowCatalogSearch(""); }}>
-                          <PopoverTrigger asChild>
-                            <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" aria-label="Buscar en el catálogo" data-testid={`btn-item-catalog-${idx}`}>
-                              <Search className="h-3.5 w-3.5" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="start">
-                            <Command shouldFilter={false}>
-                              <CommandInput
-                                placeholder="Buscar por nombre o código..."
-                                value={rowCatalogSearch}
-                                onValueChange={setRowCatalogSearch}
-                                data-testid={`input-item-catalog-search-${idx}`}
-                              />
-                              <CommandList>
-                                <CommandEmpty>Sin resultados.</CommandEmpty>
-                                {catalogGroups.map(group => {
-                                  const term = rowCatalogSearch.trim().toLowerCase();
-                                  const matches = term
-                                    ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
-                                    : group.options;
-                                  if (matches.length === 0) return null;
-                                  return (
-                                    <CommandGroup key={group.label} heading={group.label}>
-                                      {matches.slice(0, 50).map(o => (
-                                        <CommandItem
-                                          key={o.id}
-                                          value={o.id}
-                                          onMouseDown={(e) => e.preventDefault()}
-                                          onSelect={() => {
-                                            selectCatalogItemForRow(idx, o);
-                                            setRowCatalogPickerOpen(null);
-                                            setRowCatalogSearch("");
-                                          }}
-                                          data-testid={`item-catalog-option-${idx}-${o.id}`}
-                                        >
-                                          <span className="min-w-0 flex-1 break-words">{o.descripcion}
-                                            {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
-                                          </span>
-                                          {o.precioUnitario > 0 && (
-                                            <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
-                                          )}
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  );
-                                })}
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                      )}
-                    </div>
+                    )}
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
                     {fieldErrors[`catalog_${idx}`] && <p className="text-xs text-red-500" data-testid={`catalog-error-${idx}`}>{fieldErrors[`catalog_${idx}`]}</p>}
                   </div>
