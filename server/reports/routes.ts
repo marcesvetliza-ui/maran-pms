@@ -148,7 +148,7 @@ async function costosCompras(desde: string, hasta: string): Promise<any[]> {
     FROM purchase_invoices pi
     LEFT JOIN accounting_accounts aa ON aa.id = pi.cuenta_contable_id
     WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
-      AND (pi.estado != 'anulado' OR pi.tipo_comprobante NOT IN ('RESUMEN-BANCO', 'RETENCION'))
+      AND (pi.estado != 'anulado' OR pi.tipo_comprobante NOT IN ('RESUMEN-BANCO', 'RETENCION', 'LIQ-TARJETA'))
     GROUP BY aa.codigo, aa.nombre
     ORDER BY aa.codigo
   `);

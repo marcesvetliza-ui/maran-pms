@@ -8,13 +8,17 @@ import { verifyFinancialSchema } from "../migrate";
 /**
  * Real-PostgreSQL coverage for purchase-invoice accounting edits.
  *
- * A card settlement is a pending purchase invoice whose retentions are
- * suffered by the hotel: they increase the total and are debited as tax
- * credits, but they must not become practiced IIBB certificates. The PATCH
- * route replaces its accounting entry inside the same transaction, so this
- * suite verifies the old entry disappears and the replacement remains
- * balanced. FACT-A is included as the control case for the ordinary
- * supplier-retention behavior.
+ * The PATCH route replaces a comprobante's accounting entry inside the same
+ * transaction, so this suite verifies the old entry disappears and the
+ * replacement remains balanced, using FACT-A as the control case for the
+ * ordinary supplier-retention behavior.
+ *
+ * LIQ-TARJETA (card settlement) used to be a pending invoice with its own
+ * "retenciones sufridas" (tax credits withheld by the card processor) and a
+ * real Caja movement on settlement — this had its own dedicated test here.
+ * Confirmed with the user: Liquidación Tarjeta is now purely informational,
+ * same as RESUMEN-BANCO/RETENCION (see purchase-expense-only.pg.test.ts),
+ * so that behavior no longer applies to newly created records.
  */
 
 vi.mock("../auth", () => ({
@@ -302,115 +306,6 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       expect(edited.status).toBe(200);
       const stored = await testPool.query("SELECT monto_total, asiento_id FROM purchase_invoices WHERE id = $1", [fixture.facturaInvoiceId]);
       expect(stored.rows[0]).toMatchObject({ monto_total: "0.00", asiento_id: null });
-    } finally {
-      await cleanupFixture(fixture);
-    }
-  }, 15_000);
-
-  it("reemplaza el asiento de una LIQ-TARJETA editada sin practicar IIBB", async () => {
-    if (!testPool) return;
-
-    const fixture = await createFixture();
-    try {
-      const expenseAccount = await testPool.query<{ id: number }>(
-        "SELECT id FROM accounting_accounts WHERE codigo = '4.2.1.08.05.02'",
-      );
-      const accountId = expenseAccount.rows[0].id;
-      const cardNumber = `PG-LIQ-${randomUUID()}`;
-
-      const created = await requestInvoice("POST", "/api/purchase-invoices", {
-        tipoComprobante: "LIQ-TARJETA",
-        supplierId: fixture.supplierId,
-        proveedorNombre: "Procesadora de tarjetas prueba",
-        proveedorCuit: fixture.supplierCuit,
-        numeroComprobante: cardNumber,
-        fechaEmision: "2026-08-31",
-        periodo: "08/2026",
-        condicionPago: "cuenta_corriente",
-        montoNeto: "100.00",
-        retencionIibb: "5.00",
-        retencionGanancias: "3.00",
-        cuentaContableId: accountId,
-      });
-      expect(created.status).toBe(201);
-      fixture.cardInvoiceId = Number(created.body.id);
-
-      const initial = await testPool.query<{
-        asiento_id: number | null;
-        monto_total: string;
-      }>(
-        `SELECT asiento_id, monto_total
-         FROM purchase_invoices
-         WHERE id = $1`,
-        [fixture.cardInvoiceId],
-      );
-      expect(initial.rows[0].monto_total).toBe("108.00");
-      expect(initial.rows[0].asiento_id).toBeTruthy();
-      const previousEntryId = Number(initial.rows[0].asiento_id);
-
-      const updated = await requestInvoice(
-        "PATCH",
-        `/api/purchase-invoices/${fixture.cardInvoiceId}`,
-        {
-          montoNeto: "200.00",
-          montoIva21: "0.00",
-          montoIva105: "0.00",
-          montoIva27: "0.00",
-          montoIva5: "0.00",
-          montoIva25: "0.00",
-          montoExento: "0.00",
-          montoNoGravado: "0.00",
-          impuestosInternos: "0.00",
-          ley25413: "0.00",
-          percepcionIibb: "0.00",
-          percepcionIva: "0.00",
-          percepcionGanancias: "0.00",
-          retencionIibb: "12.00",
-          retencionGanancias: "4.00",
-          retencionIva: "0.00",
-          retencionSuss: "0.00",
-          cuentaContableId: accountId,
-        },
-      );
-      expect(updated.status).toBe(200);
-      expect(updated.body.id).toBe(fixture.cardInvoiceId);
-
-      const cardState = await testPool.query<{
-        asiento_id: number | null;
-        monto_total: string;
-      }>(
-        `SELECT asiento_id, monto_total
-         FROM purchase_invoices
-         WHERE id = $1`,
-        [fixture.cardInvoiceId],
-      );
-      expect(cardState.rows[0].monto_total).toBe("216.00");
-      expect(cardState.rows[0].asiento_id).toBeTruthy();
-      const replacementEntryId = Number(cardState.rows[0].asiento_id);
-      expect(replacementEntryId).not.toBe(previousEntryId);
-
-      const oldEntry = await testPool.query(
-        "SELECT id FROM accounting_entries WHERE id = $1",
-        [previousEntryId],
-      );
-      expect(oldEntry.rows).toEqual([]);
-
-      const lines = await readAccountingLines(replacementEntryId);
-      const totals = accountingTotals(lines);
-      expect(totals.debe).toBeCloseTo(216, 2);
-      expect(totals.haber).toBeCloseTo(216, 2);
-      expect(lines).toEqual(
-        expect.arrayContaining([
-          { codigo: "1.1.4.01.08.01", debe: "12.00", haber: "0.00" },
-          { codigo: "1.1.4.01.05", debe: "4.00", haber: "0.00" },
-        ]),
-      );
-
-      const practicedIibb = await testPool.query(
-        "SELECT id FROM iibb_retentions WHERE invoice_id = $1",
-        [fixture.cardInvoiceId],
-      );
-      expect(practicedIibb.rows).toEqual([]);
     } finally {
       await cleanupFixture(fixture);
     }

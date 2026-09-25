@@ -105,9 +105,10 @@ const TIPOS_COMPRA: { value: string; label: string }[] = [
   { value: "REMITO", label: "Remito" },
   { value: "RESUMEN-BANCO", label: "Resumen Bancario (gasto)" },
   { value: "RETENCION", label: "Retenciones (gasto)" },
+  { value: "LIQ-TARJETA", label: "Liquidación Tarjeta (gasto)" },
 ];
 
-const SOLO_GASTO = new Set(["RESUMEN-BANCO", "RETENCION"]);
+const SOLO_GASTO = new Set(["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"]);
 type ExpenseRow = { itemId: string; quantity: string; unitPrice: string; vatRate: string };
 const expenseRow = (): ExpenseRow => ({ itemId: "", quantity: "1", unitPrice: "", vatRate: "" });
 const suggestedVat = (sku?: string | null) => {

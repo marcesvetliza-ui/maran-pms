@@ -2947,11 +2947,14 @@ export async function registerRoutes(
 
   app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
-      // Estos dos registros alimentan los informes por cuenta de gasto; el
+      // Estos registros alimentan los informes por cuenta de gasto; el
       // emisor identifica su origen, pero nunca queda como acreedor ni se mueve
       // Caja, banco, stock o el Libro IVA. Las filas históricas de esos mismos
       // tipos conservan su tratamiento anterior y se distinguen por estado.
-      if (["RESUMEN-BANCO", "RETENCION"].includes(req.body.tipoComprobante)) {
+      // Liquidación Tarjeta se sumó acá: antes tenía sus propias retenciones
+      // sufridas y movía Caja al liquidarse; confirmado con el usuario que
+      // pase a ser puramente informativa, igual que Resumen Bancario/Retención.
+      if (["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"].includes(req.body.tipoComprobante)) {
         const input = req.body;
         const supplierId = Number(input.supplierId);
         const numero = typeof input.numeroComprobante === "string" ? input.numeroComprobante.trim() : "";

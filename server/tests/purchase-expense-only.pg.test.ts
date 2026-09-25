@@ -48,7 +48,7 @@ runWithPg("registros de gasto de Compras", () => {
     return { status: response.status, body: await response.json() };
   }
 
-  it.each(["RESUMEN-BANCO", "RETENCION"])("registra %s como gasto sin deuda, asiento ni stock", async type => {
+  it.each(["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"])("registra %s como gasto sin deuda, asiento ni stock", async type => {
     if (!pool) return;
     const suffix = randomUUID().replaceAll("-", "");
     const code = `4.2.1.08.18.${suffix.slice(0, 7)}`;
