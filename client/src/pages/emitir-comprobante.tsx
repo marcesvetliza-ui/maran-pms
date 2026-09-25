@@ -510,11 +510,13 @@ function NotaDebitoCentroDialog({ invoiceId, onClose }: { invoiceId: number; onC
   const [motivo, setMotivo] = useState("");
   const [monto, setMonto] = useState("");
 
-  const saldoPendiente = invoice
-    ? Math.max(0, (parseFloat(invoice.monto_total) || 0) - (parseFloat(invoice.monto_acreditado || "0") || 0))
-    : 0;
+  // Esto es solo informativo (cuánto de la factura ya se acreditó con una NC
+  // previa) — a diferencia de una NC, una ND agrega deuda nueva, así que no
+  // tiene sentido taparla con ese número: el backend (server/billing/routes.ts)
+  // solo exige monto > 0 y que la factura no esté 100% acreditada.
+  const yaAcreditado = invoice ? parseFloat(invoice.monto_acreditado || "0") || 0 : 0;
   const montoNum = parseFloat(monto) || 0;
-  const montoInvalido = !monto || montoNum <= 0 || montoNum > saldoPendiente + 0.01;
+  const montoInvalido = !monto || montoNum <= 0;
 
   const mutation = useMutation({
     mutationFn: (body: { motivo: string; monto: number }) => apiRequest("POST", `/api/billing/invoices/${invoiceId}/nota-debito`, body),
@@ -534,13 +536,19 @@ function NotaDebitoCentroDialog({ invoiceId, onClose }: { invoiceId: number; onC
       <DialogContent className="max-w-md">
         <DialogHeader><DialogTitle>Emitir Nota de Débito</DialogTitle></DialogHeader>
         <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Suma un importe nuevo a lo que ya se le facturó al cliente — no está relacionada con ninguna
+            Nota de Crédito. (La Nota de Débito que revierte una Nota de Crédito de una reserva se emite
+            desde el Folio de esa reserva, no desde acá.)
+          </p>
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
             <div className="font-medium">Factura original:</div>
             <div className="text-muted-foreground text-xs">
               {invoice.tipo_comprobante} {String(invoice.punto_venta).padStart(4, "0")}-{String(invoice.numero).padStart(8, "0")} — {invoice.cliente_razon_social}
             </div>
             <div className="text-muted-foreground text-xs">
-              Total: ${fmtMoney(invoice.monto_total)} · Saldo pendiente: ${fmtMoney(saldoPendiente)}
+              Total facturado: ${fmtMoney(invoice.monto_total)}
+              {yaAcreditado > 0.009 && ` (con una Nota de Crédito previa por $${fmtMoney(yaAcreditado)})`}
             </div>
           </div>
           <div className="space-y-1.5">
@@ -553,14 +561,13 @@ function NotaDebitoCentroDialog({ invoiceId, onClose }: { invoiceId: number; onC
               id="nd-monto"
               type="number"
               min="0"
-              max={saldoPendiente}
               step="0.01"
               value={monto}
               onChange={(e) => setMonto(e.target.value)}
               data-testid="input-nd-monto"
             />
             {montoInvalido && monto && (
-              <p className="text-xs text-destructive">El importe debe ser mayor a $0 y no superar el saldo pendiente.</p>
+              <p className="text-xs text-destructive">El importe debe ser mayor a $0.</p>
             )}
           </div>
         </div>

@@ -3186,6 +3186,7 @@ function NotaDebitoDialog({
         <div className="space-y-4 py-1">
           <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
             Esta Nota de Débito revierte total o parcialmente una Nota de Crédito. Restaura la factura original sin registrar un nuevo cobro.
+            (Para sumar un importe nuevo que no revierte nada, se emite desde el Centro de Comprobantes.)
           </div>
 
           {/* Credit note selector */}

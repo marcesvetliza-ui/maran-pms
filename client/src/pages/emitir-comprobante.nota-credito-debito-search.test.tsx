@@ -106,3 +106,50 @@ describe("NotaCreditoDebitoSearch — filtra por letra y muestra el saldo real",
     expect(screen.queryByTestId("saldo-parcial-1")).not.toBeInTheDocument();
   });
 });
+
+describe("NotaDebitoCentroDialog — no tapa el importe con el saldo acreditable", () => {
+  // A diferencia de la NC, la ND suma deuda nueva — no tiene relación con
+  // cuánto de la factura ya se acreditó. Antes el campo tenía max={saldoPendiente}
+  // (copiado del patrón de la NC) y bloqueaba importes mayores sin que el
+  // backend (server/billing/routes.ts) exigiera eso — solo pide monto > 0 y
+  // que la factura no esté acreditada al 100%.
+  function buildByIdFetchMock() {
+    return vi.fn(async (url: string) => {
+      if (url.match(/\/api\/billing\/invoices\/4$/)) {
+        return new Response(JSON.stringify(INVOICES[3]), { status: 200 });
+      }
+      if (url.includes("/api/billing/invoices")) {
+        return new Response(JSON.stringify(INVOICES), { status: 200 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+  }
+
+  beforeEach(() => {
+    queryClient.clear();
+    vi.stubGlobal("fetch", buildByIdFetchMock());
+  });
+
+  it("acepta un importe mayor al saldo acreditable de la factura", async () => {
+    const user = userEvent.setup();
+    renderSearch("NDA");
+    await user.type(screen.getByTestId("input-buscar-comprobante-nc-nd"), "a");
+    await user.click(await screen.findByTestId("row-invoice-nc-nd-4"));
+
+    const monto = await screen.findByTestId("input-nd-monto");
+    await user.type(monto, "999999999");
+    await user.type(screen.getByTestId("input-nd-motivo"), "Cargo adicional");
+
+    expect(screen.getByTestId("button-submit-nd")).not.toBeDisabled();
+    expect(screen.queryByText(/no superar/)).not.toBeInTheDocument();
+  });
+
+  it("aclara que esta ND no revierte una Nota de Crédito", async () => {
+    const user = userEvent.setup();
+    renderSearch("NDA");
+    await user.type(screen.getByTestId("input-buscar-comprobante-nc-nd"), "a");
+    await user.click(await screen.findByTestId("row-invoice-nc-nd-4"));
+
+    expect(await screen.findByText(/no está relacionada con ninguna/)).toBeInTheDocument();
+  });
+});
