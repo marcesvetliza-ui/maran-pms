@@ -2876,6 +2876,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalIndexSql("warehouseStockWarehouseItemUnique")))
   );
 
+  // Alícuota de IVA habitual del artículo, para precargar el renglón de
+  // Compras sin tener que elegirla a mano en cada factura (ver purchase-invoices).
+  await withTimeout("inventory_items.iva_rate", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN iva_rate text`)))
+  );
+
   await withTimeout("email_config.banner_footer", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
       ALTER TABLE email_config

@@ -546,7 +546,12 @@ export function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "", vatRate: "" }]);
+  const defaultWarehouseId = useMemo(() => {
+    const general = (invWarehouses as any[]).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
+    return general ? String(general.id) : "";
+  }, [invWarehouses]);
+
+  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" }]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
@@ -555,6 +560,15 @@ export function InvoiceDialog({
     queryKey: ["/api/inventory/items"],
     enabled: open && (unifiedLayout || step === 4),
   });
+
+  const selectExistingInvItem = (i: number, id: string) => {
+    const selected = (existingInvItems as any[]).find((it: any) => String(it.id) === id);
+    setInvItems((p) => p.map((r, j) => j === i ? {
+      ...r,
+      existingItemId: id,
+      vatRate: r.vatRate || (selected?.ivaRate ? String(selected.ivaRate) : r.vatRate),
+    } : r));
+  };
 
   const canSuggestArticles = !isEditing && ["FACT-A", "FACT-B", "FACT-M", "FACT-C"].includes(form.tipoComprobante);
   const completedArticles = invItems.filter(row => row.existingItemId && Number(row.quantity) > 0 && Number(row.costPrice) >= 0);
@@ -1000,7 +1014,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { updateInvRow(i, "existingItemId", id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1667,7 +1681,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { updateInvRow(i, "existingItemId", id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}

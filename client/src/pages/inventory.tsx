@@ -88,6 +88,7 @@ type InventoryItem = {
   location: string | null;
   isActive: string | null;
   itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
+  ivaRate?: string | null;
   category?: ItemCategory;
   suppliers?: Array<{ id: number; razonSocial: string; cuit: string; isPreferred: boolean }>;
 };
@@ -2527,7 +2528,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
   );
 }
 
-function NewItemForm({
+export function NewItemForm({
   categories,
   suppliers,
   existingItems,
@@ -2551,6 +2552,7 @@ function NewItemForm({
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState(0);
   const [itemKind, setItemKind] = useState<string>("venta_directa");
+  const [ivaRate, setIvaRate] = useState<string>("__none__");
 
   const duplicateMatches = name.trim().length > 1
     ? existingItems.filter(
@@ -2711,6 +2713,23 @@ function NewItemForm({
           />
         </div>
       </div>
+      <div className="space-y-2">
+        <Label>Alícuota de IVA</Label>
+        <Select value={ivaRate} onValueChange={setIvaRate}>
+          <SelectTrigger data-testid="select-item-iva">
+            <SelectValue placeholder="Sin definir" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— Sin definir —</SelectItem>
+            <SelectItem value="2.5">2,5%</SelectItem>
+            <SelectItem value="5">5%</SelectItem>
+            <SelectItem value="10.5">10,5%</SelectItem>
+            <SelectItem value="21">21%</SelectItem>
+            <SelectItem value="27">27%</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
+      </div>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
           Cancelar
@@ -2726,6 +2745,7 @@ function NewItemForm({
               costPrice,
               minStock,
               itemKind: itemKind as any,
+              ivaRate: ivaRate === "__none__" ? null : ivaRate,
             } as any);
           }}
           disabled={isPending || !name}

@@ -1518,6 +1518,9 @@ export const inventoryItems = pgTable("inventory_items", {
   location: text("location"),
   isActive: text("is_active").default("true"),
   itemKind: text("item_kind").$type<ItemKind>().notNull().default("venta_directa"),
+  // Alícuota de IVA habitual del artículo ("2.5"|"5"|"10.5"|"21"|"27"|"exento"|"no_gravado"),
+  // para precargar el renglón de la factura de Compras sin tener que elegirla cada vez.
+  ivaRate: text("iva_rate"),
 });
 
 export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true });
