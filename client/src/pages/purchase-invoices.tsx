@@ -557,6 +557,18 @@ export function InvoiceDialog({
   }, [invWarehouses]);
 
   const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" }]);
+
+  // Un Remito solo existe para sumar artículos al inventario (sin
+  // impuestos/total) — a diferencia de una Factura, donde no tener artículos
+  // es válido (servicio sin movimiento de stock), acá arrancar sin ningún
+  // renglón para completar no tiene sentido. Mismo criterio que ya usa
+  // TransferForm (Transferencia entre Depósitos).
+  useEffect(() => {
+    if (!open || editingInvoice || initialTipo !== "REMITO") return;
+    setInvItems((current) => current.length > 0 ? current : [
+      { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
+    ]);
+  }, [open, editingInvoice, initialTipo, defaultWarehouseId]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
@@ -652,7 +664,10 @@ export function InvoiceDialog({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/purchase-invoices", {
         ...data,
-        stockItems: invItems.map((row) => ({
+        // Un renglón sin artículo elegido (p. ej. el que arranca precargado
+        // en Remito) no se manda — el servidor rechaza cualquier fila sin
+        // itemId (parsePurchaseStockRows).
+        stockItems: invItems.filter((row) => row.existingItemId).map((row) => ({
           itemId: row.existingItemId,
           warehouseId: row.warehouseId || null,
           quantity: row.quantity,
@@ -850,6 +865,12 @@ export function InvoiceDialog({
                         ...ALL_IVA_FIELDS,
                       }));
                       setNetoLines([emptyNetoLine()]);
+                      // Un Remito solo existe para sumar artículos al inventario — a
+                      // diferencia de una Factura, arrancar sin ningún renglón para
+                      // completar no tiene sentido acá.
+                      setInvItems((current) => current.length > 0 ? current : [
+                        { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
+                      ]);
                     } else {
                       setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
                     }

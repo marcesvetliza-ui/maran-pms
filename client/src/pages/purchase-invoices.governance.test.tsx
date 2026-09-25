@@ -128,7 +128,8 @@ describe("Compras: proveedores, artículos e importe", () => {
     await user.click(screen.getByTestId("select-supplier"));
     await user.click(await screen.findByText("Proveedor Uno SA"));
     await user.type(screen.getByTestId("input-numero-comprobante"), "R-123");
-    await user.click(screen.getByTestId("btn-add-inv-item"));
+    // Remito ya arranca con un renglón vacío para completar (ver
+    // purchase-invoices.remito.test.tsx) — no hace falta "Agregar artículo".
     await user.click(screen.getByTestId("select-existing-item-0"));
     await user.click(await screen.findByText("Filtro"));
     await user.clear(screen.getByTestId("input-inv-qty-0"));

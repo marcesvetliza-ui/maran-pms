@@ -110,6 +110,19 @@ describe("InvoiceDialog — Remito", () => {
     expect(screen.getByTestId("btn-add-inv-item")).toBeInTheDocument();
   });
 
+  it("arranca con un renglón vacío para completar, igual que Transferir Stock entre Depósitos — sin tener que apretar 'Agregar artículo' primero", async () => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+    // Antes de elegir Remito, una Factura arranca sin renglones (0 artículos es válido — servicio sin stock).
+    expect(screen.queryByTestId("row-inv-item-0")).not.toBeInTheDocument();
+
+    await selectRemito(user);
+
+    expect(screen.getByTestId("row-inv-item-0")).toBeInTheDocument();
+    expect(screen.getByTestId("input-inv-qty-0")).toHaveValue(1);
+    expect(screen.queryByText("Sin artículos — el comprobante se registrará sin modificar el inventario.")).not.toBeInTheDocument();
+  });
+
   it('el botón de envío pasa a decir "Registrar remito"', async () => {
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });

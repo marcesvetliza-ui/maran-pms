@@ -360,7 +360,8 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
   const [imMotivo, setImMotivo] = useState(initialMotivo || "desayuno");
   const [imDescripcion, setImDescripcion] = useState("");
   const [imNotes, setImNotes] = useState("");
-  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([]);
+  const emptyImRow = () => ({ itemId: "", quantity: "1", notes: "" });
+  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([emptyImRow()]);
   const [showRecipeLoader, setShowRecipeLoader] = useState(false);
   const [imRecipeId, setImRecipeId] = useState("");
   const [imPorciones, setImPorciones] = useState("1");
@@ -371,7 +372,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
     setImMotivo(initialMotivo || "desayuno");
     setImDescripcion("");
     setImNotes("");
-    setImItems([]);
+    setImItems([emptyImRow()]);
     setShowRecipeLoader(false);
     setImRecipeId("");
     setImPorciones("1");

@@ -135,6 +135,22 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(within(form).getByTestId("select-tipo-comprobante")).toBeDisabled();
   });
 
+  it("Remito desde el Centro de Comprobantes arranca con un renglón de artículo vacío para completar", async () => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Compras" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Compra" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    await user.click(screen.getByRole("option", { name: "Remito" }));
+
+    const form = screen.getByTestId("invoice-form-embedded");
+    expect(within(form).getByTestId("row-inv-item-0")).toBeInTheDocument();
+  });
+
   it("el proveedor no modifica el tipo de compra elegido en el Centro", async () => {
     mockRole = "resp_deposito";
     queryClient.setQueryData(["/api/accounting-suppliers"], [{

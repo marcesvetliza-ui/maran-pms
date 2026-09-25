@@ -51,16 +51,24 @@ describe("InternalMovementForm", () => {
     }
   });
 
-  it("el botón de confirmar arranca deshabilitado hasta agregar un ítem", async () => {
+  it("arranca con un renglón vacío para completar, igual que Transferir Stock — sin tener que apretar 'Agregar ítem' primero", () => {
+    renderForm({ embedded: true, open: true, onClose: vi.fn() });
+
+    expect(screen.getByTestId("select-im-item-0")).toBeInTheDocument();
+    expect(screen.getByTestId("input-im-qty-0")).toHaveValue(1);
+    expect(screen.queryByText(/Usá "Cargar desde receta" o "Agregar ítem"/)).not.toBeInTheDocument();
+  });
+
+  it("el botón de confirmar arranca deshabilitado hasta elegir un artículo en el renglón", async () => {
     const user = userEvent.setup();
     renderForm({ embedded: true, open: true, onClose: vi.fn() });
 
+    // Ya hay un renglón, pero sin artículo elegido.
     expect(screen.getByTestId("btn-confirm-internal-mov")).toBeDisabled();
 
     await user.click(screen.getByTestId("btn-add-im-item"));
-    expect(screen.getByTestId("select-im-item-0")).toBeInTheDocument();
-    expect(screen.getByTestId("input-im-qty-0")).toBeInTheDocument();
-    // Sigue deshabilitado: se agregó la fila pero todavía no se eligió artículo.
+    expect(screen.getByTestId("select-im-item-1")).toBeInTheDocument();
+    // Sigue deshabilitado: ahora hay dos renglones, ninguno con artículo elegido.
     expect(screen.getByTestId("btn-confirm-internal-mov")).toBeDisabled();
   });
 
