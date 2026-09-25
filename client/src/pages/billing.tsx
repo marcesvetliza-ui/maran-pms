@@ -2982,7 +2982,10 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
   // mismo alcance acotado (ver editEventInvoiceCashMethod). El vínculo lo da
   // el join del propio GET (events.invoice_id), no una columna en la factura.
   const isEventCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !!invoice.event_id;
-  const isBloqueado = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash;
+  // Factura de SPA (siempre un único pago real, por diseño de link-invoice)
+  // — mismo alcance acotado (ver editSpaInvoiceCashMethod).
+  const isSpaCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash && !!invoice.spa_account_id;
+  const isBloqueado = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash && !isSpaCash;
 
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
@@ -2993,6 +2996,7 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
   const [reservaMethod, setReservaMethod] = useState("efectivo");
   const [restaurantMethod, setRestaurantMethod] = useState("efectivo");
   const [eventMethod, setEventMethod] = useState("efectivo");
+  const [spaMethod, setSpaMethod] = useState("efectivo");
   const [paymentRows, setPaymentRows] = useState<{ id: number; method: string; amount: string }[]>([{ id: 1, method: "efectivo", amount: "" }]);
 
   useEffect(() => {
@@ -3006,6 +3010,7 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
     setReservaMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
     setRestaurantMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
     setEventMethod(invoice.event_payment_method || (invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo"));
+    setSpaMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
     const detalle = Array.isArray(invoice.cash_forma_pago_detalle) ? invoice.cash_forma_pago_detalle : null;
     setPaymentRows(detalle && detalle.length
       ? detalle.map((row: { method: string; amount: number }, i: number) => ({ id: i + 1, method: row.method, amount: String(row.amount) }))
@@ -3148,6 +3153,27 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
                 disabled={mutation.isPending}
                 onClick={() => mutation.mutate({ cashFormaPago: eventMethod })}
                 data-testid="btn-guardar-edicion-fp-event"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isSpaCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Factura de SPA cobrada con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={spaMethod} onValueChange={setSpaMethod}>
+                <SelectTrigger data-testid="select-edit-spa-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: spaMethod })}
+                data-testid="btn-guardar-edicion-fp-spa"
               >
                 Guardar
               </Button>

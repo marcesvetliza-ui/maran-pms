@@ -11,6 +11,7 @@ import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSal
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
 import { editRestaurantInvoiceCashMethod } from "./restaurantInvoicePaymentEdit";
 import { editEventInvoiceCashMethod } from "./eventInvoicePaymentEdit";
+import { editSpaInvoiceCashMethod } from "./spaInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -2200,7 +2201,10 @@ export function registerBillingRoutes(app: Express) {
   //    Caja: ídem, revirtiendo y rehaciendo también el event_payment y el
   //    pago del folio del evento (editEventInvoiceCashMethod). El vínculo
   //    acá es al revés (events.invoice_id, no una columna en sales_invoices).
-  //  · Spa/Grupo/"Evento por Mesa": todavía afuera de este alcance.
+  //  · Factura de SPA (siempre un único pago real, por diseño de
+  //    link-invoice): ídem, revirtiendo y rehaciendo también el spa_payment
+  //    y el pago del folio de la cuenta SPA (editSpaInvoiceCashMethod).
+  //  · Grupo/"Evento por Mesa": todavía afuera de este alcance.
   //  · Comprobante "registrado" (cargado a mano, sin CAE real): solo forma
   //    de pago, puramente informativa (nunca generó movimientos reales).
   //  · Voucher no fiscal: solo los datos del cliente.
@@ -2281,6 +2285,15 @@ export function registerBillingRoutes(app: Express) {
         return res.json(updated);
       }
 
+      if (invoice.spa_account_id) {
+        const { cashFormaPago } = req.body;
+        if (!String(cashFormaPago || "").trim()) return res.status(400).json({ error: "Falta la forma de pago" });
+        const updated = await editSpaInvoiceCashMethod(id, String(cashFormaPago), operator);
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante de SPA ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPago } });
+        return res.json(updated);
+      }
+
       const linkedEvent = await db.execute(sql`SELECT id FROM events WHERE invoice_id = ${id} LIMIT 1`);
       if (linkedEvent.rows.length > 0) {
         const { cashFormaPago } = req.body;
@@ -2291,7 +2304,7 @@ export function registerBillingRoutes(app: Express) {
         return res.json(updated);
       }
 
-      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva, pedido de Restaurante o Evento — todavía no se puede editar la forma de pago desde acá." });
+      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva, pedido de Restaurante, cuenta de SPA o Evento — todavía no se puede editar la forma de pago desde acá." });
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (Number(status) >= 400) return res.status(status).json({ error: e.message });
