@@ -413,10 +413,20 @@ export default function EmitirComprobantePage() {
 // ── Notas de Crédito/Débito: buscar la factura origen antes de emitir ──────────
 // Mismo criterio que emitir-comprobante-button.tsx: solo facturas activas
 // (no anuladas) de los tipos que ARCA acepta como comprobante original.
-function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: string; onClose: () => void }) {
+// Una NC/ND siempre queda con la misma letra que la factura elegida (lo
+// decide el servidor a partir de original.tipo_comprobante, ver
+// server/billing/routes.ts) — así que el buscador tiene que ofrecer solo
+// facturas de esa letra desde el vamos. Antes traía todas mezcladas y, si
+// elegías una de otra letra, el comprobante emitido cambiaba de tipo sin
+// avisar (p. ej. armar "Nota de Crédito A" y terminar emitiendo una NC B).
+const LETRA_A_TIPO_FACTURA: Record<string, string> = { A: "FA", B: "FB", M: "FM", MB: "FMB" };
+
+export function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: string; onClose: () => void }) {
   const [search, setSearch] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
   const esNotaCredito = tipo.startsWith("NC");
+  const letra = tipo.replace(/^(NC|ND)/, "");
+  const tipoFacturaEsperado = LETRA_A_TIPO_FACTURA[letra];
 
   const { data: invoices = [] } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", { area, cliente: search }],
@@ -424,9 +434,17 @@ function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: 
       fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${search ? `&cliente=${encodeURIComponent(search)}` : ""}`, { credentials: "include" }).then(r => r.json()),
   });
 
-  const candidatos = (invoices || []).filter((i: any) =>
-    i.estado !== "anulada" && ["FA", "FB", "FT", "FM", "FMB"].includes(i.tipo_comprobante)
-  );
+  const candidatos = (invoices || [])
+    .filter((i: any) => i.estado !== "anulada" && i.tipo_comprobante === tipoFacturaEsperado)
+    .map((i: any) => ({
+      ...i,
+      // Lo que todavía se puede acreditar/debitar de esta factura, no su
+      // importe original — antes la lista mostraba siempre el total, aunque
+      // ya se le hubiera emitido una NC parcial (ver NotaDebitoCentroDialog,
+      // que ya calculaba esto mismo más abajo, pero no acá).
+      saldoPendiente: Math.max(0, (parseFloat(i.monto_total) || 0) - (parseFloat(i.monto_acreditado || "0") || 0)),
+    }))
+    .filter((i: any) => i.saldoPendiente > 0.009);
 
   if (selectedInvoiceId !== null) {
     return esNotaCredito
@@ -447,24 +465,30 @@ function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId; tipo: 
       <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-md border p-1.5">
         {candidatos.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-6">
-            {search ? "Sin comprobantes encontrados" : "Escribí para buscar la factura original"}
+            {search ? `Sin comprobantes ${tipoFacturaEsperado || ""} con saldo pendiente` : "Escribí para buscar la factura original"}
           </p>
         )}
-        {candidatos.map((inv: any) => (
-          <button
-            key={inv.id}
-            type="button"
-            className="w-full text-left border rounded-md p-2.5 text-sm hover:bg-muted/50"
-            onClick={() => setSelectedInvoiceId(inv.id)}
-            data-testid={`row-invoice-nc-nd-${inv.id}`}
-          >
-            <div className="flex justify-between">
-              <span>{inv.tipo_comprobante} {String(inv.punto_venta).padStart(4, "0")}-{String(inv.numero).padStart(8, "0")}</span>
-              <span className="font-medium">${fmtMoney(inv.monto_total)}</span>
-            </div>
-            <div className="text-xs text-muted-foreground">{inv.cliente_razon_social}</div>
-          </button>
-        ))}
+        {candidatos.map((inv: any) => {
+          const esParcial = inv.saldoPendiente < (parseFloat(inv.monto_total) || 0) - 0.009;
+          return (
+            <button
+              key={inv.id}
+              type="button"
+              className="w-full text-left border rounded-md p-2.5 text-sm hover:bg-muted/50"
+              onClick={() => setSelectedInvoiceId(inv.id)}
+              data-testid={`row-invoice-nc-nd-${inv.id}`}
+            >
+              <div className="flex justify-between">
+                <span>{inv.tipo_comprobante} {String(inv.punto_venta).padStart(4, "0")}-{String(inv.numero).padStart(8, "0")}</span>
+                <span className="font-medium">${fmtMoney(inv.saldoPendiente)}</span>
+              </div>
+              <div className="text-xs text-muted-foreground flex justify-between">
+                <span>{inv.cliente_razon_social}</span>
+                {esParcial && <span data-testid={`saldo-parcial-${inv.id}`}>Saldo pendiente (total ${fmtMoney(inv.monto_total)})</span>}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
