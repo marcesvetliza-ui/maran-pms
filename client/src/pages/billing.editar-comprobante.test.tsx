@@ -52,6 +52,15 @@ const reservationCashInvoice = {
   cash_forma_pago: "efectivo", cash_forma_pago_detalle: [{ method: "efectivo", amount: 1000 }],
 };
 
+const restaurantCashInvoice = {
+  id: 15, tipo_comprobante: "FB", punto_venta: 15, numero: 30,
+  cliente_razon_social: "Consumidor Final", cliente_condicion_iva: "Consumidor Final",
+  monto_total: "500.00", estado: "emitida",
+  center_settlement_area: null, center_settlement_status: null,
+  restaurant_order_id: "order-1",
+  cash_forma_pago: "efectivo", cash_forma_pago_detalle: [{ method: "efectivo", amount: 500 }],
+};
+
 const registradaInvoice = {
   id: 12, tipo_comprobante: "FT", punto_venta: 20, numero: 5,
   cliente_razon_social: "Cliente Registrado", cliente_condicion_iva: "Consumidor Final",
@@ -138,6 +147,31 @@ describe("EditarComprobanteDialog — factura de reserva cobrada en Caja", () =>
     renderDialog(reservationCashInvoice);
 
     await user.click(await screen.findByTestId("select-edit-reserva-fp"));
+    expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
+  });
+});
+
+describe("EditarComprobanteDialog — pedido de Restaurante cobrado en Caja", () => {
+  it("permite corregir entre medios reales de Caja, precargada con el actual", async () => {
+    const user = userEvent.setup();
+    renderDialog(restaurantCashInvoice);
+
+    const select = await screen.findByTestId("select-edit-restaurant-fp");
+    expect(select).toHaveTextContent("Efectivo");
+    await user.click(select);
+    await user.click(screen.getByRole("option", { name: "Transferencia" }));
+    await user.click(screen.getByTestId("btn-guardar-edicion-fp-restaurant"));
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", "/api/billing/invoices/15", {
+      cashFormaPago: "transferencia",
+    }));
+  });
+
+  it("no ofrece Cuenta Corriente como opción", async () => {
+    const user = userEvent.setup();
+    renderDialog(restaurantCashInvoice);
+
+    await user.click(await screen.findByTestId("select-edit-restaurant-fp"));
     expect(screen.queryByRole("option", { name: "Cuenta Corriente" })).not.toBeInTheDocument();
   });
 });

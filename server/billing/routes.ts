@@ -9,6 +9,7 @@ import { buildComprobanteAsociado, calcularMontos, emitirFactura, NON_FISCAL_TIP
 import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
+import { editRestaurantInvoiceCashMethod } from "./restaurantInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
@@ -2177,13 +2178,17 @@ export function registerBillingRoutes(app: Express) {
   // Edición post-emisión de un comprobante de venta. Alcance deliberadamente
   // acotado a lo que se puede corregir sin arriesgar la integridad contable
   // (investigado antes de escribir esto: emitirFactura() nunca toca Caja/CC
-  // por sí sola, cada circuito de venta lo hace distinto — ver
-  // editCenterSaleInvoicePaymentMethod en centerSaleSettlement.ts):
+  // por sí sola, cada circuito de venta lo hace distinto):
   //  · Comprobante ARCA cobrado desde el Centro de Comprobantes: solo forma
-  //    de pago, revirtiendo y rehaciendo los movimientos reales de Caja/CC.
-  //    Es el único circuito donde cash_forma_pago_detalle es la fuente real
-  //    de esos movimientos — en reserva/restaurant/eventos/spa/grupo el
-  //    cobro ya pasó por otro sistema (queda afuera de este alcance).
+  //    de pago, revirtiendo y rehaciendo los movimientos reales de Caja/CC
+  //    (editCenterSaleInvoicePaymentMethod en centerSaleSettlement.ts).
+  //  · Factura de reserva cobrada con UN medio real de Caja: solo forma de
+  //    pago entre medios reales, sin pasar a Cuenta Corriente todavía
+  //    (editReservationInvoiceCashMethod).
+  //  · Pedido de Restaurante cobrado con UN medio real de Caja: ídem,
+  //    revirtiendo y rehaciendo también el pago del folio del pedido
+  //    (editRestaurantInvoiceCashMethod).
+  //  · Eventos/Spa/Grupo: todavía afuera de este alcance.
   //  · Comprobante "registrado" (cargado a mano, sin CAE real): solo forma
   //    de pago, puramente informativa (nunca generó movimientos reales).
   //  · Voucher no fiscal: solo los datos del cliente.
@@ -2255,7 +2260,16 @@ export function registerBillingRoutes(app: Express) {
         return res.json(updated);
       }
 
-      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva — todavía no se puede editar la forma de pago desde acá." });
+      if (invoice.restaurant_order_id) {
+        const { cashFormaPago } = req.body;
+        if (!String(cashFormaPago || "").trim()) return res.status(400).json({ error: "Falta la forma de pago" });
+        const updated = await editRestaurantInvoiceCashMethod(id, String(cashFormaPago), operator);
+        await audit(req, "update", "sales_invoices", `Forma de pago editada — comprobante de restaurant ${tipo} ${id}`,
+          { entityType: "sales_invoice", entityId: String(id), details: { cashFormaPago } });
+        return res.json(updated);
+      }
+
+      return res.status(400).json({ error: "Este comprobante no se cobró desde el Centro de Comprobantes ni está vinculado a una reserva o pedido de Restaurante — todavía no se puede editar la forma de pago desde acá." });
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (Number(status) >= 400) return res.status(status).json({ error: e.message });
