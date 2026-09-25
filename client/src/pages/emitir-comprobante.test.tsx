@@ -207,6 +207,26 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(within(embedded).getByTestId("select-to-warehouse")).toBeInTheDocument();
   });
 
+  it("Inventario > Movimiento Interno ofrece Remito y reutiliza el InvoiceDialog de Compras, no InternalMovementForm", async () => {
+    mockRole = "resp_deposito";
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByTestId("select-area"));
+    await user.click(screen.getByRole("option", { name: "Inventario" }));
+    await user.click(screen.getByTestId("select-operacion"));
+    await user.click(screen.getByRole("option", { name: "Movimiento Interno" }));
+    await user.click(screen.getByTestId("select-tipo"));
+    expect(screen.getByRole("option", { name: "Remito" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Remito" }));
+
+    expect(screen.queryByTestId("internal-movement-embedded")).not.toBeInTheDocument();
+    const form = screen.getByTestId("invoice-form-embedded");
+    expect(within(form).getByTestId("select-tipo-comprobante")).toHaveTextContent("Remito");
+    expect(within(form).getByTestId("select-tipo-comprobante")).toBeDisabled();
+    expect(within(form).getByTestId("row-inv-item-0")).toBeInTheDocument();
+  });
+
   it("un rol sin ningún área habilitada ve el mensaje de acceso, no el selector", () => {
     mockRole = "housekeeping";
     renderPage();

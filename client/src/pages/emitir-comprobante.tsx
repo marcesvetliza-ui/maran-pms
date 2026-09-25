@@ -197,6 +197,10 @@ const TIPOS_MOVIMIENTO: { value: string; label: string }[] = [
   { value: "evento", label: "Evento" },
   { value: "desperdicio", label: "Desperdicio" },
   { value: "transferencia", label: "Transferencia entre depósitos" },
+  // Un Remito suma mercadería al inventario sin pasar por Compras — reusa el
+  // mismo InvoiceDialog (unifiedLayout) que ya usa Compras para Remito, no un
+  // formulario nuevo.
+  { value: "REMITO", label: "Remito" },
   { value: "otro", label: "Otro" },
 ];
 
@@ -423,7 +427,19 @@ export default function EmitirComprobantePage() {
                 />
               )}
 
-              {operacion === "movimiento" && tipo !== "transferencia" && (
+              {operacion === "movimiento" && tipo === "REMITO" && (
+                <InvoiceDialog
+                  embedded
+                  unifiedLayout
+                  open
+                  onClose={resetSeleccion}
+                  initialTipo={tipo}
+                  suppliers={suppliers}
+                  accounts={accounts}
+                />
+              )}
+
+              {operacion === "movimiento" && tipo !== "transferencia" && tipo !== "REMITO" && (
                 <InternalMovementForm
                   embedded
                   open
