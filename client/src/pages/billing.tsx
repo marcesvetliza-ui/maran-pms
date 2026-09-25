@@ -78,7 +78,7 @@ function getReconciliationError(invoice: any): string | null {
   return invoice?.reconciliation_error ?? invoice?.reconciliationError ?? null;
 }
 
-const CONDICION_IVA_OPTIONS = [
+export const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
 ];
 
@@ -89,7 +89,7 @@ const CONDICION_IVA_OPTIONS = [
 // and client-side in group-detail.tsx's applyStrictComprobanteForCondicion.
 // Kept in sync here too since this dialog is the single point of invoice
 // emission for reservations, restaurant, spa and events, not just groups.
-function isRiOrExento(condicionIva: string): boolean {
+export function isRiOrExento(condicionIva: string): boolean {
   const normalized = String(condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   return normalized === "responsable_inscripto" || normalized === "exento";
 }
@@ -147,7 +147,7 @@ const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedido
 // cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
 // and the Centro de Comprobantes) uses "events" while pos_configs.area (see
 // pos-configs.tsx) uses the Spanish "eventos" — everything else matches as-is.
-const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
+export const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
@@ -494,6 +494,8 @@ export default function BillingPage() {
                                   </div>
                                 ) : f.estado === "emitida" || f.estado === "parcial" ? (
                                   <Badge variant="outline" className="text-xs text-green-700 border-green-400 bg-green-50 dark:bg-green-950/20"><CheckCircle2 className="w-3 h-3 mr-1" />Emitida</Badge>
+                                ) : f.estado === "registrada" ? (
+                                  <Badge variant="outline" className="text-xs">Registrada (emitida afuera)</Badge>
                                 ) : (
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>
                                 )}

@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
-import { salesInvoices, invoiceCounters, folioMovements, charges, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
+import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
@@ -2103,6 +2103,72 @@ export function registerBillingRoutes(app: Express) {
       if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
         return res.status(status || 400).json({ error: e.message });
       }
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Registra un comprobante que ya se emitió fuera del sistema (p. ej. una
+  // Factura T sin reserva asociada) — no llama a ARCA, no pide CAE, y solo
+  // puede cargarse contra un Punto de Venta manual (pos_configs.tipo =
+  // "manual"). Es simplemente copiar a mano lo que ya dice ese comprobante,
+  // para que quede en los informes; nada del flujo de emisión real cambia.
+  app.post("/api/billing/invoices/registrar", requireAuth, async (req, res) => {
+    try {
+      const { tipoComprobante, puntoVenta, numero, fechaEmision, cliente, items } = req.body;
+      if (!tipoComprobante || !puntoVenta || !String(numero || "").trim() || !fechaEmision
+        || !cliente?.razonSocial?.trim() || !cliente?.condicionIva || !items?.length) {
+        return res.status(400).json({ error: "Faltan datos del comprobante" });
+      }
+      const numeroStr = String(numero).trim();
+      if (!/^\d+$/.test(numeroStr)) {
+        return res.status(400).json({ error: "El número de comprobante debe ser numérico" });
+      }
+      const numeroInt = parseInt(numeroStr, 10);
+      const puntoVentaInt = Number(puntoVenta);
+
+      const [pv] = await db.select().from(posConfigs)
+        .where(and(eq(posConfigs.numero, puntoVentaInt), eq(posConfigs.tipo, "manual"), eq(posConfigs.activo, true)));
+      if (!pv) {
+        return res.status(400).json({ error: "El Punto de Venta indicado no es un Punto de Venta manual activo" });
+      }
+
+      const dup = await db.execute(sql`
+        SELECT id FROM sales_invoices
+        WHERE tipo_comprobante = ${tipoComprobante} AND punto_venta = ${puntoVentaInt} AND numero = ${numeroInt}
+        LIMIT 1
+      `);
+      if (dup.rows.length > 0) {
+        return res.status(400).json({ error: "Ya hay un comprobante registrado con ese tipo, Punto de Venta y número" });
+      }
+
+      const montos = calcularMontos(items, tipoComprobante);
+      const user = (req as any).user;
+      const [created] = await db.insert(salesInvoices).values({
+        tipoComprobante,
+        puntoVenta: puntoVentaInt,
+        numero: numeroInt,
+        fechaEmision,
+        clienteRazonSocial: String(cliente.razonSocial).trim(),
+        clienteCuit: cliente.cuit ? String(cliente.cuit).trim() : null,
+        clienteDni: cliente.dni ? String(cliente.dni).trim() : null,
+        clienteCondicionIva: cliente.condicionIva,
+        montoNeto: montos.montoNeto.toFixed(2),
+        montoIva21: montos.montoIva21.toFixed(2),
+        montoIva105: montos.montoIva105.toFixed(2),
+        montoExento: montos.montoExento.toFixed(2),
+        montoNoGravado: montos.montoNoGravado.toFixed(2),
+        montoTotal: montos.montoTotal.toFixed(2),
+        cae: null,
+        caeFechaVto: null,
+        modoFicticio: false,
+        estado: "registrada",
+        items,
+        operador: user?.fullName || user?.username,
+        observaciones: "Registrado — comprobante emitido fuera del sistema",
+      }).returning();
+
+      res.status(201).json(created);
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });

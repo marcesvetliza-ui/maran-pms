@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Receipt, ArrowLeft, Plus, Trash2 } from "lucide-react";
-import { EmitirFacturaDialog, NotaCreditoDialog } from "@/pages/billing";
+import { EmitirFacturaDialog, NotaCreditoDialog, CASH_AREA_TO_PV_AREA, CONDICION_IVA_OPTIONS, isRiOrExento } from "@/pages/billing";
 import { InvoiceDialog, PurchaseInventoryPicker, type PurchaseInventoryOption, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 import { PrefacturaDialog, isArgentineNationality } from "@/components/PrefacturaDialog";
@@ -241,6 +241,9 @@ export default function EmitirComprobantePage() {
   const [area, setArea] = useState<AreaId | "">(areasPermitidas.length === 1 ? areasPermitidas[0].id : "");
   const [operacion, setOperacion] = useState<Operacion | "">("");
   const [tipo, setTipo] = useState<string>("");
+  // Registrar: cargar un comprobante que ya se emitió afuera del sistema (no
+  // llama a ARCA), a diferencia de emitirlo ahora — ver RegistrarComprobanteVenta.
+  const [modoRegistro, setModoRegistro] = useState(false);
 
   const operacionesDisponibles = useMemo(
     () => OPERACIONES.filter((op) => !area || op.areas.includes(area as AreaId)),
@@ -258,6 +261,7 @@ export default function EmitirComprobantePage() {
   const resetSeleccion = () => {
     setOperacion("");
     setTipo("");
+    setModoRegistro(false);
   };
 
   if (areasPermitidas.length === 0) {
@@ -348,7 +352,32 @@ export default function EmitirComprobantePage() {
                 <Badge>{tipos.find((t) => t.value === tipo)?.label}</Badge>
               </div>
 
-              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && tipo !== "FT" && (
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && (
+                <div className="flex rounded-md border overflow-hidden text-sm w-fit">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 font-medium transition-colors ${!modoRegistro ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                    onClick={() => setModoRegistro(false)}
+                    data-testid="btn-modo-emitir"
+                  >
+                    Emitir ahora
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 font-medium transition-colors ${modoRegistro ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                    onClick={() => setModoRegistro(true)}
+                    data-testid="btn-modo-registrar"
+                  >
+                    Registrar (ya emitido afuera)
+                  </button>
+                </div>
+              )}
+
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && modoRegistro && (
+                <RegistrarComprobanteVenta area={area} tipo={tipo} onClose={resetSeleccion} />
+              )}
+
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && !modoRegistro && tipo !== "FT" && (
                 <EmitirFacturaDialog
                   embedded
                   open
@@ -366,7 +395,7 @@ export default function EmitirComprobantePage() {
                 <NotaCreditoDebitoSearch area={area as AreaId} tipo={tipo} onClose={resetSeleccion} />
               )}
 
-              {operacion === "venta" && tipo === "FT" && (
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && !modoRegistro && tipo === "FT" && (
                 <FacturaTSearch onClose={resetSeleccion} />
               )}
 
@@ -653,6 +682,130 @@ function FacturaTSearch({ onClose }: { onClose: () => void }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Registrar un comprobante de venta emitido fuera del sistema ────────────────
+// No pasa por ARCA ni por ningún flujo de emisión existente: es solo copiar a
+// mano lo que ya dice un comprobante hecho afuera (p.ej. una FT sin reserva
+// asociada), usando el Punto de Venta manual del área. No genera CAE ni queda
+// disponible para NC/ND por ahora — eso es un paso aparte si hace falta.
+type VentaRegistroRow = { descripcion: string; importe: string; alicuotaIva: "21" | "10.5" | "exento" | "no_gravado" };
+const ventaRegistroRow = (): VentaRegistroRow => ({ descripcion: "", importe: "", alicuotaIva: "21" });
+
+// FT (turismo) no discrimina IVA (ver calcularMontos en invoiceService.ts) —
+// todo el importe se considera no gravado, así que la alícuota no aplica.
+const TIPOS_SIN_DISCRIMINAR_IVA = new Set(["FT"]);
+
+function RegistrarComprobanteVenta({ area, tipo, onClose }: { area: AreaId | ""; tipo: string; onClose: () => void }) {
+  const { toast } = useToast();
+  const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
+  const pvArea = area ? (CASH_AREA_TO_PV_AREA[area] ?? area) : "";
+  const manualPvs = useMemo(
+    () => posConfigsData.filter((p: any) => p.activo && p.tipo === "manual" && p.area === pvArea),
+    [posConfigsData, pvArea],
+  );
+  const [puntoVentaNumero, setPuntoVentaNumero] = useState("");
+  useEffect(() => {
+    if (manualPvs.length === 1) setPuntoVentaNumero(String(manualPvs[0].numero));
+  }, [manualPvs]);
+
+  const sinDiscriminarIva = TIPOS_SIN_DISCRIMINAR_IVA.has(tipo);
+  const [numero, setNumero] = useState("");
+  const [fecha, setFecha] = useState(getLocalToday());
+  const [razonSocial, setRazonSocial] = useState("");
+  const [cuit, setCuit] = useState("");
+  const [dni, setDni] = useState("");
+  const [condicionIva, setCondicionIva] = useState(tipo === "FB" || tipo === "FMB" ? "Consumidor Final" : "Responsable Inscripto");
+  const [rows, setRows] = useState<VentaRegistroRow[]>([ventaRegistroRow()]);
+  const updateRow = (index: number, change: Partial<VentaRegistroRow>) =>
+    setRows(current => current.map((row, i) => i === index ? { ...row, ...change } : row));
+
+  const totalCents = rows.reduce((sum, row) => sum + Math.round((Number(row.importe) || 0) * 100), 0);
+  const validRows = rows.length > 0 && rows.every(row => row.descripcion.trim() && /^\d+(?:\.\d{1,2})?$/.test(row.importe) && Number(row.importe) > 0);
+  const condicionValida = (tipo !== "FA" && tipo !== "FM") || isRiOrExento(condicionIva);
+  const valid = !!puntoVentaNumero && !!numero.trim() && !!fecha && !!razonSocial.trim() && !!condicionIva &&
+    (sinDiscriminarIva ? razonSocial.trim().length > 0 : true) && condicionValida && validRows && totalCents > 0;
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/billing/invoices/registrar", {
+        tipoComprobante: tipo,
+        puntoVenta: Number(puntoVentaNumero),
+        numero: numero.trim(),
+        fechaEmision: fecha,
+        cliente: { razonSocial: razonSocial.trim(), cuit: cuit.trim() || undefined, dni: dni.trim() || undefined, condicionIva },
+        items: rows.map(row => ({
+          descripcion: row.descripcion.trim(),
+          cantidad: 1,
+          precioUnitario: Number(row.importe),
+          subtotal: Number(row.importe),
+          alicuotaIva: sinDiscriminarIva ? "no_gravado" : row.alicuotaIva,
+        })),
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({ title: "Comprobante registrado" });
+      onClose();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo registrar", description: error.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-4" data-testid="registro-venta">
+      <p className="text-sm text-muted-foreground">Copiá acá los datos de un comprobante que ya se emitió fuera del sistema. No genera CAE ni pasa por ARCA — solo queda registrado para los informes.</p>
+      {!pvArea ? (
+        <p className="text-sm text-destructive">Elegí primero un área.</p>
+      ) : manualPvs.length === 0 ? (
+        <p className="text-sm text-destructive">No hay un Punto de Venta manual activo para esta área. Configurá uno primero en Puntos de Venta.</p>
+      ) : manualPvs.length === 1 ? (
+        <p className="text-sm text-muted-foreground">Punto de Venta: <span className="font-medium text-foreground">{manualPvs[0].nombre} (N° {String(manualPvs[0].numero).padStart(4, "0")})</span></p>
+      ) : (
+        <div>
+          <Label>Punto de Venta</Label>
+          <Select value={puntoVentaNumero} onValueChange={setPuntoVentaNumero}>
+            <SelectTrigger data-testid="select-pv-registro"><SelectValue placeholder="Elegir Punto de Venta manual" /></SelectTrigger>
+            <SelectContent>{manualPvs.map((p: any) => <SelectItem key={p.id} value={String(p.numero)}>{p.nombre} (N° {String(p.numero).padStart(4, "0")})</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div><Label>Número de comprobante</Label><Input value={numero} onChange={e => setNumero(e.target.value)} placeholder="00000123" data-testid="input-numero-registro" /></div>
+        <div><Label>Fecha</Label><Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} data-testid="input-fecha-registro" /></div>
+        <div className="sm:col-span-2"><Label>Razón social / Nombre del cliente</Label><Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} data-testid="input-razon-social-registro" /></div>
+        <div><Label>{tipo === "FT" ? "Pasaporte" : "CUIT"}</Label><Input value={cuit} onChange={e => setCuit(e.target.value)} data-testid="input-cuit-registro" /></div>
+        <div><Label>DNI (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} data-testid="input-dni-registro" /></div>
+        <div className="sm:col-span-2">
+          <Label>Condición IVA</Label>
+          <Select value={condicionIva} onValueChange={setCondicionIva}>
+            <SelectTrigger data-testid="select-condicion-iva-registro"><SelectValue /></SelectTrigger>
+            <SelectContent>{CONDICION_IVA_OPTIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+          </Select>
+          {!condicionValida && <p className="text-sm text-destructive mt-1">Factura A/MiPyme A requiere condición Responsable Inscripto o Exento.</p>}
+        </div>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between"><Label>Ítems</Label><Button type="button" variant="outline" size="sm" onClick={() => setRows(current => [...current, ventaRegistroRow()])}><Plus className="h-4 w-4 mr-1" />Agregar ítem</Button></div>
+        {rows.map((row, index) => (
+          <div key={index} className="rounded-md border p-3 space-y-2" data-testid={`registro-item-${index}`}>
+            <div className="flex items-start gap-2">
+              <div className="flex-1"><Label>Descripción</Label><Input value={row.descripcion} onChange={e => updateRow(index, { descripcion: e.target.value })} data-testid={`input-descripcion-registro-${index}`} /></div>
+              {rows.length > 1 && <Button type="button" variant="ghost" size="icon" aria-label="Quitar ítem" onClick={() => setRows(current => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>}
+            </div>
+            <div className={`grid gap-2 ${sinDiscriminarIva ? "grid-cols-1" : "grid-cols-2"}`}>
+              <div><Label>Importe</Label><Input type="number" min="0" step="0.01" value={row.importe} onChange={e => updateRow(index, { importe: e.target.value })} data-testid={`input-importe-registro-${index}`} /></div>
+              {!sinDiscriminarIva && (
+                <div><Label>Alícuota IVA</Label><Select value={row.alicuotaIva} onValueChange={v => updateRow(index, { alicuotaIva: v as VentaRegistroRow["alicuotaIva"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="21">21%</SelectItem><SelectItem value="10.5">10,5%</SelectItem><SelectItem value="exento">Exento</SelectItem><SelectItem value="no_gravado">No gravado</SelectItem></SelectContent></Select></div>
+              )}
+            </div>
+          </div>
+        ))}
+        <p className="text-right font-semibold" data-testid="total-registro">Total: ${fmtMoney(totalCents / 100)}</p>
+      </div>
+      <Button disabled={!valid || create.isPending} onClick={() => create.mutate()} data-testid="btn-registrar-venta">Registrar comprobante</Button>
     </div>
   );
 }
