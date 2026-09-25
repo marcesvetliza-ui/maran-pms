@@ -268,6 +268,7 @@ const emptyForm = () => ({
   fechaEmision: getLocalToday(),
   periodo: calcPeriodo(getLocalToday()),
   condicionPago: "cuenta_corriente",
+  formaPagoInmediata: "cuenta_corriente",
   alicuotaIva: "21",
   montoNeto: "",
   montoIva21: "",
@@ -502,6 +503,7 @@ export function InvoiceDialog({
         fechaEmision: editingInvoice.fechaEmision || "",
         periodo: editingInvoice.periodo || "",
         condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
+        formaPagoInmediata: "cuenta_corriente",
         alicuotaIva: "21",
         montoNeto: editingInvoice.montoNeto || "",
         montoIva21: editingInvoice.montoIva21 || "",
@@ -727,7 +729,12 @@ export function InvoiceDialog({
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
     // (descuentos exclusivos, artículos sin cargo, etc.).
-    createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
+    createMut.mutate({
+      ...form,
+      supplierId: form.supplierId ? parseInt(form.supplierId) : null,
+      cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
+      formaPago: form.formaPagoInmediata !== "cuenta_corriente" ? form.formaPagoInmediata : null,
+    });
   };
 
   const steps = isEditing
@@ -847,9 +854,27 @@ export function InvoiceDialog({
                   </Select>
                 </div>
                 {isSupplierPayable ? (
-                  <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
-                    El pago se registra desde la cuenta corriente del proveedor.
-                  </div>
+                  isEditing || form.tipoComprobante.startsWith("NC") ? (
+                    <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                      El pago se registra desde la cuenta corriente del proveedor.
+                    </div>
+                  ) : (
+                    <div>
+                      <Label>Forma de Pago</Label>
+                      <Select value={form.formaPagoInmediata} onValueChange={(v) => f("formaPagoInmediata", v)}>
+                        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {form.formaPagoInmediata !== "cuenta_corriente"
+                          ? "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."
+                          : "El pago se registra desde la cuenta corriente del proveedor."}
+                      </p>
+                    </div>
+                  )
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>
@@ -1276,7 +1301,11 @@ export function InvoiceDialog({
                     <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    {isSupplierPayable ? "Pendiente de pago en cuenta corriente" : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
+                    {isSupplierPayable
+                      ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
+                        ? `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`
+                        : "Pendiente de pago en cuenta corriente")
+                      : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
                 </CardContent>
               </Card>
@@ -1323,9 +1352,27 @@ export function InvoiceDialog({
                   </Select>
                 </div>
                 {isSupplierPayable ? (
-                  <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
-                    El pago se registra desde la cuenta corriente del proveedor.
-                  </div>
+                  isEditing || form.tipoComprobante.startsWith("NC") ? (
+                    <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                      El pago se registra desde la cuenta corriente del proveedor.
+                    </div>
+                  ) : (
+                    <div>
+                      <Label>Forma de Pago</Label>
+                      <Select value={form.formaPagoInmediata} onValueChange={(v) => f("formaPagoInmediata", v)}>
+                        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {form.formaPagoInmediata !== "cuenta_corriente"
+                          ? "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."
+                          : "El pago se registra desde la cuenta corriente del proveedor."}
+                      </p>
+                    </div>
+                  )
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>
@@ -1656,7 +1703,11 @@ export function InvoiceDialog({
                     <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    {isSupplierPayable ? "Pendiente de pago en cuenta corriente" : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
+                    {isSupplierPayable
+                      ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
+                        ? `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`
+                        : "Pendiente de pago en cuenta corriente")
+                      : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
                 </CardContent>
               </Card>

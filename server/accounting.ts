@@ -206,11 +206,12 @@ export async function generarAsiento(
 // ─── Asiento de Orden de Pago ─────────────────────────────────────────────────
 
 export async function generarAsientoOP(
-  op: PaymentOrder & { supplier?: { razonSocial?: string } | null }
+  op: PaymentOrder & { supplier?: { razonSocial?: string } | null },
+  executor: AccountingExecutor = db,
 ): Promise<number> {
   const d = new Date(op.fecha);
   const periodo = `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-  const minuta = await nextMinuta(periodo);
+  const minuta = await nextMinuta(periodo, executor);
 
   const totalFact = parseNum(op.totalFacturas);
   const retIibb = parseNum(op.retencionIibb);
@@ -220,15 +221,15 @@ export async function generarAsientoOP(
   const efectivo = parseNum(op.efectivo);
 
   const [acProv, acCaja, acBanco, acRetIibb, acRetGanancias, acRetIva] = await Promise.all([
-    getAccountId("2.1.1.01"),
-    getAccountId("1.1.1.01"),
-    getAccountId("1.1.1.02"),
-    getAccountId("1.1.4.01.08.01"),
-    getAccountId("1.1.4.01.05"),
-    getAccountId("1.1.4.01.04.01"),
+    getAccountId("2.1.1.01", executor),
+    getAccountId("1.1.1.01", executor),
+    getAccountId("1.1.1.02", executor),
+    getAccountId("1.1.4.01.08.01", executor),
+    getAccountId("1.1.4.01.05", executor),
+    getAccountId("1.1.4.01.04.01", executor),
   ]);
 
-  const entryRes = await db.execute(sql`
+  const entryRes = await executor.execute(sql`
     INSERT INTO accounting_entries (numero_minuta, fecha, periodo, concepto, tipo_origen, origen_id, origen_tipo)
     VALUES (${minuta}, ${op.fecha}, ${periodo}, 'Prov. Retenciones', 'orden_pago', ${op.id}, 'payment_order')
     RETURNING id
@@ -239,7 +240,7 @@ export async function generarAsientoOP(
 
   // DEBE: Proveedores a Pagar
   if (acProv && totalFact > 0) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acProv}, ${provNombre}, ${totalFact}, 0)
     `);
@@ -247,13 +248,13 @@ export async function generarAsientoOP(
 
   // HABER: Banco o Caja
   if (depBancario > 0 && acBanco) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${depBancario})
     `);
   }
   if (efectivo > 0 && acCaja) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acCaja}, ${provNombre}, 0, ${efectivo})
     `);
@@ -261,7 +262,7 @@ export async function generarAsientoOP(
   // Si es transferencia y no hay depBancario ni efectivo, usar banco
   if (depBancario === 0 && efectivo === 0 && acBanco) {
     const totalAbonado = parseNum(op.totalAbonado);
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${totalAbonado})
     `);
@@ -269,19 +270,19 @@ export async function generarAsientoOP(
 
   // HABER: Retenciones
   if (retIibb > 0 && acRetIibb) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetIibb}, ${provNombre}, 0, ${retIibb})
     `);
   }
   if (retGanancias > 0 && acRetGanancias) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetGanancias}, ${provNombre}, 0, ${retGanancias})
     `);
   }
   if (retIva > 0 && acRetIva) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetIva}, ${provNombre}, 0, ${retIva})
     `);

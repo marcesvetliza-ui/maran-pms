@@ -78,10 +78,10 @@ describe("InvoiceDialog — unifiedLayout", () => {
     expect(screen.queryByText("1. Encabezado")).not.toBeInTheDocument();
   });
 
-  it("las facturas se pagan desde la cuenta corriente y no ofrecen contado al cargarlas", async () => {
+  it("las facturas ofrecen forma de pago (Cuenta Corriente por defecto) y no ofrecen contado al cargarlas", async () => {
     renderDialog({ unifiedLayout: true });
     expect(screen.getByTestId("select-tipo-comprobante")).toBeInTheDocument();
-    expect(screen.getByTestId("supplier-payment-notice")).toHaveTextContent("cuenta corriente del proveedor");
+    expect(screen.getByTestId("select-forma-pago-inmediata")).toHaveTextContent("Cuenta Corriente");
     expect(screen.queryByTestId("select-condicion-pago")).not.toBeInTheDocument();
     expect(screen.getByText("Pendiente de pago en cuenta corriente")).toBeInTheDocument();
   });

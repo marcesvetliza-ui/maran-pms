@@ -16,8 +16,9 @@ import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shar
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
-import { generarAsiento, generarAsientoOP } from "./accounting";
+import { generarAsiento } from "./accounting";
 import { enterPurchaseInvoiceStock, parsePurchaseStockRows } from "./purchase-invoice-stock";
+import { createPaymentOrder } from "./paymentOrder";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
@@ -3217,6 +3218,29 @@ export async function registerRoutes(
       }
       await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
         `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`);
+
+      // Si se eligió una forma de pago real (no Cuenta Corriente), generar
+      // de una la Orden de Pago de esta factura para que quede pagada al
+      // cargarla, en vez de quedar pendiente hasta una OP manual aparte. Las
+      // NC quedan afuera: no tiene sentido "pagarlas" solas, se aplican
+      // contra otra factura pendiente desde la OP manual.
+      const formaPagoInmediata = ["transferencia", "efectivo", "cheque", "dep_bancario"].includes(body.formaPago)
+        ? body.formaPago : null;
+      if (formaPagoInmediata && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC")) {
+        const { op } = await createPaymentOrder(tx, {
+          supplierId,
+          fecha: body.fechaEmision,
+          facturaIds: [invoice.id],
+          formaPago: formaPagoInmediata,
+          depBancario: formaPagoInmediata === "dep_bancario" ? montoTotal : 0,
+          efectivo: formaPagoInmediata === "efectivo" ? montoTotal : 0,
+          cheques: formaPagoInmediata === "cheque" ? montoTotal : 0,
+          observaciones: "OP automática al cargar el comprobante",
+        }, getArgentinaToday);
+        rawInvoice.estado = "pagado";
+        rawInvoice.orden_pago_id = op.id;
+        rawInvoice.orden_pago_numero = op.numero;
+      }
       return rawInvoice;
       });
       res.status(201).json(rawInvoice);
@@ -3454,108 +3478,12 @@ export async function registerRoutes(
 
   app.post("/api/payment-orders", requireAuth, async (req, res) => {
     try {
-      const { supplierId, fecha, facturaIds, retencionIibb, retencionGanancias,
-        retencionIva, retencionProfLibs, compensacion, formaPago, depBancario,
-        efectivo, cheques, observaciones, alicuotaIibb } = req.body;
-
-      if (!supplierId || !facturaIds?.length) {
-        return res.status(400).json({ error: "Proveedor y facturas son requeridos" });
-      }
-
-      // Verificar facturas — usar IN con valores sanitizados para evitar "malformed array literal"
-      const idsInt = facturaIds.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id));
-      if (idsInt.length === 0) {
-        return res.status(400).json({ error: "IDs de facturas inválidos" });
-      }
-      const idsSQL = sql.raw(idsInt.join(","));
-      const facturasRes = await db.execute(sql`
-        SELECT id, monto_total, monto_neto, tipo_comprobante, estado, supplier_id FROM purchase_invoices
-        WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
-      `);
-      if (facturasRes.rows.length !== idsInt.length) {
-        const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
-        const todosRes = await db.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id IN (${idsSQL})`);
-        const noEncontradas = idsInt.filter((id: number) => !todosRes.rows.find((r: any) => Number(r.id) === id));
-        const noPendientes = todosRes.rows
-          .filter((r: any) => r.estado !== "pendiente" && !idsEncontrados.includes(Number(r.id)))
-          .map((r: any) => `#${r.id} (${r.estado})`);
-        let errorMsg = "No se pudo generar la OP: ";
-        if (noEncontradas.length > 0) errorMsg += `Facturas no encontradas: ${noEncontradas.join(", ")}. `;
-        if (noPendientes.length > 0) errorMsg += `Facturas no pendientes: ${noPendientes.join(", ")}. `;
-        if (noEncontradas.length === 0 && noPendientes.length === 0) errorMsg += `Proveedor no coincide con las facturas seleccionadas (supplierId: ${supplierId}).`;
-        return res.status(400).json({ error: errorMsg });
-      }
-
-      // Calcular totales — las NC (Notas de Crédito) restan del total a abonar
-      const isNC = (r: any) => (r.tipo_comprobante || "").startsWith("NC");
-      const totalFacturas = facturasRes.rows.reduce((s: number, r: any) =>
-        isNC(r) ? s - parseFloat(r.monto_total) : s + parseFloat(r.monto_total), 0);
-      const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) =>
-        isNC(r) ? s : s + parseFloat(r.monto_neto || "0"), 0);
-      const retIibb = parseFloat(retencionIibb || "0");
-      const retGan = parseFloat(retencionGanancias || "0");
-      const retIva = parseFloat(retencionIva || "0");
-      const retProf = parseFloat(retencionProfLibs || "0");
-      const comp = parseFloat(compensacion || "0");
-      const totalAbonado = totalFacturas - retIibb - retGan - retIva - retProf - comp;
-
-      // Número de OP autoincremental
-      const numRes = await db.execute(sql`
-        SELECT COALESCE(MAX(CAST(SPLIT_PART(numero, '-', 2) AS INTEGER)), 0) + 1 AS next FROM payment_orders
-      `);
-      const nextNum = (numRes.rows[0] as any).next as number;
-      const numero = `000-${String(nextNum).padStart(8, "0")}`;
-
-      // Insertar OP
-      const dep = parseFloat(depBancario || "0");
-      const ef = parseFloat(efectivo || "0");
-      const ch = parseFloat(cheques || "0");
-      const opRes = await db.execute(sql`
-        INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones, alicuota_iibb_op)
-        VALUES (${numero}, ${supplierId}, ${fecha || getArgentinaToday()}, ${formaPago||"transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones||null}, ${parseFloat(alicuotaIibb||"0")||null})
-        RETURNING *
-      `);
-      const op = opRes.rows[0] as any;
-
-      // Marcar facturas como pagadas e insertar ítems
-      // Las NC se insertan con importe_cancelado negativo (reducen el total de la OP)
-      for (const fid of idsInt) {
-        const factura = facturasRes.rows.find((r: any) => Number(r.id) === fid) as any;
-        const importeCancelado = isNC(factura)
-          ? -Math.abs(parseFloat(factura.monto_total))
-          : parseFloat(factura.monto_total);
-        await db.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
-        await db.execute(sql`
-          INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
-          VALUES (${op.id}, ${fid}, ${importeCancelado})
-        `);
-      }
-
-      // Generar asiento contable
-      try {
-        const supplier = await db.execute(sql`SELECT razon_social FROM accounting_suppliers WHERE id = ${supplierId}`);
-        const entryId = await generarAsientoOP({ ...op, supplier: supplier.rows[0] as any });
-        await db.execute(sql`UPDATE payment_orders SET asiento_id = ${entryId} WHERE id = ${op.id}`);
-      } catch (ae) { console.error("Error generando asiento OP:", ae); }
-
-      // Insertar retención IIBB si corresponde
-      if (retIibb > 0) {
-        try {
-          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
-          const nroConstancia = (nroRes.rows[0] as any).next;
-          const sup = await db.execute(sql`SELECT cuit FROM accounting_suppliers WHERE id = ${supplierId}`);
-          const cuit = (sup.rows[0] as any)?.cuit || "";
-          await db.execute(sql`
-            INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, importe_base, alicuota, importe_retenido)
-            VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${fecha||getArgentinaToday()}, ${fecha||getArgentinaToday()}, ${nextNum}, ${baseNetosIibb > 0 ? baseNetosIibb : totalFacturas}, ${parseFloat(alicuotaIibb||"0") || 0}, ${retIibb})
-          `);
-        } catch (re) { console.error("Error inserting iibb_retention for OP:", re); }
-      }
-
-      // Retornar OP completa con facturas
-      res.status(201).json({ ...op, facturas: facturasRes.rows, numero });
+      const { op, numero, facturas } = await db.transaction(async (tx) =>
+        createPaymentOrder(tx, req.body, getArgentinaToday)
+      );
+      res.status(201).json({ ...op, facturas, numero });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 

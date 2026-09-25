@@ -3618,6 +3618,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql`
       INSERT INTO accounting_accounts (codigo, nombre, tipo, activo) VALUES
       ('1.1.1.01', 'Caja', 'activo', true),
+      ('1.1.1.02', 'Banco', 'activo', true),
       ('1.1.4.01.04.01', 'Ret. IVA', 'activo', true),
       ('1.1.4.01.05', 'Ret Impuestos a las ganancias', 'activo', true),
       ('1.1.4.01.08.01', 'Ret. Ing Brutos', 'activo', true),
