@@ -48,7 +48,7 @@ export function suggestPurchaseAmountsFromArticles(
   tipoComprobante: string,
 ): { lines: Array<{ neto: string; alicuota: string }>; fields: Record<string, string>; articleTotal: number } {
   const totals = new Map<string, number>();
-  const grossPrice = tipoComprobante === "FACT-B" || tipoComprobante === "FACT-C";
+  const grossPrice = tipoComprobante === "FACT-B" || tipoComprobante === "FACT-C" || tipoComprobante === "RECIBO-C";
   for (const article of articles) {
     const subtotal = roundCurrency(amount(article.quantity) * amount(article.unitPrice));
     const rate = grossPrice ? "0" : article.vatRate === "2.5" ? "25" : article.vatRate || "0";

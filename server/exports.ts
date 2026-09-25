@@ -90,6 +90,11 @@ function tipoInfo(tipo: string) {
     "FACT-A":        { arca: "001", codcom: "1",   label: "PROV FACT -A-" },
     "FACT-B":        { arca: "002", codcom: "2",   label: "PROV FACT -B-" },
     "FACT-C":        { arca: "002", codcom: "2",   label: "PROV FACT -C-" },
+    // Confirmado con ARCA: el Recibo C es un tipo de comprobante propio (no
+    // una factura) pero se trata igual que Factura C a los fines fiscales —
+    // sin discriminar IVA. Mismo bucket arca/codcom que FACT-C acá, ya que
+    // este export ya agrupa las letras de una misma clase de comprobante.
+    "RECIBO-C":      { arca: "002", codcom: "2",   label: "PROV RECIBO -C-" },
     "FACT-M":        { arca: "051", codcom: "2",   label: "PROV FACT -M-" },
     "NC-A":          { arca: "003", codcom: "3",   label: "PROV N.CRED -A-" },
     "NC-B":          { arca: "003", codcom: "3",   label: "PROV N.CRED -B-" },
