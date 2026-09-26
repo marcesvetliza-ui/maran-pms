@@ -112,10 +112,26 @@ function tipoInfo(tipo: string) {
   return m[tipo] || { arca: "001", codcom: "1", label: tipo };
 }
 
+// Código AFIP "Condición IVA del Receptor" (tabla CondicionIVAReceptorId,
+// WSFEv1 RG 4291) usado en los archivos de Libro IVA Digital. La tabla real
+// es 1=Responsable Inscripto, 4=Exento, 5=Consumidor Final, 6=Monotributo,
+// 7=No Categorizado (Extranjero, el que usa Factura T) — la versión anterior
+// tenía Monotributo y Exento invertidos (4↔6), mandaba Consumidor Final al
+// código 6 en vez de 5, y "No Categorizado" no matcheaba nada y caía en el
+// default de Responsable Inscripto. condicion_iva es texto libre con varios
+// formatos reales ("Responsable Inscripto", "responsable_inscripto",
+// "R.Inscrp.", "No Categorizado (Extranjero)") — se normaliza antes de
+// comparar en vez de depender de un formato exacto.
 function ivaCodiva(condIva: string): string {
-  if (condIva?.includes("onotr")) return "4";
-  if (condIva?.includes("xento")) return "5";
-  if (condIva?.includes("o Resp") || condIva?.includes("onsumidor")) return "6";
+  const norm = (condIva || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (norm.includes("categorizado")) return "7";
+  if (norm.includes("monotribut")) return "6";
+  if (norm.includes("exento")) return "4";
+  if (norm.includes("noresponsable") || norm.includes("consumidor")) return "5";
   return "1"; // Responsable Inscripto
 }
 
