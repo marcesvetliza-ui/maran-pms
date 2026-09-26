@@ -4902,8 +4902,11 @@ export class DatabaseStorage implements IStorage {
         sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
       );
     }
-    if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
-    if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
+    // Cancelled orders belong to the shift in which they were cancelled,
+    // not necessarily the shift in which they were opened.
+    const periodTimestamp = status === "cancelled" ? restaurantOrders.closedAt : restaurantOrders.openedAt;
+    if (from) conditions.push(gte(periodTimestamp, new Date(from)));
+    if (to) conditions.push(lte(periodTimestamp, new Date(to)));
 
     let orderList: RestaurantOrder[];
     if (conditions.length > 0) {
@@ -8214,24 +8217,19 @@ export class DatabaseStorage implements IStorage {
 
   async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
     const conditions: any[] = [];
-    if (area) conditions.push(eq(cashClosingSummaries.area, area));
-    if (from) conditions.push(gte(cashClosingSummaries.closedAt, new Date(from)));
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setDate(toDate.getDate() + 1);
-      conditions.push(lt(cashClosingSummaries.closedAt, toDate));
-    }
+    if (area) conditions.push(eq(cashShifts.area, area));
+    // The filter and the primary date shown in Historial both refer to
+    // the closing day in Argentina, even when the shift opened before midnight.
+    const closingDate = sql`(${cashClosingSummaries.closedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`;
+    if (from) conditions.push(sql`${closingDate} >= ${from}::date`);
+    if (to) conditions.push(sql`${closingDate} <= ${to}::date`);
 
-    const summaries = await db.select().from(cashClosingSummaries)
+    const rows = await db.select({ summary: cashClosingSummaries, shift: cashShifts })
+      .from(cashClosingSummaries)
+      .innerJoin(cashShifts, eq(cashShifts.id, cashClosingSummaries.shiftId))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(cashClosingSummaries.closedAt));
-
-    const results = [];
-    for (const s of summaries) {
-      const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, s.shiftId));
-      results.push({ ...s, shift });
-    }
-    return results;
+    return rows.map(({ summary, shift }) => ({ ...summary, shift }));
   }
   async getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente?: number })[]> {
     const rows = await db.select()
