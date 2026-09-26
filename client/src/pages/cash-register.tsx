@@ -201,6 +201,7 @@ const AREA_LABEL_MAP: Record<string, string> = {
   events: "Eventos",
 };
 const MANUAL_RECEIPT_LABELS: Record<string, string> = {
+  voucher: "Voucher Justo",
   inicio_caja: "Inicio de Caja",
   retiro_efectivo: "Retiro de Efectivo",
   ingreso_efectivo: "Ingreso de Efectivo",
@@ -254,7 +255,7 @@ function formatDateTime(dateStr: string): string {
 function formatInvoiceReference(movement: CashMovement): string | null {
   if (movement.invoicePointOfSale == null || movement.invoiceNumber == null) return null;
   const number = `${String(movement.invoicePointOfSale).padStart(4, "0")}-${String(movement.invoiceNumber).padStart(8, "0")}`;
-  return movement.invoiceType ? `${movement.invoiceType} ${number}` : number;
+  return movement.invoiceType ? `${receiptTypeLabel(movement.invoiceType)} ${number}` : number;
 }
 
 function formatRestaurantInvoice(invoice: NonNullable<CashMovement["restaurantInvoices"]>[number]): string {
@@ -264,7 +265,7 @@ function formatRestaurantInvoice(invoice: NonNullable<CashMovement["restaurantIn
     factura_a: "Factura A", factura_b: "Factura B", factura_c: "Factura C",
   };
   const number = `${String(invoice.pointOfSale).padStart(4, "0")}-${String(invoice.number).padStart(8, "0")}`;
-  return `${typeLabels[invoice.type] || invoice.type} ${number}`;
+  return `${typeLabels[invoice.type] || receiptTypeLabel(invoice.type)} ${number}`;
 }
 
 const CASH_RECEIPT_CODES: Record<string, string> = {
@@ -272,8 +273,11 @@ const CASH_RECEIPT_CODES: Record<string, string> = {
   factura_b: "FB",
   factura_c: "FC",
   ticket: "TK",
+  voucher: "VJ",
   voucher_justo: "VJ",
   voucher_pedidos_ya: "VPY",
+  voucher_room_service: "RS",
+  voucher_consumo_interno: "CI",
   cierre_habitacion: "VH",
   cierre_spa: "VS",
   nota_credito: "NC",
@@ -286,11 +290,11 @@ function cashReceiptTypes(movement: CashMovement): Array<{ code: string; label: 
   if (movement.sourceType === "restaurant_order" && movement.restaurantInvoices?.length) {
     return [...new Map(movement.restaurantInvoices.map((invoice) => [
       invoice.type,
-      { code: invoice.type, label: formatRestaurantInvoice(invoice) },
+      { code: CASH_RECEIPT_CODES[invoice.type] || invoice.type, label: formatRestaurantInvoice(invoice) },
     ])).values()];
   }
   if (movement.invoiceType) {
-    return [{ code: movement.invoiceType, label: formatInvoiceReference(movement) || movement.invoiceType }];
+    return [{ code: CASH_RECEIPT_CODES[movement.invoiceType] || movement.invoiceType, label: formatInvoiceReference(movement) || receiptTypeLabel(movement.invoiceType) }];
   }
   if (movement.receiptType && movement.receiptType !== "none") {
     return [{
@@ -1118,7 +1122,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                                 <div><span className="font-medium text-foreground">Categoría:</span> {expenseCategoryLabels[m.expenseCategory] || m.expenseCategory}</div>
                               )}
                               {m.receiptType && (
-                                <div><span className="font-medium text-foreground">Comprobante:</span> {MANUAL_RECEIPT_LABELS[m.receiptType] || m.receiptType}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {MANUAL_RECEIPT_LABELS[m.receiptType] || receiptTypeLabel(m.receiptType)}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
                               )}
                               {m.motivoAnulacion && (
                                 <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {m.motivoAnulacion}</div>
@@ -2101,7 +2105,7 @@ function HistorialTab() {
                           ) : (
                             <div className="font-medium">
                               {formatInvoiceReference(m) || (m.receiptType
-                                ? `${MANUAL_RECEIPT_LABELS[m.receiptType] || m.receiptType}${m.receiptNumber ? ` · ${m.receiptNumber}` : ""}`
+                                ? `${MANUAL_RECEIPT_LABELS[m.receiptType] || receiptTypeLabel(m.receiptType)}${m.receiptNumber ? ` · ${m.receiptNumber}` : ""}`
                                 : m.sourceType === "group_payment" ? formatAdvanceReference(m) : "Sin comprobante vinculado")}
                             </div>
                           )}

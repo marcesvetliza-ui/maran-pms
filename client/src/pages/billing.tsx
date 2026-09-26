@@ -134,7 +134,9 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   NDC: { nombre: "Nota Déb. C",  color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
   ticket: { nombre: "Ticket", color: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300" },
   voucher_justo: { nombre: "Voucher Justo", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
-  voucher_pedidos_ya: { nombre: "Voucher PedidosYa", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+  voucher_pedidos_ya: { nombre: "Voucher Pedidos Ya", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+  voucher_room_service: { nombre: "Room Service", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  voucher_consumo_interno: { nombre: "Consumo Interno", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   cierre_habitacion: { nombre: "Voucher Habitaciones", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
   cierre_spa: { nombre: "Voucher SPA", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
   cierre_spa_agustin: { nombre: "Voucher SPA — Agustín I", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
@@ -142,7 +144,7 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
 };
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
-const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
+const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
 
 // cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
 // and the Centro de Comprobantes) uses "events" while pos_configs.area (see
@@ -151,7 +153,9 @@ export const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" 
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
-  voucher_pedidos_ya: "Voucher PedidosYa — Comprobante interno",
+  voucher_pedidos_ya: "Voucher Pedidos Ya — Comprobante interno",
+  voucher_room_service: "Room Service — Comprobante interno",
+  voucher_consumo_interno: "Consumo Interno — Comprobante interno",
   cierre_habitacion: "Voucher Habitaciones — Comprobante interno",
   cierre_spa: "Voucher SPA — Comprobante interno",
   cierre_spa_agustin: "Voucher SPA — Agustín I — Comprobante interno",
