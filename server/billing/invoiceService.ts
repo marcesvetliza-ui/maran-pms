@@ -25,11 +25,25 @@ export interface InvoiceItem {
   giftBeneficiaryName?: string;
 }
 
-export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa" | "cierre_spa_agustin" | "cierre_spa_cortesia";
+export type NonFiscalTipo =
+  | "ticket"
+  | "voucher_justo"
+  | "voucher_pedidos_ya"
+  | "voucher_room_service"
+  | "voucher_consumo_interno"
+  | "cierre_habitacion"
+  | "cierre_spa"
+  | "cierre_spa_agustin"
+  | "cierre_spa_cortesia";
 
 export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
-  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia",
+  "ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno",
+  "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia",
 ];
+
+export function isNonFiscalTipo(tipo: string): tipo is NonFiscalTipo {
+  return NON_FISCAL_TIPOS.includes(tipo as NonFiscalTipo);
+}
 
 export interface NewInvoiceData {
   tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "FMB" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NCMB" | "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC" | NonFiscalTipo;
@@ -272,7 +286,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   }
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
-  const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
+  const esNoFiscal = isNonFiscalTipo(data.tipoComprobante);
   const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
   // All operational owners are captured in the local draft before ARCA.  The
   // later link is deliberately idempotent, but must never be the only place

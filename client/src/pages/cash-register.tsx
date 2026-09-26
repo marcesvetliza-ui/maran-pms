@@ -65,6 +65,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { parseNightAuditDetail } from "@shared/nightAudit";
+import { receiptTypeLabel } from "@shared/receiptTypes";
 import type { DuplicateCashPaymentLinkGroup } from "@shared/schema";
 import { cleanCashMovementLabel } from "@/lib/account-movement-display";
 
@@ -121,14 +122,37 @@ type CashMovement = {
   invoiceId?: number | null;
   groupPaymentId?: string | null;
   advanceNumber?: number | string | null;
+  restaurantInvoices?: Array<{
+    id: number;
+    type: string;
+    pointOfSale: number;
+    number: number;
+    status: string | null;
+    creditNoteOfInvoiceId: number | null;
+  }>;
 };
 
 type ShiftDetail = {
   shift: CashShift;
   movements: CashMovement[];
-  summary: Record<string, { count: number; total: number }>;
-  efectivoSistema?: number;
-  efectivoContado?: number;
+  summary: CashClosingSnapshot | null;
+};
+
+type CashClosingSnapshot = {
+  totalCash: string | null;
+  totalDebitCard: string | null;
+  totalCreditCard: string | null;
+  totalTransfer: string | null;
+  totalMercadopago: string | null;
+  totalCurrentAccount: string | null;
+  totalRoomCharge: string | null;
+  totalVoucher: string | null;
+  nonCashSettlementsTotal: string | null;
+  nonCashSettlementsCount: number | null;
+  totalGeneral: string | null;
+  transactionCount: number | null;
+  closedAt: string | null;
+  notes: string | null;
 };
 
 const expenseCategoryLabels: Record<string, string> = {
@@ -177,6 +201,7 @@ const AREA_LABEL_MAP: Record<string, string> = {
   events: "Eventos",
 };
 const MANUAL_RECEIPT_LABELS: Record<string, string> = {
+  voucher: "Voucher Justo",
   inicio_caja: "Inicio de Caja",
   retiro_efectivo: "Retiro de Efectivo",
   ingreso_efectivo: "Ingreso de Efectivo",
@@ -230,7 +255,54 @@ function formatDateTime(dateStr: string): string {
 function formatInvoiceReference(movement: CashMovement): string | null {
   if (movement.invoicePointOfSale == null || movement.invoiceNumber == null) return null;
   const number = `${String(movement.invoicePointOfSale).padStart(4, "0")}-${String(movement.invoiceNumber).padStart(8, "0")}`;
-  return movement.invoiceType ? `${movement.invoiceType} ${number}` : number;
+  return movement.invoiceType ? `${receiptTypeLabel(movement.invoiceType)} ${number}` : number;
+}
+
+function formatRestaurantInvoice(invoice: NonNullable<CashMovement["restaurantInvoices"]>[number]): string {
+  const typeLabels: Record<string, string> = {
+    FA: "Factura A", FB: "Factura B", FC: "Factura C",
+    NCA: "Nota de crédito A", NCB: "Nota de crédito B", NCC: "Nota de crédito C",
+    factura_a: "Factura A", factura_b: "Factura B", factura_c: "Factura C",
+  };
+  const number = `${String(invoice.pointOfSale).padStart(4, "0")}-${String(invoice.number).padStart(8, "0")}`;
+  return `${typeLabels[invoice.type] || receiptTypeLabel(invoice.type)} ${number}`;
+}
+
+const CASH_RECEIPT_CODES: Record<string, string> = {
+  factura_a: "FA",
+  factura_b: "FB",
+  factura_c: "FC",
+  ticket: "TK",
+  voucher: "VJ",
+  voucher_justo: "VJ",
+  voucher_pedidos_ya: "VPY",
+  voucher_room_service: "RS",
+  voucher_consumo_interno: "CI",
+  cierre_habitacion: "VH",
+  cierre_spa: "VS",
+  nota_credito: "NC",
+  inicio_caja: "Inicio de caja",
+  ingreso_efectivo: "Ingreso manual",
+  retiro_efectivo: "Retiro de efectivo",
+};
+
+function cashReceiptTypes(movement: CashMovement): Array<{ code: string; label: string }> {
+  if (movement.sourceType === "restaurant_order" && movement.restaurantInvoices?.length) {
+    return [...new Map(movement.restaurantInvoices.map((invoice) => [
+      invoice.type,
+      { code: CASH_RECEIPT_CODES[invoice.type] || invoice.type, label: formatRestaurantInvoice(invoice) },
+    ])).values()];
+  }
+  if (movement.invoiceType) {
+    return [{ code: CASH_RECEIPT_CODES[movement.invoiceType] || movement.invoiceType, label: formatInvoiceReference(movement) || receiptTypeLabel(movement.invoiceType) }];
+  }
+  if (movement.receiptType && movement.receiptType !== "none") {
+    return [{
+      code: CASH_RECEIPT_CODES[movement.receiptType] || movement.receiptType.replace(/_/g, " "),
+      label: MANUAL_RECEIPT_LABELS[movement.receiptType] || receiptTypeLabel(movement.receiptType),
+    }];
+  }
+  return [];
 }
 
 function formatAdvanceReference(movement: CashMovement): string | null {
@@ -353,21 +425,46 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
 function printClosingSummary(
   shift: CashShift,
   movements: CashMovement[],
-  efectivoSistema: number,
-  efectivoContado: number
+  efectivoSistema: number | null,
+  efectivoContado: number | null,
+  closingSnapshot?: CashClosingSnapshot | null,
 ) {
   const activos = movements.filter(m => !m.anulado);
   const anulados = movements.filter(m => m.anulado);
   const summary = buildSummaryFromMovements(movements);
-  const totalGeneral = Object.values(summary).reduce((s, v) => s + v.total, 0);
-  const totalTx = Object.values(summary).reduce((s, v) => s + v.count, 0);
+  const totalGeneral = closingSnapshot
+    ? Number(closingSnapshot.totalGeneral || 0)
+    : Object.values(summary).reduce((s, v) => s + v.total, 0);
+  const totalTx = closingSnapshot?.transactionCount
+    ?? Object.values(summary).reduce((s, v) => s + v.count, 0);
   const informational = activos.filter(m => m.movementType === "informational");
   const informationalTotal = informational.reduce((s, m) => s + (parseFloat(String(m.amount)) || 0), 0);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
-  const diferencia = efectivoContado - efectivoSistema;
+  const diferencia = efectivoContado != null && efectivoSistema != null
+    ? efectivoContado - efectivoSistema
+    : null;
   const shiftDateObj = new Date(shift.openedAt);
-  const shiftDateStr = shiftDateObj.toLocaleDateString("es-AR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
-  const shiftDateShort = shiftDateObj.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const shiftDateStr = shiftDateObj.toLocaleDateString("es-AR", {
+    weekday: "long", day: "2-digit", month: "2-digit", year: "numeric", timeZone: ARGENTINA_TIME_ZONE,
+  });
+  const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character] || character);
+  const documentReference = (movement: CashMovement): string => {
+    if (movement.sourceType === "restaurant_order") {
+      if (movement.restaurantInvoices?.length) {
+        return movement.restaurantInvoices.map(formatRestaurantInvoice).join(" · ");
+      }
+      if (movement.receiptType && !/^factura_[abc]$/.test(movement.receiptType)) {
+        return receiptTypeLabel(movement.receiptType);
+      }
+      return movement.receiptType ? "Sin factura fiscal vinculada" : "Sin comprobante vinculado";
+    }
+    return formatInvoiceReference(movement)
+      || (movement.receiptType
+        ? `${receiptTypeLabel(movement.receiptType)}${movement.receiptNumber ? ` #${movement.receiptNumber}` : ""}`
+        : formatAdvanceReference(movement) || "Sin comprobante vinculado");
+  };
 
   // Group active movements by payment method (normalized to avoid duplicates)
   const byMethod: Record<string, CashMovement[]> = {};
@@ -389,9 +486,12 @@ function printClosingSummary(
       const esIngreso = m.movementType === "income";
       return `<tr style="${esInformational ? "opacity:0.65;font-style:italic;" : ""}">
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${m.description || m.sourceLabel || "-"}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${escapeHtml(m.description || m.sourceLabel || "-")}</td>
+        ${closingSnapshot ? `<td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:10px">${escapeHtml(documentReference(m))}</td>` : ""}
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
-          ${esInformational
+          ${closingSnapshot
+            ? escapeHtml(cashReceiptTypes(m).map(({ code }) => code).join(" / ") || "—")
+            : esInformational
             ? `<span style="background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:3px;font-size:10px">Solo registro</span>`
             : `<span style="background:${esIngreso ? "#c6f6d5" : "#fed7d7"};color:${esIngreso ? "#276749" : "#9b2c2c"};padding:1px 6px;border-radius:3px;font-size:10px">${esIngreso ? "Ingreso" : "Egreso"}</span>`
           }
@@ -400,10 +500,10 @@ function printClosingSummary(
       </tr>`;
     }).join("");
 
-    const diferenciaEfectivo = isEfectivo ? `
+    const diferenciaEfectivo = isEfectivo && diferencia != null ? `
       <div style="margin-top:8px;padding:8px;background:${Math.abs(diferencia) > 0 ? "#fff5f5" : "#f0fff4"};border:1px solid ${Math.abs(diferencia) > 0 ? "#fc8181" : "#9ae6b4"};border-radius:4px">
-        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Sistema:</span><span>${formatCurrency(efectivoSistema)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Contado:</span><span>${formatCurrency(efectivoContado)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Sistema:</span><span>${formatCurrency(efectivoSistema ?? 0)}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Contado:</span><span>${formatCurrency(efectivoContado ?? 0)}</span></div>
         <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:${diferencia !== 0 ? "#c53030" : "#276749"};margin-top:4px">
           <span>Diferencia:</span><span>${diferencia > 0 ? "+" : ""}${formatCurrency(diferencia)}</span>
         </div>
@@ -421,7 +521,8 @@ function printClosingSummary(
             <tr style="background:#f9f9f9">
               <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Hora</th>
               <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Descripción</th>
-              <th style="padding:4px 8px;font-size:10px;text-align:center;color:#888;font-weight:600;text-transform:uppercase">Tipo</th>
+              ${closingSnapshot ? `<th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Comprobante</th>` : ""}
+              <th style="padding:4px 8px;font-size:10px;text-align:center;color:#888;font-weight:600;text-transform:uppercase">${closingSnapshot ? "Tipo de comprobante" : "Tipo"}</th>
               <th style="padding:4px 8px;font-size:10px;text-align:right;color:#888;font-weight:600;text-transform:uppercase">Monto</th>
             </tr>
           </thead>
@@ -441,16 +542,18 @@ function printClosingSummary(
     <thead><tr style="background:#fafafa">
       <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Hora</th>
       <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Descripción</th>
+      ${closingSnapshot ? `<th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Comprobante / tipo</th>` : ""}
       <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Método</th>
       <th style="padding:5px 8px;font-size:10px;text-align:right;border-bottom:1px solid #eee">Monto</th>
       <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Motivo</th>
     </tr></thead>
     <tbody>${anulados.map(m => `<tr style="color:#aaa">
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${formatTime(m.createdAt)}</td>
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${m.description || m.sourceLabel || "-"}</td>
+      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${escapeHtml(m.description || m.sourceLabel || "-")}</td>
+      ${closingSnapshot ? `<td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0">${escapeHtml(documentReference(m))} · ${escapeHtml(cashReceiptTypes(m).map(({ code }) => code).join(" / ") || "—")}</td>` : ""}
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0">${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td>
       <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right;text-decoration:line-through">${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td>
-      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${m.motivoAnulacion || "-"}</td>
+      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${escapeHtml(m.motivoAnulacion || "-")}</td>
     </tr>`).join("")}</tbody>
   </table>
 </div>` : "";
@@ -465,7 +568,7 @@ function printClosingSummary(
   <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Maran Suites & Towers</div>
   <div style="font-size:20px;font-weight:bold;margin:4px 0">Cierre de Turno</div>
   <div style="font-size:14px;color:#555">${areaLabel} — ${shift.turnoTipo ? formatShiftLabel(shift) : `Turno #${shift.shiftNumber}`}</div>
-  <div style="font-size:13px;font-weight:600;color:#444;margin-top:4px">${shiftDateStr}</div>
+  <div style="font-size:13px;font-weight:600;color:#444;margin-top:4px">Apertura: ${shiftDateStr}${shift.closedAt ? ` · Cierre: ${formatDate(shift.closedAt)}` : ""}</div>
 </div>
 
 <div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:12px;gap:16px">
@@ -484,8 +587,18 @@ function printClosingSummary(
   </div>
 </div>
 
+${closingSnapshot ? `<div style="font-size:11px;margin-bottom:14px;padding:10px;border:1px solid #ddd">
+  <strong>Totales registrados en el cierre:</strong>
+  Efectivo ${formatCurrency(Number(closingSnapshot.totalCash || 0))} ·
+  Débito ${formatCurrency(Number(closingSnapshot.totalDebitCard || 0))} ·
+  Crédito ${formatCurrency(Number(closingSnapshot.totalCreditCard || 0))} ·
+  Transferencia ${formatCurrency(Number(closingSnapshot.totalTransfer || 0))} ·
+  MercadoPago ${formatCurrency(Number(closingSnapshot.totalMercadopago || 0))} ·
+  No monetarias ${formatCurrency(Number(closingSnapshot.nonCashSettlementsTotal || 0))}
+</div>` : ""}
+
 <div style="font-size:12px;font-weight:600;color:#444;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ddd">
-  Detalle por Forma de Pago
+  ${closingSnapshot ? "Detalle de movimientos registrados" : "Detalle por Forma de Pago"}
 </div>
 
 ${informational.length ? `<div style="margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #cbd5e1">
@@ -1009,7 +1122,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                                 <div><span className="font-medium text-foreground">Categoría:</span> {expenseCategoryLabels[m.expenseCategory] || m.expenseCategory}</div>
                               )}
                               {m.receiptType && (
-                                <div><span className="font-medium text-foreground">Comprobante:</span> {MANUAL_RECEIPT_LABELS[m.receiptType] || m.receiptType}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
+                                <div><span className="font-medium text-foreground">Comprobante:</span> {MANUAL_RECEIPT_LABELS[m.receiptType] || receiptTypeLabel(m.receiptType)}{m.receiptNumber ? ` — ${m.receiptNumber}` : ""}</div>
                               )}
                               {m.motivoAnulacion && (
                                 <div className="col-span-2 text-destructive"><span className="font-medium">Motivo anulación:</span> {m.motivoAnulacion}</div>
@@ -1694,7 +1807,7 @@ function HistorialTab() {
   const [areaFilter, setAreaFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [detailShiftId, setDetailShiftId] = useState<number | null>(null);
+  const [detailShiftId, setDetailShiftId] = useState<string | null>(null);
 
   const queryParams = new URLSearchParams();
   if (areaFilter !== "all") queryParams.set("area", areaFilter);
@@ -1702,7 +1815,7 @@ function HistorialTab() {
   if (dateTo) queryParams.set("to", dateTo);
   const qs = queryParams.toString();
 
-  const { data: history = [], isLoading } = useQuery<any[]>({
+  const { data: history = [], isLoading, isError: historyError } = useQuery<any[]>({
     queryKey: ["/api/cash/summary", qs],
     queryFn: async () => {
       const res = await fetch(`/api/cash/summary${qs ? "?" + qs : ""}`, { credentials: "include" });
@@ -1711,7 +1824,18 @@ function HistorialTab() {
     },
   });
 
-  const { data: shiftDetail, isLoading: detailLoading } = useQuery<ShiftDetail>({
+  const { data: openShifts = [], isError: openShiftsError } = useQuery<CashShift[]>({
+    queryKey: ["/api/cash/shifts", "open", areaFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ status: "open" });
+      if (areaFilter !== "all") params.set("area", areaFilter);
+      const res = await fetch(`/api/cash/shifts?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error loading open shifts");
+      return res.json();
+    },
+  });
+
+  const { data: shiftDetail, isLoading: detailLoading, isError: detailError } = useQuery<ShiftDetail>({
     queryKey: ["/api/cash/shifts", detailShiftId],
     queryFn: async () => {
       const res = await fetch(`/api/cash/shifts/${detailShiftId}`, { credentials: "include" });
@@ -1721,17 +1845,17 @@ function HistorialTab() {
     enabled: !!detailShiftId,
   });
 
-  const { data: cancelledOrders = [] } = useQuery<any[]>({
+  const { data: cancelledOrders = [], isError: cancelledOrdersError } = useQuery<any[]>({
     queryKey: ["/api/restaurant/orders/cancelled-in-shift", detailShiftId],
     queryFn: async () => {
       if (!shiftDetail) return [];
       const from = shiftDetail.shift.openedAt;
       const to = shiftDetail.shift.closedAt || new Date().toISOString();
       const res = await fetch(`/api/restaurant/orders?status=cancelled&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { credentials: "include" });
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error("Error loading cancelled orders");
       return res.json();
     },
-    enabled: !!detailShiftId && !!shiftDetail,
+    enabled: !!detailShiftId && shiftDetail?.shift.area === "restaurant",
   });
 
   return (
@@ -1761,7 +1885,7 @@ function HistorialTab() {
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium">Desde</label>
+              <label className="text-sm font-medium">Cierre desde</label>
               <Input
                 type="date"
                 value={dateFrom}
@@ -1770,7 +1894,7 @@ function HistorialTab() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium">Hasta</label>
+              <label className="text-sm font-medium">Cierre hasta</label>
               <Input
                 type="date"
                 value={dateTo}
@@ -1780,19 +1904,41 @@ function HistorialTab() {
             </div>
           </div>
 
+          <p className="text-sm text-muted-foreground mb-4">
+            Las fechas filtran el día de cierre (hora de Argentina), no el de apertura. Los turnos abiertos todavía no tienen cierre.
+          </p>
+          {openShiftsError && (
+            <p role="alert" className="text-sm text-destructive mb-4">No se pudieron consultar los turnos abiertos.</p>
+          )}
+          {openShifts.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 mb-5 space-y-2">
+              <p className="text-sm font-medium">Turnos todavía abiertos — no figuran entre los cierres</p>
+              {openShifts.map((shift) => (
+                <div key={shift.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <span>{AREA_LABEL_MAP[shift.area] || shift.area} · {formatShiftLabel(shift)} #{shift.shiftNumber} · Abierto {formatDateTime(shift.openedAt)}</span>
+                  <Button variant="outline" size="sm" onClick={() => setDetailShiftId(shift.id)}>
+                    Ver movimientos (solo lectura)
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {isLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
+          ) : historyError ? (
+            <p role="alert" className="text-center text-destructive py-8">No se pudo cargar el historial de cierres. Intentá nuevamente.</p>
           ) : history.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">No hay registros para los filtros seleccionados</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fecha</TableHead>
+                  <TableHead>Fecha de cierre</TableHead>
                   <TableHead>Área</TableHead>
                   <TableHead>Turno</TableHead>
                   <TableHead>Abierto por</TableHead>
@@ -1807,7 +1953,7 @@ function HistorialTab() {
               <TableBody>
                 {history.map((row: any) => (
                   <TableRow key={row.id} data-testid={`history-row-${row.id}`}>
-                    <TableCell>{row.shift ? formatDate(row.shift.openedAt) : formatDate(row.closedAt)}</TableCell>
+                    <TableCell>{formatDate(row.closedAt)}</TableCell>
                     <TableCell>
                       <Badge className={AREA_COLORS[row.area] || ""}>
                         {AREA_LABEL_MAP[row.area] || row.area}
@@ -1862,6 +2008,8 @@ function HistorialTab() {
                 <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
+          ) : detailError ? (
+            <p role="alert" className="text-sm text-destructive">No se pudo cargar el detalle de este turno.</p>
           ) : shiftDetail ? (
             <div className="space-y-6">
               <div className="flex flex-wrap items-center gap-4">
@@ -1872,26 +2020,59 @@ function HistorialTab() {
                   {formatShiftLabel(shiftDetail.shift)}
                   <span className="ml-1 text-xs text-muted-foreground font-normal">#{shiftDetail.shift.shiftNumber}</span>
                 </span>
+                <Badge variant="outline">{shiftDetail.shift.status === "closed" ? "Cerrado · solo lectura" : "Abierto · solo lectura"}</Badge>
                 <span className="text-sm text-muted-foreground">
                   {shiftDetail.shift.openedBy} — {formatDateTime(shiftDetail.shift.openedAt)}
                   {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} — ${formatDateTime(shiftDetail.shift.closedAt)}`}
                 </span>
               </div>
 
+              {shiftDetail.summary ? (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h3 className="font-semibold">Totales registrados en el cierre</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-2 text-sm">
+                    {([
+                      ["Efectivo", shiftDetail.summary.totalCash],
+                      ["Débito", shiftDetail.summary.totalDebitCard],
+                      ["Crédito", shiftDetail.summary.totalCreditCard],
+                      ["Transferencia", shiftDetail.summary.totalTransfer],
+                      ["MercadoPago", shiftDetail.summary.totalMercadopago],
+                      ["Cuenta corriente", shiftDetail.summary.totalCurrentAccount],
+                      ["Cargo a habitación", shiftDetail.summary.totalRoomCharge],
+                      ["Voucher", shiftDetail.summary.totalVoucher],
+                    ] as const).map(([label, amount]) => (
+                      <div key={label} className="flex justify-between gap-2 border-b pb-1">
+                        <span className="text-muted-foreground">{label}</span>
+                        <span className="font-medium">{formatCurrency(Number(amount || 0))}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm border-t pt-2">
+                    <span><strong>Total general:</strong> {formatCurrency(Number(shiftDetail.summary.totalGeneral || 0))}</span>
+                    <span><strong>Movimientos:</strong> {shiftDetail.summary.transactionCount ?? 0}</span>
+                    <span><strong>Liquidaciones no monetarias:</strong> {formatCurrency(Number(shiftDetail.summary.nonCashSettlementsTotal || 0))} ({shiftDetail.summary.nonCashSettlementsCount ?? 0})</span>
+                  </div>
+                  {shiftDetail.summary.notes && <p className="text-sm"><strong>Observaciones:</strong> {shiftDetail.summary.notes}</p>}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Este turno todavía no tiene resumen de cierre.</p>
+              )}
+
               <div>
-                <h3 className="font-semibold mb-2">Resumen por método</h3>
+                <h3 className="font-semibold mb-2">Desglose de movimientos registrados</h3>
                 <SummaryTable movements={shiftDetail.movements} />
               </div>
 
               <div>
-                <h3 className="font-semibold mb-2">Movimientos</h3>
+                <h3 className="font-semibold mb-2">Comprobantes y movimientos, uno por uno</h3>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Hora</TableHead>
+                      <TableHead>Comprobante / origen</TableHead>
                       <TableHead>Descripción</TableHead>
                       <TableHead>Método</TableHead>
-                      <TableHead>Tipo</TableHead>
+                      <TableHead>Tipo de comprobante</TableHead>
                       <TableHead className="text-right">Monto</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1899,25 +2080,79 @@ function HistorialTab() {
                     {shiftDetail.movements.map((m) => (
                       <TableRow key={m.id}>
                         <TableCell className="text-xs tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
+                        <TableCell className="text-xs">
+                          {m.sourceType === "restaurant_order" ? (
+                            <>
+                              {m.restaurantInvoices?.length ? m.restaurantInvoices.map((invoice) => (
+                                <div key={invoice.id}>
+                                  <a
+                                    className="font-medium underline"
+                                    href={`/api/billing/invoices/${invoice.id}/pdf`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >{formatRestaurantInvoice(invoice)}</a>
+                                  {invoice.status && <span className="text-muted-foreground"> · {invoice.status}</span>}
+                                </div>
+                              )) : (
+                                <div className="text-muted-foreground">
+                                  {m.receiptType && !/^factura_[abc]$/.test(m.receiptType)
+                                    ? receiptTypeLabel(m.receiptType)
+                                    : m.receiptType ? "Sin factura fiscal vinculada al pedido" : "Sin comprobante vinculado"}
+                                </div>
+                              )}
+                              {m.receiptNumber && <div className="text-muted-foreground">Recibo de caja #{m.receiptNumber}</div>}
+                            </>
+                          ) : (
+                            <div className="font-medium">
+                              {formatInvoiceReference(m) || (m.receiptType
+                                ? `${MANUAL_RECEIPT_LABELS[m.receiptType] || receiptTypeLabel(m.receiptType)}${m.receiptNumber ? ` · ${m.receiptNumber}` : ""}`
+                                : m.sourceType === "group_payment" ? formatAdvanceReference(m) : "Sin comprobante vinculado")}
+                            </div>
+                          )}
+                          <div className="text-muted-foreground">{m.groupName || m.sourceLabel || m.sourceType || "Movimiento manual"}</div>
+                          {m.sourceId && <div className="text-muted-foreground">Referencia: {m.sourceId}</div>}
+                          {m.sourceType === "group_payment" && m.sourceId && m.groupPaymentId && (
+                            <a
+                              href={`/api/groups/${m.sourceId}/payments/${m.groupPaymentId}/receipt.pdf`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline"
+                            >Ver recibo</a>
+                          )}
+                        </TableCell>
                         <TableCell>{cleanCashMovementLabel(m.description || m.sourceLabel) || "-"}</TableCell>
                         <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
-                          {m.movementType === "informational" ? (
-                             <Badge className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Informativo · Liquidación</Badge>
-                          ) : m.movementType === "income" ? (
-                            <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">Ingreso</Badge>
-                          ) : (
-                            <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Egreso</Badge>
+                          <div className="flex flex-wrap gap-1">
+                            {cashReceiptTypes(m).length
+                              ? cashReceiptTypes(m).map(({ code, label }) => (
+                                <Badge key={code} variant="outline" title={label}>{code}</Badge>
+                              ))
+                              : <span className="text-muted-foreground" title="Sin tipo de comprobante registrado">—</span>}
+                          </div>
+                          {m.sourceType === "restaurant_order" && /^factura_[abc]$/.test(m.receiptType || "") && !m.restaurantInvoices?.length && (
+                            <span className="block text-xs text-amber-700 dark:text-amber-400">Sin factura vinculada</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-medium">{formatCurrency(m.amount)}</TableCell>
+                        <TableCell className={`text-right font-medium ${m.anulado ? "line-through text-muted-foreground" : ""}`}>
+                          {formatCurrency(Number(m.amount))}
+                          {m.anulado && <div className="text-xs font-normal">Anulado{m.motivoAnulacion ? ` · ${m.motivoAnulacion}` : ""}</div>}
+                          {!m.anulado && m.movementType !== "income" && (
+                            <div className="text-xs font-normal text-muted-foreground">
+                              {m.movementType === "informational" ? "Informativo · no monetario" : "Egreso"}
+                            </div>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
 
-              {cancelledOrders.length > 0 && (
+              {cancelledOrdersError && shiftDetail.shift.area === "restaurant" && (
+                <p role="alert" className="text-sm text-destructive">No se pudieron consultar los pedidos anulados de este turno.</p>
+              )}
+              {cancelledOrders.length > 0 && shiftDetail.shift.area === "restaurant" && (
                 <div>
                   <h3 className="font-semibold mb-2 flex items-center gap-2 text-destructive">
                     <XCircle className="h-4 w-4" />
@@ -1952,20 +2187,17 @@ function HistorialTab() {
                 </div>
               )}
 
-              <DialogFooter>
-                <Button
-                  onClick={() => printClosingSummary(
-                    shiftDetail.shift,
-                    shiftDetail.movements,
-                    shiftDetail.efectivoSistema ?? 0,
-                    shiftDetail.efectivoContado ?? 0,
-                  )}
-                  data-testid={`btn-print-detail-${detailShiftId}`}
-                >
-                  <Printer className="h-4 w-4 mr-2" />
-                  Imprimir
-                </Button>
-              </DialogFooter>
+              {shiftDetail.shift.status === "closed" && (
+                <DialogFooter>
+                  <Button
+                    onClick={() => printClosingSummary(shiftDetail.shift, shiftDetail.movements, null, null, shiftDetail.summary)}
+                    data-testid={`btn-print-detail-${detailShiftId}`}
+                  >
+                    <Printer className="h-4 w-4 mr-2" />
+                    Imprimir detalle
+                  </Button>
+                </DialogFooter>
+              )}
             </div>
           ) : null}
         </DialogContent>
