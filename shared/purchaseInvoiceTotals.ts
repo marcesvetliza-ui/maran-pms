@@ -197,6 +197,40 @@ export function isValidPurchaseInvoiceTotal(tipoComprobante: string | null | und
   return tipoComprobante === "REMITO" || (Number.isFinite(total) && total > 0);
 }
 
+// condicion_iva de accounting_suppliers es texto libre: conviven "Responsable
+// Inscripto" (ABM actual), "responsable_inscripto" (datos históricos/tests)
+// y "R.Inscrp." (importado de la planilla real del proveedor consultor) —
+// confirmado leyendo accounting-suppliers.tsx y server/seed.ts. Normalizamos
+// a letras antes de comparar para no depender de un formato exacto.
+function normalizeCondicionIva(raw: string | null | undefined): string {
+  return (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z]/g, "");
+}
+
+// La letra del comprobante depende de la condición IVA de quien lo EMITE (el
+// proveedor), no la nuestra. Solo bloqueamos las combinaciones que AFIP nunca
+// permite bajo ninguna interpretación — no la sugerencia general de letra
+// (esa es no bloqueante a propósito: un proveedor cargado como Responsable
+// Inscripto puede facturar un concepto exento y emitir B en vez de A).
+// - Letra A discrimina IVA: solo puede emitirla un Responsable Inscripto.
+// - Monotributo tiene un único comprobante habilitado, la C.
+export function condicionIvaPermiteComprobante(
+  condicionIva: string | null | undefined,
+  tipoComprobante: string | null | undefined,
+): boolean {
+  const letra = /^(?:FACT|NC|ND|RECIBO)-([ABC])$/.exec(tipoComprobante || "")?.[1];
+  if (!letra) return true;
+  const norm = normalizeCondicionIva(condicionIva);
+  const esResponsableInscripto = norm.includes("inscr");
+  const esMonotributo = norm.startsWith("monotribut");
+  if (letra === "A") return esResponsableInscripto;
+  if (esMonotributo) return letra === "C";
+  return true;
+}
+
 export function purchaseInvoiceRetentionSide(tipoComprobante?: string | null): "debe" | "haber" {
   return isCardSettlement(tipoComprobante) || isReceivedRetention(tipoComprobante) ? "debe" : "haber";
 }

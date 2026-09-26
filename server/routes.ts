@@ -59,6 +59,7 @@ import {
   isSupplierPayableDocument,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
+  condicionIvaPermiteComprobante,
 } from "@shared/purchaseInvoiceTotals";
 import {
   buildPendingOperationalReservationRows,
@@ -3057,7 +3058,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Elegí un proveedor cargado en el ABM." });
       }
       const supplierResult = await db.execute(sql`
-        SELECT razon_social, cuit FROM accounting_suppliers WHERE id = ${supplierId}
+        SELECT razon_social, cuit, condicion_iva FROM accounting_suppliers WHERE id = ${supplierId}
       `);
       if (!supplierResult.rows.length) {
         return res.status(400).json({ error: "El proveedor seleccionado no existe en el ABM." });
@@ -3065,6 +3066,11 @@ export async function registerRoutes(
       body.supplierId = supplierId;
       body.proveedorNombre = supplierResult.rows[0].razon_social;
       body.proveedorCuit = supplierResult.rows[0].cuit;
+      if (!condicionIvaPermiteComprobante(supplierResult.rows[0].condicion_iva as string, body.tipoComprobante)) {
+        return res.status(400).json({
+          error: `Un proveedor "${supplierResult.rows[0].condicion_iva}" no puede emitir ${body.tipoComprobante}. Revisá la condición IVA del proveedor o el tipo de comprobante.`,
+        });
+      }
       if (isReceivedRetention(body.tipoComprobante)) {
         body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
       }
