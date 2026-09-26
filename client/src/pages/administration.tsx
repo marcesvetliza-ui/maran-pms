@@ -59,6 +59,7 @@ const userFormSchema = z.object({
   department: z.string().optional(),
   phone: z.string().optional(),
   isActive: z.string().default("true"),
+  esMozo: z.string().default("false"),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -1059,6 +1060,7 @@ export default function AdministrationPage() {
       department: "",
       phone: "",
       isActive: "true",
+      esMozo: "false",
     });
     setIsUserDialogOpen(true);
   };
@@ -1074,6 +1076,7 @@ export default function AdministrationPage() {
       department: user.department || "",
       phone: user.phone || "",
       isActive: user.isActive || "true",
+      esMozo: (user as any).esMozo === "true" ? "true" : "false",
     });
     setIsUserDialogOpen(true);
   };
@@ -1366,9 +1369,14 @@ export default function AdministrationPage() {
                         <TableCell>{user.fullName}</TableCell>
                         <TableCell className="text-muted-foreground">{user.email}</TableCell>
                         <TableCell>
-                          <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                            {roleLabels[user.role] || user.role}
-                          </Badge>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                              {roleLabels[user.role] || user.role}
+                            </Badge>
+                            {(user as any).esMozo === "true" && (
+                              <Badge variant="outline" data-testid={`badge-mozo-${user.id}`}>Mozo</Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>{user.department || "-"}</TableCell>
                         <TableCell>
@@ -1986,6 +1994,28 @@ export default function AdministrationPage() {
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={userForm.control}
+                name="esMozo"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <FormLabel>Aparece como mozo en Restaurant</FormLabel>
+                      <p className="text-xs text-muted-foreground">
+                        Independiente del rol — se puede activar para gente de otra área que atiende mesas, o desactivar para quien comparte el rol Restaurante pero no es mozo (ej. cocina).
+                      </p>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value === "true"}
+                        onCheckedChange={(checked) => field.onChange(checked ? "true" : "false")}
+                        data-testid="switch-user-es-mozo"
+                      />
+                    </FormControl>
                   </FormItem>
                 )}
               />

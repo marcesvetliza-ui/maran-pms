@@ -635,7 +635,7 @@ export async function registerRoutes(
   app.get("/api/staff/users", requireAuth, async (req, res) => {
     try {
       const users = await storage.getSystemUsers();
-      res.json(users.map(({ password: _, ...u }) => ({ id: u.id, username: u.username, fullName: (u as any).fullName ?? null, role: u.role })));
+      res.json(users.map(({ password: _, ...u }) => ({ id: u.id, username: u.username, fullName: (u as any).fullName ?? null, role: u.role, esMozo: (u as any).esMozo ?? null })));
     } catch (error) {
       res.status(500).json({ error: "Error fetching staff" });
     }

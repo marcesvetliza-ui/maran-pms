@@ -1000,10 +1000,14 @@ export default function RestaurantPage() {
     queryFn: async () => { const r = await apiRequest("GET", "/api/billing/config"); return r.json(); },
     enabled: isEmitirComprobanteOpen,
   });
-  const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string }[]>({
+  const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string; esMozo: string | null }[]>({
     queryKey: ["/api/staff/users"],
   });
-  const restaurantUsers = allUsers.filter(u => u.role === "restaurant");
+  // esMozo es independiente del rol (ver administration.tsx): permite sumar
+  // gente de otras áreas que también atiende mesas y sacar de la lista a
+  // quien comparte el rol "restaurant" pero no es mozo (ej. cocina). Antes
+  // era puramente role === "restaurant".
+  const restaurantUsers = allUsers.filter(u => u.esMozo === "true");
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });

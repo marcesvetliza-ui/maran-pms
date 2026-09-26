@@ -2016,6 +2016,11 @@ export const systemUsers = pgTable("system_users", {
   department: text("department"),
   phone: text("phone"),
   isActive: text("is_active").default("true"),
+  // Independiente del rol: quién aparece como mozo en Restaurant. Antes era
+  // puramente role === "restaurant", pero eso mezclaba mozos con cocina
+  // (mismo rol) y no dejaba sumar gente de otras áreas que también atiende
+  // mesas. NULL hasta que corre la migración de backfill (ver server/migrate.ts).
+  esMozo: text("es_mozo"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").notNull(),
   lockedAt: timestamp("locked_at"),

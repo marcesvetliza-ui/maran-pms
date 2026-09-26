@@ -4548,6 +4548,22 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `[checkout-debt-incident] Empresas/agencias remanentes: ${JSON.stringify(companyAgencyIncidentPostcheck?.rows ?? [])}`,
   );
 
+  // Quién aparece como mozo en Restaurant pasa de ser puramente role ===
+  // "restaurant" a un flag independiente por usuario (mezclaba mozos con
+  // cocina, que comparten el mismo rol, y no dejaba sumar gente de otras
+  // áreas que también atiende mesas). El backfill solo toca filas que
+  // todavía no tienen el flag seteado (IS NULL), así que corre una sola vez:
+  // no pisa un valor que un admin ya haya cambiado a mano después del deploy.
+  await withTimeout("system_users.es_mozo", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE system_users ADD COLUMN es_mozo text`)))
+  );
+  await withTimeout("system_users.es_mozo_backfill", T, () =>
+    db.execute(sql`
+      UPDATE system_users SET es_mozo = CASE WHEN role = 'restaurant' THEN 'true' ELSE 'false' END
+      WHERE es_mozo IS NULL
+    `)
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
