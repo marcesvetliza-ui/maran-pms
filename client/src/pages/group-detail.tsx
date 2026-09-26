@@ -139,6 +139,7 @@ const CONDICION_IVA_OPTIONS = [
   "Monotributista",
   "Exento",
   "No Responsable",
+  "No Categorizado",
 ];
 
 // Guests/companies/agencies persist Condición IVA in different shapes (snake_case
@@ -154,6 +155,7 @@ const CONDICION_IVA_NORMALIZE_MAP: Record<string, string> = {
   monotributista: "Monotributista",
   exento: "Exento",
   no_responsable: "No Responsable",
+  no_categorizado: "No Categorizado",
 };
 function normalizeCondicionIva(raw: string | null | undefined): string {
   if (!raw) return "Consumidor Final";

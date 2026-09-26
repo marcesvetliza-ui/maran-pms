@@ -79,7 +79,7 @@ function getReconciliationError(invoice: any): string | null {
 }
 
 export const CONDICION_IVA_OPTIONS = [
-  "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
+  "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento", "No Categorizado",
 ];
 
 // Condición IVA → tipo de comprobante is a strict, mutually exclusive split:
@@ -106,6 +106,7 @@ const CONDICION_IVA_DB_TO_LABEL: Record<string, string> = {
   monotributista: "Monotributista",
   exento: "Exento",
   no_responsable: "Consumidor Final",
+  no_categorizado: "No Categorizado",
 };
 function normalizeCondicionIvaLabel(raw: string | null | undefined): string | null {
   if (!raw) return null;
