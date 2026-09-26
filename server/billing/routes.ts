@@ -960,10 +960,6 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // ── Purga de comprobantes no fiscales ────────────────────────────────────────
-  const NON_FISCAL_TIPOS = [
-    "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia",
-  ];
-
   // GET /api/billing/invoices/non-fiscal/count?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
   app.get("/api/billing/invoices/non-fiscal/count", requireRole(["admin", "administracion"]), async (req, res) => {
     try {

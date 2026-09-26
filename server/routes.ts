@@ -166,7 +166,7 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
       FROM jsonb_array_elements(COALESCE(gp.retention_detail, '[]'::jsonb)) item
     ) stored ON true
     LEFT JOIN LATERAL (
-      SELECT si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social, si.monto_total
+      SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social, si.monto_total
       FROM sales_invoices si
       WHERE si.id = gp.invoice_id OR si.group_payment_id = gp.id
       ORDER BY CASE WHEN si.id = gp.invoice_id THEN 0 ELSE 1 END, si.created_at DESC
@@ -176,6 +176,60 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
   `);
   const details = new Map((result.rows as Array<Record<string, unknown>>).map((row) => [String(row.id), row]));
   return movements.map((movement) => ({ ...movement, ...(details.get(String(movement.id)) || {}) }));
+}
+
+async function enrichRestaurantCashMovements<T extends { sourceType: string; sourceId?: string | null }>(
+  movements: T[],
+): Promise<Array<T & { restaurantInvoices?: Array<{
+  id: number;
+  type: string;
+  pointOfSale: number;
+  number: number;
+  status: string | null;
+  creditNoteOfInvoiceId: number | null;
+}> }>> {
+  const orderIds = [...new Set(
+    movements
+      .filter((movement) => movement.sourceType === "restaurant_order" && movement.sourceId)
+      .map((movement) => movement.sourceId as string),
+  )];
+  if (!orderIds.length) return movements;
+
+  // Credit notes link to the original invoice, not necessarily to the order.
+  // Split payments may share an order; references never count as additional cash.
+  const result = await db.execute(sql`
+    SELECT original.restaurant_order_id AS "orderId", document.id,
+           document.tipo_comprobante AS "type",
+           document.punto_venta AS "pointOfSale", document.numero AS "number",
+           document.estado AS "status",
+           document.nota_credito_id AS "creditNoteOfInvoiceId"
+    FROM sales_invoices original
+    JOIN sales_invoices document
+      ON document.id = original.id OR document.nota_credito_id = original.id
+    WHERE original.restaurant_order_id IN (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})
+    ORDER BY original.restaurant_order_id, document.created_at ASC, document.id ASC
+  `);
+  const byOrder = new Map<string, Array<{
+    id: number; type: string; pointOfSale: number; number: number;
+    status: string | null; creditNoteOfInvoiceId: number | null;
+  }>>();
+  for (const row of result.rows as Array<Record<string, unknown>>) {
+    const orderId = String(row.orderId);
+    const invoices = byOrder.get(orderId) || [];
+    if (invoices.some((invoice) => invoice.id === Number(row.id))) continue;
+    invoices.push({
+      id: Number(row.id),
+      type: String(row.type),
+      pointOfSale: Number(row.pointOfSale),
+      number: Number(row.number),
+      status: row.status == null ? null : String(row.status),
+      creditNoteOfInvoiceId: row.creditNoteOfInvoiceId == null ? null : Number(row.creditNoteOfInvoiceId),
+    });
+    byOrder.set(orderId, invoices);
+  }
+  return movements.map((movement) => movement.sourceType === "restaurant_order"
+    ? { ...movement, restaurantInvoices: byOrder.get(movement.sourceId || "") || [] }
+    : movement);
 }
 
 function timeToMinutes(time: string): number {
@@ -1915,7 +1969,8 @@ export async function registerRoutes(
   app.get("/api/cash/shifts/:id", requireAuth, async (req, res) => {
     try {
       const detail = await storage.getShiftDetail(req.params.id);
-      res.json({ ...detail, movements: await enrichGroupCashMovements(detail.movements, req.params.id) });
+      const grouped = await enrichGroupCashMovements(detail.movements, req.params.id);
+      res.json({ ...detail, movements: await enrichRestaurantCashMovements(grouped) });
     } catch (error: any) {
       res.status(404).json({ error: error.message || "Shift not found" });
     }
@@ -1926,7 +1981,8 @@ export async function registerRoutes(
       const { shiftId } = req.query as { shiftId: string };
       if (!shiftId) return res.status(400).json({ error: "shiftId is required" });
       const movements = await storage.getCashMovements(shiftId);
-      res.json(await enrichGroupCashMovements(movements, shiftId));
+      const grouped = await enrichGroupCashMovements(movements, shiftId);
+      res.json(await enrichRestaurantCashMovements(grouped));
     } catch (error) {
       res.status(500).json({ error: "Error fetching movements" });
     }

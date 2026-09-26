@@ -173,7 +173,15 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   NDT: { nombre: "NOTA DE DÉBITO",      letra: "T", codigo: "196" },
   NDM: { nombre: "NOTA DE DÉBITO MiPyME", letra: "A", codigo: "202" },
   NDMB: { nombre: "NOTA DE DÉBITO MiPyME", letra: "B", codigo: "207" },
+  voucher_justo: { nombre: "Voucher Justo", letra: "—", codigo: "000" },
+  voucher_pedidos_ya: { nombre: "Voucher Pedidos Ya", letra: "—", codigo: "000" },
+  voucher_room_service: { nombre: "Room Service", letra: "—", codigo: "000" },
+  voucher_consumo_interno: { nombre: "Consumo Interno", letra: "—", codigo: "000" },
 };
+
+export function getInvoiceTypePresentation(tipoKey: string) {
+  return TIPO_LABELS[tipoKey] ?? { nombre: tipoKey, letra: "?", codigo: "000" };
+}
 
 // ── Guest data (optional, enriched from reservation) ─────────────────────────
 export interface InvoiceGuestData {
@@ -252,7 +260,7 @@ export async function generarFacturaPDF(
     const montoIva105    = $n(factura.monto_iva105     ?? factura.montoIva105     ?? 0);
     const montoTotal     = $n(factura.monto_total      ?? factura.montoTotal      ?? factura.total ?? 0);
 
-    const tipo = TIPO_LABELS[tipoKey] ?? { nombre: tipoKey, letra: "?", codigo: "000" };
+    const tipo = getInvoiceTypePresentation(String(tipoKey));
     const PV   = padNum(Number(puntoVenta), 4);
     const NRO  = padNum(Number(numero), 8);
 

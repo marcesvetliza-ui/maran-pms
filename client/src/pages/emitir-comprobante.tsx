@@ -82,7 +82,9 @@ const VOUCHERS_POR_AREA: Partial<Record<AreaId, { value: string; label: string }
   ],
   restaurant: [
     { value: "voucher_justo", label: "Voucher Justo" },
-    { value: "voucher_pedidos_ya", label: "Voucher PedidosYa" },
+    { value: "voucher_pedidos_ya", label: "Voucher Pedidos Ya" },
+    { value: "voucher_room_service", label: "Room Service" },
+    { value: "voucher_consumo_interno", label: "Consumo Interno" },
   ],
 };
 

@@ -19,10 +19,17 @@ const receiptTypeLabels: Record<string, string> = {
   factura_b: "Factura B",
   factura_c: "Factura C",
   voucher: "Voucher Justo",
+  voucher_justo: "Voucher Justo",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
+  voucher_room_service: "Room Service",
+  voucher_consumo_interno: "Consumo Interno",
   consumo_interno: "Consumo Interno",
   cuenta_habitacion: "Cargo a Habitación",
 };
+
+export function getRestaurantReceiptTypeLabel(receiptType: string | null | undefined): string {
+  return receiptType ? (receiptTypeLabels[receiptType] || receiptType) : "Ticket";
+}
 
 export interface RestaurantReceiptData {
   orderNumber: string;
@@ -102,7 +109,7 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
       ? formatArgentinaDateTime(data.closedAt)
       : formatArgentinaDateTime(new Date());
 
-    const receiptLabel = data.receiptType ? (receiptTypeLabels[data.receiptType] || data.receiptType) : "Ticket";
+    const receiptLabel = getRestaurantReceiptTypeLabel(data.receiptType);
 
     if (data.waiterName) {
       doc.fillColor("#555555").fontSize(8.5).font("Helvetica")

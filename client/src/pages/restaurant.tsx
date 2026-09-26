@@ -285,7 +285,10 @@ const receiptTypeLabels: Record<string, string> = {
   factura_b: "Factura B",
   voucher: "Voucher Justo",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
+  voucher_room_service: "Room Service",
+  voucher_consumo_interno: "Consumo Interno",
 };
+const restaurantVoucherTypes = new Set(["voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno"]);
 
 const paymentMethodLabels: Record<string, string> = {
   efectivo: "Efectivo",
@@ -876,7 +879,7 @@ export default function RestaurantPage() {
   const [closeBillingClientSearch, setCloseBillingClientSearch] = useState("");
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
-  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher">("__default__");
+  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher" | "voucher_pedidos_ya" | "voucher_room_service" | "voucher_consumo_interno">("__default__");
   const [closeGiftVoucher, setCloseGiftVoucher] = useState<GiftVoucher | null>(null);
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
@@ -2393,7 +2396,7 @@ export default function RestaurantPage() {
       return toast({ title: `Seleccione ${compCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
     }
     const pvNum = compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined);
-    const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : compTipo === "voucher_pedidos_ya" ? "Voucher PedidosYa" : compTipo;
+    const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : receiptTypeLabels[compTipo] || compTipo;
     emitirComprobanteMutation.mutate({
       tipoComprobante: compTipo,
       cliente: { razonSocial: compRazonSocial, cuit: compCuit || undefined, dni: compDni || undefined, condicionIva: compCondicionIva, domicilio: compDomicilio || undefined },
@@ -5561,7 +5564,7 @@ export default function RestaurantPage() {
                             )}
                           </div>
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
-                            setCloseNonFiscalOverride(v as "__default__" | "ticket" | "voucher");
+                            setCloseNonFiscalOverride(v as typeof closeNonFiscalOverride);
                             if (v) setCloseSalesCondition("contado");
                           }}>
                             <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
@@ -5570,7 +5573,10 @@ export default function RestaurantPage() {
                             <SelectContent>
                               <SelectItem value="__default__">Según cliente</SelectItem>
                               <SelectItem value="ticket">Ticket</SelectItem>
-                              <SelectItem value="voucher">Voucher</SelectItem>
+                              <SelectItem value="voucher">Voucher Justo</SelectItem>
+                              <SelectItem value="voucher_pedidos_ya">Voucher Pedidos Ya</SelectItem>
+                              <SelectItem value="voucher_room_service">Room Service</SelectItem>
+                              <SelectItem value="voucher_consumo_interno">Consumo Interno</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -6504,8 +6510,10 @@ export default function RestaurantPage() {
                         amount: parseFloat(s.amount || "0"),
                         roomReservationId: s.method === "cuenta_habitacion" ? s.roomId : undefined,
                       }));
-                // Consumo interno: forzar receipt no-fiscal
-                const finalReceiptType = primaryPaymentMethod === "consumo_interno" ? "consumo_interno" : effReceiptType;
+                // Keep an explicitly selected voucher identifiable even when the
+                // payment method is Consumo Interno (which still records an expense).
+                const finalReceiptType = primaryPaymentMethod === "consumo_interno" && closeNonFiscalOverride === "__default__"
+                  ? "consumo_interno" : effReceiptType;
                 // Gift voucher: incluir código y id del voucher si está validado
                 const hasGiftVoucher = closePaymentSplits.some(s => s.method === "gift_voucher");
                 closeOrderMutation.mutate({
@@ -6891,22 +6899,24 @@ export default function RestaurantPage() {
                 <SelectItem value="FA">Factura A</SelectItem>
                 <SelectItem value="FB">Factura B</SelectItem>
                 <SelectItem value="voucher_justo">Voucher Justo</SelectItem>
-                <SelectItem value="voucher_pedidos_ya">Voucher PedidosYa</SelectItem>
+                <SelectItem value="voucher_pedidos_ya">Voucher Pedidos Ya</SelectItem>
+                <SelectItem value="voucher_room_service">Room Service</SelectItem>
+                <SelectItem value="voucher_consumo_interno">Consumo Interno</SelectItem>
               </SelectContent>
             </Select>
-            {(compTipo === "voucher_justo" || compTipo === "voucher_pedidos_ya") && (
+            {restaurantVoucherTypes.has(compTipo) && (
               <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Comprobante interno — no es una factura fiscal (sin CAE)
               </p>
             )}
-            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "ficticio" && (
+            {!restaurantVoucherTypes.has(compTipo) && compAmbiente === "ficticio" && (
               <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Modo ficticio — CAE simulado, no válido fiscalmente
               </p>
             )}
-            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "homologacion" && (
+            {!restaurantVoucherTypes.has(compTipo) && compAmbiente === "homologacion" && (
               <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Homologación — CAE real de ARCA, ambiente de pruebas
