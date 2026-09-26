@@ -5,8 +5,8 @@ import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { requireAuth } from "./auth";
-import { calcNeto, calcIva21 } from "./lib/pricing";
 import { formatArgentinaDate, formatArgentinaDateTime, formatArgentinaFilenameTimestamp } from "./utils/argentinaDateTime";
+import { TIPOS_CBT_WSFE } from "./billing/invoiceService";
 
 // ─── Hotel Constants ──────────────────────────────────────────────────────────
 const H = {
@@ -251,28 +251,58 @@ function alicuotasComprasLines(inv: any, netoPorTasa: Record<string, number> | u
   return lines;
 }
 
+// ─── Gravado por alícuota de una venta ────────────────────────────────────────
+//
+// sales_invoices solo guarda monto_iva21 y monto_iva105 (nunca 27/5/2.5 — las
+// ventas del hotel no usan esas alícuotas), pero el neto de cada una no está
+// separado en columnas propias. A diferencia de Compras, acá se puede derivar
+// exacto: el IVA de cada línea se calculó como neto × tasa al emitir, así que
+// neto = iva ÷ tasa es siempre exacto, no una aproximación.
+function ventaGravadoPorAlicuota(sale: any): { g21: number; g105: number } {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const iva21 = $n(sale.monto_iva21), iva105 = $n(sale.monto_iva105);
+  if (!iva21 && !iva105) return { g21: $n(sale.monto_neto), g105: 0 };
+  return { g21: iva21 ? round2(iva21 / 0.21) : 0, g105: iva105 ? round2(iva105 / 0.105) : 0 };
+}
+
 // ─── CBTE ventas TXT ──────────────────────────────────────────────────────────
 function cbteVentasLine(sale: any): string {
   const fecha = (() => {
-    const d = new Date((sale.fecha || "2026-01-01") + "T12:00:00");
+    const d = new Date((sale.fecha_emision || "2026-01-01") + "T12:00:00");
     return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
   })();
-  const pv = "0001"; // hotel point of sale
-  const num = String(sale.id || "0").padStart(20, "0");
-  const cuit = (sale.cuit || "").replace(/-/g, "").padStart(11, "0");
-  const nombre = pad(((sale.guest_name || sale.nombre || "Consumidor Final")).toUpperCase(), 30, " ", true);
-  const total = String(Math.round($n(sale.total) * 100)).padStart(15, "0");
+  const cbteTipo = String(TIPOS_CBT_WSFE[sale.tipo_comprobante] ?? 6).padStart(3, "0");
+  const pv = String(sale.punto_venta || "1").padStart(5, "0");
+  const num = String(sale.numero || "0").padStart(20, "0");
+  const cuit = (sale.cliente_cuit || "").replace(/-/g, "").padStart(11, "0");
+  const nombre = pad((sale.cliente_razon_social || "Consumidor Final").toUpperCase(), 30, " ", true);
+  const total = String(Math.round($n(sale.monto_total) * 100)).padStart(15, "0");
+  const codIva = ivaCodiva(sale.cliente_condicion_iva || "");
 
-  return [fecha, "001", pv, num, num, "8", cuit, nombre, total].join("");
+  return [fecha, cbteTipo, pv, num, num, codIva, cuit, nombre, total].join("");
 }
 
 // ─── ALICUOTAS ventas TXT ─────────────────────────────────────────────────────
-function alicuotasVentasLine(sale: any): string {
-  const pv = "0001";
-  const num = String(sale.id || "0").padStart(20, "0");
-  const neto = String(Math.round($n(sale.neto) * 100)).padStart(15, "0");
-  const ivaM = String(Math.round($n(sale.iva) * 100)).padStart(15, "0");
-  return `001${pv}${num}${neto}0210${ivaM}`;
+function alicuotasVentasLine(sale: any): string[] {
+  const cbteTipo = String(TIPOS_CBT_WSFE[sale.tipo_comprobante] ?? 6).padStart(3, "0");
+  const pv = String(sale.punto_venta || "1").padStart(5, "0");
+  const num = String(sale.numero || "0").padStart(20, "0");
+  const g = ventaGravadoPorAlicuota(sale);
+  const lines: string[] = [];
+  const alicuotas = [
+    { base: g.g21, iva: $n(sale.monto_iva21), cod: "0210" },
+    { base: g.g105, iva: $n(sale.monto_iva105), cod: "0105" },
+  ].filter((a) => a.iva > 0);
+  for (const a of alicuotas) {
+    const base = String(Math.round(a.base * 100)).padStart(15, "0");
+    const ivaM = String(Math.round(a.iva * 100)).padStart(15, "0");
+    lines.push(`${cbteTipo}${pv}${num}${base}${a.cod}${ivaM}`);
+  }
+  if (!lines.length) {
+    const base = String(Math.round($n(sale.monto_neto) * 100)).padStart(15, "0");
+    lines.push(`${cbteTipo}${pv}${num}${base}0000000000000000000`);
+  }
+  return lines;
 }
 
 // ─── Route registration ───────────────────────────────────────────────────────
@@ -532,26 +562,25 @@ export function registerExportRoutes(app: Express) {
       const { desde, hasta, tipo = "excel" } = req.query as Record<string, string>;
       if (!desde || !hasta) return res.status(400).json({ error: "Se requieren 'desde' y 'hasta'" });
 
-      // Sales: payments + reservations + guests
+      // Antes armaba esto a partir de payments+reservations+guests, asumiendo
+      // que todo cobro era una Factura B al 21% flat — ignoraba el tipo de
+      // comprobante real, la condición de IVA del cliente, y cualquier venta
+      // de Restaurant/Spa/Eventos/Grupos (que no pasan por reservation
+      // payments). Ahora lee directo de sales_invoices, la fuente real.
       const rows = (await db.execute(sql`
-        SELECT
-          p.id, p.date AS fecha, p.amount AS total, p.method,
-          p.reservation_id,
-          CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
-          COALESCE(g.cuil_cuit, '00000000000') AS cuit,
-          r.reservation_code
-        FROM payments p
-        LEFT JOIN reservations r ON r.id = p.reservation_id
-        LEFT JOIN guests g ON g.id = r.guest_id
-        WHERE p.date BETWEEN ${desde} AND ${hasta}
-        ORDER BY p.date, p.id
+        SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.fecha_emision,
+               si.cliente_razon_social, si.cliente_cuit, si.cliente_condicion_iva,
+               si.monto_neto, si.monto_iva21, si.monto_iva105, si.monto_exento,
+               si.monto_no_gravado, si.monto_total
+        FROM sales_invoices si
+        WHERE si.fecha_emision BETWEEN ${desde} AND ${hasta}
+          AND si.estado != 'anulado'
+          AND (si.modo_ficticio = false OR si.modo_ficticio IS NULL)
+        ORDER BY si.fecha_emision, si.id
       `)).rows as any[];
 
       const [d1, d2] = [desde.replace(/-/g, ""), hasta.replace(/-/g, "")];
       const ts = `${d1}-${d2}`;
-
-      // Calculate IVA 21% from total (total includes 21% IVA) — from shared pricing module
-      const calcIVA = (total: number) => calcIva21(calcNeto(total));
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();
@@ -562,10 +591,11 @@ export function registerExportRoutes(app: Express) {
 
         for (const r of rows) {
           ws.addRow([
-            fDate(r.fecha), "FACT-B", "0001", r.id,
-            r.reservation_code, r.guest_name,
-            (r.cuit || "").replace(/-/g, ""),
-            $n(r.total), calcNeto($n(r.total)), calcIVA($n(r.total)), 0, 0,
+            fDate(r.fecha_emision), r.tipo_comprobante, r.punto_venta || 1, r.numero,
+            "", r.cliente_razon_social || "Consumidor Final",
+            (r.cliente_cuit || "").replace(/-/g, ""),
+            $n(r.monto_total), $n(r.monto_neto), $n(r.monto_iva21) + $n(r.monto_iva105),
+            $n(r.monto_exento), $n(r.monto_no_gravado),
           ]);
         }
         const buf = await wb.xlsx.writeBuffer();
@@ -578,9 +608,7 @@ export function registerExportRoutes(app: Express) {
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_VENTAS_CBTE_f_${ts}.txt"`);
         res.send(lines.join("\r\n"));
       } else if (tipo === "alicuotas") {
-        const lines = rows.map((r) =>
-          alicuotasVentasLine({ ...r, neto: calcNeto($n(r.total)), iva: calcIVA($n(r.total)) })
-        );
+        const lines = rows.flatMap(alicuotasVentasLine);
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_VENTAS_ALICUOTAS_f_${ts}.txt"`);
         res.send(lines.join("\r\n"));
