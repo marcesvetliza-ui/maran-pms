@@ -271,6 +271,10 @@ const emptyForm = () => ({
   condicionPago: "cuenta_corriente",
   formaPagoInmediata: "cuenta_corriente",
   montoPagadoAhora: "",
+  // Formas de pago adicionales cuando se combina más de una al cargar el
+  // comprobante (ej. parte efectivo, parte transferencia) — formaPagoInmediata
+  // + montoPagadoAhora siguen siendo la primera fila.
+  formasPagoExtra: [] as Array<{ formaPago: string; monto: string }>,
   alicuotaIva: "21",
   montoNeto: "",
   montoIva21: "",
@@ -507,6 +511,7 @@ export function InvoiceDialog({
         condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
         formaPagoInmediata: "cuenta_corriente",
         montoPagadoAhora: "",
+        formasPagoExtra: [],
         alicuotaIva: "21",
         montoNeto: editingInvoice.montoNeto || "",
         montoIva21: editingInvoice.montoIva21 || "",
@@ -647,6 +652,100 @@ export function InvoiceDialog({
     return calculatePurchaseInvoiceTotal(form);
   }, [form]);
 
+  // Se puede combinar más de una forma de pago real al cargar el comprobante
+  // (ej. parte efectivo, parte transferencia), igual que en Ventas — antes
+  // solo admitía una. formaPagoInmediata/montoPagadoAhora son la primera
+  // fila; formasPagoExtra son las que se van agregando. Compartido entre el
+  // layout unificado (Centro de Comprobantes) y el asistente clásico.
+  const montoPagadoAhoraTotal = $n(form.montoPagadoAhora) + form.formasPagoExtra.reduce((s, r) => s + $n(r.monto), 0);
+  const formaPagoInmediataSection = (
+    <div>
+      <Label>Forma de Pago</Label>
+      <Select
+        value={form.formaPagoInmediata}
+        onValueChange={(v) => setForm((p) => ({
+          ...p,
+          formaPagoInmediata: v,
+          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
+          formasPagoExtra: v === "cuenta_corriente" ? [] : p.formasPagoExtra,
+        }))}
+      >
+        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {form.formaPagoInmediata !== "cuenta_corriente" && (
+        <>
+          <div className="mt-2">
+            <Label>Monto a pagar ahora ($)</Label>
+            <Input
+              type="number" min="0" step="0.01" max={total}
+              value={form.montoPagadoAhora}
+              onChange={(e) => f("montoPagadoAhora", e.target.value)}
+              data-testid="input-monto-pagado-ahora"
+            />
+          </div>
+          {form.formasPagoExtra.map((row, i) => (
+            <div key={i} className="flex gap-2 items-end mt-2">
+              <div className="flex-1">
+                <Label>Otra forma de pago</Label>
+                <Select
+                  value={row.formaPago}
+                  onValueChange={(v) => setForm((p) => {
+                    const extra = [...p.formasPagoExtra];
+                    extra[i] = { ...extra[i], formaPago: v };
+                    return { ...p, formasPagoExtra: extra };
+                  })}
+                >
+                  <SelectTrigger data-testid={`select-forma-pago-extra-${i}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1">
+                <Label>Monto ($)</Label>
+                <Input
+                  type="number" min="0" step="0.01"
+                  value={row.monto}
+                  onChange={(e) => setForm((p) => {
+                    const extra = [...p.formasPagoExtra];
+                    extra[i] = { ...extra[i], monto: e.target.value };
+                    return { ...p, formasPagoExtra: extra };
+                  })}
+                  data-testid={`input-monto-pagado-extra-${i}`}
+                />
+              </div>
+              <Button
+                type="button" variant="ghost" size="icon" className="text-destructive"
+                onClick={() => setForm((p) => ({ ...p, formasPagoExtra: p.formasPagoExtra.filter((_, idx) => idx !== i) }))}
+                data-testid={`button-remove-forma-pago-extra-${i}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button" variant="ghost" size="sm" className="mt-2 px-0"
+            onClick={() => setForm((p) => ({ ...p, formasPagoExtra: [...p.formasPagoExtra, { formaPago: "transferencia", monto: "" }] }))}
+            data-testid="button-add-forma-pago-extra"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Agregar otra forma de pago
+          </Button>
+        </>
+      )}
+      <p className="text-xs text-muted-foreground mt-1">
+        {form.formaPagoInmediata === "cuenta_corriente"
+          ? "El pago se registra desde la cuenta corriente del proveedor."
+          : montoPagadoAhoraTotal < total - 0.005
+            ? `Se genera la OP por $${fmt(montoPagadoAhoraTotal)} y el resto ($${fmt(total - montoPagadoAhoraTotal)}) queda pendiente en cuenta corriente.`
+            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
+      </p>
+    </div>
+  );
+
   const articleAmountComparison = canSuggestArticles && completedArticles.length > 0 && vatSelectionComplete && (
     <div className={`rounded-md border p-3 text-xs ${Math.abs(total - articleSuggestion.articleTotal) > 0.01 ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`} data-testid="article-amount-comparison">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -744,10 +843,19 @@ export function InvoiceDialog({
       toast({ title: "Elegí la alícuota de IVA de cada artículo", variant: "destructive" });
       return;
     }
-    if (form.formaPagoInmediata !== "cuenta_corriente" &&
-        (!form.montoPagadoAhora || $n(form.montoPagadoAhora) <= 0 || $n(form.montoPagadoAhora) > total + 0.005)) {
-      toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
-      return;
+    if (form.formaPagoInmediata !== "cuenta_corriente") {
+      if (!form.montoPagadoAhora || $n(form.montoPagadoAhora) <= 0) {
+        toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
+        return;
+      }
+      if (form.formasPagoExtra.some((r) => $n(r.monto) <= 0)) {
+        toast({ title: "Cada forma de pago agregada necesita un monto mayor a $0,00", variant: "destructive" });
+        return;
+      }
+      if (montoPagadoAhoraTotal > total + 0.005) {
+        toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
+        return;
+      }
     }
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
@@ -756,8 +864,9 @@ export function InvoiceDialog({
       ...form,
       supplierId: form.supplierId ? parseInt(form.supplierId) : null,
       cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
-      formaPago: form.formaPagoInmediata !== "cuenta_corriente" ? form.formaPagoInmediata : null,
-      montoPagadoAhora: form.formaPagoInmediata !== "cuenta_corriente" ? form.montoPagadoAhora : null,
+      formasPago: form.formaPagoInmediata !== "cuenta_corriente"
+        ? [{ formaPago: form.formaPagoInmediata, monto: form.montoPagadoAhora }, ...form.formasPagoExtra]
+        : [],
     });
   };
 
@@ -888,43 +997,7 @@ export function InvoiceDialog({
                     <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
                       El pago se registra desde la cuenta corriente del proveedor.
                     </div>
-                  ) : (
-                    <div>
-                      <Label>Forma de Pago</Label>
-                      <Select
-                        value={form.formaPagoInmediata}
-                        onValueChange={(v) => setForm((p) => ({
-                          ...p,
-                          formaPagoInmediata: v,
-                          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
-                        }))}
-                      >
-                        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      {form.formaPagoInmediata !== "cuenta_corriente" && (
-                        <div className="mt-2">
-                          <Label>Monto a pagar ahora ($)</Label>
-                          <Input
-                            type="number" min="0" step="0.01" max={total}
-                            value={form.montoPagadoAhora}
-                            onChange={(e) => f("montoPagadoAhora", e.target.value)}
-                            data-testid="input-monto-pagado-ahora"
-                          />
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {form.formaPagoInmediata === "cuenta_corriente"
-                          ? "El pago se registra desde la cuenta corriente del proveedor."
-                          : $n(form.montoPagadoAhora) < total - 0.005
-                            ? `Se genera la OP por $${fmt(form.montoPagadoAhora)} y el resto ($${fmt(total - $n(form.montoPagadoAhora))}) queda pendiente en cuenta corriente.`
-                            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
-                      </p>
-                    </div>
-                  )
+                  ) : formaPagoInmediataSection
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>
@@ -1408,43 +1481,7 @@ export function InvoiceDialog({
                     <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
                       El pago se registra desde la cuenta corriente del proveedor.
                     </div>
-                  ) : (
-                    <div>
-                      <Label>Forma de Pago</Label>
-                      <Select
-                        value={form.formaPagoInmediata}
-                        onValueChange={(v) => setForm((p) => ({
-                          ...p,
-                          formaPagoInmediata: v,
-                          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
-                        }))}
-                      >
-                        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-                          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      {form.formaPagoInmediata !== "cuenta_corriente" && (
-                        <div className="mt-2">
-                          <Label>Monto a pagar ahora ($)</Label>
-                          <Input
-                            type="number" min="0" step="0.01" max={total}
-                            value={form.montoPagadoAhora}
-                            onChange={(e) => f("montoPagadoAhora", e.target.value)}
-                            data-testid="input-monto-pagado-ahora"
-                          />
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {form.formaPagoInmediata === "cuenta_corriente"
-                          ? "El pago se registra desde la cuenta corriente del proveedor."
-                          : $n(form.montoPagadoAhora) < total - 0.005
-                            ? `Se genera la OP por $${fmt(form.montoPagadoAhora)} y el resto ($${fmt(total - $n(form.montoPagadoAhora))}) queda pendiente en cuenta corriente.`
-                            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
-                      </p>
-                    </div>
-                  )
+                  ) : formaPagoInmediataSection
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>

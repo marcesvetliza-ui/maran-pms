@@ -219,6 +219,7 @@ export async function generarAsientoOP(
   const retIva = parseNum(op.retencionIva);
   const depBancario = parseNum(op.depBancario);
   const efectivo = parseNum(op.efectivo);
+  const cheques = parseNum(op.cheques);
 
   const [acProv, acCaja, acBanco, acRetIibb, acRetGanancias, acRetIva] = await Promise.all([
     getAccountId("2.1.1.01", executor),
@@ -259,12 +260,24 @@ export async function generarAsientoOP(
       VALUES (${entryId}, ${acCaja}, ${provNombre}, 0, ${efectivo})
     `);
   }
-  // Si es transferencia y no hay depBancario ni efectivo, usar banco
-  if (depBancario === 0 && efectivo === 0 && acBanco) {
-    const totalAbonado = parseNum(op.totalAbonado);
+  if (cheques > 0 && acBanco) {
     await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
-      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${totalAbonado})
+      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${cheques})
+    `);
+  }
+  // Transferencia no tiene columna propia (queda implícita como lo que sobra
+  // del total abonado tras restar depBancario/efectivo/cheques) — antes esto
+  // solo se cubría cuando depBancario y efectivo daban 0 los dos, así que una
+  // combinación (ej. parte efectivo + parte transferencia) dejaba la porción
+  // de transferencia sin acreditar en ninguna cuenta y el asiento quedaba
+  // desbalanceado. Ahora el resto se acredita siempre, sea o no la única forma.
+  const totalAbonado = parseNum(op.totalAbonado);
+  const resto = Math.round((totalAbonado - depBancario - efectivo - cheques) * 100) / 100;
+  if (resto > 0.004 && acBanco) {
+    await executor.execute(sql`
+      INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
+      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${resto})
     `);
   }
 

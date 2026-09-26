@@ -94,8 +94,7 @@ describe("InvoiceDialog — pago parcial al cargar el comprobante", () => {
     await user.click(screen.getByTestId("btn-submit-invoice"));
 
     await waitFor(() => expect(capture.body).toBeTruthy());
-    expect(capture.body.formaPago).toBe("transferencia");
-    expect(capture.body.montoPagadoAhora).toBe("700");
+    expect(capture.body.formasPago).toEqual([{ formaPago: "transferencia", monto: "700" }]);
   });
 
   it("volver a Cuenta Corriente oculta el campo y no manda formaPago", async () => {
@@ -115,8 +114,35 @@ describe("InvoiceDialog — pago parcial al cargar el comprobante", () => {
 
     await user.click(screen.getByTestId("btn-submit-invoice"));
     await waitFor(() => expect(capture.body).toBeTruthy());
-    expect(capture.body.formaPago).toBeNull();
-    expect(capture.body.montoPagadoAhora).toBeNull();
+    expect(capture.body.formasPago).toEqual([]);
+  });
+
+  it("permite combinar más de una forma de pago y las manda todas juntas", async () => {
+    const capture: { body: any } = { body: undefined };
+    vi.stubGlobal("fetch", buildFetchMock(capture));
+    const user = userEvent.setup();
+    renderDialog();
+    await fillMinimo(user);
+
+    await user.click(screen.getByTestId("select-forma-pago-inmediata"));
+    await user.click(await screen.findByRole("option", { name: "Efectivo" }));
+
+    const primerMonto = screen.getByTestId("input-monto-pagado-ahora");
+    await user.clear(primerMonto);
+    await user.type(primerMonto, "500");
+
+    await user.click(screen.getByTestId("button-add-forma-pago-extra"));
+    await user.click(screen.getByTestId("select-forma-pago-extra-0"));
+    await user.click(await screen.findByRole("option", { name: "Transferencia" }));
+    await user.type(screen.getByTestId("input-monto-pagado-extra-0"), "710");
+
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+
+    await waitFor(() => expect(capture.body).toBeTruthy());
+    expect(capture.body.formasPago).toEqual([
+      { formaPago: "efectivo", monto: "500" },
+      { formaPago: "transferencia", monto: "710" },
+    ]);
   });
 
   it("bloquea el envío si el monto a pagar ahora supera el total", async () => {

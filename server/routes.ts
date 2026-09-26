@@ -3127,20 +3127,31 @@ export async function registerRoutes(
         : body.condicionPago || "contado";
       const estado = condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
 
-      // Si se eligió una forma de pago real (no Cuenta Corriente), se paga
+      // Si se eligieron formas de pago reales (no Cuenta Corriente), se paga
       // total o parcialmente al cargarla — ver el bloque más abajo, dentro
-      // de la transacción. Las NC quedan afuera: no tiene sentido "pagarlas"
-      // solas, se aplican contra otra factura pendiente desde la OP manual.
-      const formaPagoInmediata = ["transferencia", "efectivo", "cheque", "dep_bancario"].includes(body.formaPago)
-        ? body.formaPago : null;
-      const pagaAlCargar = !!formaPagoInmediata && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC");
+      // de la transacción. Se puede combinar más de una (ej. parte efectivo,
+      // parte transferencia), igual que en Ventas. Las NC quedan afuera: no
+      // tiene sentido "pagarlas" solas, se aplican contra otra factura
+      // pendiente desde la OP manual.
+      const FORMAS_PAGO_INMEDIATAS = ["transferencia", "efectivo", "cheque", "dep_bancario"];
+      const formasPagoInput = Array.isArray(body.formasPago) ? body.formasPago : [];
+      for (const row of formasPagoInput) {
+        const monto = Number(row?.monto);
+        if (!FORMAS_PAGO_INMEDIATAS.includes(row?.formaPago) || !Number.isFinite(monto) || monto <= 0) {
+          return res.status(400).json({ error: "Cada forma de pago debe tener un método válido y un monto mayor a $0,00." });
+        }
+      }
+      const formasPago: Array<{ formaPago: string; monto: number }> = formasPagoInput.map((row: any) => ({
+        formaPago: row.formaPago as string, monto: Number(row.monto),
+      }));
+      const pagaAlCargar = formasPago.length > 0 && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC");
       let montoPagadoAhora = montoTotal;
-      if (pagaAlCargar && body.montoPagadoAhora !== undefined && body.montoPagadoAhora !== null && body.montoPagadoAhora !== "") {
-        const parsed = Number(body.montoPagadoAhora);
-        if (!Number.isFinite(parsed) || parsed <= 0 || parsed > montoTotal + 0.005) {
+      if (pagaAlCargar) {
+        montoPagadoAhora = Math.round(formasPago.reduce((sum, r) => sum + r.monto, 0) * 100) / 100;
+        if (montoPagadoAhora > montoTotal + 0.005) {
           return res.status(400).json({ error: "El monto a pagar ahora debe ser mayor a $0,00 y no puede superar el total del comprobante." });
         }
-        montoPagadoAhora = Math.min(parsed, montoTotal);
+        montoPagadoAhora = Math.min(montoPagadoAhora, montoTotal);
       }
       const esPagoParcial = pagaAlCargar && montoPagadoAhora < montoTotal - 0.005;
 
@@ -3252,15 +3263,19 @@ export async function registerRoutes(
       // manual aparte. Si es parcial, el resto queda con saldo pendiente en
       // cuenta corriente — ver createPaymentOrder.
       if (pagaAlCargar) {
+        const sumaPorMetodo = (metodo: string) => Math.round(
+          formasPago.filter((r) => r.formaPago === metodo).reduce((sum, r) => sum + r.monto, 0) * 100,
+        ) / 100;
+        const formaPagoLabel = [...new Set(formasPago.map((r) => r.formaPago))].join("+");
         const { op } = await createPaymentOrder(tx, {
           supplierId,
           fecha: body.fechaEmision,
           facturaIds: [invoice.id],
           montoParcial: esPagoParcial ? montoPagadoAhora : undefined,
-          formaPago: formaPagoInmediata,
-          depBancario: formaPagoInmediata === "dep_bancario" ? montoPagadoAhora : 0,
-          efectivo: formaPagoInmediata === "efectivo" ? montoPagadoAhora : 0,
-          cheques: formaPagoInmediata === "cheque" ? montoPagadoAhora : 0,
+          formaPago: formaPagoLabel,
+          depBancario: sumaPorMetodo("dep_bancario"),
+          efectivo: sumaPorMetodo("efectivo"),
+          cheques: sumaPorMetodo("cheque"),
           observaciones: esPagoParcial ? "OP automática (pago parcial) al cargar el comprobante" : "OP automática al cargar el comprobante",
         }, getArgentinaToday);
         const updated = await tx.execute(sql`SELECT estado, saldo_pendiente FROM purchase_invoices WHERE id = ${invoice.id}`);

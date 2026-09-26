@@ -97,7 +97,7 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
       const created = await request("POST", "/api/purchase-invoices", {
         tipoComprobante: "FACT-A", supplierId,
         numeroComprobante: `AUTOPAGO-${suffix}`, fechaEmision: "2026-09-23",
-        montoNeto: "100.00", montoIva21: "21.00", formaPago: "efectivo",
+        montoNeto: "100.00", montoIva21: "21.00", formasPago: [{ formaPago: "efectivo", monto: "121.00" }],
       });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       invoiceId = Number(created.body.id);
@@ -165,7 +165,7 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
       const created = await request("POST", "/api/purchase-invoices", {
         tipoComprobante: "NC-A", supplierId,
         numeroComprobante: `NC-${suffix}`, fechaEmision: "2026-09-23",
-        montoNeto: "30.00", montoIva21: "6.30", formaPago: "efectivo",
+        montoNeto: "30.00", montoIva21: "6.30", formasPago: [{ formaPago: "efectivo", monto: "36.30" }],
       });
       expect(created.status).toBe(201);
       invoiceId = Number(created.body.id);
