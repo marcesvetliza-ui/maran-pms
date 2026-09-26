@@ -136,7 +136,8 @@ import {
   guestReviews, housekeepingTasks, reservationChangelog,
   restaurantAreas, restaurantTables, menuCategories, menuItems,
   restaurantOrders, orderItems, tableReservations, restaurantTimeSlots,
-  restaurantReservationAdvances,
+  restaurantReservationAdvances, eventualWaiters,
+  type EventualWaiter, type InsertEventualWaiter,
   type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
   itemCategories, inventoryItems, inventoryItemSuppliers, accountingSuppliers, stockMovements, warehouseStock,
@@ -4955,6 +4956,22 @@ export class DatabaseStorage implements IStorage {
   async deleteRestaurantOrder(id: string): Promise<boolean> {
     const result = await db.delete(restaurantOrders).where(eq(restaurantOrders.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getEventualWaiters(activeOnly = false): Promise<EventualWaiter[]> {
+    return activeOnly
+      ? db.select().from(eventualWaiters).where(eq(eventualWaiters.isActive, "true"))
+      : db.select().from(eventualWaiters);
+  }
+
+  async createEventualWaiter(waiter: InsertEventualWaiter): Promise<EventualWaiter> {
+    const [created] = await db.insert(eventualWaiters).values(waiter as any).returning();
+    return created;
+  }
+
+  async updateEventualWaiter(id: string, waiter: Partial<InsertEventualWaiter>): Promise<EventualWaiter | undefined> {
+    const [updated] = await db.update(eventualWaiters).set(waiter as any).where(eq(eventualWaiters.id, id)).returning();
+    return updated;
   }
 
   generateOrderNumber(): string {

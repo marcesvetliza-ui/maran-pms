@@ -173,6 +173,42 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // Mozos eventuales — personal ocasional sin usuario del sistema (sin login
+  // ni email), para poder sumarlos al selector de mozo sin pasar por el ABM
+  // de usuarios. restaurant_orders.waiter_name es un snapshot de texto libre
+  // (no una FK), así que solo hace falta alimentar el nombre.
+  app.get("/api/restaurant/eventual-waiters", async (req, res) => {
+    try {
+      const activeOnly = req.query.activeOnly !== "false";
+      const waiters = await storage.getEventualWaiters(activeOnly);
+      res.json(waiters);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching eventual waiters" });
+    }
+  });
+
+  app.post("/api/restaurant/eventual-waiters", async (req, res) => {
+    try {
+      const fullName = String(req.body?.fullName || "").trim();
+      if (!fullName) return res.status(400).json({ error: "El nombre es requerido" });
+      const waiter = await storage.createEventualWaiter({ fullName, isActive: "true" });
+      res.status(201).json(waiter);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating eventual waiter" });
+    }
+  });
+
+  app.patch("/api/restaurant/eventual-waiters/:id", async (req, res) => {
+    try {
+      const isActive = req.body?.isActive === "false" ? "false" : "true";
+      const waiter = await storage.updateEventualWaiter(req.params.id, { isActive });
+      if (!waiter) return res.status(404).json({ error: "Eventual waiter not found" });
+      res.json(waiter);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating eventual waiter" });
+    }
+  });
+
   // Restaurant Orders
   app.get("/api/restaurant/orders", async (req, res) => {
     try {

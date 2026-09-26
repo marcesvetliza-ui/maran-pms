@@ -4564,6 +4564,19 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  // Mozos eventuales: personal ocasional sin usuario del sistema, para
+  // sumarlos al selector de mozo de Restaurant sin crearles login/email.
+  await withTimeout("eventual_waiters.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE eventual_waiters (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        full_name text NOT NULL,
+        is_active text NOT NULL DEFAULT 'true',
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

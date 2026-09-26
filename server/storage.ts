@@ -86,6 +86,8 @@ import {
   type MenuItemWithCategory,
   type RestaurantOrder,
   type InsertRestaurantOrder,
+  type EventualWaiter,
+  type InsertEventualWaiter,
   type OrderItem,
   type InsertOrderItem,
   type RestaurantOrderWithDetails,
@@ -543,6 +545,11 @@ export interface IStorage {
   updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined>;
   deleteRestaurantOrder(id: string): Promise<boolean>;
   generateOrderNumber(): string;
+
+  // Mozos eventuales (sin usuario del sistema)
+  getEventualWaiters(activeOnly?: boolean): Promise<EventualWaiter[]>;
+  createEventualWaiter(waiter: InsertEventualWaiter): Promise<EventualWaiter>;
+  updateEventualWaiter(id: string, waiter: Partial<InsertEventualWaiter>): Promise<EventualWaiter | undefined>;
 
   // Order Items
   getOrderItems(orderId: string): Promise<OrderItem[]>;

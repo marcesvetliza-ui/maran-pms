@@ -750,6 +750,8 @@ export default function RestaurantPage() {
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferTargetOrderId, setTransferTargetOrderId] = useState<string>("");
   const [transferNewWaiter, setTransferNewWaiter] = useState("");
+  const [addingMozoFor, setAddingMozoFor] = useState<null | "new" | "direct" | "transfer">(null);
+  const [newMozoEventualName, setNewMozoEventualName] = useState("");
   const [reservationClientSearch, setReservationClientSearch] = useState("");
   const [showReservationClientDropdown, setShowReservationClientDropdown] = useState(false);
   const [editingCovers, setEditingCovers] = useState(false);
@@ -1011,6 +1013,48 @@ export default function RestaurantPage() {
   // quien comparte el rol "restaurant" pero no es mozo (ej. cocina). Antes
   // era puramente role === "restaurant".
   const restaurantUsers = allUsers.filter(u => u.esMozo === "true");
+  const { data: eventualWaiters = [] } = useQuery<{ id: string; fullName: string; isActive: string }[]>({
+    queryKey: ["/api/restaurant/eventual-waiters"],
+  });
+  // Selector de mozo unificado: usuarios reales (esMozo === "true") + mozos
+  // eventuales (sin usuario del sistema, ver eventualWaiters arriba). Ambos
+  // solo aportan un nombre — restaurant_orders.waiterName ya es un snapshot
+  // de texto libre, no una FK, así que no hace falta "unir" nada más.
+  const mozoOptions = [
+    ...restaurantUsers.filter(u => u.fullName || u.username).map(u => ({
+      id: u.id, fullName: u.fullName || u.username, username: u.username as string | null, eventual: false,
+    })),
+    ...eventualWaiters.map(w => ({ id: w.id, fullName: w.fullName, username: null as string | null, eventual: true })),
+  ];
+  // Selector de mozo compartido por los 3 diálogos que asignan uno (nuevo
+  // pedido, pedido directo y transferencia a nueva cuenta) — un botón "+" al
+  // lado abre el diálogo de alta de mozo eventual (setAddingMozoFor).
+  const renderMozoSelect = (value: string, onValueChange: (v: string) => void, testId: string, context: "new" | "direct" | "transfer") => (
+    <div className="flex gap-2">
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger data-testid={testId} className="flex-1">
+          <SelectValue placeholder="Seleccionar mozo..." />
+        </SelectTrigger>
+        <SelectContent>
+          {mozoOptions.map(opt => (
+            <SelectItem key={opt.id} value={opt.fullName}>
+              {opt.fullName}
+              {opt.username && <span className="text-muted-foreground text-xs ml-1">(@{opt.username})</span>}
+              {opt.eventual && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0">Eventual</Badge>}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button" variant="outline" size="icon"
+        onClick={() => setAddingMozoFor(context)}
+        data-testid={`button-add-mozo-eventual-${context}`}
+        title="Agregar mozo eventual"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  );
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
@@ -1264,6 +1308,21 @@ export default function RestaurantPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
     },
+  });
+
+  const createEventualWaiterMutation = useMutation({
+    mutationFn: async (fullName: string) => {
+      const res = await apiRequest("POST", "/api/restaurant/eventual-waiters", { fullName });
+      return res.json();
+    },
+    onSuccess: (created: { id: string; fullName: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/eventual-waiters"] });
+      if (addingMozoFor === "new" || addingMozoFor === "direct") setNewWaiterName(created.fullName);
+      if (addingMozoFor === "transfer") setTransferNewWaiter(created.fullName);
+      setAddingMozoFor(null);
+      setNewMozoEventualName("");
+    },
+    onError: () => toast({ title: "Error al crear mozo eventual", variant: "destructive" }),
   });
 
   const createOrderMutation = useMutation({
@@ -4247,18 +4306,7 @@ export default function RestaurantPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="waiter-name">Mozo *</Label>
-              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
-                <SelectTrigger id="waiter-name" data-testid="select-waiter-name">
-                  <SelectValue placeholder="Seleccionar mozo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
-                    <SelectItem key={u.id} value={u.fullName || u.username}>
-                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {renderMozoSelect(newWaiterName, setNewWaiterName, "select-waiter-name", "new")}
             </div>
             <div className="space-y-2">
               <Label htmlFor="covers">Cantidad de comensales</Label>
@@ -4295,6 +4343,41 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Agregar mozo eventual — compartido por los 3 selectores de mozo */}
+      <Dialog open={addingMozoFor !== null} onOpenChange={(open) => { if (!open) { setAddingMozoFor(null); setNewMozoEventualName(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar mozo eventual</DialogTitle>
+            <DialogDescription>Para personal ocasional sin usuario del sistema. Queda disponible para elegir de nuevo la próxima vez.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="mozo-eventual-name">Nombre y apellido</Label>
+            <Input
+              id="mozo-eventual-name"
+              value={newMozoEventualName}
+              onChange={(e) => setNewMozoEventualName(e.target.value)}
+              placeholder="Ej: Juan Pérez"
+              data-testid="input-mozo-eventual-name"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAddingMozoFor(null); setNewMozoEventualName(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (newMozoEventualName.trim()) createEventualWaiterMutation.mutate(newMozoEventualName.trim());
+              }}
+              disabled={createEventualWaiterMutation.isPending || !newMozoEventualName.trim()}
+              data-testid="button-confirm-mozo-eventual"
+            >
+              {createEventualWaiterMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Agregar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Direct Order Dialog (tableless areas) */}
       <Dialog open={isDirectOrderDialogOpen} onOpenChange={(open) => { if (open) setIsDirectOrderDialogOpen(true); }}>
         <DialogContent onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
@@ -4315,18 +4398,7 @@ export default function RestaurantPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-waiter">Mozo *</Label>
-              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
-                <SelectTrigger id="direct-waiter" data-testid="select-direct-waiter">
-                  <SelectValue placeholder="Seleccionar mozo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
-                    <SelectItem key={u.id} value={u.fullName || u.username}>
-                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {renderMozoSelect(newWaiterName, setNewWaiterName, "select-direct-waiter", "direct")}
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-covers">Comensales (opcional)</Label>
@@ -4612,18 +4684,7 @@ export default function RestaurantPage() {
                   {transferTargetOrderId === "new" && (
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Mozo del nuevo ticket *</label>
-                      <Select value={transferNewWaiter} onValueChange={setTransferNewWaiter}>
-                        <SelectTrigger className="h-8 text-sm" data-testid="select-transfer-new-waiter">
-                          <SelectValue placeholder="Seleccionar mozo..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {restaurantUsers.map(u => (
-                            <SelectItem key={u.id} value={u.fullName}>
-                              {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {renderMozoSelect(transferNewWaiter, setTransferNewWaiter, "select-transfer-new-waiter", "transfer")}
                     </div>
                   )}
                   <Button

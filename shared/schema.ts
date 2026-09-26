@@ -1370,6 +1370,21 @@ export const insertRestaurantOrderSchema = createInsertSchema(restaurantOrders).
 export type InsertRestaurantOrder = z.infer<typeof insertRestaurantOrderSchema>;
 export type RestaurantOrder = typeof restaurantOrders.$inferSelect;
 
+// Mozos eventuales: personal ocasional sin usuario del sistema (sin login,
+// sin email). restaurant_orders.waiter_name ya es un snapshot de texto libre
+// (no una FK a system_users), así que estos solo alimentan el selector de
+// mozo con un nombre — no hace falta que sean "joinables" en ningún lado.
+export const eventualWaiters = pgTable("eventual_waiters", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fullName: text("full_name").notNull(),
+  isActive: text("is_active").notNull().default("true"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertEventualWaiterSchema = createInsertSchema(eventualWaiters).omit({ id: true, createdAt: true });
+export type InsertEventualWaiter = z.infer<typeof insertEventualWaiterSchema>;
+export type EventualWaiter = typeof eventualWaiters.$inferSelect;
+
 // Order Items
 export type OrderItemStatus = "pending" | "preparing" | "ready" | "served" | "cancelled" | "waiting_course";
 
