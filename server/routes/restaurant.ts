@@ -355,7 +355,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions } = req.body;
 
       // CUIT is mandatory when actually emitting Factura A / Factura C
       if (emitInvoice && ["factura_a", "factura_c"].includes(receiptType || "") && !(customerCuit || "").trim()) {
@@ -611,10 +611,13 @@ export function registerRestaurantRoutes(app: Express) {
 
           for (const item of orderItemsList) {
             const menuItem = await storage.getMenuItem(item.menuItemId);
-            // Nombre: customName en notes (entre corchetes) > nombre del ítem de menú > fallback
+            // Nombre: override editado al cerrar (itemDescriptions) > customName
+            // en notes (entre corchetes) > nombre del ítem de menú > fallback
             let itemName = menuItem?.name || "Ítem";
             const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
             if (notesMatch) itemName = notesMatch[1];
+            const override = itemDescriptions?.[item.id];
+            if (typeof override === "string" && override.trim()) itemName = override.trim();
 
             const grossItem = parseFloat(item.subtotal || "0");
             if (grossItem <= 0.001) continue;
@@ -1090,6 +1093,7 @@ export function registerRestaurantRoutes(app: Express) {
         itemIds, method, receiptType, roomReservationId,
         emitInvoice, vatCondition, customerRazonSocial, customerCuit,
         ccEntityType, ccEntityId, discount, discountType, puntoVenta: pvOverride,
+        itemDescriptions,
       } = req.body;
 
       if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -1172,6 +1176,26 @@ export function registerRestaurantRoutes(app: Express) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const invoiceItems = await Promise.all(selectedItems.map(async (i: any) => {
+            // Nombre: override editado al cobrar (itemDescriptions) > customName
+            // en notes (entre corchetes) > nombre del ítem de menú > fallback.
+            // selectedItems viene de storage.getOrderItems (sin join), así que
+            // el nombre real del menú se busca acá, no en i.menuItem.
+            const menuItem = await storage.getMenuItem(i.menuItemId);
+            let itemName = menuItem?.name || "Ítem restaurante";
+            const notesMatch = (i.notes || "").match(/^\[(.+?)\]/);
+            if (notesMatch) itemName = notesMatch[1];
+            const override = itemDescriptions?.[i.id];
+            if (typeof override === "string" && override.trim()) itemName = override.trim();
+            return {
+              descripcion: itemName,
+              cantidad: i.quantity || 1,
+              precioUnitario: parseFloat((parseFloat(i.subtotal) / 1.21 / (i.quantity || 1)).toFixed(4)),
+              alicuotaIva: "21" as const,
+              subtotalNeto: parseFloat((parseFloat(i.subtotal) / 1.21).toFixed(4)),
+              subtotal: parseFloat(i.subtotal),
+            };
+          }));
           const invoice = await emitirFactura({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
@@ -1179,14 +1203,7 @@ export function registerRestaurantRoutes(app: Express) {
               cuit: customerCuit || undefined,
               condicionIva: condicion,
             },
-            items: selectedItems.map((i: any) => ({
-              descripcion: i.menuItem?.name || `Ítem restaurante`,
-              cantidad: i.quantity || 1,
-              precioUnitario: parseFloat((parseFloat(i.subtotal) / 1.21 / (i.quantity || 1)).toFixed(4)),
-              alicuotaIva: "21" as const,
-              subtotalNeto: parseFloat((parseFloat(i.subtotal) / 1.21).toFixed(4)),
-              subtotal: parseFloat(i.subtotal),
-            })),
+            items: invoiceItems,
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
@@ -2248,8 +2265,13 @@ export function registerRestaurantRoutes(app: Express) {
               .from(menuItems)
               .where(eq(menuItems.id, item.menuItemId))
               .limit(1);
+            // Nombre: customName en notes (entre corchetes, ej. "Fuera de
+            // Menú") > nombre del ítem de menú > fallback.
+            let itemName = mi?.name || "Ítem";
+            const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
+            if (notesMatch) itemName = notesMatch[1];
             return {
-              name: mi?.name || "Ítem",
+              name: itemName,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               subtotal: item.subtotal,

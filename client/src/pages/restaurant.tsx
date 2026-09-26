@@ -313,6 +313,15 @@ function vatConditionShortLabel(vc: string | null | undefined): string {
   return "Cons. Final";
 }
 
+// Un ítem "Fuera de Menú" guarda su nombre real entre corchetes al inicio de
+// notes (server/routes/restaurant.ts) — no hay una columna de nombre propia.
+function displayItemName(item: { notes?: string | null; menuItem?: { name?: string } | null }): string {
+  if (item.notes?.startsWith("[")) {
+    return item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item";
+  }
+  return item.menuItem?.name || "Item";
+}
+
 function useElapsedTime(openedAt: string | null | undefined): string {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -752,6 +761,10 @@ export default function RestaurantPage() {
   const [transferNewWaiter, setTransferNewWaiter] = useState("");
   const [addingMozoFor, setAddingMozoFor] = useState<null | "new" | "direct" | "transfer">(null);
   const [newMozoEventualName, setNewMozoEventualName] = useState("");
+  // Descripción de factura editable por ítem al momento de cerrar/cobrar —
+  // por defecto usa displayItemName(item) (el nombre real de un "Fuera de
+  // Menú"), pero el mozo/cajero puede corregirla antes de emitir.
+  const [invoiceDescriptionOverrides, setInvoiceDescriptionOverrides] = useState<Record<string, string>>({});
   const [reservationClientSearch, setReservationClientSearch] = useState("");
   const [showReservationClientDropdown, setShowReservationClientDropdown] = useState(false);
   const [editingCovers, setEditingCovers] = useState(false);
@@ -1744,6 +1757,7 @@ export default function RestaurantPage() {
       customerDni?: string; puntoVenta?: number; reservationAdvanceCredit?: number;
       paymentSplits?: {method: string; amount: number; roomReservationId?: string}[];
       voucherCode?: string; voucherId?: string;
+      itemDescriptions?: Record<string, string>;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1766,6 +1780,7 @@ export default function RestaurantPage() {
         paymentSplits: data.paymentSplits,
         voucherCode: data.voucherCode,
         voucherId: data.voucherId,
+        itemDescriptions: data.itemDescriptions,
       });
       return res.json();
     },
@@ -5348,7 +5363,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -5381,13 +5396,16 @@ export default function RestaurantPage() {
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {getOrderItems().map((item) => (
-                  <div key={item.id} className="flex items-center justify-between py-2 border-b">
-                    <div>
-                      <span>{item.menuItem?.name || "Item"}</span>
-                      <span className="text-muted-foreground ml-2">x{item.quantity}</span>
-                      {item.course && item.course > 1 && <Badge variant="outline" className="ml-1 text-[10px]">{courseLabels[item.course]}</Badge>}
-                    </div>
-                    <span>
+                  <div key={item.id} className="flex items-center gap-2 py-2 border-b">
+                    <Input
+                      value={invoiceDescriptionOverrides[item.id] ?? displayItemName(item)}
+                      onChange={(e) => setInvoiceDescriptionOverrides((p) => ({ ...p, [item.id]: e.target.value }))}
+                      className="h-7 text-sm flex-1 min-w-0"
+                      data-testid={`input-invoice-description-${item.id}`}
+                    />
+                    <span className="text-muted-foreground shrink-0">x{item.quantity}</span>
+                    {item.course && item.course > 1 && <Badge variant="outline" className="text-[10px] shrink-0">{courseLabels[item.course]}</Badge>}
+                    <span className="shrink-0">
                       ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
@@ -6236,7 +6254,7 @@ export default function RestaurantPage() {
                       <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                         {allItems.length === 0 && <p className="text-sm text-muted-foreground text-center py-3">No hay ítems pendientes</p>}
                         {allItems.map((item: any) => (
-                          <label key={item.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30">
+                          <div key={item.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30">
                             <Checkbox
                               checked={payItemSelectedIds.has(item.id)}
                               onCheckedChange={() => {
@@ -6245,9 +6263,15 @@ export default function RestaurantPage() {
                                 setPayItemSelectedIds(next);
                               }}
                             />
-                            <span className="flex-1 text-sm">{item.menuItem?.name || "Ítem"} <span className="text-muted-foreground text-xs">x{item.quantity}</span></span>
-                            <span className="text-sm font-medium">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                          </label>
+                            <Input
+                              value={invoiceDescriptionOverrides[item.id] ?? displayItemName(item)}
+                              onChange={(e) => setInvoiceDescriptionOverrides((p) => ({ ...p, [item.id]: e.target.value }))}
+                              className="h-7 text-sm flex-1 min-w-0"
+                              data-testid={`input-invoice-description-${item.id}`}
+                            />
+                            <span className="text-muted-foreground text-xs shrink-0">x{item.quantity}</span>
+                            <span className="text-sm font-medium shrink-0">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
                         ))}
                       </div>
 
@@ -6464,6 +6488,11 @@ export default function RestaurantPage() {
                               customerCuit: isFactura ? (payItemBillingCuit || undefined) : undefined,
                               discount: payItemDiscount || undefined,
                               discountType: payItemDiscountType,
+                              itemDescriptions: Object.fromEntries(
+                                selectedItems
+                                  .filter((item: any) => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))
+                                  .map((item: any) => [item.id, invoiceDescriptionOverrides[item.id]]),
+                              ),
                             });
                           }}
                           data-testid="button-confirm-pay-items"
@@ -6604,6 +6633,11 @@ export default function RestaurantPage() {
                   paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
                   voucherCode: hasGiftVoucher ? (closeGiftVoucher?.voucherCode || undefined) : undefined,
                   voucherId: hasGiftVoucher ? (closeGiftVoucher?.id || undefined) : undefined,
+                  itemDescriptions: Object.fromEntries(
+                    getOrderItems()
+                      .filter(item => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))
+                      .map(item => [item.id, invoiceDescriptionOverrides[item.id]]),
+                  ),
                 });
               };
               return (
