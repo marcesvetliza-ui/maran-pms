@@ -166,20 +166,76 @@ function cbteComprasLine(inv: any): string {
   ].join("");
 }
 
+// ─── Neto gravado por alícuota (para no repetir el neto total en cada tasa) ──
+//
+// purchase_invoices solo guarda UN monto_neto agregado (más los montos de IVA
+// separados por alícuota) — no alcanza para saber cuánto de ese neto
+// corresponde a cada tasa cuando un comprobante mezcla alícuotas (ej. $100 al
+// 21% + $100 al 10,5%). purchase_invoice_lines sí guarda el neto real de cada
+// renglón junto con su alícuota (server/purchase-invoice-stock.ts), así que
+// se prioriza sumarizar eso; solo cuando el comprobante no tiene renglones
+// (comprobantes de gasto sin artículos — RESUMEN-BANCO, RETENCION, etc., o
+// comprobantes viejos previos a purchase_invoice_lines) se aproxima el neto de
+// cada alícuota activa como iva ÷ tasa, ya que iva = neto × tasa por diseño.
+type GravadoPorAlicuota = { g21: number; g105: number; g27: number; g5: number; g25: number };
+
+async function netoPorAlicuotaPorFactura(invoiceIds: number[]): Promise<Map<number, Record<string, number>>> {
+  const map = new Map<number, Record<string, number>>();
+  if (!invoiceIds.length) return map;
+  const result = await db.execute(sql`
+    SELECT invoice_id, vat_rate, SUM(line_total) AS neto
+    FROM purchase_invoice_lines
+    WHERE invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)}) AND vat_rate IS NOT NULL
+    GROUP BY invoice_id, vat_rate
+  `);
+  for (const row of result.rows as any[]) {
+    const invId = Number(row.invoice_id);
+    if (!map.has(invId)) map.set(invId, {});
+    map.get(invId)![String(row.vat_rate)] = $n(row.neto);
+  }
+  return map;
+}
+
+function gravadoPorAlicuota(inv: any, netoPorTasa: Record<string, number> | undefined): GravadoPorAlicuota {
+  if (netoPorTasa && Object.keys(netoPorTasa).length) {
+    return {
+      g21: netoPorTasa["21"] || 0,
+      g105: netoPorTasa["10.5"] || 0,
+      g27: netoPorTasa["27"] || 0,
+      g5: netoPorTasa["5"] || 0,
+      g25: netoPorTasa["2.5"] || 0,
+    };
+  }
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const iva21 = $n(inv.monto_iva21), iva105 = $n(inv.monto_iva105), iva27 = $n(inv.monto_iva27),
+    iva5 = $n(inv.monto_iva5), iva25 = $n(inv.monto_iva25);
+  if (!iva21 && !iva105 && !iva27 && !iva5 && !iva25) {
+    return { g21: $n(inv.monto_neto), g105: 0, g27: 0, g5: 0, g25: 0 };
+  }
+  return {
+    g21: iva21 ? round2(iva21 / 0.21) : 0,
+    g105: iva105 ? round2(iva105 / 0.105) : 0,
+    g27: iva27 ? round2(iva27 / 0.27) : 0,
+    g5: iva5 ? round2(iva5 / 0.05) : 0,
+    g25: iva25 ? round2(iva25 / 0.025) : 0,
+  };
+}
+
 // ─── ALICUOTAS compras TXT ────────────────────────────────────────────────────
-function alicuotasComprasLines(inv: any): string[] {
+function alicuotasComprasLines(inv: any, netoPorTasa: Record<string, number> | undefined): string[] {
   const t = tipoInfo(inv.tipo_comprobante);
   const pv = String(inv.punto_venta || "1").padStart(5, "0");
   const num = String(inv.numero_comprobante || "0").padStart(20, "0");
   const cuit = (inv.proveedor_cuit || "").replace(/-/g, "").padStart(11, "0");
   const lines: string[] = [];
+  const g = gravadoPorAlicuota(inv, netoPorTasa);
 
   const alicuotas = [
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva21), cod: "0210" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva105), cod: "0105" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva27), cod: "0270" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva5),  cod: "0050" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva25), cod: "0025" },
+    { base: g.g21, iva: $n(inv.monto_iva21), cod: "0210" },
+    { base: g.g105, iva: $n(inv.monto_iva105), cod: "0105" },
+    { base: g.g27, iva: $n(inv.monto_iva27), cod: "0270" },
+    { base: g.g5, iva: $n(inv.monto_iva5),  cod: "0050" },
+    { base: g.g25, iva: $n(inv.monto_iva25), cod: "0025" },
   ].filter((a) => a.iva > 0);
 
   for (const a of alicuotas) {
@@ -373,6 +429,7 @@ export function registerExportRoutes(app: Express) {
       const [mm, yyyy] = periodo.split("/");
       const periodoCode = ivaPeriodo(periodo);
       const ts = `${mm}${yyyy}`;
+      const netoPorFactura = await netoPorAlicuotaPorFactura(rows.map((r) => Number(r.id)));
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();
@@ -390,6 +447,7 @@ export function registerExportRoutes(app: Express) {
 
         for (const r of rows) {
           const ti = tipoInfo(r.tipo_comprobante);
+          const g = gravadoPorAlicuota(r, netoPorFactura.get(Number(r.id)));
           ws.addRow([
             periodoCode,
             ivaCodiva(r.condicion_iva || ""),
@@ -402,8 +460,7 @@ export function registerExportRoutes(app: Express) {
             r.supplier_id || 0,
             r.supplier_nombre || r.proveedor_nombre || "",
             (r.proveedor_cuit || "").replace(/-/g, ""),
-            $n(r.monto_neto),
-            0, 0, 0, 0, // gravado10_5, 27, 2_5, 5
+            g.g21, g.g105, g.g27, g.g25, g.g5,
             $n(r.monto_iva21),
             $n(r.monto_iva105),
             $n(r.monto_iva27),
@@ -427,9 +484,14 @@ export function registerExportRoutes(app: Express) {
         }
 
         // Totals row
+        const gravadoTotals = rows.reduce((acc, r) => {
+          const g = gravadoPorAlicuota(r, netoPorFactura.get(Number(r.id)));
+          acc.g21 += g.g21; acc.g105 += g.g105; acc.g27 += g.g27; acc.g25 += g.g25; acc.g5 += g.g5;
+          return acc;
+        }, { g21: 0, g105: 0, g27: 0, g25: 0, g5: 0 });
         const totRow = ws.addRow([
           "", "", "", "TOTALES", "", "", "", "", "", "", "",
-          rows.reduce((s, r) => s + $n(r.monto_neto), 0), 0, 0, 0, 0,
+          gravadoTotals.g21, gravadoTotals.g105, gravadoTotals.g27, gravadoTotals.g25, gravadoTotals.g5,
           rows.reduce((s, r) => s + $n(r.monto_iva21), 0),
           rows.reduce((s, r) => s + $n(r.monto_iva105), 0),
           rows.reduce((s, r) => s + $n(r.monto_iva27), 0),
@@ -452,7 +514,7 @@ export function registerExportRoutes(app: Express) {
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_COMPRAS_CBTE_p_${mm}_${yyyy}.txt"`);
         res.send(content);
       } else if (tipo === "alicuotas") {
-        const lines = rows.flatMap(alicuotasComprasLines);
+        const lines = rows.flatMap((r) => alicuotasComprasLines(r, netoPorFactura.get(Number(r.id))));
         const content = lines.join("\r\n");
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_COMPRAS_ALICUOTAS_p_${mm}_${yyyy}.txt"`);
