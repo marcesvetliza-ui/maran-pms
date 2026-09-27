@@ -186,14 +186,16 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
   const start = Date.now();
   const sqlBuffer = await generateBackupSql();
-  const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
     .replace(/\//g, "-");
-  const filename = `maran-backup-${dateStr}.sql`;
+  const timeStr = now.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", hour12: false });
+  const filename = `maran-backup-${dateStr}-${timeStr.replace(":", "")}hs.sql`;
 
   const result = await sendEmailWithPdfAttachment({
     to: targetEmail,
-    subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
-    body: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
+    subject: `[Maran] Backup automático de base de datos — ${dateStr} ${timeStr} hs`,
+    body: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las ${timeStr} hs.\n\nEste email es automático, no respondas.`,
     attachmentFilename: filename,
     attachmentBuffer: sqlBuffer,
     attachmentContentType: "application/sql",
@@ -211,7 +213,16 @@ export async function logManualDownload(fileSizeBytes: number): Promise<void> {
   await logBackup({ type: "manual_download", status: "success", fileSizeBytes });
 }
 
-// ─── Scheduler — corre a las 03:00 hora Argentina ────────────────────────────
+// ─── Scheduler — corre a las 03:00 y 15:00 hora Argentina (cada 12hs) ────────
+export const BACKUP_HOURS = [3, 15];
+
+export function isBackupTime(date: Date): boolean {
+  const argTime = new Date(
+    date.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }),
+  );
+  return BACKUP_HOURS.includes(argTime.getHours()) && argTime.getMinutes() === 0;
+}
+
 let backupSchedulerStarted = false;
 
 export function setupBackupScheduler() {
@@ -225,10 +236,9 @@ export function setupBackupScheduler() {
         now.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }),
       );
       const hour = argTime.getHours();
-      const minute = argTime.getMinutes();
 
-      if (hour === 3 && minute === 0) {
-        backupLog("Hora de backup alcanzada (03:00 ARG) — iniciando...");
+      if (isBackupTime(now)) {
+        backupLog(`Hora de backup alcanzada (${String(hour).padStart(2, "0")}:00 ARG) — iniciando...`);
 
         // Read config from system_settings
         const enabledRow = await db.select().from(systemSettings)
@@ -257,5 +267,5 @@ export function setupBackupScheduler() {
     }
   }, 60_000);
 
-  backupLog("Backup scheduler iniciado (verifica a las 03:00 ARG)");
+  backupLog("Backup scheduler iniciado (verifica a las 03:00 y 15:00 ARG)");
 }

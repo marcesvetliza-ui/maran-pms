@@ -721,9 +721,9 @@ function BackupTab() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Database className="h-5 w-5 text-primary" />
-            Backup automático diario — 03:00 hs
+            Backup automático — 03:00 y 15:00 hs
           </CardTitle>
-          <CardDescription>El sistema genera y envía un backup por email todos los días a las 3 de la madrugada (hora Argentina).</CardDescription>
+          <CardDescription>El sistema genera y envía un backup por email dos veces al día, cada 12 horas (03:00 y 15:00, hora Argentina).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {cfgLoading ? (
@@ -756,12 +756,12 @@ function BackupTab() {
                     data-testid="input-backup-auto-email"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">El backup se enviará como adjunto a este email cada noche a las 03:00 hs.</p>
+                <p className="text-xs text-muted-foreground">El backup se enviará como adjunto a este email dos veces al día, a las 03:00 y a las 15:00 hs.</p>
               </div>
               {cfg?.enabled && cfg?.email && (
                 <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 rounded-md px-3 py-2">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  <span>Backup automático activo — se enviará a <strong>{cfg.email}</strong> cada noche a las 03:00 hs.</span>
+                  <span>Backup automático activo — se enviará a <strong>{cfg.email}</strong> a las 03:00 y a las 15:00 hs.</span>
                 </div>
               )}
             </>
