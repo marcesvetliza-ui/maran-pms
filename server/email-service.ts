@@ -305,7 +305,7 @@ async function getOrCreateWebCheckinToken(reservationId: string): Promise<string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public: Send a transactional email with a PDF attachment (no reservation ID required)
+// Public: Send a transactional email with a file attachment (no reservation ID required)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function sendEmailWithPdfAttachment(opts: {
   to: string;
@@ -313,6 +313,7 @@ export async function sendEmailWithPdfAttachment(opts: {
   body: string;
   attachmentFilename: string;
   attachmentBuffer: Buffer;
+  attachmentContentType?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const cfg = await getConfig();
   if (!cfg) return { ok: false, error: "Email no configurado" };
@@ -340,7 +341,7 @@ export async function sendEmailWithPdfAttachment(opts: {
         text: opts.body,
         html,
         attachments: [
-          { filename: opts.attachmentFilename, content: opts.attachmentBuffer, contentType: "application/pdf" },
+          { filename: opts.attachmentFilename, content: opts.attachmentBuffer, contentType: opts.attachmentContentType || "application/pdf" },
         ],
       });
       return { ok: true };

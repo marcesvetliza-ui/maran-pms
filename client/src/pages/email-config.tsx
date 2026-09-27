@@ -712,7 +712,7 @@ function BackupTab() {
               Enviar ahora
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">Requiere SMTP configurado en la pestaña Configuración.</p>
+          <p className="text-xs text-muted-foreground">Usa el mismo proveedor de envío (Resend o SMTP) configurado en la pestaña Configuración.</p>
         </CardContent>
       </Card>
 

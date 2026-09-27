@@ -4577,6 +4577,25 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)))
   );
 
+  // backup_logs nunca había quedado en el script incremental (se creó a mano
+  // en el momento, no por una migración) — en una base nueva (o recreada)
+  // faltaba la tabla y el módulo de backup fallaba entero con "relation
+  // backup_logs does not exist".
+  await withTimeout("backup_logs.create", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE backup_logs (
+        id serial PRIMARY KEY,
+        type text NOT NULL,
+        status text NOT NULL,
+        destination text,
+        file_size_bytes integer,
+        duration_ms integer,
+        error_message text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

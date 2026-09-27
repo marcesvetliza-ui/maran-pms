@@ -1,8 +1,7 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import type SMTPTransport from "nodemailer/lib/smtp-transport";
-import { createIpv4SmtpTransport } from "./lib/smtpTransport";
-import { emailConfig, backupLogs } from "@shared/schema";
+import { sendEmailWithPdfAttachment } from "./email-service";
+import { backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
 
@@ -179,41 +178,32 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 }
 
 // ─── Send backup by email ─────────────────────────────────────────────────────
+// Reutiliza el mismo mecanismo de envío que el resto del sistema (SMTP o
+// Resend, lo que esté configurado en Configuración > Emails) en vez de
+// requerir SMTP siempre — muchos hosts (ej. Railway fuera del plan Pro)
+// bloquean las conexiones SMTP salientes, mientras que Resend (HTTPS) sí
+// funciona ahí.
 export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
   const start = Date.now();
-  const cfgRows = await db.select().from(emailConfig).limit(1);
-  const cfg = cfgRows[0];
-  if (!cfg || !cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass) {
-    await logBackup({ type, status: "error", destination: targetEmail, errorMessage: "SMTP no configurado" });
-    throw new Error("SMTP no configurado. Configurá el servidor de correo en Configuración > Emails.");
-  }
-
-  const transportOptions: SMTPTransport.Options = {
-    host: cfg.smtpHost,
-    port: cfg.smtpPort ?? 587,
-    secure: cfg.smtpSecure ?? false,
-    auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-  };
-  const transport = await createIpv4SmtpTransport(transportOptions);
-
   const sqlBuffer = await generateBackupSql();
   const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
     .replace(/\//g, "-");
   const filename = `maran-backup-${dateStr}.sql`;
 
-  try {
-    await transport.sendMail({
-      from: `"${cfg.fromName || "Maran Suite System"}" <${cfg.fromEmail || cfg.smtpUser}>`,
-      to: targetEmail,
-      subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
-      text: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
-      attachments: [{ filename, content: sqlBuffer, contentType: "application/sql" }],
-    });
-    await logBackup({ type, status: "success", destination: targetEmail, fileSizeBytes: sqlBuffer.length, durationMs: Date.now() - start });
-  } catch (err: any) {
-    await logBackup({ type, status: "error", destination: targetEmail, durationMs: Date.now() - start, errorMessage: err.message });
-    throw err;
+  const result = await sendEmailWithPdfAttachment({
+    to: targetEmail,
+    subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
+    body: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
+    attachmentFilename: filename,
+    attachmentBuffer: sqlBuffer,
+    attachmentContentType: "application/sql",
+  });
+
+  if (!result.ok) {
+    await logBackup({ type, status: "error", destination: targetEmail, durationMs: Date.now() - start, errorMessage: result.error });
+    throw new Error(result.error || "Error enviando el backup por email");
   }
+  await logBackup({ type, status: "success", destination: targetEmail, fileSizeBytes: sqlBuffer.length, durationMs: Date.now() - start });
 }
 
 // ─── Log manual download ───────────────────────────────────────────────────────
