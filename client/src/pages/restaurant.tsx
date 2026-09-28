@@ -2078,13 +2078,57 @@ export default function RestaurantPage() {
               setSelectedCategory(null);
               setIsOrderDialogOpen(true);
             } else {
-              // No hay orden activa hoy — mesa trabada. Refetch inmediato de tables
-              // para que closeStaleOrders corra y la libere en la respuesta.
-              queryClient.refetchQueries({ queryKey: ["/api/restaurant/tables"] });
-              toast({
-                title: "Mesa sin pedido activo",
-                description: "La mesa quedó ocupada de una jornada anterior. Se está liberando…",
-              });
+              // No hay orden de HOY, pero puede haber un pedido de un día anterior
+              // que closeStaleOrders todavía no barrió (o que un turno anterior dejó
+              // sin cerrar). En vez de descartarlo en silencio, lo abrimos directo en
+              // el diálogo de cobro: el mozo decide cómo cerrarlo y queda registrado
+              // en Caja igual que cualquier otro cierre — la mesa se libera como
+              // efecto del cierre normal del pedido.
+              const staleOrder = freshOrders.find(
+                (o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled"
+              );
+              if (staleOrder) {
+                setCurrentOrder(staleOrder);
+                setClosePaymentMethod("efectivo");
+                setCloseDiscount("");
+                setCloseDiscountType("percent");
+                setCloseRoomId("");
+                setRoomSearchFilter("");
+                const _todayISO = getArgentinaToday();
+                const _tableRes = reservations.find(r => r.tableId === staleOrder.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISO);
+                const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
+                const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
+                setCloseReceiptType(_needsFactura ? "factura_a" : "ticket");
+                setCloseBillingName(_needsFactura ? `${_resClient!.firstName} ${_resClient!.lastName}`.toUpperCase() : (_tableRes ? _tableRes.guestName : ""));
+                setCloseBillingCuit(_needsFactura ? (_resClient!.cuilCuit || "") : "");
+                setCloseBillingCompanyId("");
+                setCloseCcEntityType("company");
+                setCloseCcEntityId("");
+                setBillingSearch("");
+                setFbIsExento(false);
+                setSplitCustomerNames({});
+                setSplitCustomerCuits({});
+                setSplitVatConditions({});
+                setSplitFbIsExento({});
+                setIsSplitMode(false);
+                setIsCloseDialogOpen(true);
+                toast({
+                  title: "Pedido de una jornada anterior",
+                  description: "Cerralo para liberar la mesa — queda registrado en Caja como un cierre normal.",
+                });
+              } else {
+                // Mesa realmente huérfana: no tiene ningún pedido activo asociado
+                // (quedó "occupied" por un bug o una sesión cortada a mitad de nada).
+                // No hay nada que cobrar, así que se libera directo.
+                apiRequest("PATCH", `/api/restaurant/tables/${table.id}`, { status: "available" })
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+                    toast({ title: "Mesa liberada", description: "No tenía ningún pedido activo asociado." });
+                  })
+                  .catch(() => {
+                    toast({ title: "No se pudo liberar la mesa", variant: "destructive" });
+                  });
+              }
             }
           })
           .catch((err) => {
