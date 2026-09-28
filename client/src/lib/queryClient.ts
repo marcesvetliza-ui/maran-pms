@@ -130,6 +130,9 @@ export function parseApiError(err: unknown): string {
         }
         return String(parsed.error);
       }
+      if (parsed?.message) {
+        return String(parsed.message);
+      }
     } catch {
       return match[1].trim() || raw;
     }
