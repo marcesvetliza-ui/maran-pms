@@ -1475,7 +1475,7 @@ export function registerBillingRoutes(app: Express) {
           for (const allocation of ordinaryAdvances) {
             const payment: any = activePaymentById.get(allocation.paymentId);
             if (!payment || payment.invoiceRef || payment.invoice_ref ||
-                ["cuenta_corriente", "current_account"].includes(String(payment.method)) ||
+                normalizeToSpanishPaymentMethod(payment.method) === "cuenta_corriente" ||
                 Math.abs(Number(payment.amount) - allocation.amount) > 0.009) {
               throw new FolioInvoiceValidationError("Un anticipo ordinario ya no está disponible", 409);
             }
@@ -1485,15 +1485,20 @@ export function registerBillingRoutes(app: Express) {
           for (const row of normalizedCashFormaPagoDetalle || []) {
             paymentDetailByMethod.set(row.method, (paymentDetailByMethod.get(row.method) || 0) + row.amount);
           }
+          // El pago aplicado (anticipo) puede tener guardada la grafía en
+          // inglés (ver normalizeToSpanishPaymentMethod más arriba) — hay que
+          // normalizarla igual que normalizedCashFormaPagoDetalle o esta
+          // comparación nunca matchea aunque los montos coincidan.
           const requiredAdvanceByMethod = new Map<string, number>();
           for (const allocation of [...normalized, ...ordinaryAdvances]) {
             const payment: any = activePaymentById.get(allocation.paymentId);
             if (!payment?.method) {
               throw new FolioInvoiceValidationError("Un pago aplicado ya no está disponible", 409);
             }
+            const normalizedMethod = normalizeToSpanishPaymentMethod(payment.method);
             requiredAdvanceByMethod.set(
-              String(payment.method),
-              (requiredAdvanceByMethod.get(String(payment.method)) || 0) + allocation.amount,
+              normalizedMethod,
+              (requiredAdvanceByMethod.get(normalizedMethod) || 0) + allocation.amount,
             );
           }
           for (const [method, amount] of requiredAdvanceByMethod) {

@@ -81,8 +81,19 @@ vi.mock("../billing/billingConfig", () => ({ getBillingConfig: vi.fn(), updateBi
 vi.mock("../billing/invoicePdf", () => ({ generarFacturaPDF: vi.fn(), generarVoucherHabitacionPDF: vi.fn() }));
 vi.mock("../utils/assetPath", () => ({ assetPath: (value: string) => value }));
 vi.mock("pdfkit", () => ({ default: class PDFDocument {} }));
+// Solo se ejerce por los tests de creditOperationId más abajo (los que usan
+// paymentId nunca setean creditIntent, así que nunca llegan a llamarla) — se
+// mockea para no depender de su lógica real de reconciliación, ajena a lo
+// que este archivo prueba. Mock parcial: el resto del módulo (p.ej.
+// getUncoveredReservationSettlement, usada por los tests existentes de CC)
+// sigue siendo la implementación real.
+vi.mock("../billing/reservationCreditReconciliation", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../billing/reservationCreditReconciliation")>();
+  return { ...original, reconcileReservationCreditInvoice: vi.fn(async () => ({})) };
+});
 
 const { registerBillingRoutes } = await import("../billing/routes");
+const { storage: mockedStorage } = await import("../db-storage");
 
 function body(overrides: Record<string, unknown> = {}) {
   return {
@@ -238,6 +249,76 @@ describe("advance Cuenta Corriente invoice route", () => {
     await withServer(async url => {
       expect((await post(url, body({ ccEntityType: "agency", ccEntityId: "agency-1" }))).status).toBe(201);
       expect(emitirFactura).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+// Un anticipo (Reservas → Cta Cte no interviene acá) reaplicado vía
+// creditOperationId/ordinaryAdvanceApplications — el flujo real que
+// PrefacturaDialog usa al cerrar una reserva con un anticipo previo. Daba
+// "La forma de pago transfer no refleja los anticipos aplicados" (409) si el
+// pago original tenía guardada la grafía en inglés (ej. cargado desde pagos
+// de grupo), porque cashFormaPagoDetalle ya viajaba normalizado a español
+// pero el pago original se comparaba sin normalizar.
+describe("reservation invoice — anticipo ordinario con grafía en inglés", () => {
+  const getPayments = mockedStorage.getPayments as any;
+
+  function advanceBody(overrides: Record<string, unknown> = {}) {
+    return {
+      tipoComprobante: "FB",
+      cliente: { razonSocial: "ESCO", condicionIva: "Consumidor Final" },
+      items: [{ descripcion: "Alojamiento", cantidad: 1, precioUnitario: 144000, subtotal: 144000, subtotalNeto: 119008.26, alicuotaIva: "21" }],
+      reservaId: "res-1",
+      paymentId: undefined,
+      sourceChargeIds: ["cargo-1"],
+      sourceChargeAmounts: { "cargo-1": 144000 },
+      creditOperationId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      ordinaryAdvanceApplications: [{ paymentId: "pay-transfer", amount: 144000 }],
+      cashFormaPago: "transferencia",
+      cashFormaPagoDetalle: [{ method: "transferencia", amount: 144000 }],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    getPayments.mockReset().mockResolvedValue([
+      { id: "pay-transfer", reservationId: "res-1", amount: "144000", method: "transfer", invoiceRef: null, billingTarget: "guest" },
+    ]);
+  });
+
+  it("reconcilia el anticipo aunque el pago original tenga method en inglés", async () => {
+    await withServer(async url => {
+      const result = await post(url, advanceBody());
+      expect(result.status, JSON.stringify(result.body)).toBe(201);
+      expect(emitirFactura).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("reconcilia igual con otro alias en inglés (credit_card → tarjeta_credito)", async () => {
+    getPayments.mockReset().mockResolvedValue([
+      { id: "pay-transfer", reservationId: "res-1", amount: "144000", method: "credit_card", invoiceRef: null, billingTarget: "guest" },
+    ]);
+    await withServer(async url => {
+      const result = await post(url, advanceBody({
+        cashFormaPago: "tarjeta_credito",
+        cashFormaPagoDetalle: [{ method: "tarjeta_credito", amount: 144000 }],
+      }));
+      expect(result.status, JSON.stringify(result.body)).toBe(201);
+      expect(emitirFactura).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("sigue rechazando cuando la forma de pago declarada no cubre el anticipo real", async () => {
+    await withServer(async url => {
+      // El anticipo real es "transfer" (→ transferencia), pero se declara
+      // como si hubiera sido efectivo — no debe pasar solo por normalizar.
+      const result = await post(url, advanceBody({
+        cashFormaPago: "efectivo",
+        cashFormaPagoDetalle: [{ method: "efectivo", amount: 144000 }],
+      }));
+      expect(result.status).toBe(409);
+      expect(result.body).toEqual({ error: "La forma de pago transferencia no refleja los anticipos aplicados" });
+      expect(emitirFactura).not.toHaveBeenCalled();
     });
   });
 });
