@@ -17,8 +17,93 @@ import {
 import {
   KeyRound, ShieldCheck, ShieldAlert, ShieldOff, Copy, RefreshCw,
   CheckCircle2, AlertTriangle, ExternalLink, Database, Github,
-  Mail, Activity, Clock,
+  Mail, Activity, Clock, Lock, Unlock, Users,
 } from "lucide-react";
+import { formatHotelDateTime } from "@/lib/hotelTime";
+
+type LockedUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  lockedAt: string | null;
+  lockReason: string | null;
+  lockPermanent: string | null;
+  failedLoginCount: number | null;
+};
+
+function LockedUsersCard() {
+  const { toast } = useToast();
+
+  const { data: lockedUsers = [], isLoading, refetch } = useQuery<LockedUser[]>({
+    queryKey: ["/api/admin/security/locked-users"],
+  });
+
+  const unlockMut = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/admin/security/unlock-user/${id}`, {}),
+    onSuccess: async (res: any) => {
+      const data = await res.json();
+      refetch();
+      toast({ title: data.message || "Cuenta desbloqueada" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card data-testid="card-locked-users">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Users className="h-4 w-4" />
+          Usuarios bloqueados
+        </CardTitle>
+        <CardDescription>
+          Se bloquean automáticamente después de varios intentos de contraseña incorrecta (temporal a las 5, permanente a las 8). Desde acá los desbloqueás vos mismo, sin esperar.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-8 w-40 bg-muted animate-pulse rounded" />
+        ) : lockedUsers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No hay ningún usuario bloqueado ahora mismo.</p>
+        ) : (
+          <div className="space-y-2">
+            {lockedUsers.map((u) => (
+              <div
+                key={u.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-2.5 flex-wrap"
+                data-testid={`row-locked-user-${u.username}`}
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm">{u.fullName}</span>
+                    <code className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">{u.username}</code>
+                    <Badge variant={u.lockPermanent === "true" ? "destructive" : "outline"} className="text-xs">
+                      <Lock className="h-3 w-3 mr-1" />
+                      {u.lockPermanent === "true" ? "Permanente" : "Temporal"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {u.lockReason || `${u.failedLoginCount ?? 0} intentos fallidos`}
+                    {u.lockedAt && ` — ${formatHotelDateTime(u.lockedAt)}`}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => unlockMut.mutate(u.id)}
+                  disabled={unlockMut.isPending}
+                  data-testid={`button-unlock-${u.username}`}
+                >
+                  <Unlock className="h-3.5 w-3.5 mr-1.5" />
+                  Desbloquear
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 type TwoFactorStatus = { enabled: boolean };
 
@@ -323,6 +408,7 @@ export default function SeguridadPage() {
         </p>
       </div>
 
+      <LockedUsersCard />
       <TwoFactorCard />
 
       {/* Summary */}
