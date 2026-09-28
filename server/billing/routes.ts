@@ -15,6 +15,7 @@ import { editSpaInvoiceCashMethod } from "./spaInvoicePaymentEdit";
 import { editGroupInvoiceCashMethod } from "./groupInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
 import { requireAuth, requireRole } from "../auth";
+import { normalizeToSpanishPaymentMethod } from "../payment-method";
 import { audit } from "../audit";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
@@ -1148,7 +1149,12 @@ export function registerBillingRoutes(app: Express) {
       const normalizedCashFormaPagoDetalle = Array.isArray(cashFormaPagoDetalle)
         ? cashFormaPagoDetalle
           .map((entry: any) => ({
-            method: typeof entry?.method === "string" ? entry.method.trim() : "",
+            // Un anticipo cargado en otra pantalla (ej. pagos de grupo) puede
+            // tener guardada la grafía en inglés de la forma de pago
+            // ("transfer", "credit_card") — son alias válidos en el resto del
+            // sistema, pero la factura fiscal solo reconoce la grafía en
+            // español. Se normaliza acá para no rechazar un pago legítimo.
+            method: typeof entry?.method === "string" ? normalizeToSpanishPaymentMethod(entry.method) : "",
             amount: Number(entry?.amount),
           }))
           .filter((entry: { method: string; amount: number }) =>

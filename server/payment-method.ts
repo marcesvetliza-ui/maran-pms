@@ -20,6 +20,28 @@ const aliases: Record<string, string> = {
   voucher_habitacion: "voucher",
 };
 
+const spanishCanonical: Record<string, string> = {
+  cash: "efectivo",
+  debit_card: "tarjeta_debito",
+  credit_card: "tarjeta_credito",
+  transfer: "transferencia",
+  current_account: "cuenta_corriente",
+  check: "cheque",
+};
+
+/**
+ * El resto del sistema (Caja, reportes, pagos de grupo) acepta ambas
+ * grafías de una misma forma de pago como alias (ver `aliases` arriba) —
+ * pero la factura fiscal (ARCA) y sus PDFs solo reconocen la grafía en
+ * español. Un pago guardado con la grafía en inglés (ej. un anticipo
+ * cargado desde el flujo de grupos) rompía la emisión de la factura al
+ * intentar aplicarlo, con el error "Forma de pago inválida: transfer".
+ */
+export function normalizeToSpanishPaymentMethod(value: unknown): string {
+  const normalized = normalizeReservationPaymentMethod(value);
+  return spanishCanonical[normalized] ?? normalized;
+}
+
 export function classifyReservationPaymentMethod(value: unknown): {
   method: string;
   class: ReservationPaymentClass;

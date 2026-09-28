@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyReservationPaymentMethod } from "../payment-method";
+import { classifyReservationPaymentMethod, normalizeToSpanishPaymentMethod } from "../payment-method";
 
 describe("reservation payment method classification", () => {
   it.each(["cargo_habitacion", "room_charge"])(
@@ -21,4 +21,30 @@ describe("reservation payment method classification", () => {
       });
     },
   );
+});
+
+describe("normalizeToSpanishPaymentMethod", () => {
+  // Un anticipo cargado desde el flujo de pagos de grupo (group-detail.tsx,
+  // GROUP_CAJA_TENDER_METHODS) guarda la grafía en inglés — es un alias
+  // válido en todo el sistema salvo en el validador de la factura fiscal,
+  // que rompía con "Forma de pago inválida: transfer" al intentar aplicarlo.
+  it.each([
+    ["cash", "efectivo"],
+    ["transfer", "transferencia"],
+    ["credit_card", "tarjeta_credito"],
+    ["debit_card", "tarjeta_debito"],
+    ["current_account", "cuenta_corriente"],
+    ["check", "cheque"],
+  ])("traduce el alias en inglés %s a %s", (english, spanish) => {
+    expect(normalizeToSpanishPaymentMethod(english)).toBe(spanish);
+  });
+
+  it("deja intacta una grafía en español ya válida", () => {
+    expect(normalizeToSpanishPaymentMethod("tarjeta_credito")).toBe("tarjeta_credito");
+    expect(normalizeToSpanishPaymentMethod("mercadopago")).toBe("mercadopago");
+  });
+
+  it("no toca un valor sin alias conocido (ej. una retención)", () => {
+    expect(normalizeToSpanishPaymentMethod("retencion_iibb")).toBe("retencion_iibb");
+  });
 });
