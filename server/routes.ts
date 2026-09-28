@@ -11,6 +11,7 @@ import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from 
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
+import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -284,6 +285,10 @@ export async function registerRoutes(
       }
       req.logIn(user, async (err) => {
         if (err) return next(err);
+        if (user.totpEnabled === "true") {
+          req.session.pending2FA = true;
+          return res.json({ pending2FA: true, username: user.username });
+        }
         await audit(req, "login", "auth", `Inicio de sesión: ${user.username}`);
         return res.json(user);
       });
@@ -301,13 +306,20 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/me", (req, res) => {
-    if (req.isAuthenticated()) {
+    if (req.isAuthenticated() && !req.session.pending2FA) {
       return res.json(req.user);
+    }
+    if (req.isAuthenticated() && req.session.pending2FA) {
+      return res.status(401).json({ message: "Falta completar la verificación en dos pasos", pending2FA: true });
     }
     res.status(401).json({ message: "No autenticado" });
   });
 
   registerAuthBootstrapRoute(app);
+  // Registrado antes del gate: /2fa/verify-login necesita ser alcanzable con
+  // una sesión "pending2FA" (que requireAuth del gate rechazaría), y las
+  // demás rutas de 2FA ya traen su propio requireAuth.
+  registerTwoFactorRoutes(app);
 
   app.use("/api", (req, res, next) => {
     const publicPaths = [
@@ -317,15 +329,15 @@ export async function registerRoutes(
       "/api/auth/setup",
       "/api/health",
     ];
-    
+
     if (publicPaths.includes(req.path)) {
       return next();
     }
-    
+
     if (req.path.startsWith("/public/")) {
       return next();
     }
-    
+
     if ((req.path === "/api/webhook/chatbot" || req.path === "/webhook/chatbot") && req.method === "POST") {
       return next();
     }

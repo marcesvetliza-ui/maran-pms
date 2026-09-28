@@ -5,6 +5,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -15,6 +19,202 @@ import {
   CheckCircle2, AlertTriangle, ExternalLink, Database, Github,
   Mail, Activity, Clock,
 } from "lucide-react";
+
+type TwoFactorStatus = { enabled: boolean };
+
+function TwoFactorCard() {
+  const { toast } = useToast();
+  const [step, setStep] = useState<"idle" | "enroll" | "backup-codes">("idle");
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [manualSecret, setManualSecret] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [disableOpen, setDisableOpen] = useState(false);
+  const [disablePassword, setDisablePassword] = useState("");
+
+  const { data: status, isLoading, refetch } = useQuery<TwoFactorStatus>({
+    queryKey: ["/api/auth/2fa/status"],
+  });
+
+  const handleClose = () => {
+    setStep("idle");
+    setQrCodeDataUrl(null);
+    setManualSecret(null);
+    setCode("");
+    setBackupCodes([]);
+  };
+
+  const setupMut = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/auth/2fa/setup", {})).json(),
+    onSuccess: (res: any) => {
+      setQrCodeDataUrl(res.qrCodeDataUrl);
+      setManualSecret(res.secret);
+      setCode("");
+      setStep("enroll");
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const confirmMut = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/auth/2fa/confirm", { token: code })).json(),
+    onSuccess: (res: any) => {
+      setBackupCodes(res.backupCodes ?? []);
+      setStep("backup-codes");
+      refetch();
+      toast({ title: "Verificación en dos pasos activada" });
+    },
+    onError: (e: any) => toast({ title: "Código incorrecto", description: e.message, variant: "destructive" }),
+  });
+
+  const disableMut = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/auth/2fa/disable", { password: disablePassword })).json(),
+    onSuccess: () => {
+      setDisableOpen(false);
+      setDisablePassword("");
+      refetch();
+      toast({ title: "Verificación en dos pasos desactivada" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card data-testid="card-2fa">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4" />
+          Verificación en dos pasos (2FA)
+        </CardTitle>
+        <CardDescription>
+          Sumá un código de tu celular además de la contraseña al iniciar sesión. Es opcional — la activás cuando quieras y podés desactivarla en cualquier momento.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-8 w-40 bg-muted animate-pulse rounded" />
+        ) : status?.enabled ? (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-400 dark:border-green-800">
+              <CheckCircle2 className="h-3 w-3 mr-1" /> Activada
+            </Badge>
+            <AlertDialog open={disableOpen} onOpenChange={(open) => { setDisableOpen(open); if (!open) setDisablePassword(""); }}>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="outline" data-testid="button-disable-2fa">
+                  <ShieldOff className="h-3.5 w-3.5 mr-1.5" />
+                  Desactivar
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Desactivar verificación en dos pasos</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Ingresá tu contraseña para confirmar. Vas a poder volver a activarla cuando quieras.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="py-2">
+                  <Label htmlFor="disable-2fa-password">Contraseña</Label>
+                  <PasswordInput
+                    id="disable-2fa-password"
+                    value={disablePassword}
+                    onChange={(e) => setDisablePassword(e.target.value)}
+                    data-testid="input-disable-2fa-password"
+                  />
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={(e) => { e.preventDefault(); disableMut.mutate(); }}
+                    disabled={!disablePassword || disableMut.isPending}
+                    data-testid="button-confirm-disable-2fa"
+                  >
+                    {disableMut.isPending ? "Desactivando..." : "Desactivar"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <Badge variant="outline" className="text-xs text-muted-foreground">
+              <ShieldOff className="h-3 w-3 mr-1" /> Desactivada
+            </Badge>
+            <Button size="sm" onClick={() => setupMut.mutate()} disabled={setupMut.isPending} data-testid="button-enable-2fa">
+              <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+              {setupMut.isPending ? "Generando..." : "Activar"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+
+      <Dialog open={step === "enroll"} onOpenChange={(open) => { if (!open) handleClose(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Escaneá el código QR</DialogTitle>
+            <DialogDescription>
+              Usá Google Authenticator, Microsoft Authenticator u otra app similar. Después ingresá el código de 6 dígitos que te muestra.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {qrCodeDataUrl && (
+              <img
+                src={qrCodeDataUrl}
+                alt="Código QR de verificación en dos pasos"
+                className="mx-auto border rounded"
+                data-testid="img-2fa-qr"
+              />
+            )}
+            {manualSecret && (
+              <p className="text-xs text-muted-foreground text-center break-all">
+                O ingresalo manualmente: <code className="font-mono">{manualSecret}</code>
+              </p>
+            )}
+            <div>
+              <Label htmlFor="2fa-confirm-code">Código de 6 dígitos</Label>
+              <Input
+                id="2fa-confirm-code"
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                data-testid="input-2fa-confirm-code"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleClose}>Cancelar</Button>
+            <Button
+              onClick={() => confirmMut.mutate()}
+              disabled={code.length !== 6 || confirmMut.isPending}
+              data-testid="button-confirm-2fa"
+            >
+              {confirmMut.isPending ? "Verificando..." : "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={step === "backup-codes"} onOpenChange={(open) => { if (!open) handleClose(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Guardá tus códigos de respaldo</DialogTitle>
+            <DialogDescription>
+              Si perdés el celular, usá uno de estos códigos para entrar (cada uno sirve una sola vez). Se muestran una única vez.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {backupCodes.map((c) => (
+              <code key={c} className="bg-muted rounded px-2 py-1.5 text-sm font-mono text-center" data-testid="text-2fa-backup-code">
+                {c}
+              </code>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button onClick={handleClose} data-testid="button-close-2fa-backup-codes">Ya los guardé</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
 
 type CredentialStatus = {
   name: string;
@@ -122,6 +322,8 @@ export default function SeguridadPage() {
           Auditoría de claves y secretos del sistema. Las credenciales deben rotarse periódicamente para minimizar el riesgo.
         </p>
       </div>
+
+      <TwoFactorCard />
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-4">

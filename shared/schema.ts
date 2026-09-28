@@ -2042,6 +2042,13 @@ export const systemUsers = pgTable("system_users", {
   lockReason: text("lock_reason"),
   lockPermanent: text("lock_permanent").default("false"),
   failedLoginCount: integer("failed_login_count").default(0),
+  // Verificación en dos pasos (TOTP), opcional por usuario. El secreto viaja
+  // siempre cifrado (ver server/totp.ts) — nunca en texto plano en la base.
+  totpEnabled: text("totp_enabled").notNull().default("false"),
+  totpSecretEncrypted: text("totp_secret_encrypted"),
+  // JSON de códigos de respaldo, cada uno con hash bcrypt — se van
+  // eliminando del arreglo a medida que se consumen.
+  totpBackupCodes: text("totp_backup_codes"),
 });
 
 export const failedLoginAttempts = pgTable("failed_login_attempts", {

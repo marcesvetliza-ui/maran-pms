@@ -93,6 +93,7 @@ const loginLimiter = rateLimit({
   message: { error: "Demasiados intentos de inicio de sesión" },
 });
 app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/2fa/verify-login", loginLimiter);
 
 declare module "http" {
   interface IncomingMessage {

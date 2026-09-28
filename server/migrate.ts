@@ -4596,6 +4596,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)))
   );
 
+  // Verificación en dos pasos (TOTP) opcional por usuario, admin la activa
+  // desde su propia pantalla de Seguridad.
+  await withTimeout("system_users.totp_enabled", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE system_users ADD COLUMN totp_enabled text NOT NULL DEFAULT 'false'`)))
+  );
+  await withTimeout("system_users.totp_secret_encrypted", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE system_users ADD COLUMN totp_secret_encrypted text`)))
+  );
+  await withTimeout("system_users.totp_backup_codes", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE system_users ADD COLUMN totp_backup_codes text`)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
