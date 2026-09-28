@@ -101,16 +101,16 @@ async function saveToDb(token: string, sign: string, ambiente: string): Promise<
   }
 }
 
-export async function getTokenAuth(
+/**
+ * Un solo intento de loginCms contra WSAA: arma un TRA nuevo (timestamp propio),
+ * lo firma y lo postea. Separado de getTokenAuth para poder reintentar con un
+ * TRA realmente nuevo, no reenviar los mismos bytes.
+ */
+async function requestNewToken(
   certPem: string,
   keyPem: string,
-  ambiente: "homologacion" | "produccion"
+  ambiente: "homologacion" | "produccion",
 ): Promise<{ token: string; sign: string }> {
-  // 1. Intentar desde DB (persiste entre restarts)
-  const cached = await loadFromDb(ambiente);
-  if (cached) return cached;
-
-  // 2. Pedir nuevo token a WSAA
   const tra = buildTRA();
   const cms = signTRA(tra, certPem, keyPem);
   const url = ambiente === "homologacion" ? WSAA_HOMOLOG : WSAA_PROD;
@@ -122,21 +122,7 @@ export async function getTokenAuth(
     `<soapenv:Body><wsaa:loginCms><wsaa:in0>${cms}</wsaa:in0></wsaa:loginCms></soapenv:Body>` +
     `</soapenv:Envelope>`;
 
-  let resp: string;
-  try {
-    resp = await soapPost(url, envelope);
-  } catch (err: unknown) {
-    const msg = (err as Error).message ?? "";
-    // alreadyAuthenticated: AFIP dice que el token anterior sigue vigente pero lo perdimos.
-    // El único remedio es esperar a que expire (~12h desde la última autenticación).
-    if (msg.includes("alreadyAuthenticated")) {
-      throw new Error(
-        "AFIP indica que ya existe un TA válido para este certificado. " +
-        "El token expirará automáticamente. Intentá de nuevo en unos minutos o esperá hasta que expire (máx. 12h)."
-      );
-    }
-    throw err;
-  }
+  const resp = await soapPost(url, envelope);
 
   // Detectar faults en respuesta HTTP 200 (AFIP a veces devuelve faults con 200)
   const faultCheck = resp.match(/<faultstring>([^<]+)<\/faultstring>/);
@@ -169,8 +155,42 @@ export async function getTokenAuth(
     throw new Error(`WSAA: respuesta inválida. HTTP 200 sin token/sign. Preview: ${preview}`);
   }
 
-  const token = tokenM[1];
-  const sign  = signM[1];
+  return { token: tokenM[1], sign: signM[1] };
+}
+
+// Fallas de WSAA que la comunidad reporta como esporádicas del lado de AFIP
+// (se resuelven solas reintentando con un TRA nuevo) — no algo que un
+// segundo intento idéntico vaya a repetir indefinidamente.
+const TRANSIENT_WSAA_FAULT = /cms\.sign\.invalid|algoritmo no soportado|firma inv[aá]lida/i;
+
+export async function getTokenAuth(
+  certPem: string,
+  keyPem: string,
+  ambiente: "homologacion" | "produccion"
+): Promise<{ token: string; sign: string }> {
+  // 1. Intentar desde DB (persiste entre restarts)
+  const cached = await loadFromDb(ambiente);
+  if (cached) return cached;
+
+  // 2. Pedir nuevo token a WSAA — un reintento con TRA fresco si AFIP devuelve
+  // un fault de firma que la comunidad reporta como transitorio.
+  let token: string, sign: string;
+  try {
+    ({ token, sign } = await requestNewToken(certPem, keyPem, ambiente));
+  } catch (err: unknown) {
+    const msg = (err as Error).message ?? "";
+    if (msg.includes("alreadyAuthenticated")) {
+      throw new Error(
+        "AFIP indica que ya existe un TA válido para este certificado. " +
+        "El token expirará automáticamente. Intentá de nuevo en unos minutos o esperá hasta que expire (máx. 12h)."
+      );
+    }
+    if (TRANSIENT_WSAA_FAULT.test(msg)) {
+      ({ token, sign } = await requestNewToken(certPem, keyPem, ambiente));
+    } else {
+      throw err;
+    }
+  }
 
   // 3. Persistir en DB para próximos requests
   await saveToDb(token, sign, ambiente);
