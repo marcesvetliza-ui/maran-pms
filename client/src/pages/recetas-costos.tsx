@@ -604,10 +604,24 @@ export default function RecetasCostosPage() {
                   const margin = price - cost;
                   const marginPct = price > 0 ? (margin / price) * 100 : 0;
                   const cat = menuCategories.find(c => c.id === item.categoryId);
+                  const isInactive = item.isActive === "false";
 
                   return (
-                    <TableRow key={item.id} data-testid={`recipe-row-${item.id}`}>
-                      <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableRow
+                      key={item.id}
+                      data-testid={`recipe-row-${item.id}`}
+                      className={isInactive ? "opacity-50 bg-muted/40" : undefined}
+                    >
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {item.name}
+                          {isInactive && (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground" data-testid={`badge-inactive-${item.id}`}>
+                              Inactivo
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{cat?.name || "-"}</TableCell>
                       <TableCell className="text-right">
                         ${price.toLocaleString("es-AR", { minimumFractionDigits: 2 })}

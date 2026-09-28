@@ -29,6 +29,7 @@ function makeStorage() {
     const storage = new DatabaseStorage() as any;
     storage.getGroupBlocks = vi.fn().mockResolvedValue([]);
     storage.checkOverbooking = vi.fn().mockResolvedValue(false);
+    storage.evaluateReservationInventory = vi.fn().mockResolvedValue(null);
     storage.getGuest = vi.fn().mockResolvedValue({
       id: EXISTING_GUEST_ID,
       firstName: "Lucía",

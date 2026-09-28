@@ -2,9 +2,9 @@ import { db } from "./db";
 import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, webCheckins } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
-import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { shouldBlockExternalComm } from "./external-comms-policy";
+import { createIpv4SmtpTransport } from "./lib/smtpTransport";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Template interpolation
@@ -186,14 +186,13 @@ async function sendViaSmtp(opts: {
   html: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const transportOptions: SMTPTransport.Options & { family: number } = {
+    const transportOptions: SMTPTransport.Options = {
       host: opts.host,
       port: opts.port,
       secure: opts.secure,
       auth: { user: opts.user, pass: opts.pass },
-      family: 4, // force IPv4 — Replit production has no IPv6 route
     };
-    const transporter = nodemailer.createTransport(transportOptions);
+    const transporter = await createIpv4SmtpTransport(transportOptions);
     await transporter.sendMail({
       from: opts.from,
       to: opts.to,
@@ -320,7 +319,7 @@ async function getOrCreateWebCheckinToken(reservationId: string): Promise<string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public: Send a transactional email with a PDF attachment (no reservation ID required)
+// Public: Send a transactional email with a file attachment (no reservation ID required)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function sendEmailWithPdfAttachment(opts: {
   to: string;
@@ -328,6 +327,7 @@ export async function sendEmailWithPdfAttachment(opts: {
   body: string;
   attachmentFilename: string;
   attachmentBuffer: Buffer;
+  attachmentContentType?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   if (shouldBlockExternalComm({ integration: "email", action: "pdf-attachment" })) {
     return { ok: false, error: "Envío de email bloqueado por ambiente (APP_ENV≠production)" };
@@ -345,14 +345,13 @@ export async function sendEmailWithPdfAttachment(opts: {
       return { ok: false, error: "SMTP: usuario o contraseña no configurados" };
     }
     try {
-      const transportOptions: SMTPTransport.Options & { family: number } = {
+      const transportOptions: SMTPTransport.Options = {
         host: cfg.smtpHost || "smtp.gmail.com",
         port: cfg.smtpPort || 587,
         secure: cfg.smtpSecure ?? false,
         auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-        family: 4, // force IPv4 — Replit production has no IPv6 route
       };
-      const transporter = nodemailer.createTransport(transportOptions);
+      const transporter = await createIpv4SmtpTransport(transportOptions);
       await transporter.sendMail({
         from,
         to: opts.to,
@@ -360,7 +359,7 @@ export async function sendEmailWithPdfAttachment(opts: {
         text: opts.body,
         html,
         attachments: [
-          { filename: opts.attachmentFilename, content: opts.attachmentBuffer, contentType: "application/pdf" },
+          { filename: opts.attachmentFilename, content: opts.attachmentBuffer, contentType: opts.attachmentContentType || "application/pdf" },
         ],
       });
       return { ok: true };

@@ -136,6 +136,57 @@ runIfDatabaseIsConfigured("PostgreSQL real: reservation payment ledger transacti
     }
   });
 
+  it("splits a payment with a retención into a cash-bearing row plus an informational retention row", async () => {
+    if (!testPool) return;
+    const suffix = randomUUID();
+    const reservationId = `reservation-ledger-retencion-${suffix}`;
+    const shiftId = `reservation-ledger-retencion-shift-${suffix}`;
+    await createReservation(reservationId);
+    await testPool.query(
+      `INSERT INTO cash_shifts (id, area, shift_number, opened_at, status)
+       VALUES ($1, 'reception', 900003, NOW(), 'open')`,
+      [shiftId],
+    );
+    try {
+      // A company pays a $100 invoice, withholding $2 of Ganancias: only $98
+      // actually arrives by transferencia. That's two payment rows, as
+      // PrefacturaDialog now sends them — not one row for the gross $100.
+      const netPayment = await storage.createReservationPaymentWithLedger({
+        payment: {
+          reservationId, amount: "98.00", method: "transferencia",
+          date: "2026-01-01",
+        },
+        sourceLabel: "Reserva de prueba — neto",
+      });
+      const retentionPayment = await storage.createReservationPaymentWithLedger({
+        payment: {
+          reservationId, amount: "2.00", method: "retencion_ganancias",
+          date: "2026-01-01", notes: JSON.stringify({ retencion: { tipo: "ganancias", monto: 2, neto: 98 } }),
+        },
+        sourceLabel: "Reserva de prueba — retención",
+      });
+
+      const cash = await testPool.query(
+        "SELECT payment_id, payment_method, amount, movement_type FROM cash_movements WHERE payment_id = ANY($1) ORDER BY movement_type",
+        [[netPayment.id, retentionPayment.id]],
+      );
+      expect(cash.rows).toEqual([
+        expect.objectContaining({ payment_id: netPayment.id, payment_method: "transfer", amount: "98.00", movement_type: "income" }),
+        expect.objectContaining({ payment_id: retentionPayment.id, payment_method: "retencion_ganancias", amount: "2.00", movement_type: "informational" }),
+      ]);
+
+      // The folio balance reflects both rows: the full $100 is covered, not just the $98 that physically arrived.
+      const folio = await testPool.query(
+        `SELECT total_payments, balance FROM folios WHERE entity_type = 'reservation' AND entity_id = $1`,
+        [reservationId],
+      );
+      expect(folio.rows).toEqual([expect.objectContaining({ total_payments: "100.00", balance: "-100.00" })]);
+    } finally {
+      await cleanupReservation(reservationId);
+      await testPool.query("DELETE FROM cash_shifts WHERE id = $1", [shiftId]);
+    }
+  });
+
   it("keeps folio totals correct for concurrent payments to an existing folio", async () => {
     if (!testPool) return;
     const reservationId = `reservation-ledger-concurrent-${randomUUID()}`;

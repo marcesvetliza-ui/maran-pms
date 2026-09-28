@@ -191,7 +191,7 @@ export function prepareReservationCreditIntent(
       const originalId = originalInvoiceIdForPayment(locked[index]);
       const original = (sources.rows as any[]).find((row) => Number(row.id) === originalId);
       if (!original || String(original.reserva_id) !== reservationId ||
-          !["FA", "FB", "FC", "FT", "FM"].includes(String(original.tipo_comprobante)) ||
+          !["FA", "FB", "FC", "FT", "FM", "FMB"].includes(String(original.tipo_comprobante)) ||
           !(original.estado === "anulada" || Number(original.monto_acreditado) > 0)) {
         throw new Error("El pago no referencia una factura de venta acreditada de la reserva");
       }

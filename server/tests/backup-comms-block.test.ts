@@ -16,6 +16,7 @@ vi.mock("../db", () => ({
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         limit: vi.fn(() => Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : [])),
+        where: vi.fn(() => Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : [])),
       })),
     })),
     insert: vi.fn(() => ({
@@ -41,6 +42,8 @@ describe("backup.ts — bloqueo por ambiente antes de leer config SMTP o generar
   beforeEach(() => {
     resetAppEnvForTests();
     state.emailConfigRow = {
+      globalEnabled: true,
+      provider: "smtp",
       smtpHost: "smtp.example.test",
       smtpUser: "user",
       smtpPass: "pass",

@@ -8,6 +8,7 @@ import { eq, desc, and, gte } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { runReminderScheduler } from "../email-service";
 import { shouldBlockExternalComm } from "../external-comms-policy";
+import { createIpv4SmtpTransport } from "../lib/smtpTransport";
 
 const HOTEL_BASE_URL_ROUTES =
   process.env.REPLIT_DEPLOYMENT_URL ||
@@ -231,15 +232,13 @@ export function registerEmailRoutes(app: Express) {
 
       if (cfg.provider === "smtp") {
         if (!cfg.smtpUser || !cfg.smtpPass) return res.status(400).json({ error: "SMTP: usuario o contraseña no configurados" });
-        const nodemailer = await import("nodemailer");
-        const transportOptions: import("nodemailer/lib/smtp-transport").Options & { family: number } = {
+        const transportOptions: import("nodemailer/lib/smtp-transport").Options = {
           host: cfg.smtpHost || "smtp.gmail.com",
           port: cfg.smtpPort || 587,
           secure: cfg.smtpSecure ?? false,
           auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-          family: 4, // force IPv4 — Replit production has no IPv6 route
         };
-        const transporter = nodemailer.default.createTransport(transportOptions);
+        const transporter = await createIpv4SmtpTransport(transportOptions);
         await transporter.sendMail({ from, to, subject, text, html });
       } else {
         if (!cfg.apiKey) return res.status(400).json({ error: "API key de Resend no configurada" });

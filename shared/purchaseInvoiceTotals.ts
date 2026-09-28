@@ -28,12 +28,39 @@ export type PurchaseInvoiceAmountInput = {
   retencionGanancias?: string | number | null;
   retencionIva?: string | number | null;
   retencionSuss?: string | number | null;
+  retencionMunicipal?: string | number | null;
 };
 
 export type PurchaseInvoiceNetLine = {
   neto: string | number | null;
   alicuota: string;
 };
+
+export type PurchaseInvoiceArticleAmount = {
+  quantity: string | number;
+  unitPrice: string | number;
+  vatRate?: string | null;
+};
+
+/** A usa precio neto y discrimina IVA; B usa precio final y no suma IVA encima. */
+export function suggestPurchaseAmountsFromArticles(
+  articles: PurchaseInvoiceArticleAmount[],
+  tipoComprobante: string,
+): { lines: Array<{ neto: string; alicuota: string }>; fields: Record<string, string>; articleTotal: number } {
+  const totals = new Map<string, number>();
+  const grossPrice = tipoComprobante === "FACT-B" || tipoComprobante === "FACT-C" || tipoComprobante === "RECIBO-C";
+  for (const article of articles) {
+    const subtotal = roundCurrency(amount(article.quantity) * amount(article.unitPrice));
+    const rate = grossPrice ? "0" : article.vatRate === "2.5" ? "25" : article.vatRate || "0";
+    totals.set(rate, roundCurrency((totals.get(rate) || 0) + subtotal));
+  }
+  const lines = [...totals].map(([alicuota, neto]) => ({ alicuota, neto: neto.toFixed(2) }));
+  const fields = grossPrice
+    ? { montoNeto: [...totals.values()].reduce((sum, value) => sum + value, 0).toFixed(2),
+        montoIva5: "", montoIva25: "", montoIva105: "", montoIva21: "", montoIva27: "" }
+    : calculatePurchaseInvoiceAmountsFromNetLines(lines);
+  return { lines, fields, articleTotal: calculatePurchaseInvoiceTotal({ tipoComprobante, ...fields }) };
+}
 
 const IVA_FIELD_BY_RATE: Record<string, keyof PurchaseInvoiceAmountInput> = {
   "5": "montoIva5",
@@ -72,6 +99,11 @@ export function isReceivedRetention(tipoComprobante?: string | null): boolean {
   return tipoComprobante === RECEIVED_RETENTION_TYPE;
 }
 
+/** Los comprobantes del proveedor se cancelan mediante su Orden de Pago. */
+export function isSupplierPayableDocument(tipoComprobante?: string | null): boolean {
+  return /^(FACT|NC|ND|RECIBO)-/.test(tipoComprobante || "");
+}
+
 export function receivedRetentionAccountCode(subtipo?: string | null): string | null {
   return RECEIVED_RETENTION_ACCOUNT_CODES[
     String(subtipo || "").toLowerCase() as keyof typeof RECEIVED_RETENTION_ACCOUNT_CODES
@@ -97,7 +129,9 @@ export function mapPurchaseInvoiceAmountFields(row: Record<string, unknown>) {
     retencionGanancias: formAmount(row.retencion_ganancias),
     retencionIva: formAmount(row.retencion_iva),
     retencionSuss: formAmount(row.retencion_suss),
+    retencionMunicipal: formAmount(row.retencion_municipal),
     montoTotal: formAmount(row.monto_total),
+    saldoPendiente: formAmount(row.saldo_pendiente),
   };
 }
 
@@ -153,9 +187,48 @@ export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput)
     amount(input.retencionIibb) +
     amount(input.retencionGanancias) +
     amount(input.retencionIva) +
-    amount(input.retencionSuss);
+    amount(input.retencionSuss) +
+    amount(input.retencionMunicipal);
 
   return roundCurrency(baseAndTaxes + (isCardSettlement(input.tipoComprobante) ? retentions : -retentions));
+}
+
+export function isValidPurchaseInvoiceTotal(tipoComprobante: string | null | undefined, total: number): boolean {
+  return tipoComprobante === "REMITO" || (Number.isFinite(total) && total > 0);
+}
+
+// condicion_iva de accounting_suppliers es texto libre: conviven "Responsable
+// Inscripto" (ABM actual), "responsable_inscripto" (datos históricos/tests)
+// y "R.Inscrp." (importado de la planilla real del proveedor consultor) —
+// confirmado leyendo accounting-suppliers.tsx y server/seed.ts. Normalizamos
+// a letras antes de comparar para no depender de un formato exacto.
+function normalizeCondicionIva(raw: string | null | undefined): string {
+  return (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z]/g, "");
+}
+
+// La letra del comprobante depende de la condición IVA de quien lo EMITE (el
+// proveedor), no la nuestra. Solo bloqueamos las combinaciones que AFIP nunca
+// permite bajo ninguna interpretación — no la sugerencia general de letra
+// (esa es no bloqueante a propósito: un proveedor cargado como Responsable
+// Inscripto puede facturar un concepto exento y emitir B en vez de A).
+// - Letra A discrimina IVA: solo puede emitirla un Responsable Inscripto.
+// - Monotributo tiene un único comprobante habilitado, la C.
+export function condicionIvaPermiteComprobante(
+  condicionIva: string | null | undefined,
+  tipoComprobante: string | null | undefined,
+): boolean {
+  const letra = /^(?:FACT|NC|ND|RECIBO)-([ABC])$/.exec(tipoComprobante || "")?.[1];
+  if (!letra) return true;
+  const norm = normalizeCondicionIva(condicionIva);
+  const esResponsableInscripto = norm.includes("inscr");
+  const esMonotributo = norm.startsWith("monotribut");
+  if (letra === "A") return esResponsableInscripto;
+  if (esMonotributo) return letra === "C";
+  return true;
 }
 
 export function purchaseInvoiceRetentionSide(tipoComprobante?: string | null): "debe" | "haber" {

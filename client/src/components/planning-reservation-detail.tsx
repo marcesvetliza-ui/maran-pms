@@ -19,7 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import { getLocalToday, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
@@ -96,7 +96,7 @@ export function ReservationDetailModal({
 
   const updateReservationMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, data);
+      return apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
@@ -265,7 +265,7 @@ export function ReservationDetailModal({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="w-[95vw] max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5" />

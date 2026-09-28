@@ -32,10 +32,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 
 type Movement = {
   id: string;
@@ -48,6 +50,7 @@ type Movement = {
   date: string;
   type: string;
   paymentMethod?: string | null;
+  voided?: boolean;
 };
 
 type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;
@@ -65,8 +68,34 @@ type AccountMovement = {
   reference?: string | null;
   paymentMethod?: string | null;
   saldoPendiente?: number;
+  area?: string | null;
   createdAt: string;
+  reservationId?: string | null;
+  paymentId?: string | null;
+  groupPaymentId?: string | null;
+  receiptNumber?: string | null;
+  voided?: boolean;
 };
+
+// Solo hacia adelante: los movimientos creados antes de este campo quedan en
+// null, se muestran como "Sin clasificar" en vez de adivinar el área.
+const AREA_LABELS: Record<string, string> = {
+  recepcion: "Recepción",
+  restaurant: "Restaurant",
+  eventos: "Eventos",
+  spa: "SPA",
+  grupos: "Grupos",
+  otros: "Otros",
+};
+const AREA_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "all", label: "Todas las áreas" },
+  { value: "recepcion", label: "Recepción" },
+  { value: "restaurant", label: "Restaurant" },
+  { value: "eventos", label: "Eventos" },
+  { value: "spa", label: "SPA" },
+  { value: "grupos", label: "Grupos" },
+  { value: "sin_clasificar", label: "Sin clasificar" },
+];
 
 const TYPE_LABELS: Record<string, string> = {
   company: "Empresa",
@@ -84,6 +113,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
 function fmtMoney(n: string | number) {
   return `$${parseFloat(String(n)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
 }
+
+const HOTEL_NAME_HTML = "Maran Suites &amp; Towers";
 
 function printEntityStatement(entityName: string, entityType: string, movements: AccountMovement[]) {
   const balance = movements.reduce((s, m) => s + parseFloat(m.amount), 0);
@@ -144,7 +175,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -181,7 +212,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
@@ -243,7 +274,7 @@ function printDebtListing(
 <body>
   <div class="header">
     <div>
-      <div class="hotel-name">Maran Suites &amp; Torres</div>
+      <div class="hotel-name">${HOTEL_NAME_HTML}</div>
       <div class="hotel-sub">Sistema de Gestión Hotelera</div>
     </div>
     <div class="doc-info">
@@ -283,7 +314,7 @@ function printDebtListing(
   </table>
 
   <div class="footer">
-    <span>Maran Suites &amp; Torres — Documento generado automáticamente</span>
+    <span>${HOTEL_NAME_HTML} — Documento generado automáticamente</span>
     <span>${today}</span>
   </div>
   <script>window.onload = () => { window.print(); }</script>
@@ -358,6 +389,7 @@ function EntityMovementsInline({
           <tr className="bg-muted/50 text-muted-foreground">
             <th className="text-left px-3 py-1.5 font-medium">Fecha</th>
             <th className="text-left px-3 py-1.5 font-medium">Tipo</th>
+            <th className="text-left px-3 py-1.5 font-medium">Área</th>
             <th className="text-left px-3 py-1.5 font-medium">Descripción</th>
             <th className="text-left px-3 py-1.5 font-medium">Reserva / Ref.</th>
             <th className="text-right px-3 py-1.5 font-medium">Importe</th>
@@ -414,6 +446,9 @@ function EntityMovementsInline({
                     </Badge>
                   )}
                 </td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {m.area ? (AREA_LABELS[m.area] ?? m.area) : (m.type === "cargo" ? "Sin clasificar" : "—")}
+                </td>
                 <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">
                   {m.reservationCode ? (
@@ -453,7 +488,7 @@ function EntityMovementsInline({
         </tbody>
         <tfoot>
           <tr className="bg-muted/50 font-semibold">
-            <td colSpan={4} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
+            <td colSpan={5} className="px-3 py-1.5 text-xs text-right text-muted-foreground">Saldo total:</td>
             <td className={`px-3 py-1.5 text-right tabular-nums text-xs ${balance > 0 ? "text-red-600" : "text-green-600"}`}>
               {fmtMoney(balance)}
             </td>
@@ -479,8 +514,9 @@ const AGING_BUCKETS: AgingBucket[] = [
   { label: "+90 días",   days: [91, Infinity], color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800" },
 ];
 
-function AgingReportSection({ accountSummary }: {
-  accountSummary: { companies: { id: string; name: string; balance: number }[]; agencies: { id: string; name: string; balance: number }[]; guests: { id: string; name: string; balance: number }[] }
+function AgingReportSection({ accountSummary, areaFilter }: {
+  accountSummary: { companies: { id: string; name: string; balance: number }[]; agencies: { id: string; name: string; balance: number }[]; guests: { id: string; name: string; balance: number }[] };
+  areaFilter: string;
 }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -494,11 +530,12 @@ function AgingReportSection({ accountSummary }: {
 
   // Fetch all movements without date filter to calculate aging from oldest unpaid charge
   const { data: allMovementsRaw, isLoading } = useQuery<AccountMovement[]>({
-    queryKey: ["/api/account-movements/report-aging"],
+    queryKey: ["/api/account-movements/report-aging", areaFilter],
     queryFn: async () => {
       const from = "2000-01-01";
       const to = getArgentinaToday();
-      const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}`);
+      const areaParam = areaFilter !== "all" ? `&area=${areaFilter}` : "";
+      const res = await apiRequest("GET", `/api/account-movements/report?from=${from}&to=${to}${areaParam}`);
       return res.json();
     },
   });
@@ -605,6 +642,7 @@ export default function AdminCuentasPage() {
   const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
   const [expandedEntityId, setExpandedEntityId] = useState<string | null>(null);
   const [expandedEntityType, setExpandedEntityType] = useState<string | null>(null);
+  const [areaFilter, setAreaFilter] = useState<string>("all");
 
   const toggleEntityDetail = (type: string, id: string) => {
     if (expandedEntityId === id && expandedEntityType === type) {
@@ -635,23 +673,6 @@ export default function AdminCuentasPage() {
     },
   });
 
-  const reconcileCheckoutDebtsMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/reconcile-checkout-debts");
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
-      toast({
-        title: "Revisión completada",
-        description: data.message || `${data.created} cargo(s) creado(s)`,
-      });
-    },
-    onError: () => {
-      toast({ title: "Error al revisar saldos pendientes", variant: "destructive" });
-    },
-  });
-
   const [reporteFrom, setReporteFrom] = useState(() => {
     return getArgentinaToday().slice(0, 7) + "-01";
   });
@@ -670,7 +691,12 @@ export default function AdminCuentasPage() {
     agencies: { id: string; name: string; balance: number }[];
     guests: { id: string; name: string; balance: number }[];
   }>({
-    queryKey: ["/api/account-summary"],
+    queryKey: ["/api/account-summary", areaFilter],
+    queryFn: async () => {
+      const params = areaFilter !== "all" ? `?area=${areaFilter}` : "";
+      const res = await apiRequest("GET", `/api/account-summary${params}`);
+      return res.json();
+    },
   });
 
   type ReceiptMovement = AccountMovement & { entityName: string; entityTypeName: string };
@@ -706,7 +732,7 @@ export default function AdminCuentasPage() {
   const totalDebt = totalCompaniesDebt + totalAgenciesDebt + totalGuestsDebt;
 
   const reporteCharges = reporteMovements.filter(m => parseFloat(m.amount) > 0);
-  const reportePayments = reporteMovements.filter(m => parseFloat(m.amount) < 0);
+  const reportePayments = reporteMovements.filter(m => parseFloat(m.amount) < 0 && !m.voided);
   const reporteTotal = reporteMovements.reduce((sum, m) => sum + parseFloat(m.amount || "0"), 0);
 
   return (
@@ -727,6 +753,26 @@ export default function AdminCuentasPage() {
           </h1>
           <p className="text-muted-foreground text-sm">Empresas, Agencias y Clientes — saldos pendientes y movimientos</p>
         </div>
+      </div>
+
+      {/* Filtro por área de origen */}
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground shrink-0">Área:</span>
+        <Select value={areaFilter} onValueChange={setAreaFilter}>
+          <SelectTrigger className="w-56" data-testid="select-area-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AREA_FILTER_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {areaFilter !== "all" && (
+          <p className="text-xs text-muted-foreground">
+            Solo movimientos creados desde que se agregó este filtro — el historial anterior no se reclasificó.
+          </p>
+        )}
       </div>
 
       {/* Resumen de deuda — cards clickeables */}
@@ -1120,7 +1166,7 @@ export default function AdminCuentasPage() {
 
       {/* Reporte de Antigüedad de Deuda */}
       {accountSummary && (totalCompaniesDebt > 0 || totalAgenciesDebt > 0 || totalGuestsDebt > 0) && (
-        <AgingReportSection accountSummary={accountSummary} />
+        <AgingReportSection accountSummary={accountSummary} areaFilter={areaFilter} />
       )}
 
       {/* Reconciliación de pagos CC existentes */}
@@ -1146,34 +1192,6 @@ export default function AdminCuentasPage() {
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
               {reconcileMutation.isPending ? "Sincronizando..." : "Sincronizar ahora"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Revisión de saldos pendientes de checkout histórico */}
-      <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/40 dark:bg-orange-950/10">
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium">Revisar saldos pendientes de checkout</p>
-                <p className="text-xs text-muted-foreground">
-                  Detecta reservas ya cerradas (check-out) que tienen saldo sin registrar en cuentas corrientes y crea los cargos faltantes.
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => reconcileCheckoutDebtsMutation.mutate()}
-              disabled={reconcileCheckoutDebtsMutation.isPending}
-              className="border-orange-300 dark:border-orange-700 shrink-0"
-              data-testid="button-reconcile-checkout-debts"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${reconcileCheckoutDebtsMutation.isPending ? "animate-spin" : ""}`} />
-              {reconcileCheckoutDebtsMutation.isPending ? "Revisando..." : "Revisar saldos pendientes"}
             </Button>
           </div>
         </CardContent>
@@ -1235,7 +1253,7 @@ export default function AdminCuentasPage() {
           <div className="flex items-center gap-2 mb-3 px-1">
             <span className="text-sm text-muted-foreground">Total cobrado en el período:</span>
             <span className="font-bold text-green-600 tabular-nums text-sm">
-              ${Math.abs(recibos.reduce((s, r) => s + parseFloat(r.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+              ${Math.abs(recibos.filter(r => !r.voided).reduce((s, r) => s + parseFloat(r.amount), 0)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
             </span>
           </div>
         )}
@@ -1284,17 +1302,21 @@ export default function AdminCuentasPage() {
                         ${Math.abs(parseFloat(r.amount)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </td>
                       <td className="px-1 py-1 text-center">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Ver / reimprimir recibo"
-                          onClick={() => window.open(`/api/account-movements/${r.id}/receipt-pdf`, "_blank")}
-                          data-testid={`button-reprint-recibo-${r.id}`}
-                        >
-                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {r.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Ver / reimprimir recibo"
+                            onClick={() => window.open(`/api/account-movements/${r.id}/receipt-pdf`, "_blank")}
+                            data-testid={`button-reprint-recibo-${r.id}`}
+                          >
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                          </Button>
+                          <CcVoidReceiptAction movement={r} entityLabel={r.entityName} />
+                        </div>
                       </td>
                     </tr>
                   );

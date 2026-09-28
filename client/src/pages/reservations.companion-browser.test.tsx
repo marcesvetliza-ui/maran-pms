@@ -36,7 +36,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
  */
 vi.mock("@/lib/queryClient", async (importOriginal) => {
   const orig = (await importOriginal()) as Record<string, unknown>;
-  return { ...orig, apiRequest: vi.fn() };
+  const apiRequest = vi.fn();
+  return {
+    ...orig,
+    apiRequest,
+    apiRequestWithGroupInventoryWarning: (...args: unknown[]) => apiRequest(...args),
+  };
 });
 
 /**

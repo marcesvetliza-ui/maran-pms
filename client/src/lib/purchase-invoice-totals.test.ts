@@ -6,9 +6,32 @@ import {
   purchaseInvoiceRetentionSide,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
+  suggestPurchaseAmountsFromArticles,
 } from "@shared/purchaseInvoiceTotals";
 
 describe("purchase invoice totals", () => {
+  it("suggests grouped net amounts and VAT for A, with per-line currency rounding", () => {
+    const suggestion = suggestPurchaseAmountsFromArticles([
+      { quantity: 2, unitPrice: 100, vatRate: "21" },
+      { quantity: 1, unitPrice: 50, vatRate: "21" },
+      { quantity: 1, unitPrice: 100, vatRate: "10.5" },
+    ], "FACT-A");
+    expect(suggestion.lines).toEqual([
+      { alicuota: "21", neto: "250.00" },
+      { alicuota: "10.5", neto: "100.00" },
+    ]);
+    expect(suggestion.fields).toMatchObject({ montoNeto: "350.00", montoIva21: "52.50", montoIva105: "10.50" });
+    expect(suggestion.articleTotal).toBe(413);
+  });
+
+  it("treats B article prices as final even when a VAT rate is recorded", () => {
+    const suggestion = suggestPurchaseAmountsFromArticles([
+      { quantity: 2, unitPrice: 121, vatRate: "21" },
+    ], "FACT-B");
+    expect(suggestion.articleTotal).toBe(242);
+    expect(calculatePurchaseInvoiceTotal({ tipoComprobante: "FACT-B", ...suggestion.fields })).toBe(242);
+    expect(suggestion.fields.montoIva21).toBe("");
+  });
   it("adds suffered retentions to a card settlement total", () => {
     const amounts = calculatePurchaseInvoiceAmountsFromNetLines([
       { neto: "112837.20", alicuota: "21" },
@@ -45,6 +68,17 @@ describe("purchase invoice totals", () => {
     expect(total).toBe(116);
     expect(purchaseInvoiceRetentionSide("FACT-A")).toBe("haber");
     expect(shouldRegisterPracticedIibbRetention("FACT-A")).toBe(true);
+  });
+
+  it("also subtracts a practiced municipal retention from a regular invoice", () => {
+    const total = calculatePurchaseInvoiceTotal({
+      tipoComprobante: "FACT-A",
+      montoNeto: "100.00",
+      montoIva21: "21.00",
+      retencionMunicipal: "5.00",
+    });
+
+    expect(total).toBe(116);
   });
 
   it("treats a received retention net amount as the final total and maps its asset account", () => {
@@ -84,7 +118,9 @@ describe("purchase invoice totals", () => {
       retencion_ganancias: "8.00",
       retencion_iva: "9.00",
       retencion_suss: "10.00",
+      retencion_municipal: "11.00",
       monto_total: "217.00",
+      saldo_pendiente: "217.00",
     })).toEqual({
       montoNeto: "100.00",
       montoIva21: "21.00",
@@ -103,7 +139,9 @@ describe("purchase invoice totals", () => {
       retencionGanancias: "8.00",
       retencionIva: "9.00",
       retencionSuss: "10.00",
+      retencionMunicipal: "11.00",
       montoTotal: "217.00",
+      saldoPendiente: "217.00",
     });
   });
 });

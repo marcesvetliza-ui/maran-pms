@@ -8,6 +8,7 @@ const pendingCharge = {
   entityId: "entity-1",
   saldoPendiente: 100,
 };
+let mockedRole = "admin";
 
 const mockStorage = {
   getCompany: vi.fn().mockResolvedValue({ id: "entity-1" }),
@@ -15,10 +16,18 @@ const mockStorage = {
   getGuest: vi.fn().mockResolvedValue({ id: "entity-1", firstName: "Ana", lastName: "Prueba" }),
   getPendingCharges: vi.fn().mockResolvedValue([pendingCharge]),
   createPaymentWithAllocations: vi.fn(),
+  voidDirectAccountPayment: vi.fn(),
 };
 
 vi.mock("../db-storage", () => ({ storage: mockStorage }));
-vi.mock("../auth", () => ({ requireAuth: (_req: any, _res: any, next: () => void) => next() }));
+vi.mock("../auth", () => ({
+  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireRole: (roles: string[]) => (req: any, res: any, next: () => void) => {
+    req.user = { role: mockedRole, fullName: "Test Admin" };
+    if (!roles.includes(mockedRole)) return res.status(403).json({ error: "forbidden" });
+    next();
+  },
+}));
 vi.mock("../db", () => ({
   db: { execute: vi.fn().mockResolvedValue({ rows: [] }) },
   pool: { query: vi.fn() },
@@ -51,6 +60,7 @@ async function postPayment(baseUrl: string, path: string, body: unknown) {
 describe("Cuenta Corriente payment routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedRole = "admin";
     mockStorage.getCompany.mockResolvedValue({ id: "entity-1" });
     mockStorage.getAgency.mockResolvedValue({ id: "entity-1" });
     mockStorage.getGuest.mockResolvedValue({ id: "entity-1", firstName: "Ana", lastName: "Prueba" });
@@ -59,6 +69,11 @@ describe("Cuenta Corriente payment routes", () => {
       movement: { id: "payment-1", ...data },
       allocations: allocations.map((allocation) => ({ ...allocation, pagoId: "payment-1" })),
     }));
+    mockStorage.voidDirectAccountPayment.mockResolvedValue({
+      original: { id: "payment-1", voided: true },
+      reversal: { id: "reversal-1", amount: "100.00" },
+      releasedAllocations: 1,
+    });
   });
 
   it.each([
@@ -106,6 +121,41 @@ describe("Cuenta Corriente payment routes", () => {
       expect(result.status).toBe(400);
       expect(result.body.error).toMatch(/total aplicado/i);
       expect(mockStorage.createPaymentWithAllocations).not.toHaveBeenCalled();
+    } finally {
+      app.close();
+    }
+  });
+
+  it("requires a trimmed reason before invoking receipt voiding", async () => {
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/account-movements/payment-1/void", { reason: "   " });
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/motivo/i);
+      expect(mockStorage.voidDirectAccountPayment).not.toHaveBeenCalled();
+    } finally {
+      app.close();
+    }
+  });
+
+  it("uses the protected voiding route for an authorized manager/admin", async () => {
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/account-movements/payment-1/void", { reason: " Error de carga " });
+      expect(result.status).toBe(200);
+      expect(mockStorage.voidDirectAccountPayment).toHaveBeenCalledWith("payment-1", "Error de carga", "Test Admin");
+    } finally {
+      app.close();
+    }
+  });
+
+  it("rejects a void request from a role outside administration", async () => {
+    mockedRole = "reception";
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/account-movements/payment-1/void", { reason: "No autorizado" });
+      expect(result.status).toBe(403);
+      expect(mockStorage.voidDirectAccountPayment).not.toHaveBeenCalled();
     } finally {
       app.close();
     }

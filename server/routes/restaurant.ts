@@ -173,6 +173,42 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // Mozos eventuales — personal ocasional sin usuario del sistema (sin login
+  // ni email), para poder sumarlos al selector de mozo sin pasar por el ABM
+  // de usuarios. restaurant_orders.waiter_name es un snapshot de texto libre
+  // (no una FK), así que solo hace falta alimentar el nombre.
+  app.get("/api/restaurant/eventual-waiters", async (req, res) => {
+    try {
+      const activeOnly = req.query.activeOnly !== "false";
+      const waiters = await storage.getEventualWaiters(activeOnly);
+      res.json(waiters);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching eventual waiters" });
+    }
+  });
+
+  app.post("/api/restaurant/eventual-waiters", async (req, res) => {
+    try {
+      const fullName = String(req.body?.fullName || "").trim();
+      if (!fullName) return res.status(400).json({ error: "El nombre es requerido" });
+      const waiter = await storage.createEventualWaiter({ fullName, isActive: "true" });
+      res.status(201).json(waiter);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating eventual waiter" });
+    }
+  });
+
+  app.patch("/api/restaurant/eventual-waiters/:id", async (req, res) => {
+    try {
+      const isActive = req.body?.isActive === "false" ? "false" : "true";
+      const waiter = await storage.updateEventualWaiter(req.params.id, { isActive });
+      if (!waiter) return res.status(404).json({ error: "Eventual waiter not found" });
+      res.json(waiter);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating eventual waiter" });
+    }
+  });
+
   // Restaurant Orders
   app.get("/api/restaurant/orders", async (req, res) => {
     try {
@@ -319,7 +355,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions } = req.body;
 
       // CUIT is mandatory when actually emitting Factura A / Factura C
       if (emitInvoice && ["factura_a", "factura_c"].includes(receiptType || "") && !(customerCuit || "").trim()) {
@@ -349,6 +385,28 @@ export function registerRestaurantRoutes(app: Express) {
       const advanceCredit = parseFloat(String(reservationAdvanceCredit || 0)) || 0;
       if (advanceCredit > 0) {
         finalTotal = Math.max(0, finalTotal - advanceCredit);
+      }
+
+      // Aplicar y consumir el voucher de regalo ANTES de cerrar el pedido: si
+      // no está disponible (ya usado, vencido, área equivocada), el pedido no
+      // debe quedar cerrado con un pago que en realidad no se cubrió.
+      let giftVoucherApplicationId: string | null = null;
+      if (voucherId) {
+        const giftVoucherSplit = Array.isArray(paymentSplits) ? paymentSplits.find((s: any) => s.method === "gift_voucher") : null;
+        const giftVoucherAmount = giftVoucherSplit
+          ? parseFloat(giftVoucherSplit.amount || "0")
+          : (effectivePrimaryMethod === "gift_voucher" ? finalTotal : 0);
+        if (giftVoucherAmount > 0) {
+          try {
+            const actor = (req as any).user?.username || "sistema";
+            const { application } = await storage.applyGiftVoucher(
+              voucherId, "restaurant_order", req.params.id, giftVoucherAmount, actor,
+            );
+            giftVoucherApplicationId = application.id;
+          } catch (e: any) {
+            return res.status(400).json({ error: e?.message || "Error al aplicar el voucher de regalo" });
+          }
+        }
       }
 
       const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
@@ -476,6 +534,7 @@ export function registerRestaurantRoutes(app: Express) {
           type: "cargo",
           description: label,
           amount: String(finalTotal.toFixed(2)),
+          area: "restaurant",
         });
       }
 
@@ -552,10 +611,13 @@ export function registerRestaurantRoutes(app: Express) {
 
           for (const item of orderItemsList) {
             const menuItem = await storage.getMenuItem(item.menuItemId);
-            // Nombre: customName en notes (entre corchetes) > nombre del ítem de menú > fallback
+            // Nombre: override editado al cerrar (itemDescriptions) > customName
+            // en notes (entre corchetes) > nombre del ítem de menú > fallback
             let itemName = menuItem?.name || "Ítem";
             const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
             if (notesMatch) itemName = notesMatch[1];
+            const override = itemDescriptions?.[item.id];
+            if (typeof override === "string" && override.trim()) itemName = override.trim();
 
             const grossItem = parseFloat(item.subtotal || "0");
             if (grossItem <= 0.001) continue;
@@ -607,16 +669,14 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      // Marcar voucher de regalo como usado (si aplica)
-      if (voucherId) {
+      // Consumir la aplicación del voucher — el pedido de restaurant se paga
+      // y se cierra en el mismo momento, así que reservado→utilizado ocurre
+      // sin un estado intermedio visible.
+      if (giftVoucherApplicationId) {
         try {
-          await storage.markGiftVoucherUsed(
-            voucherId,
-            (req as any).user?.username || "sistema",
-            `Aplicado al pedido ${order.orderNumber}${voucherCode ? ` — código ${voucherCode}` : ""}`
-          );
+          await storage.consumeGiftVoucherApplication(giftVoucherApplicationId, (req as any).user?.username || "sistema");
         } catch (e) {
-          console.error("[GiftVoucher] Error al marcar voucher como usado:", e);
+          console.error("[GiftVoucher] Error al consumir la aplicación del voucher:", e);
         }
       }
 
@@ -1033,6 +1093,7 @@ export function registerRestaurantRoutes(app: Express) {
         itemIds, method, receiptType, roomReservationId,
         emitInvoice, vatCondition, customerRazonSocial, customerCuit,
         ccEntityType, ccEntityId, discount, discountType, puntoVenta: pvOverride,
+        itemDescriptions,
       } = req.body;
 
       if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
@@ -1090,6 +1151,7 @@ export function registerRestaurantRoutes(app: Express) {
           amount,
           reference: `Orden: ${order.orderNumber}`,
           createdBy: (req as any).user?.id || null,
+          area: "restaurant",
         } as any);
       }
 
@@ -1114,6 +1176,26 @@ export function registerRestaurantRoutes(app: Express) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
+          const invoiceItems = await Promise.all(selectedItems.map(async (i: any) => {
+            // Nombre: override editado al cobrar (itemDescriptions) > customName
+            // en notes (entre corchetes) > nombre del ítem de menú > fallback.
+            // selectedItems viene de storage.getOrderItems (sin join), así que
+            // el nombre real del menú se busca acá, no en i.menuItem.
+            const menuItem = await storage.getMenuItem(i.menuItemId);
+            let itemName = menuItem?.name || "Ítem restaurante";
+            const notesMatch = (i.notes || "").match(/^\[(.+?)\]/);
+            if (notesMatch) itemName = notesMatch[1];
+            const override = itemDescriptions?.[i.id];
+            if (typeof override === "string" && override.trim()) itemName = override.trim();
+            return {
+              descripcion: itemName,
+              cantidad: i.quantity || 1,
+              precioUnitario: parseFloat((parseFloat(i.subtotal) / 1.21 / (i.quantity || 1)).toFixed(4)),
+              alicuotaIva: "21" as const,
+              subtotalNeto: parseFloat((parseFloat(i.subtotal) / 1.21).toFixed(4)),
+              subtotal: parseFloat(i.subtotal),
+            };
+          }));
           const invoice = await emitirFactura({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
@@ -1121,14 +1203,7 @@ export function registerRestaurantRoutes(app: Express) {
               cuit: customerCuit || undefined,
               condicionIva: condicion,
             },
-            items: selectedItems.map((i: any) => ({
-              descripcion: i.menuItem?.name || `Ítem restaurante`,
-              cantidad: i.quantity || 1,
-              precioUnitario: parseFloat((parseFloat(i.subtotal) / 1.21 / (i.quantity || 1)).toFixed(4)),
-              alicuotaIva: "21" as const,
-              subtotalNeto: parseFloat((parseFloat(i.subtotal) / 1.21).toFixed(4)),
-              subtotal: parseFloat(i.subtotal),
-            })),
+            items: invoiceItems,
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
@@ -2190,8 +2265,13 @@ export function registerRestaurantRoutes(app: Express) {
               .from(menuItems)
               .where(eq(menuItems.id, item.menuItemId))
               .limit(1);
+            // Nombre: customName en notes (entre corchetes, ej. "Fuera de
+            // Menú") > nombre del ítem de menú > fallback.
+            let itemName = mi?.name || "Ítem";
+            const notesMatch = (item.notes || "").match(/^\[(.+?)\]/);
+            if (notesMatch) itemName = notesMatch[1];
             return {
-              name: mi?.name || "Ítem",
+              name: itemName,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               subtotal: item.subtotal,

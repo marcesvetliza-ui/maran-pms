@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsLeft, ChevronsRight, Info, Plus, LogIn, LogOut, ExternalLink, Calendar, User, DollarSign, Bed, Users, CalendarSearch, Accessibility, Mountain, Sofa, Armchair, BedDouble, ArrowLeftRight, BedSingle, Droplets, Sunrise, Sunset, FileText, Ban, GripVertical, Move, Maximize2, Minimize2, ShoppingCart, XCircle, TrendingUp, Palette, X, SlidersHorizontal, ArrowRightLeft, Loader2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
 import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
@@ -290,7 +290,7 @@ export default function PlanningPage() {
         const co = new Date(checkOutDate + "T12:00:00");
         payload.nights = String(Math.round((co.getTime() - ci.getTime()) / (1000 * 60 * 60 * 24)));
       }
-      const res = await apiRequest("PATCH", `/api/reservations/${reservationId}`, payload);
+      const res = await apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, payload);
       return res.json();
     },
     onSuccess: () => {
@@ -409,7 +409,7 @@ export default function PlanningPage() {
     });
   };
 
-  const { data, isLoading } = useQuery<PlanningData>({
+  const { data, isLoading, isFetching } = useQuery<PlanningData>({
     queryKey: ["/api/planning", dateRange.start, dateRange.end],
     queryFn: async () => {
       const res = await fetch(`/api/planning?start=${dateRange.start}&end=${dateRange.end}`);
@@ -417,6 +417,12 @@ export default function PlanningPage() {
       return res.json();
     },
     refetchInterval: 30000,
+    // Cada navegación de fecha cambia el queryKey, así que sin esto React
+    // Query trata cada rango como una consulta nueva: la grilla entera
+    // desaparece y muestra el esqueleto de carga mientras espera la
+    // respuesta, en vez de seguir mostrando los datos anteriores hasta que
+    // lleguen los nuevos. Eso es lo que se sentía como demora al navegar.
+    placeholderData: keepPreviousData,
   });
 
   useEffect(() => {
@@ -465,7 +471,12 @@ export default function PlanningPage() {
       const blockDays = data.days.filter(d => d >= block.checkIn && d < block.checkOut);
       if (blockDays.length === 0) continue;
 
-      const roomsOfType = data.rooms.filter(r => r.roomTypeId === block.roomTypeId);
+      const roomsOfType = data.rooms.filter(room =>
+        room.roomTypeId === block.roomTypeId &&
+        isOperationalInventoryRoom(room) &&
+        room.status !== "maintenance" &&
+        room.status !== "oos"
+      );
 
       // Find rooms that are fully available for the whole block period
       const availableRooms = roomsOfType.filter(room => {
@@ -606,6 +617,31 @@ export default function PlanningPage() {
       end: toArgentinaDateStr(end),
     });
   };
+
+  // El filtro "Libres"/"Ocupadas" evalúa el estado de cada habitación en
+  // filters.referenceDate contra data.occupancy, que solo trae datos del
+  // rango de fechas actualmente cargado (dateRange). Si la fecha de
+  // referencia elegida por el usuario queda fuera de ese rango, la
+  // habitación no tiene estado para ese día y el filtro se salteaba en
+  // silencio (mostraba todas las habitaciones, sin filtrar nada). Para que
+  // el filtro siempre funcione, navegamos la grilla hasta esa fecha —
+  // pero SOLO cuando el usuario efectivamente cambia esa fecha de
+  // referencia, nunca simplemente porque dayIndexMap cambió (eso pasa en
+  // cada navegación manual del calendario, y por defecto referenceDate
+  // sigue siendo "hoy" aunque el usuario nunca haya tocado el filtro). Sin
+  // este resguardo, navegar el calendario lejos de "hoy" quedaba imposible:
+  // el efecto lo revertía en cada render, haciendo que "siguiente semana"
+  // no hiciera nada.
+  const lastAutoNavigatedReferenceDate = useRef(filters.referenceDate);
+  useEffect(() => {
+    if (filters.referenceDate === lastAutoNavigatedReferenceDate.current) return;
+    lastAutoNavigatedReferenceDate.current = filters.referenceDate;
+    if (!filters.referenceDate) return;
+    if (dayIndexMap[filters.referenceDate] !== undefined) return;
+    const [y, m, d] = filters.referenceDate.split("-").map(Number);
+    if (!y || !m || !d) return;
+    goToDate(new Date(y, m - 1, d));
+  }, [filters.referenceDate, dayIndexMap]);
 
   const findReservationForRoomAndDay = (roomId: string, day: string): string | null => {
     if (!data?.reservations || !data?.cellReservations?.[roomId]) return null;
@@ -871,6 +907,9 @@ export default function PlanningPage() {
                   return `${filteredRooms.length} habitaciones${filteredRooms.length !== totalReal ? ` (de ${totalReal})` : ""}`;
                 })() : "Cargando..."}
               </span>
+              {isFetching && !isLoading && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" data-testid="planning-fetching-indicator" />
+              )}
             </div>
             {/* Navegación de fechas — pegada a la grilla para acceso rápido */}
             <div className="flex items-center gap-1">
@@ -988,7 +1027,7 @@ export default function PlanningPage() {
                               <div
                                 onClick={() => { setEditingNoteDate(day); setEditingNoteValue(note); }}
                                 title={note || "Clic para agregar nota"}
-                                className="text-[10px] text-center text-amber-700 dark:text-amber-400 truncate cursor-pointer px-1 py-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[18px]"
+                                className="text-[10px] text-center text-amber-700 dark:text-amber-400 truncate cursor-pointer px-1 py-0.5 rounded border border-dashed border-amber-300/60 dark:border-amber-700/50 hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[18px]"
                                 data-testid={`cell-day-note-${day}`}
                               >
                                 {note || <span className="text-amber-300 dark:text-amber-700">·</span>}
@@ -1261,7 +1300,7 @@ export default function PlanningPage() {
                                               borderColor: `rgba(${r}, ${g}, ${b}, 0.5)`,
                                             };
                                           })()}
-                                          title={`Bloque sin asignar — ${ghostBlock.groupName}`}
+                                          title={`Pendiente de asignar — ${ghostBlock.groupName}`}
                                           data-testid={`cell-ghost-${room.id}-${day}`}
                                           onClick={() => navigate(`/groups/${ghostBlock.groupId}`)}
                                         >
@@ -1275,7 +1314,7 @@ export default function PlanningPage() {
                                               return { color: `rgb(${r}, ${g}, ${b})` };
                                             })()}
                                           >
-                                            {ghostBlock.groupName.substring(0, 5).toUpperCase()}
+                                            PEND.
                                           </span>
                                           <button
                                             className="hidden group-hover/ghost:flex items-center justify-center w-4 h-4 rounded-full bg-destructive/80 text-white text-[9px] font-bold flex-shrink-0 hover:bg-destructive transition-colors"
@@ -1375,7 +1414,8 @@ export default function PlanningPage() {
                                               <div className="font-semibold" style={(() => { const hex = ghostBlock.groupColor.replace("#",""); const r=parseInt(hex.substring(0,2),16),g=parseInt(hex.substring(2,4),16),b=parseInt(hex.substring(4,6),16); return {color:`rgb(${r},${g},${b})`}; })()}>
                                                 Grupo: {ghostBlock.groupName}
                                               </div>
-                                              <div className="text-muted-foreground text-[10px]">Bloque sin asignar — clic para ir al grupo</div>
+                                              <div className="font-medium text-amber-700 dark:text-amber-300">Pendiente de asignar</div>
+                                              <div className="text-muted-foreground text-[10px]">No es una reserva física — clic para ir al grupo</div>
                                             </div>
                                           </>
                                         ) : (

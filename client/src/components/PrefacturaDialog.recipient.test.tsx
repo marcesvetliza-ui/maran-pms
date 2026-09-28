@@ -120,7 +120,7 @@ describe("PrefacturaDialog recipient selection", () => {
     vi.stubGlobal("fetch", buildFetchMock());
   });
 
-  it("keeps a linked company optional and restores the guest receiver after switching", async () => {
+  it("auto-selects the reservation's linked company on open, and still allows switching to the guest and back", async () => {
     const user = userEvent.setup();
     render(
       <Wrapper>
@@ -136,8 +136,21 @@ describe("PrefacturaDialog recipient selection", () => {
 
     await screen.findByText(/Alojamiento Hab\. 101/);
     const receiverSelect = await screen.findByTestId("select-billing-target");
-    expect(receiverSelect).toHaveTextContent("Huésped");
-    expect(screen.getAllByText("Factura B").length).toBeGreaterThan(0);
+    // A reservation linked to a company starts pre-billed to that company,
+    // fiscal data included — reception shouldn't have to re-pick and re-type
+    // it on every checkout.
+    await waitFor(() => {
+      expect(receiverSelect).toHaveTextContent("Empresa");
+      expect(screen.getAllByText("Factura A").length).toBeGreaterThan(0);
+    });
+
+    await user.click(receiverSelect);
+    await user.click(await screen.findByRole("option", { name: /Huésped/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("select-billing-target")).toHaveTextContent("Huésped");
+      expect(screen.getAllByText("Factura B").length).toBeGreaterThan(0);
+    });
     await user.click(screen.getByTestId("select-receipt-type"));
     expect(screen.getByRole("option", { name: "Factura B" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Factura T" })).not.toBeInTheDocument();
@@ -154,14 +167,6 @@ describe("PrefacturaDialog recipient selection", () => {
     await waitFor(() => {
       expect(screen.getByTestId("select-billing-target")).toHaveTextContent("Empresa");
       expect(screen.getAllByText("Factura A").length).toBeGreaterThan(0);
-    });
-
-    await user.click(screen.getByTestId("select-billing-target"));
-    await user.click(await screen.findByRole("option", { name: /Huésped/ }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("select-billing-target")).toHaveTextContent("Huésped");
-      expect(screen.getAllByText("Factura B").length).toBeGreaterThan(0);
     });
 
     await user.click(screen.getByRole("button", { name: /Agregar forma de pago/ }));
@@ -186,6 +191,15 @@ describe("PrefacturaDialog recipient selection", () => {
     );
 
     await screen.findByText(/Alojamiento Hab\. 101/);
+    // This reservation has a linked company, so it opens pre-billed to that
+    // company (see the other test in this file) — switch to the guest
+    // explicitly to exercise the guest-account CC charge this test covers.
+    const receiverSelect = await screen.findByTestId("select-billing-target");
+    await waitFor(() => expect(receiverSelect).toHaveTextContent("Empresa"));
+    await user.click(receiverSelect);
+    await user.click(await screen.findByRole("option", { name: /Huésped/ }));
+    await waitFor(() => expect(screen.getByTestId("select-billing-target")).toHaveTextContent("Huésped"));
+
     await user.click(screen.getByTestId("select-sale-condition"));
     await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
     await user.click(screen.getByTestId("button-registrar-emitir"));

@@ -20,6 +20,7 @@ import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-a
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { emitirFactura } from "../billing/invoiceService";
 import { assertInvoiceEmittedForLink, canonicalInvoiceReference } from "../billing/invoiceLinkIntegrity";
+import { countReservationExtraFolioCharges } from "../groupReservationExtraCharges";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -203,7 +204,7 @@ function confirmedInvoiceAppliedAdvances(invoiceData: any, fallback: number): nu
 }
 
 const supportedGroupReceiptTypes = new Set([
-  "sin_comprobante", "none", "factura_a", "factura_b", "factura_mipyme_a", "factura_t",
+  "sin_comprobante", "none", "factura_a", "factura_b", "factura_mipyme_a", "factura_mipyme_b", "factura_t",
 ]);
 
 /** Validate collection evidence before either group collection path persists it. */
@@ -220,7 +221,7 @@ function validateGroupPaymentEvidence(
   if (!rows.some((row) => Number(row.amount) > 0)) {
     throw Object.assign(new Error("Debe informar al menos un detalle de cobro con importe positivo."), { statusCode: 400 });
   }
-  const isFiscal = ["factura_a", "factura_b", "factura_mipyme_a", "factura_t"].includes(normalizedReceiptType);
+  const isFiscal = ["factura_a", "factura_b", "factura_mipyme_a", "factura_mipyme_b", "factura_t"].includes(normalizedReceiptType);
   for (const row of rows) {
     if (!isFiscal && Number(row.amount) > 0 && !String(row.reference || "").trim()) {
       throw Object.assign(new Error("Cada medio de pago debe incluir una referencia no vacía."), { statusCode: 400 });
@@ -403,8 +404,8 @@ export function registerGroupsRoutes(app: Express) {
         createdBy: null,
       });
       res.status(201).json(group);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating group" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error creating group" });
     }
   });
 
@@ -552,143 +553,25 @@ export function registerGroupsRoutes(app: Express) {
       if (masterFolioConfig !== undefined) updateData.masterFolioConfig = masterFolioConfig;
       if (billingEntityType !== undefined) updateData.billingEntityType = nullIfEmpty(billingEntityType);
       if (billingEntityId !== undefined) updateData.billingEntityId = nullIfEmpty(billingEntityId);
-
-      // 3.1: Date propagation — fetch current dates BEFORE update
-      // Normalize any date value (Date object or string) to "YYYY-MM-DD"
-      const toDateStr = (d: any): string | null => {
-        if (!d) return null;
-        if (typeof d === "string") return d.substring(0, 10);
-        if (d instanceof Date) return d.toISOString().substring(0, 10);
-        return String(d).substring(0, 10);
-      };
-      const currentGroup = await storage.getGroup(req.params.id);
-      const oldCheckIn = toDateStr(currentGroup?.checkInDate);
-      const oldCheckOut = toDateStr(currentGroup?.checkOutDate);
-
-      // Determine whether dates are changing before touching the database
-      const newCheckIn = updateData.checkInDate as string | undefined;
-      const newCheckOut = updateData.checkOutDate as string | undefined;
-      const datesChanged = (newCheckIn && newCheckIn !== oldCheckIn) || (newCheckOut && newCheckOut !== oldCheckOut);
-
-      // Guard: if dates are changing, reject if any linked reservation is currently checked_in
-      if (datesChanged) {
-        const linksForCheck = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        const linkedResIds = new Set(linksForCheck.map(l => l.reservationId));
-        const allResForCheck = await storage.getReservations();
-        const checkedInCount = allResForCheck.filter(r => linkedResIds.has(r.id) && r.status === "checked_in").length;
-        if (checkedInCount > 0) {
-          return res.status(409).json({
-            error: `No se pueden cambiar las fechas mientras hay huéspedes en casa. Hay ${checkedInCount} habitación${checkedInCount !== 1 ? "es" : ""} actualmente en check-in en este grupo.`,
-          });
-        }
+      if (req.body.overrideTentativeGroupWarning === true) {
+        updateData._inventoryOverrideTentativeGroupWarning = true;
       }
 
-      const group = await storage.updateGroup(req.params.id, updateData);
-      if (!group) {
-        return res.status(404).json({ error: "Group not found" });
-      }
+      // All date propagation, room moves, cancellation and room/placeholder
+      // projections are performed by the storage transaction.  Keep this
+      // route free of side effects so a failed projection cannot leave a
+      // partially updated group.
+      const atomicGroup = await storage.updateGroupAtomic(req.params.id, {
+        patch: updateData as any,
+        roomReassignments: roomReassignments && typeof roomReassignments === "object" ? roomReassignments : undefined,
+        overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
+      });
+      if (!atomicGroup) return res.status(404).json({ error: "Group not found" });
+      return res.json(atomicGroup);
 
-      // 3.1: If dates changed, propagate to pending/confirmed reservations that had the old dates
-      let propagatedCount = 0;
-      if (datesChanged) {
-        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        for (const link of links) {
-          const [linked] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
-          if (!linked) continue;
-          if (!["pending", "confirmed"].includes(linked.status as string)) continue;
-          // Propagate group date changes to all pending/confirmed reservations.
-          // We update only the date dimension that changed in the group.
-          const patch: Record<string, unknown> = {};
-          if (newCheckIn) patch.checkInDate = newCheckIn;
-          if (newCheckOut) patch.checkOutDate = newCheckOut;
-          if (Object.keys(patch).length) {
-            await db.update(reservationsTable).set(patch as any).where(eq(reservationsTable.id, linked.id));
-            propagatedCount++;
-          }
-        }
-      }
-
-      // 6a: Apply room reassignments sent from the conflict-resolution dialog (with full server-side validation)
-      if (datesChanged && roomReassignments && typeof roomReassignments === 'object') {
-        // Build the set of reservation IDs that belong to this group for ownership validation
-        const groupLinks = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        const groupResIdSet = new Set(groupLinks.map(l => l.reservationId));
-
-        // Validate uniqueness: no two reservations can be reassigned to the same room
-        const targetRoomIds = Object.values(roomReassignments).filter(Boolean) as string[];
-        const uniqueTargets = new Set(targetRoomIds);
-        if (targetRoomIds.length !== uniqueTargets.size) {
-          return res.status(400).json({ error: "Dos reservas no pueden asignarse a la misma habitación." });
-        }
-
-        const ciToUse = newCheckIn || (newCheckOut ? group.checkInDate : null);
-        const coToUse = newCheckOut || (newCheckIn ? group.checkOutDate : null);
-
-        for (const [reservationId, newRoomId] of Object.entries(roomReassignments)) {
-          if (!newRoomId) continue;
-
-          // 1. Ownership: reservationId must belong to this group
-          if (!groupResIdSet.has(reservationId)) {
-            return res.status(403).json({ error: `Reserva ${reservationId} no pertenece a este grupo.` });
-          }
-
-          const [currentRes] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, reservationId)).limit(1);
-          if (!currentRes) continue;
-
-          const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, newRoomId as string)).limit(1);
-          if (!newRoom) return res.status(404).json({ error: `Habitación destino ${newRoomId} no encontrada.` });
-
-          // 2. Room type must match original reservation
-          if (newRoom.roomTypeId !== currentRes.roomTypeId) {
-            return res.status(400).json({ error: `La habitación ${newRoom.roomNumber} no es del mismo tipo que la original.` });
-          }
-
-          // 3. Recheck availability at commit time with new dates
-          const checkInForRecheck = ciToUse || currentRes.checkInDate;
-          const checkOutForRecheck = coToUse || currentRes.checkOutDate;
-          const hasConflict = await storage.checkOverbooking(newRoomId as string, checkInForRecheck, checkOutForRecheck, reservationId);
-          if (hasConflict) {
-            return res.status(409).json({ error: `La habitación ${newRoom.roomNumber} ya no está disponible en esas fechas. Recargá la página y volvé a intentarlo.` });
-          }
-
-          // All validations passed — apply the reassignment
-          if (currentRes.roomId) {
-            await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, currentRes.roomId));
-          }
-          await db.update(reservationsTable)
-            .set({ roomId: newRoomId as string, roomTypeId: newRoom.roomTypeId })
-            .where(eq(reservationsTable.id, reservationId));
-          await db.update(roomsTable).set({ status: 'occupied' }).where(eq(roomsTable.id, newRoomId as string));
-        }
-      }
-
-      // 2.2: Al cancelar el grupo, cancelar todas las reservas vinculadas (excepto las ya checked_out)
-      if (status === 'cancelled') {
-        const links = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, req.params.id));
-        for (const link of links) {
-          const [res] = await db.select().from(reservationsTable).where(eq(reservationsTable.id, link.reservationId)).limit(1);
-          if (res && res.status !== 'checked_out' && res.status !== 'cancelled') {
-            await db.update(reservationsTable).set({ status: 'cancelled' }).where(eq(reservationsTable.id, res.id));
-            if (res.roomId) {
-              await db.update(roomsTable).set({ status: 'available' }).where(eq(roomsTable.id, res.roomId));
-            }
-          }
-        }
-      }
-
-      // Si el nombre cambió, sincronizar el guest placeholder que se usa en planning,
-      // rooming list, folio y cualquier otro lugar que muestra el nombre del grupo
-      if (name !== undefined) {
-        const placeholderCode = `GROUP-${req.params.id}`;
-        await db.update(guestsTable)
-          .set({ firstName: name, lastName: "" })
-          .where(eq(guestsTable.codigo, placeholderCode));
-      }
-
-      res.json({ ...group, propagatedCount });
     } catch (error: any) {
       console.error("Error updating group:", error?.message || error);
-      res.status(500).json({ error: "Error updating group", detail: error?.message });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating group", detail: error?.message });
     }
   });
 
@@ -762,7 +645,7 @@ export function registerGroupsRoutes(app: Express) {
         agreedRate: agreedRate ? String(agreedRate) : null,
         blockCheckInDate: blockCheckInDate || null,
         blockCheckOutDate: blockCheckOutDate || null,
-      });
+      }, { overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true });
 
       // Auto-assign available rooms and create placeholder reservations
       const group = await storage.getGroup(req.params.groupId);
@@ -794,6 +677,7 @@ export function registerGroupsRoutes(app: Express) {
           // Use the group's placeholder guest so guestId is never null (schema constraint).
           const placeholderGuest = await getOrCreatePlaceholderGuest(group.id, group.name);
           const reservation = await storage.createReservation({
+            _inventoryContextGroupId: group.id,
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
             guestId: placeholderGuest.id,
             guestName: "",
@@ -829,20 +713,22 @@ export function registerGroupsRoutes(app: Express) {
       }
 
       res.status(201).json(block);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating group block" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error creating group block" });
     }
   });
 
   app.patch("/api/group-blocks/:id", async (req, res) => {
     try {
-      const block = await storage.updateGroupBlock(req.params.id, req.body);
+      const block = await storage.updateGroupBlock(req.params.id, req.body, {
+        overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
+      });
       if (!block) {
         return res.status(404).json({ error: "Group block not found" });
       }
       res.json(block);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating group block" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating group block" });
     }
   });
 
@@ -949,6 +835,23 @@ export function registerGroupsRoutes(app: Express) {
       if (!currentRes) {
         return res.status(404).json({ error: "Reserva no encontrada" });
       }
+      const effectiveRoomTypeId = roomTypeId || currentRes.roomTypeId;
+      const changesInventoryType = effectiveRoomTypeId !== currentRes.roomTypeId;
+      // Replacing the placeholder guest does not alter room demand. Revalidating
+      // the whole group here used to block harmless guest updates whenever the
+      // group already had an unrelated inventory shortage.
+      if (changesInventoryType) {
+        const inventoryConflict = await storage.evaluateReservationInventory({
+          roomTypeId: effectiveRoomTypeId,
+          checkInDate: currentRes.checkInDate,
+          checkOutDate: currentRes.checkOutDate,
+          excludeReservationId: reservationId,
+          contextGroupId: groupId,
+        });
+        if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE") {
+          return res.status(409).json({ error: "El bloque grupal excede el inventario operativo", code: "GROUP_BLOCK_SHORTAGE", warning: inventoryConflict, canOverride: false });
+        }
+      }
 
       if (roomId) {
         if (roomId !== currentRes.roomId) {
@@ -958,7 +861,7 @@ export function registerGroupsRoutes(app: Express) {
           }
           const [newRoom] = await db.select().from(roomsTable).where(eq(roomsTable.id, roomId));
           if (!newRoom) return res.status(404).json({ error: "Habitación no encontrada" });
-          const canonicalRoomTypeId = roomTypeId || currentRes.roomTypeId;
+          const canonicalRoomTypeId = effectiveRoomTypeId;
           if (!hasCanonicalRoomType(newRoom, canonicalRoomTypeId)) {
             return res.status(400).json({ error: "La habitación no corresponde al tipo del bloque" });
           }
@@ -995,12 +898,10 @@ export function registerGroupsRoutes(app: Express) {
         guestName,
       });
 
-      // Direct DB update — bypass storage layer to avoid silent failures
-      const [updated] = await db
-        .update(reservationsTable)
-        .set(reservationUpdates)
-        .where(eq(reservationsTable.id, reservationId))
-        .returning();
+      const updated = await storage.updateReservation(reservationId, {
+        ...reservationUpdates,
+        _inventoryContextGroupId: groupId,
+      } as any);
 
       if (!updated) {
         console.error(`[passenger-assign] updateReservation devolvió vacío para ID ${reservationId}`);
@@ -1018,7 +919,7 @@ export function registerGroupsRoutes(app: Express) {
       res.json(updated);
     } catch (error: any) {
       console.error("[passenger-assign] Error:", error?.message);
-      res.status(500).json({ error: error?.message || "Error al asignar pasajero" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: error?.message || "Error al asignar pasajero" });
     }
   });
 
@@ -1067,7 +968,10 @@ export function registerGroupsRoutes(app: Express) {
       res.status(201).json(reservation);
     } catch (error: any) {
       const msg = error?.message || "Error assigning room to group";
-      res.status(400).json({ error: msg });
+      res.status(error?.statusCode || 400).json({
+        error: msg,
+        ...(error?.statusCode === 409 ? { code: "GROUP_BLOCK_SHORTAGE", canOverride: false } : {}),
+      });
     }
   });
 
@@ -1208,6 +1112,39 @@ export function registerGroupsRoutes(app: Express) {
     } catch (error) {
       console.error("[group-invoice-snapshot] Error:", error);
       res.status(500).json({ error: "Error al calcular la disponibilidad de facturación del grupo" });
+    }
+  });
+
+  // Same recovery source as the per-group endpoint below, but scanning every
+  // group instead of one. Reception (or anyone logged in) may never reopen
+  // the specific group whose cobro got orphaned — a confirmed invoice with
+  // no linked Caja/CC movement must not depend on that. Polled in the
+  // background by GroupFiscalCollectionWatcher (client/src/App.tsx).
+  app.get("/api/groups/pending-fiscal-collections", requireAuth, async (req, res) => {
+    try {
+      assertFinancialSchemaReady();
+      const result = await db.execute(sql`
+        SELECT id, group_id, items, group_payment_intent
+        FROM sales_invoices
+        WHERE group_id IS NOT NULL
+          AND estado = 'emitida'
+          AND group_payment_id IS NULL
+          AND group_payment_intent IS NOT NULL
+        ORDER BY id
+      `);
+      res.json(result.rows.map((row: any) => ({
+        id: Number(row.id),
+        groupId: row.group_id,
+        items: row.items,
+        intent: row.group_payment_intent,
+      })));
+    } catch (error) {
+      console.error("[pending-fiscal-collections:all] Error:", error);
+      const typedError = error as any;
+      res.status(typedError?.statusCode || 500).json({
+        error: typedError?.message || "No se pudieron recuperar los cobros fiscales pendientes",
+        ...(typedError?.code ? { code: typedError.code } : {}),
+      });
     }
   });
 
@@ -1580,9 +1517,9 @@ export function registerGroupsRoutes(app: Express) {
       );
       const compositionSources = await getGroupInvoiceCompositionSources(req.params.groupId);
       const fiscalTypes = new Set([
-        "FA", "FB", "FC", "FT", "FM",
-        "NCA", "NCB", "NCC", "NCT", "NCM",
-        "NDA", "NDB", "NDC", "NDT", "NDM",
+        "FA", "FB", "FC", "FT", "FM", "FMB",
+        "NCA", "NCB", "NCC", "NCT", "NCM", "NCMB",
+        "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB",
       ]);
       const invoices = rows
         .filter((invoice) => fiscalTypes.has(invoice.tipoComprobante))
@@ -1807,7 +1744,7 @@ export function registerGroupsRoutes(app: Express) {
         SELECT 1
         FROM sales_invoices si
         WHERE si.group_id = ${req.params.groupId}
-          AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
           AND si.estado IN ('emitida', 'parcial')
           AND COALESCE(si.source_charge_amounts->>${sourceId}, '0')::numeric > 0
           AND COALESCE(si.monto_total, 0)::numeric > COALESCE(si.monto_acreditado, 0)::numeric + 0.009
@@ -2424,7 +2361,7 @@ export function registerGroupsRoutes(app: Express) {
           SELECT si.id
           FROM sales_invoices si
           WHERE (si.group_payment_id = ${paymentId} OR si.id = ${payment.invoiceId ?? null})
-            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
             AND si.estado IN ('emitida', 'parcial')
           LIMIT 1
         `);
@@ -2503,13 +2440,7 @@ export function registerGroupsRoutes(app: Express) {
       await assertGroupStructureCanChange(groupId);
 
       // Verificar que no tenga cargos extras antes de desasignar
-      const chargesCheck = await db.execute(sql`
-        SELECT COUNT(*) as cnt FROM folio_movements
-        WHERE reservation_id = ${reservationId}
-          AND type = 'charge'
-          AND source_type NOT IN ('accommodation', 'transfer', 'transfer_reversal')
-      `);
-      const chargeCount = parseInt(String(chargesCheck.rows[0]?.cnt ?? "0"));
+      const chargeCount = await countReservationExtraFolioCharges(reservationId);
       if (chargeCount > 0) {
         return res.status(400).json({
           error: `Esta reserva tiene ${chargeCount} cargo(s) extra registrado(s). Eliminá o revertí los cargos antes de desasignarla del grupo.`

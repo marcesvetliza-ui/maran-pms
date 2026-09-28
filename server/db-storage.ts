@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
-import { getArgentinaOperationalParts } from "./utils/argentinaDateTime";
+import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
+import { evaluateGroupInventory, type GroupInventoryConflict } from "@shared/group-inventory";
 import {
   loadReservationOperationalSummaries,
   projectReservationOperationalReportRows,
@@ -13,7 +14,7 @@ export function getArgentinaToday(): string {
 }
 
 const giftVoucherAreas = ["alojamiento", "restaurant", "spa", "otro"] as const;
-const giftVoucherStatuses = ["activo", "usado", "vencido", "cancelado"] as const;
+const giftVoucherStatuses = ["activo", "activo_facturado", "reservado", "utilizado", "vencido", "cancelado"] as const;
 const giftVoucherValueTypes = ["monetario", "descriptivo"] as const;
 
 function parseGiftVoucherArea(value: string): GiftVoucher["area"] {
@@ -39,7 +40,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool } from "./db";
-import { IStorage } from "./storage";
+import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
   type User, type InsertUser,
   type Room, type InsertRoom,
@@ -84,7 +85,7 @@ import {
   type Recipe, type InsertRecipe,
   type RecipeIngredient, type InsertRecipeIngredient, type RecipeWithIngredients,
   type ItemCategory, type InsertItemCategory,
-  type Supplier, type InsertSupplier,
+  type AccountingSupplier,
   type InventoryItem, type InsertInventoryItem, type InventoryItemWithDetails,
   type StockMovement, type InsertStockMovement, type StockMovementWithItem,
   type SpaCabin, type InsertSpaCabin,
@@ -121,6 +122,7 @@ import {
   type CashRegisterConfig, type InsertCashRegisterConfig,
   type CashShift, type InsertCashShift,
   type CashMovement, type InsertCashMovement, type OrphanedCashPaymentLink,
+  type DuplicateCashPaymentLinkGroup, type DuplicateCashPaymentLinkMovement,
   type CashClosingSummary, type InsertCashClosingSummary,
   type AccountMovement, type InsertAccountMovement, type AccountEntityType,
   type OrderStatus,
@@ -134,10 +136,11 @@ import {
   guestReviews, housekeepingTasks, reservationChangelog,
   restaurantAreas, restaurantTables, menuCategories, menuItems,
   restaurantOrders, orderItems, tableReservations, restaurantTimeSlots,
-  restaurantReservationAdvances,
+  restaurantReservationAdvances, eventualWaiters,
+  type EventualWaiter, type InsertEventualWaiter,
   type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
-  itemCategories, suppliers, inventoryItems, stockMovements, warehouseStock,
+  itemCategories, inventoryItems, inventoryItemSuppliers, accountingSuppliers, stockMovements, warehouseStock,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
   spaTreatmentResources, spaAppointmentResources,
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
@@ -158,6 +161,10 @@ import {
   type ReservationCompanion, type InsertReservationCompanion,
   giftVouchers,
   type GiftVoucher, type InsertGiftVoucher,
+  giftVoucherApplications,
+  type GiftVoucherApplication, type InsertGiftVoucherApplication, type GiftVoucherApplicationTargetType,
+  giftVoucherEvents,
+  type GiftVoucherEvent, type InsertGiftVoucherEvent,
   inventoryCounts,
   inventoryCountItems,
 } from "@shared/schema";
@@ -216,6 +223,17 @@ export function reconcileGroupPaymentIntentSettlement(
 }
 
 export class DatabaseStorage implements IStorage {
+  private async withInventoryMutationLock<T>(operation: () => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    const lockKey = "lodging-inventory-mutations";
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+      return await operation();
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+      client.release();
+    }
+  }
 
   // Reservation Companions
   async getReservationCompanions(reservationId: string): Promise<ReservationCompanion[]> {
@@ -781,17 +799,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchGuests(query: string): Promise<Guest[]> {
+    // Matched the whole query as one string against each field, so "Ojeda"
+    // (found in lastName alone) worked but "Ojeda R" (lastName + first letter
+    // of firstName, a natural way to disambiguate several same-surname guests)
+    // matched nothing — no single field contains "Ojeda R". Split into words
+    // and require each word to appear in some field of the row (still allowing
+    // different words to match different fields), so "Ojeda R" needs "Ojeda"
+    // in lastName/etc. AND "R" in firstName/etc., independent of word order.
+    const words = query.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    const wordConditions = words.map(word => or(
+      ilike(guests.firstName, `%${word}%`),
+      ilike(guests.lastName, `%${word}%`),
+      ilike(guests.email, `%${word}%`),
+      ilike(guests.documentNumber, `%${word}%`),
+      ilike(guests.phone, `%${word}%`),
+      ilike(guests.cuilCuit, `%${word}%`)
+    ));
     return db.select().from(guests).where(
       and(
         visibleGuestCondition(),
-        or(
-          ilike(guests.firstName, `%${query}%`),
-          ilike(guests.lastName, `%${query}%`),
-          ilike(guests.email, `%${query}%`),
-          ilike(guests.documentNumber, `%${query}%`),
-          ilike(guests.phone, `%${query}%`),
-          ilike(guests.cuilCuit, `%${query}%`)
-        )
+        ...wordConditions
       )
     ).limit(20);
   }
@@ -1087,11 +1115,192 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createReservation(reservation: InsertReservation): Promise<Reservation> {
-    const [created] = await db.insert(reservations).values(reservation as any).returning();
+    return this.withInventoryMutationLock(async () => {
+      const insertData = { ...(reservation as any) };
+      const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
+      const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
+      delete insertData._inventoryContextGroupId;
+      delete insertData._inventoryOverrideTentativeGroupWarning;
+      if (insertData.roomId && insertData.checkInDate && insertData.checkOutDate) {
+        const hasPhysicalConflict = await this.checkOverbooking(
+          insertData.roomId,
+          insertData.checkInDate,
+          insertData.checkOutDate,
+        );
+        if (hasPhysicalConflict) {
+          throw Object.assign(new Error("La habitación ya tiene una reserva en esas fechas."), {
+            statusCode: 409,
+            response: { error: "La habitación ya tiene una reserva en esas fechas.", code: "PHYSICAL_ROOM_OVERLAP", canOverride: false },
+          });
+        }
+      }
+      if (insertData.roomTypeId && insertData.checkInDate && insertData.checkOutDate &&
+          !["cancelled", "checked_out", "no_show"].includes(insertData.status)) {
+        const inventoryConflict = await this.evaluateReservationInventory({
+          roomTypeId: insertData.roomTypeId,
+          checkInDate: insertData.checkInDate,
+          checkOutDate: insertData.checkOutDate,
+          contextGroupId,
+        });
+        if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && overrideSoft)) {
+          throw Object.assign(new Error("La demanda de habitaciones excede el inventario disponible."), {
+            statusCode: 409,
+            response: { error: "La demanda de habitaciones excede el inventario disponible.", code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
+          });
+        }
+      }
+    // El voucher se aplica ANTES de insertar la reserva (usando un id
+    // generado acá, no el default de la columna) para que una reserva nunca
+    // quede creada con un descuento que en realidad no se pudo reservar
+    // (voucher ya usado, vencido, etc.) — si applyGiftVoucher falla, no se
+    // crea nada.
+    const id = randomUUID();
+    const voucherId = insertData.voucherId as string | null | undefined;
+    if (voucherId) {
+      const amount = parseFloat((reservation as any).voucherAppliedAmount || "0");
+      if (amount > 0) {
+        await this.applyGiftVoucher(voucherId, "reservation", id, amount, insertData.lastModifiedBy || "sistema");
+      }
+    }
+    const [created] = await db.insert(reservations).values({ ...insertData, id } as any).returning();
     return created;
+    });
+  }
+
+  async evaluateReservationInventory(input: {
+    roomTypeId: string;
+    checkInDate: string;
+    checkOutDate: string;
+    excludeReservationId?: string;
+    contextGroupId?: string;
+  }): Promise<GroupInventoryConflict | null> {
+    const [roomRows, groupRows, blockRows, linkRows, reservationRows] = await Promise.all([
+      db.select({ id: rooms.id, roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
+      db.select({ id: groups.id, name: groups.name, status: groups.status, checkInDate: groups.checkInDate, checkOutDate: groups.checkOutDate }).from(groups),
+      db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.roomTypeId, input.roomTypeId)),
+      db.select().from(groupReservationLinks),
+      db.select({
+        id: reservations.id, roomTypeId: reservations.roomTypeId,
+        checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate,
+        status: reservations.status,
+      }).from(reservations).where(and(
+        eq(reservations.roomTypeId, input.roomTypeId),
+        lt(reservations.checkInDate, input.checkOutDate),
+        gt(reservations.checkOutDate, input.checkInDate),
+      )),
+    ]);
+    const linkByReservation = new Map(linkRows.map(link => [link.reservationId, link.groupId]));
+    return evaluateGroupInventory({
+      roomTypeId: input.roomTypeId,
+      checkIn: input.checkInDate,
+      checkOut: input.checkOutDate,
+      operationalInventory: roomRows.filter(room => isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
+      groups: groupRows,
+      blocks: blockRows,
+      reservations: reservationRows.map(row => ({ ...row, groupId: linkByReservation.get(row.id) ?? null })),
+      excludeReservationId: input.excludeReservationId,
+      contextGroupId: input.contextGroupId,
+    });
+  }
+
+  async validateGroupInventory(groupId: string, proposedStatus?: string, blockOverride?: { id?: string; roomTypeId?: string; quantity?: number; blockCheckInDate?: string | null; blockCheckOutDate?: string | null }, proposedDates?: { checkInDate?: string; checkOutDate?: string }): Promise<GroupInventoryConflict | null> {
+    const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
+    if (!group) return null;
+    const [allGroups, blocks] = await Promise.all([
+      db.select({ id: groups.id, name: groups.name, status: groups.status, checkInDate: groups.checkInDate, checkOutDate: groups.checkOutDate }).from(groups),
+      db.select().from(groupRoomBlocks),
+    ]);
+    const effectiveBlocks = blockOverride?.id
+      ? blocks.map(block => block.id === blockOverride.id ? { ...block, ...blockOverride } : block)
+      : blocks;
+    const allLinks = await db.select().from(groupReservationLinks);
+    const relevantReservationIds = new Set(allLinks.map(link => link.reservationId));
+    const linkedReservations = relevantReservationIds.size
+      ? await db.select({ id: reservations.id, roomTypeId: reservations.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate, status: reservations.status }).from(reservations).where(inArray(reservations.id, [...relevantReservationIds]))
+      : [];
+    const groupRows = allGroups.map(row => row.id === groupId ? {
+      ...row,
+      status: proposedStatus || row.status,
+      checkInDate: proposedDates?.checkInDate || row.checkInDate,
+      checkOutDate: proposedDates?.checkOutDate || row.checkOutDate,
+    } : row);
+    const targetBlocks = effectiveBlocks.filter(block => block.groupId === groupId);
+    const roomTypeIds = [...new Set(targetBlocks.map(block => block.roomTypeId))];
+    const linksByReservation = new Map(allLinks.map(link => [link.reservationId, link.groupId]));
+    for (const roomTypeId of roomTypeIds) {
+      const inventory = await this.evaluateGroupInventoryForType({
+        roomTypeId, groupRows, effectiveBlocks, linkedReservations, linksByReservation, groupId,
+      });
+      if (inventory) return inventory;
+    }
+    return null;
+  }
+
+  private async evaluateGroupInventoryForType(input: any): Promise<GroupInventoryConflict | null> {
+    const [inventoryRooms, [roomType]] = await Promise.all([
+      db.select({ roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
+      db.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes).where(eq(roomTypes.id, input.roomTypeId)).limit(1),
+    ]);
+    const conflict = evaluateGroupInventory({
+      roomTypeId: input.roomTypeId,
+      checkIn: input.groupRows.find((group: any) => group.id === input.groupId).checkInDate,
+      checkOut: input.groupRows.find((group: any) => group.id === input.groupId).checkOutDate,
+      operationalInventory: inventoryRooms.filter((room: any) => isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
+      groups: input.groupRows,
+      blocks: input.effectiveBlocks,
+      reservations: input.linkedReservations.map((row: any) => ({ ...row, groupId: input.linksByReservation.get(row.id) })),
+      contextGroupId: input.groupId,
+      candidateUnits: 0,
+    });
+    return conflict ? { ...conflict, roomTypeName: roomType?.name || input.roomTypeId } : null;
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
+    return this.withInventoryMutationLock(async () => {
+      const existing = await this.getReservation(id);
+      if (!existing) return undefined;
+      const finalRoomId = (reservation as any).roomId || existing.roomId;
+      const finalRoomTypeId = (reservation as any).roomTypeId || existing.roomTypeId;
+      const finalCheckIn = (reservation as any).checkInDate || existing.checkInDate;
+      const finalCheckOut = (reservation as any).checkOutDate || existing.checkOutDate;
+      const finalStatus = (reservation as any).status || existing.status;
+      const contextGroupId = (reservation as any)._inventoryContextGroupId as string | undefined;
+      const overrideSoft = (reservation as any)._inventoryOverrideTentativeGroupWarning === true;
+      const safeReservation = { ...(reservation as any) };
+      delete safeReservation._inventoryContextGroupId;
+      delete safeReservation._inventoryOverrideTentativeGroupWarning;
+      const inventoryRelevant = ["roomId", "roomTypeId", "checkInDate", "checkOutDate", "status"]
+        .some(key => Object.prototype.hasOwnProperty.call(safeReservation, key));
+      if (inventoryRelevant && finalRoomId && finalCheckIn && finalCheckOut) {
+        const physicalConflict = await this.checkOverbooking(finalRoomId, finalCheckIn, finalCheckOut, id);
+        if (physicalConflict) {
+          throw Object.assign(new Error("La habitación ya tiene una reserva en esas fechas."), {
+            statusCode: 409,
+            response: { error: "La habitación ya tiene una reserva en esas fechas.", code: "PHYSICAL_ROOM_OVERLAP", canOverride: false },
+          });
+        }
+      }
+      if (inventoryRelevant && finalRoomTypeId && finalCheckIn && finalCheckOut &&
+          !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+        const inventoryConflict = await this.evaluateReservationInventory({
+          roomTypeId: finalRoomTypeId,
+          checkInDate: finalCheckIn,
+          checkOutDate: finalCheckOut,
+          excludeReservationId: id,
+          contextGroupId,
+        });
+        if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && overrideSoft)) {
+          throw Object.assign(new Error("La demanda de habitaciones excede el inventario disponible."), {
+            statusCode: 409,
+            response: { error: "La demanda de habitaciones excede el inventario disponible.", code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
+          });
+        }
+      }
+      return this.updateReservationUnlocked(id, safeReservation);
+    });
+  }
+
+  private async updateReservationUnlocked(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
     const safeData: Record<string, any> = {};
     const protectedFields = ["id", "createdAt", "reservationCode"];
     const fkFields = ["guestId", "roomId", "roomTypeId"];
@@ -1104,8 +1313,74 @@ export class DatabaseStorage implements IStorage {
       safeData[key] = value;
     }
     if (Object.keys(safeData).length === 0) return undefined;
+
+    const needsVoucherSync = "status" in safeData || "voucherId" in safeData;
+    const before = needsVoucherSync
+      ? (await db.select().from(reservations).where(eq(reservations.id, id)))[0]
+      : undefined;
+
+    // Igual que en createReservation: aplicar ANTES de commitear el update.
+    // Si el voucher ya no está disponible, el PATCH entero falla en vez de
+    // guardar una reserva con un descuento que en realidad no se reservó.
+    if (before && "voucherId" in safeData) {
+      const newVoucherId = safeData.voucherId || null;
+      const actor = safeData.lastModifiedBy || before.lastModifiedBy || "sistema";
+      if (newVoucherId && newVoucherId !== before.voucherId) {
+        const amount = parseFloat(safeData.voucherAppliedAmount ?? before.voucherAppliedAmount ?? "0");
+        if (amount > 0) {
+          await this.applyGiftVoucher(newVoucherId, "reservation", id, amount, actor);
+        }
+      } else if (!newVoucherId && before.voucherId) {
+        // Se sacó el voucher de la reserva — liberar la aplicación viva si
+        // todavía no se consumió (si ya se consumió no hay nada que hacer).
+        const applications = await this.getGiftVoucherApplicationsForTarget("reservation", id);
+        for (const application of applications) {
+          await this.releaseGiftVoucherApplication(application.id, actor, "Se quitó el voucher de la reserva");
+        }
+      }
+    }
+
     const [updated] = await db.update(reservations).set(safeData).where(eq(reservations.id, id)).returning();
+    if (!updated) return updated;
+
+    if (before) {
+      // A diferencia del apply de arriba, esto reacciona a una transición de
+      // estado ya decidida (check-out, cancelación) — no debe bloquearla por
+      // un problema de sincronización del voucher, así que se atrapa acá y
+      // queda logueado para revisar a mano.
+      try {
+        await this.syncGiftVoucherStatusTransition(before, updated);
+      } catch (e) {
+        console.error("[GiftVoucher] Error sincronizando estado del voucher con la reserva:", e);
+      }
+    }
     return updated;
+  }
+
+  private async syncGiftVoucherStatusTransition(before: Reservation, after: Reservation): Promise<void> {
+    const isRelease = ["cancelled", "no_show"].includes(after.status) && !["cancelled", "no_show"].includes(before.status);
+    const isConsume = after.status === "checked_out" && before.status !== "checked_out";
+    if (!isRelease && !isConsume) return;
+    const voucherId = after.voucherId || before.voucherId;
+    if (!voucherId) return;
+    const applications = await this.getGiftVoucherApplicationsForTarget("reservation", after.id);
+    if (applications.length === 0) return;
+    const actor = after.lastModifiedBy || "sistema";
+    if (isRelease) {
+      for (const application of applications) {
+        await this.releaseGiftVoucherApplication(application.id, actor, `La reserva pasó a estado "${after.status}"`);
+      }
+      // El voucher vuelve a estar disponible para cualquier otra operación —
+      // si se restaura esta reserva más adelante, no debe quedar mostrando
+      // un vínculo que ya no representa nada reservado.
+      await db.update(reservations)
+        .set({ voucherId: null, voucherCode: null, voucherAppliedAmount: null })
+        .where(eq(reservations.id, after.id));
+    } else {
+      for (const application of applications) {
+        await this.consumeGiftVoucherApplication(application.id, actor);
+      }
+    }
   }
 
   async deleteReservation(id: string): Promise<boolean> {
@@ -1438,7 +1713,7 @@ export class DatabaseStorage implements IStorage {
       voucher_habitacion: "voucher",
     };
     const paymentMethod = classifyReservationPaymentMethod(input.payment.method).method;
-    if (!paymentMethod || !["cash", "debit_card", "credit_card", "transfer", "mercadopago", "current_account", "voucher", "room_charge"].includes(paymentMethod)) {
+    if (!paymentMethod || !["cash", "debit_card", "credit_card", "transfer", "mercadopago", "current_account", "voucher", "room_charge", "retencion_iibb", "retencion_ganancias", "retencion_iva"].includes(paymentMethod)) {
       throw Object.assign(new Error("Método de pago no admitido."), { statusCode: 400 });
     }
     const rawAmount = typeof input.payment.amount === "string"
@@ -1469,7 +1744,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const cashBearingMethods = new Set(["cash", "debit_card", "credit_card", "transfer", "mercadopago"]);
-    const informationalMethods = new Set(["current_account", "voucher"]);
+    const informationalMethods = new Set(["current_account", "voucher", "retencion_iibb", "retencion_ganancias", "retencion_iva"]);
     return db.transaction(async (tx) => {
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
@@ -1720,7 +1995,11 @@ export class DatabaseStorage implements IStorage {
           amount: canonicalAmount,
           reservationId: payment.reservationId,
           reference: input.accountSettlement.reference ?? payment.reference ?? payment.invoiceRef ?? null,
+          paymentId: payment.id,
           createdBy: input.accountSettlement.createdBy ?? null,
+          // Esta función solo liquida CC de una reserva (reservationId es
+          // obligatorio más arriba), así que el área es siempre recepción.
+          area: "recepcion",
         } as any);
         if (input.accountSettlement.invoiceId) {
           for (const advanceId of input.accountSettlement.advancePaymentIds || []) {
@@ -1886,7 +2165,8 @@ export class DatabaseStorage implements IStorage {
     );
     const pendingReservations = pendingResult[0]?.cnt ?? 0;
 
-    // Desayunos mañana = pax en reservas checked_in que pasan la noche de hoy
+    // Desayunos mañana = pax que pasarán la noche de hoy:
+    // huéspedes ya alojados que continúan + llegadas operativas previstas para hoy.
     const tonightRows = await db.execute(sql`
       SELECT
         COALESCE(SUM(r.number_of_guests), 0) AS pax,
@@ -1895,7 +2175,13 @@ export class DatabaseStorage implements IStorage {
       JOIN rooms rm ON rm.id = r.room_id
       WHERE r.check_in_date <= ${today}
         AND r.check_out_date > ${today}
-        AND r.status = 'checked_in'
+        AND (
+          r.status = 'checked_in'
+          OR (
+            r.check_in_date = ${today}
+            AND r.status IN ('confirmed', 'web_checkin', 'pending')
+          )
+        )
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
@@ -2242,7 +2528,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async syncOTAReservation(logId: string): Promise<Reservation | undefined> {
+  async syncOTAReservation(logId: string, overrideTentativeGroupWarning = false): Promise<Reservation | undefined> {
     const [log] = await db.select().from(otaReservationLogs).where(eq(otaReservationLogs.id, logId));
     if (!log || log.status === "synced") return undefined;
 
@@ -2269,14 +2555,36 @@ export class DatabaseStorage implements IStorage {
     }
     if (!roomType) return undefined;
 
-    const [availableRoom] = await db.select().from(rooms).where(
-      and(eq(rooms.roomTypeId, roomType.id), eq(rooms.status, "available"))
-    ).limit(1);
+    const candidateRooms = await db.select().from(rooms).where(eq(rooms.roomTypeId, roomType.id));
+    let availableRoom: Room | undefined;
+    for (const candidate of candidateRooms) {
+      if (!isOperationalInventoryRoom(candidate) || candidate.status === "maintenance" || candidate.status === "oos") continue;
+      if (!await this.checkOverbooking(candidate.id, log.checkInDate, log.checkOutDate)) {
+        availableRoom = candidate;
+        break;
+      }
+    }
     if (!availableRoom) return undefined;
 
     const checkIn = new Date(log.checkInDate);
     const checkOut = new Date(log.checkOutDate);
     const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
+    const inventoryConflict = await this.evaluateReservationInventory({
+      roomTypeId: roomType.id,
+      checkInDate: log.checkInDate,
+      checkOutDate: log.checkOutDate,
+    });
+    if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE" ||
+        (inventoryConflict?.code === "GROUP_BLOCK_WARNING" && !overrideTentativeGroupWarning)) {
+      const canOverride = inventoryConflict.code === "GROUP_BLOCK_WARNING";
+      const error = canOverride
+        ? "La reserva OTA consume disponibilidad comprometida para un grupo tentativo."
+        : "La reserva OTA excede el inventario comprometido para grupos confirmados.";
+      throw Object.assign(new Error(error), {
+        statusCode: 409,
+        response: { error, code: inventoryConflict.code, warning: inventoryConflict, canOverride },
+      });
+    }
 
     const reservation = await this.createReservation({
       reservationCode: this.generateReservationCode(),
@@ -2395,13 +2703,184 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateGroupAtomic(id: string, input: AtomicGroupUpdateInput): Promise<AtomicGroupUpdateResult | undefined> {
+    const reassignment = input.roomReassignments || {};
+    const override = input.overrideTentativeGroupWarning === true;
+    return db.transaction(async (tx) => {
+      // This lock is deliberately transaction-scoped: every inventory mutation
+      // (including room moves made by the group editor) serializes here.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('lodging-inventory-mutations'))`);
+      const [before] = await tx.select().from(groups).where(eq(groups.id, id)).for("update");
+      if (!before) return undefined;
+      const date = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : String(value || "").slice(0, 10);
+      const nextCheckIn = (input.patch.checkInDate as string | undefined) || date(before.checkInDate);
+      const nextCheckOut = (input.patch.checkOutDate as string | undefined) || date(before.checkOutDate);
+      if (nextCheckOut <= nextCheckIn) throw Object.assign(new Error("La fecha de check-out debe ser posterior al check-in."), { statusCode: 400 });
+
+      const links = await tx.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, id));
+      const reservationIds = links.map(link => link.reservationId);
+      const linked = reservationIds.length
+        ? await tx.select().from(reservations).where(inArray(reservations.id, reservationIds)).for("update")
+        : [];
+      const datesChanged = nextCheckIn !== date(before.checkInDate) || nextCheckOut !== date(before.checkOutDate);
+      if (datesChanged && linked.some(row => row.status === "checked_in")) {
+        throw Object.assign(new Error("No se pueden cambiar las fechas mientras hay huéspedes en casa."), { statusCode: 409 });
+      }
+
+      const targets = Object.entries(reassignment).filter(([, roomId]) => !!roomId) as Array<[string, string]>;
+      if (new Set(targets.map(([, roomId]) => roomId)).size !== targets.length) {
+        throw Object.assign(new Error("Dos reservas no pueden asignarse a la misma habitación."), { statusCode: 400 });
+      }
+      const roomsById = new Map((targets.length ? await tx.select().from(rooms).where(inArray(rooms.id, targets.map(([, roomId]) => roomId))) : []).map(room => [room.id, room]));
+      const linkedById = new Map(linked.map(row => [row.id, row]));
+      for (const [reservationId, roomId] of targets) {
+        const row = linkedById.get(reservationId);
+        if (!row) throw Object.assign(new Error(`Reserva ${reservationId} no pertenece a este grupo.`), { statusCode: 403 });
+        if (row.status === "checked_in") throw Object.assign(new Error("No se puede reasignar una reserva en check-in."), { statusCode: 409 });
+        const room = roomsById.get(roomId);
+        if (!room) throw Object.assign(new Error(`Habitación destino ${roomId} no encontrada.`), { statusCode: 404 });
+        if (room.roomTypeId !== row.roomTypeId) throw Object.assign(new Error(`La habitación ${room.roomNumber} no es del mismo tipo que la reserva.`), { statusCode: 400 });
+        if (!isOperationalInventoryRoom(room) || room.status === "maintenance" || room.status === "oos") {
+          throw Object.assign(new Error(`La habitación ${room.roomNumber} no está habilitada para asignaciones.`), {
+            statusCode: 409,
+            response: {
+              error: `La habitación ${room.roomNumber} no está habilitada para asignaciones.`,
+              code: "PHYSICAL_ROOM_UNAVAILABLE",
+              canOverride: false,
+            },
+          });
+        }
+      }
+      // Physical overlap is checked against the final room assignment, before
+      // the first write. Group reservations are allowed to move together.
+      const finalRoomByReservation = new Map(linked.map(row => [row.id, reassignment[row.id] || row.roomId]));
+      const active = linked.filter(row => !["cancelled", "checked_out", "no_show"].includes(row.status));
+      const finalRooms = active.map(row => finalRoomByReservation.get(row.id)).filter(Boolean);
+      if (new Set(finalRooms).size !== finalRooms.length) {
+        throw Object.assign(new Error("Dos reservas no pueden ocupar la misma habitación."), { statusCode: 409 });
+      }
+      const allOnRooms = active.length
+        ? await tx.select().from(reservations).where(inArray(reservations.roomId, [...new Set(active.map(row => finalRoomByReservation.get(row.id)).filter(Boolean) as string[])]))
+        : [];
+      for (const row of active) {
+        const roomId = finalRoomByReservation.get(row.id);
+        if (!roomId) continue;
+        const conflict = allOnRooms.some(other => other.id !== row.id
+          && other.roomId === roomId && !reservationIds.includes(other.id)
+          && !["cancelled", "checked_out", "no_show"].includes(other.status)
+          && other.checkInDate < nextCheckOut && other.checkOutDate > nextCheckIn);
+        if (conflict) throw Object.assign(new Error(`La habitación destino ya no está disponible en esas fechas.`), { statusCode: 409 });
+      }
+
+      // Validate group inventory from the same transaction snapshot.
+      const allGroups = await tx.select().from(groups);
+      const blocks = await tx.select().from(groupRoomBlocks);
+      const allReservations = await tx.select().from(reservations);
+      const allGroupLinks = await tx.select().from(groupReservationLinks);
+      const groupByReservation = new Map(allGroupLinks.map(link => [link.reservationId, link.groupId]));
+      const targetRoomTypeIds = [...new Set(blocks.filter(block => block.groupId === id).map(block => block.roomTypeId))];
+      const targetRoomTypes = targetRoomTypeIds.length
+        ? await tx.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes).where(inArray(roomTypes.id, targetRoomTypeIds))
+        : [];
+      const roomTypeNameById = new Map(targetRoomTypes.map(roomType => [roomType.id, roomType.name]));
+      for (const roomTypeId of targetRoomTypeIds) {
+        const inventoryRooms = await tx.select({
+          id: rooms.id,
+          roomNumber: rooms.roomNumber,
+          isActive: rooms.isActive,
+          isVirtual: rooms.isVirtual,
+          status: rooms.status,
+        }).from(rooms).where(eq(rooms.roomTypeId, roomTypeId));
+        const roomCount = inventoryRooms.filter(room =>
+          isOperationalInventoryRoom(room) &&
+          room.status !== "maintenance" &&
+          room.status !== "oos"
+        ).length;
+        const isCancellingGroup = String(input.patch.status || "") === "cancelled";
+        const conflict = evaluateGroupInventory({
+          roomTypeId, checkIn: nextCheckIn, checkOut: nextCheckOut, operationalInventory: roomCount,
+          groups: allGroups.map(group => group.id === id ? { ...group, checkInDate: nextCheckIn, checkOutDate: nextCheckOut, status: String(input.patch.status || group.status) } : group) as any,
+          blocks,
+          reservations: allReservations.map(row => ({
+            ...row,
+            status: isCancellingGroup && reservationIds.includes(row.id) ? "cancelled" : row.status,
+            groupId: groupByReservation.get(row.id),
+          })) as any,
+          contextGroupId: id,
+        });
+        if (conflict && (!conflict.canOverride || !override)) {
+          const detailedConflict = { ...conflict, roomTypeName: roomTypeNameById.get(roomTypeId) || roomTypeId };
+          throw Object.assign(new Error("El compromiso del grupo excede el inventario operativo."), { statusCode: 409, response: { error: "El compromiso del grupo excede el inventario operativo.", code: conflict.code, warning: detailedConflict, canOverride: conflict.canOverride } });
+        }
+      }
+
+      const safePatch: Record<string, unknown> = { ...input.patch };
+      delete (safePatch as any)._inventoryOverrideTentativeGroupWarning;
+      delete (safePatch as any).id;
+      delete (safePatch as any).createdAt;
+      const [updated] = await tx.update(groups).set(safePatch as any).where(eq(groups.id, id)).returning();
+      if (!updated) return undefined;
+      let writes = 1;
+      if (input.failAfterFirstWrite) throw new Error("test-only atomic group failure");
+      let propagatedCount = 0;
+      for (const row of linked) {
+        if (["cancelled", "checked_out"].includes(row.status)) continue;
+        const patch: Record<string, unknown> = {};
+        if (datesChanged && row.status !== "checked_in") {
+          patch.checkInDate = nextCheckIn; patch.checkOutDate = nextCheckOut;
+        }
+        if (reassignment[row.id]) {
+          patch.roomId = reassignment[row.id]; patch.roomTypeId = roomsById.get(reassignment[row.id]!)!.roomTypeId;
+        }
+        if (String(input.patch.status) === "cancelled") patch.status = "cancelled";
+        if (Object.keys(patch).length) {
+          await tx.update(reservations).set(patch as any).where(eq(reservations.id, row.id));
+          propagatedCount++; writes++;
+        }
+      }
+      const affectedRooms = new Set<string>();
+      for (const row of linked) { if (row.roomId) affectedRooms.add(row.roomId); const next = reassignment[row.id]; if (next) affectedRooms.add(next); }
+      for (const roomId of affectedRooms) {
+        const [room] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for("update");
+        if (!room || ["maintenance", "oos"].includes(room.status)) continue;
+        const occupants = await tx.select({ id: reservations.id }).from(reservations)
+          .where(and(eq(reservations.roomId, roomId), not(inArray(reservations.status, ["cancelled", "checked_out", "no_show"]))));
+        const today = getArgentinaOperationalParts().date;
+        const inHouse = occupants.length > 0 && (await tx.select({ id: reservations.id }).from(reservations)
+          .where(and(eq(reservations.roomId, roomId), lte(reservations.checkInDate, today), gt(reservations.checkOutDate, today), not(inArray(reservations.status, ["cancelled", "checked_out", "no_show"]))))).length > 0;
+        await tx.update(rooms).set({ status: inHouse ? "occupied" : "available" }).where(eq(rooms.id, roomId));
+      }
+      if (input.patch.name !== undefined) {
+        await tx.update(guests).set({ firstName: String(input.patch.name), lastName: "" }).where(eq(guests.codigo, `GROUP-${id}`));
+      }
+      return { ...updated, propagatedCount };
+    });
+  }
+
   async updateGroup(id: string, group: Partial<InsertGroup>): Promise<Group | undefined> {
+    const overrideSoft = (group as any)._inventoryOverrideTentativeGroupWarning === true;
     const safeData: Record<string, any> = {};
     for (const [key, value] of Object.entries(group)) {
-      if (["id", "createdAt", "groupCode"].includes(key) || value === undefined) continue;
+      if (["id", "createdAt", "groupCode", "_inventoryOverrideTentativeGroupWarning"].includes(key) || value === undefined) continue;
       safeData[key] = value;
     }
     if (Object.keys(safeData).length === 0) return undefined;
+    const current = await this.getGroup(id);
+    if (current && (safeData.status !== undefined || safeData.checkInDate !== undefined || safeData.checkOutDate !== undefined)) {
+      const nextStatus = safeData.status || current.status;
+      if (["confirmed", "inhouse"].includes(nextStatus)) {
+        const conflict = await this.validateGroupInventory(id, nextStatus, undefined, {
+          checkInDate: safeData.checkInDate || current.checkInDate,
+          checkOutDate: safeData.checkOutDate || current.checkOutDate,
+        });
+        if (conflict) {
+          const canOverride = conflict.code === "GROUP_BLOCK_WARNING";
+          if (!(canOverride && overrideSoft)) {
+            throw Object.assign(new Error("El compromiso del grupo excede el inventario operativo"), { statusCode: 409, response: { error: "El compromiso del grupo excede el inventario operativo", code: conflict.code, warning: conflict, canOverride } });
+          }
+        }
+      }
+    }
     const [updated] = await db.update(groups).set(safeData).where(eq(groups.id, id)).returning();
     return updated;
   }
@@ -2459,14 +2938,37 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async createGroupBlock(block: InsertGroupRoomBlock): Promise<GroupRoomBlock> {
-    const [created] = await db.insert(groupRoomBlocks).values(block as any).returning();
-    return created;
+  async createGroupBlock(block: InsertGroupRoomBlock, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock> {
+    return this.withInventoryMutationLock(async () => {
+      const [created] = await db.insert(groupRoomBlocks).values(block as any).returning();
+      const group = await this.getGroup(created.groupId);
+      if (group && ["tentative", "blocked", "confirmed", "inhouse"].includes(group.status)) {
+        const conflict = await this.validateGroupInventory(created.groupId, group.status, created);
+        if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
+          await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, created.id));
+          throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409, response: { error: "El bloque grupal excede el inventario operativo", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" } });
+        }
+      }
+      return created;
+    });
   }
 
-  async updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>): Promise<GroupRoomBlock | undefined> {
-    const [updated] = await db.update(groupRoomBlocks).set(block as any).where(eq(groupRoomBlocks.id, id)).returning();
-    return updated;
+  async updateGroupBlock(id: string, block: Partial<InsertGroupRoomBlock>, options?: { overrideTentativeGroupWarning?: boolean }): Promise<GroupRoomBlock | undefined> {
+    return this.withInventoryMutationLock(async () => {
+      const [before] = await db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.id, id));
+      const [updated] = await db.update(groupRoomBlocks).set(block as any).where(eq(groupRoomBlocks.id, id)).returning();
+      if (updated) {
+        const group = await this.getGroup(updated.groupId);
+        if (group && ["tentative", "blocked", "confirmed", "inhouse"].includes(group.status)) {
+          const conflict = await this.validateGroupInventory(updated.groupId, group.status, updated);
+          if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
+            await db.update(groupRoomBlocks).set(before as any).where(eq(groupRoomBlocks.id, id));
+            throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409, response: { error: "El bloque grupal excede el inventario operativo", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" } });
+          }
+        }
+      }
+      return updated;
+    });
   }
 
   async deleteGroupBlock(id: string): Promise<boolean> {
@@ -2554,6 +3056,15 @@ export class DatabaseStorage implements IStorage {
     if (hasConflict) {
       throw new Error(`La habitación ${room.roomNumber} ya tiene una reserva en esas fechas`);
     }
+    const inventoryConflict = await this.evaluateReservationInventory({
+      roomTypeId: canonicalRoomTypeId,
+      checkInDate,
+      checkOutDate,
+      contextGroupId: groupId,
+    });
+    if (inventoryConflict && inventoryConflict.code === "GROUP_BLOCK_SHORTAGE") {
+      throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409 });
+    }
 
     let guest: Guest | undefined;
     if (options?.guestId) {
@@ -2567,6 +3078,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const reservation = await this.createReservation({
+      _inventoryContextGroupId: groupId,
       reservationCode: `G${group.groupCode}-${room.roomNumber}`,
       guestId: guest.id,
       roomTypeId: canonicalRoomTypeId,
@@ -2588,7 +3100,7 @@ export class DatabaseStorage implements IStorage {
       notes: `Grupo: ${group.name}`,
       createdAt: new Date(),
       lastModifiedBy: null,
-    });
+    } as any);
 
     await this.createGroupReservationLink({
       groupId,
@@ -2697,6 +3209,7 @@ export class DatabaseStorage implements IStorage {
           factura_a: "FA",
           factura_b: "FB",
           factura_mipyme_a: "FM",
+          factura_mipyme_b: "FMB",
           factura_t: "FT",
         };
         const expectedInvoiceType = receiptToInvoiceType[String(input.receiptType || "").toLowerCase()];
@@ -2826,7 +3339,7 @@ export class DatabaseStorage implements IStorage {
               FROM sales_invoices si
               WHERE si.group_id = ${input.groupId}
                 AND si.id <> ${Number(linkedInvoice.id)}
-                AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FM', 'FT')
+                AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FM', 'FMB', 'FT')
                 AND si.estado IN ('emitida', 'autorizacion_pendiente')
             ), 0) AS invoiced
         `);
@@ -3295,6 +3808,7 @@ export class DatabaseStorage implements IStorage {
                 groupPaymentId: groupPayment.id,
                 reference: row.reference || input.reference || "Pago Folio Maestro",
                 paymentMethod: row.method,
+                area: "grupos",
               } as any);
             }
             continue;
@@ -3334,6 +3848,7 @@ export class DatabaseStorage implements IStorage {
               guestName: reservation?.guestName || "Huésped",
               reference: row.reference || input.reference || "Pago grupal",
               paymentMethod: row.method,
+              area: "grupos",
             } as any);
           }
         }
@@ -4388,8 +4903,11 @@ export class DatabaseStorage implements IStorage {
         sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
       );
     }
-    if (from) conditions.push(gte(restaurantOrders.openedAt, new Date(from)));
-    if (to) conditions.push(lte(restaurantOrders.openedAt, new Date(to)));
+    // Cancelled orders belong to the shift in which they were cancelled,
+    // not necessarily the shift in which they were opened.
+    const periodTimestamp = status === "cancelled" ? restaurantOrders.closedAt : restaurantOrders.openedAt;
+    if (from) conditions.push(gte(periodTimestamp, new Date(from)));
+    if (to) conditions.push(lte(periodTimestamp, new Date(to)));
 
     let orderList: RestaurantOrder[];
     if (conditions.length > 0) {
@@ -4438,6 +4956,22 @@ export class DatabaseStorage implements IStorage {
   async deleteRestaurantOrder(id: string): Promise<boolean> {
     const result = await db.delete(restaurantOrders).where(eq(restaurantOrders.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getEventualWaiters(activeOnly = false): Promise<EventualWaiter[]> {
+    return activeOnly
+      ? db.select().from(eventualWaiters).where(eq(eventualWaiters.isActive, "true"))
+      : db.select().from(eventualWaiters);
+  }
+
+  async createEventualWaiter(waiter: InsertEventualWaiter): Promise<EventualWaiter> {
+    const [created] = await db.insert(eventualWaiters).values(waiter as any).returning();
+    return created;
+  }
+
+  async updateEventualWaiter(id: string, waiter: Partial<InsertEventualWaiter>): Promise<EventualWaiter | undefined> {
+    const [updated] = await db.update(eventualWaiters).set(waiter as any).where(eq(eventualWaiters.id, id)).returning();
+    return updated;
   }
 
   generateOrderNumber(): string {
@@ -4725,40 +5259,30 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getSuppliers(): Promise<Supplier[]> {
-    return db.select().from(suppliers);
-  }
-
-  async getSupplier(id: string): Promise<Supplier | undefined> {
-    const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, id));
-    return supplier;
-  }
-
-  async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
-    const [created] = await db.insert(suppliers).values(supplier as any).returning();
-    return created;
-  }
-
-  async updateSupplier(id: string, supplier: Partial<InsertSupplier>): Promise<Supplier | undefined> {
-    const [updated] = await db.update(suppliers).set(supplier as any).where(eq(suppliers.id, id)).returning();
-    return updated;
-  }
-
-  async deleteSupplier(id: string): Promise<boolean> {
-    const result = await db.delete(suppliers).where(eq(suppliers.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-
   async getInventoryItems(): Promise<InventoryItemWithDetails[]> {
     const items = await db.select().from(inventoryItems);
     const cats = await db.select().from(itemCategories);
-    const sups = await db.select().from(suppliers);
+    const links = await db.select().from(inventoryItemSuppliers);
+    const supplierIds = [...new Set(links.map(link => link.accountingSupplierId))];
+    const sups = supplierIds.length
+      ? await db.select().from(accountingSuppliers).where(inArray(accountingSuppliers.id, supplierIds))
+      : [];
     const catsMap = new Map(cats.map(c => [c.id, c]));
     const supsMap = new Map(sups.map(s => [s.id, s]));
+    const linksMap = new Map<string, typeof links>();
+    for (const link of links) linksMap.set(link.itemId, [...(linksMap.get(link.itemId) ?? []), link]);
     return items.map(i => ({
       ...i,
       category: i.categoryId ? catsMap.get(i.categoryId) : undefined,
-      supplier: i.supplierId ? supsMap.get(i.supplierId) : undefined,
+      suppliers: (linksMap.get(i.id) ?? []).flatMap(link => {
+        const supplier = supsMap.get(link.accountingSupplierId);
+        return supplier ? [{
+          id: supplier.id,
+          razonSocial: supplier.razonSocial,
+          cuit: supplier.cuit,
+          isPreferred: link.isPreferred,
+        }] : [];
+      }),
     }));
   }
 
@@ -4766,8 +5290,25 @@ export class DatabaseStorage implements IStorage {
     const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
     if (!item) return undefined;
     const category = item.categoryId ? (await db.select().from(itemCategories).where(eq(itemCategories.id, item.categoryId)))[0] : undefined;
-    const supplier = item.supplierId ? (await db.select().from(suppliers).where(eq(suppliers.id, item.supplierId)))[0] : undefined;
-    return { ...item, category, supplier };
+    const links = await db.select().from(inventoryItemSuppliers).where(eq(inventoryItemSuppliers.itemId, id));
+    const supplierIds = links.map(link => link.accountingSupplierId);
+    const sups = supplierIds.length
+      ? await db.select().from(accountingSuppliers).where(inArray(accountingSuppliers.id, supplierIds))
+      : [];
+    const supsMap = new Map(sups.map(s => [s.id, s]));
+    return {
+      ...item,
+      category,
+      suppliers: links.flatMap(link => {
+        const supplier = supsMap.get(link.accountingSupplierId);
+        return supplier ? [{
+          id: supplier.id,
+          razonSocial: supplier.razonSocial,
+          cuit: supplier.cuit,
+          isPreferred: link.isPreferred,
+        }] : [];
+      }),
+    };
   }
 
   async getInventoryItemsBelowMinStock(): Promise<InventoryItem[]> {
@@ -4776,13 +5317,64 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
-  async createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem> {
-    const [created] = await db.insert(inventoryItems).values(item as any).returning();
+  async createInventoryItem(item: InsertInventoryItem & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem> {
+    const { accountingSupplierIds = [], preferredAccountingSupplierId = null, ...itemValues } = item;
+    if (!Array.isArray(accountingSupplierIds)) throw new Error("La lista de proveedores contables es inválida");
+    const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
+    if (preferredAccountingSupplierId !== null && !uniqueIds.includes(Number(preferredAccountingSupplierId))) {
+      throw new Error("El proveedor preferido debe estar asociado al artículo");
+    }
+    const [created] = await db.transaction(async (tx) => {
+      if (uniqueIds.length) {
+        const existingSuppliers = await tx
+          .select({ id: accountingSuppliers.id })
+          .from(accountingSuppliers)
+          .where(inArray(accountingSuppliers.id, uniqueIds));
+        if (uniqueIds.length !== existingSuppliers.length) {
+          throw new Error("Uno o más proveedores contables no existen");
+        }
+      }
+      const [newItem] = await tx.insert(inventoryItems).values(itemValues as any).returning();
+      if (uniqueIds.length) {
+        await tx.insert(inventoryItemSuppliers).values(uniqueIds.map(accountingSupplierId => ({
+          itemId: newItem.id,
+          accountingSupplierId,
+          isPreferred: accountingSupplierId === Number(preferredAccountingSupplierId),
+        })));
+      }
+      return [newItem];
+    });
     return created;
   }
 
-  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem>): Promise<InventoryItem | undefined> {
-    const [updated] = await db.update(inventoryItems).set(item as any).where(eq(inventoryItems.id, id)).returning();
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined> {
+    const { accountingSupplierIds, preferredAccountingSupplierId, ...itemValues } = item;
+    if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
+      throw new Error("La lista de proveedores contables es inválida");
+    }
+    const [updated] = await db.transaction(async (tx) => {
+      const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
+      if (!result) return [];
+      if (accountingSupplierIds !== undefined) {
+        const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
+        if (preferredAccountingSupplierId !== null && preferredAccountingSupplierId !== undefined && !uniqueIds.includes(Number(preferredAccountingSupplierId))) {
+          throw new Error("El proveedor preferido debe estar asociado al artículo");
+        }
+        const existing = uniqueIds.length
+          ? await tx.select({ id: accountingSuppliers.id }).from(accountingSuppliers).where(inArray(accountingSuppliers.id, uniqueIds))
+          : [];
+        if (existing.length !== uniqueIds.length) throw new Error("Uno o más proveedores contables no existen");
+        await tx.delete(inventoryItemSuppliers).where(eq(inventoryItemSuppliers.itemId, id));
+        if (uniqueIds.length) {
+          await tx.insert(inventoryItemSuppliers).values(uniqueIds.map(accountingSupplierId => ({
+            itemId: id,
+            accountingSupplierId,
+            isPreferred: accountingSupplierId === Number(preferredAccountingSupplierId),
+          })));
+        }
+      }
+      return [result];
+    });
     return updated;
   }
 
@@ -5048,6 +5640,7 @@ export class DatabaseStorage implements IStorage {
           id: spaAppointmentResources.id,
           appointmentId: spaAppointmentResources.appointmentId,
           cabinId: spaAppointmentResources.cabinId,
+          resourceTreatmentId: spaAppointmentResources.resourceTreatmentId,
           startTime: spaAppointmentResources.startTime,
           endTime: spaAppointmentResources.endTime,
           durationMinutes: spaAppointmentResources.durationMinutes,
@@ -5062,14 +5655,27 @@ export class DatabaseStorage implements IStorage {
         .where(inArray(spaAppointmentResources.appointmentId, apptIds)),
     ]);
 
+    // Plain follow-up lookup rather than a second (aliased) join to
+    // spa_treatments — a resource that's a treatment (e.g. a massage bundled
+    // into a circuit) is the rare case, so this keeps the main query simple.
+    const resourceTreatmentIds = [...new Set(resourceRows.map(r => r.resourceTreatmentId).filter((id): id is string => !!id))];
+    const resourceTreatmentById = resourceTreatmentIds.length > 0
+      ? new Map((await db.select({ id: spaTreatments.id, name: spaTreatments.name, description: spaTreatments.description })
+          .from(spaTreatments)
+          .where(inArray(spaTreatments.id, resourceTreatmentIds))
+        ).map(t => [t.id, t]))
+      : new Map<string, { id: string; name: string; description: string | null }>();
+
     const rowMap = new Map((result.rows as any[]).map(r => [r.appointmentId, r]));
     const resourcesMap = new Map<string, any[]>();
     for (const resource of resourceRows) {
       if (!resourcesMap.has(resource.appointmentId)) resourcesMap.set(resource.appointmentId, []);
+      const resourceTreatment = resource.resourceTreatmentId ? resourceTreatmentById.get(resource.resourceTreatmentId) : undefined;
       resourcesMap.get(resource.appointmentId)!.push({
         id: resource.id,
         appointmentId: resource.appointmentId,
         cabinId: resource.cabinId,
+        resourceTreatmentId: resource.resourceTreatmentId,
         startTime: resource.startTime,
         endTime: resource.endTime,
         durationMinutes: resource.durationMinutes,
@@ -5080,6 +5686,11 @@ export class DatabaseStorage implements IStorage {
           name: resource.cabinName,
           description: resource.cabinDescription,
           isActive: resource.cabinIsActive,
+        } : undefined,
+        resourceTreatment: resourceTreatment ? {
+          id: resourceTreatment.id,
+          name: resourceTreatment.name,
+          description: resourceTreatment.description,
         } : undefined,
       });
     }
@@ -5113,14 +5724,8 @@ export class DatabaseStorage implements IStorage {
   async getSpaAppointment(id: string): Promise<SpaAppointmentWithDetails | undefined> {
     const [appt] = await db.select().from(spaAppointments).where(eq(spaAppointments.id, id));
     if (!appt) return undefined;
-    const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, appt.cabinId));
-    const [treatment] = await db.select().from(spaTreatments).where(eq(spaTreatments.id, appt.treatmentId));
-    const resourceReservations = await db
-      .select()
-      .from(spaAppointmentResources)
-      .where(eq(spaAppointmentResources.appointmentId, id))
-      .orderBy(spaAppointmentResources.sortOrder);
-    return { ...appt, cabin, treatment, resourceReservations };
+    const [enriched] = await this.enrichSpaAppointmentsBulk([appt]);
+    return enriched;
   }
 
   async getSpaAppointmentsByCabin(cabinId: string, date: string): Promise<SpaAppointment[]> {
@@ -5466,6 +6071,14 @@ export class DatabaseStorage implements IStorage {
 
   async deductStockFromSpaAccount(accountId: string): Promise<void> {
     try {
+      // Se puede disparar tanto al iniciar el turno como al cerrar la
+      // cuenta (o vincular una factura) — idempotente por cuenta para no
+      // descontar dos veces el mismo consumo.
+      const [alreadyDeducted] = await db.select({ id: stockMovements.id }).from(stockMovements)
+        .where(and(eq(stockMovements.sourceType, "spa_account"), eq(stockMovements.sourceId, accountId)))
+        .limit(1);
+      if (alreadyDeducted) return;
+
       const accountData = await this.getSpaAccount(accountId);
       if (!accountData || !accountData.appointmentId) return;
 
@@ -5490,21 +6103,52 @@ export class DatabaseStorage implements IStorage {
 
           await db.insert(stockMovements).values({
             itemId: supply.inventoryItemId,
-            type: "salida",
+            movementType: "salida",
             quantity: String(qty),
             previousStock: String(prev),
             newStock: String(newStock),
-            reason: "Consumo SPA",
+            notes: "Consumo SPA",
             sourceType: "spa_account",
             sourceId: accountId,
             createdAt: new Date(),
-          } as any);
+          });
         } catch (err) {
           console.warn(`[SPA] Error descounting stock for item ${supply.inventoryItemId}:`, err);
         }
       }
     } catch (err) {
       console.warn(`[SPA] Error in deductStockFromSpaAccount:`, err);
+    }
+  }
+
+  // Un producto que el SPA vende directamente (crema, bebida — venta_directa,
+  // a diferencia de un concepto como cochera) descuenta stock al agregarse al
+  // folio, no al iniciar el turno: el artículo sale del estante en ese momento.
+  async deductStockForSoldSpaProduct(inventoryItemId: string, quantity: number, accountItemId: string): Promise<void> {
+    try {
+      const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, inventoryItemId));
+      if (!invItem) return;
+
+      const prev = parseFloat(invItem.currentStock ?? "0");
+      const newStock = Math.max(0, prev - quantity);
+
+      await db.update(inventoryItems)
+        .set({ currentStock: String(newStock) })
+        .where(eq(inventoryItems.id, inventoryItemId));
+
+      await db.insert(stockMovements).values({
+        itemId: inventoryItemId,
+        movementType: "salida",
+        quantity: String(quantity),
+        previousStock: String(prev),
+        newStock: String(newStock),
+        notes: "Venta SPA",
+        sourceType: "spa_account_item",
+        sourceId: accountItemId,
+        createdAt: new Date(),
+      });
+    } catch (err) {
+      console.warn(`[SPA] Error deducting stock for sold product ${inventoryItemId}:`, err);
     }
   }
 
@@ -5999,6 +6643,14 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateMaintenanceBlock(
+    id: string,
+    updates: Partial<Pick<InsertMaintenanceBlock, "blockFrom" | "blockTo" | "notes">>,
+  ): Promise<MaintenanceBlock | undefined> {
+    const [updated] = await db.update(maintenanceBlocks).set(updates).where(eq(maintenanceBlocks.id, id)).returning();
+    return updated;
+  }
+
   async deleteMaintenanceBlock(id: string): Promise<boolean> {
     const result = await db.delete(maintenanceBlocks).where(eq(maintenanceBlocks.id, id));
     return (result.rowCount ?? 0) > 0;
@@ -6437,22 +7089,25 @@ export class DatabaseStorage implements IStorage {
       totalNightsSold += nights;
     }
 
-    const periodPayments = await db.select().from(payments)
-      .where(and(gte(payments.date, from), lte(payments.date, to)));
-    const totalRevenue = periodPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
-
+    // Room revenue on an accrual basis (the reservation's own rate), not raw
+    // payments — a folio payment can include restaurant/spa/minibar consumption
+    // charged to the room, which would otherwise double-count against those
+    // areas' own figures. Extras use the same accrual logic: charges actually
+    // posted in the period, by category, regardless of when/whether collected.
+    const accommodationRevenue = periodReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
     const periodCharges = await db.select().from(charges)
       .where(and(gte(charges.date, from), lte(charges.date, to)));
-    const accommodationCharges = periodCharges.filter(c => (c.category || "").toLowerCase().includes("aloj"));
-    const accommodationRevenue = accommodationCharges.reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const extrasRevenue = totalRevenue - accommodationRevenue;
+    const extrasRevenue = periodCharges
+      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
+      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+    const totalRevenue = accommodationRevenue + extrasRevenue;
 
     const daysInPeriod = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
     const occupiedRooms = roomsByStatus.occupied || 0;
     const availableRooms = roomsByStatus.available || 0;
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
-    const adr = totalNightsSold > 0 ? Math.round(totalRevenue / totalNightsSold) : 0;
+    const adr = totalNightsSold > 0 ? Math.round(accommodationRevenue / totalNightsSold) : 0;
     const revpar = Math.round(adr * occupancyRate / 100);
 
     const byChannelMap = new Map<string, { reservations: number; revenue: number }>();
@@ -6478,16 +7133,20 @@ export class DatabaseStorage implements IStorage {
     const prevReservations = rawPrevReservations.filter(
       reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
     );
-    const prevPayments = await db.select().from(payments)
-      .where(and(gte(payments.date, prevFrom), lte(payments.date, prevTo)));
-    const prevTotalRevenue = prevPayments.reduce((s, p) => s + parseFloat(p.amount || "0"), 0);
+    const prevAccommodationRevenue = prevReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
+    const prevCharges = await db.select().from(charges)
+      .where(and(gte(charges.date, prevFrom), lte(charges.date, prevTo)));
+    const prevExtrasRevenue = prevCharges
+      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
+      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
+    const prevTotalRevenue = prevAccommodationRevenue + prevExtrasRevenue;
     let prevNightsSold = 0;
     for (const r of prevReservations) {
       const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(prevFrom).getTime()));
       const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(prevTo).getTime()));
       prevNightsSold += Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
     }
-    const prevAdr = prevNightsSold > 0 ? Math.round(prevTotalRevenue / prevNightsSold) : 0;
+    const prevAdr = prevNightsSold > 0 ? Math.round(prevAccommodationRevenue / prevNightsSold) : 0;
     const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
     const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
 
@@ -7224,6 +7883,12 @@ export class DatabaseStorage implements IStorage {
           totals[method] += amt;
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;
+        } else if (method.startsWith("retencion_")) {
+          // Retención practicada por quien nos paga: no hay bucket propio en
+          // cash_closing_summaries, pero igual debe contar como liquidación
+          // no monetaria para que el cierre de turno no la deje afuera.
+          nonCashSettlementsTotal += amt;
+          nonCashSettlementsCount++;
         }
         continue; // solo registro, no impacta saldo físico ni totalGeneral
       }
@@ -7419,6 +8084,119 @@ export class DatabaseStorage implements IStorage {
     return result.rows as OrphanedCashPaymentLink[];
   }
 
+  // Mismo criterio de duplicado que CASH_MOVEMENTS_PAYMENT_ID_UNIQUE_MIGRATION_SQL
+  // (server/migrate.ts): más de un cash_movements con source_type='reservation'
+  // apuntando al mismo payment_id. La migración se limita a saltear la creación
+  // del índice único mientras esto exista; esta consulta es lo que le permite a
+  // un admin encontrar y revisar esos casos en vez de necesitar acceso directo
+  // a la base.
+  async getDuplicateCashPaymentLinks(): Promise<DuplicateCashPaymentLinkGroup[]> {
+    const result = await db.execute(sql`
+      WITH duplicated_payment_ids AS (
+        SELECT payment_id
+        FROM cash_movements
+        WHERE payment_id IS NOT NULL AND source_type = 'reservation'
+        GROUP BY payment_id
+        HAVING COUNT(*) > 1
+      )
+      SELECT
+        cm.payment_id AS "paymentId",
+        cm.id AS "movementId",
+        cm.area,
+        cm.amount,
+        cm.payment_method AS "paymentMethod",
+        cm.movement_type AS "movementType",
+        cm.shift_id AS "shiftId",
+        cm.registered_by AS "registeredBy",
+        cm.anulado,
+        cm.motivo_anulacion AS "motivoAnulacion",
+        cm.anulado_por AS "anuladoPor",
+        cm.created_at AS "createdAt",
+        p.amount AS "paymentAmount",
+        p.date AS "paymentDate",
+        r.reservation_code AS "reservationCode",
+        g.first_name AS "guestFirstName",
+        g.last_name AS "guestLastName"
+      FROM cash_movements cm
+      JOIN duplicated_payment_ids dpi ON dpi.payment_id = cm.payment_id
+      LEFT JOIN payments p ON p.id = cm.payment_id
+      LEFT JOIN reservations r ON r.id = p.reservation_id
+      LEFT JOIN guests g ON g.id = r.guest_id
+      WHERE cm.payment_id IS NOT NULL AND cm.source_type = 'reservation'
+      ORDER BY cm.payment_id, cm.created_at ASC NULLS FIRST, cm.id ASC
+    `);
+
+    const groups = new Map<string, DuplicateCashPaymentLinkGroup>();
+    for (const row of result.rows as any[]) {
+      let group = groups.get(row.paymentId);
+      if (!group) {
+        const guestName = row.guestFirstName || row.guestLastName
+          ? `${row.guestLastName || ""} ${row.guestFirstName || ""}`.trim()
+          : null;
+        group = {
+          paymentId: row.paymentId,
+          reservationCode: row.reservationCode ?? null,
+          guestName,
+          paymentAmount: row.paymentAmount ?? null,
+          paymentDate: row.paymentDate ?? null,
+          movements: [],
+        };
+        groups.set(row.paymentId, group);
+      }
+      const movement: DuplicateCashPaymentLinkMovement = {
+        movementId: row.movementId,
+        area: row.area,
+        amount: row.amount,
+        paymentMethod: row.paymentMethod,
+        movementType: row.movementType,
+        shiftId: row.shiftId ?? null,
+        registeredBy: row.registeredBy ?? null,
+        anulado: row.anulado,
+        motivoAnulacion: row.motivoAnulacion ?? null,
+        anuladoPor: row.anuladoPor ?? null,
+        createdAt: row.createdAt ?? null,
+      };
+      group.movements.push(movement);
+    }
+    return Array.from(groups.values());
+  }
+
+  // Desvincula puntualmente UN movimiento de caja duplicado: lo marca anulado
+  // (con motivo/operador/fecha, igual que el resto del sistema) y borra su
+  // payment_id para que deje de contar como duplicado ante la migración que
+  // crea el índice único. Deliberadamente NO usa la misma ruta que
+  // PATCH /api/cash/movements/:id/anular — esa además reversa el pago real de
+  // la reserva (folio, saldo del huésped), que acá sería incorrecto: el pago
+  // es válido, lo único erróneo es que quedó anotado dos veces en la caja.
+  async resolveDuplicateCashPaymentLink(movementId: string, motivo: string, operator: string): Promise<CashMovement> {
+    const [mov] = await db.select().from(cashMovements).where(eq(cashMovements.id, movementId));
+    if (!mov) throw new Error("Movimiento no encontrado");
+    if (mov.anulado) throw new Error("Ya está anulado");
+    if (!mov.paymentId || mov.sourceType !== "reservation") {
+      throw new Error("Este movimiento no tiene un vínculo de pago de reserva para desvincular");
+    }
+
+    const dupCheck = await db.execute(sql`
+      SELECT COUNT(*)::int AS count FROM cash_movements
+      WHERE payment_id = ${mov.paymentId} AND source_type = 'reservation'
+    `);
+    if (((dupCheck.rows[0] as any)?.count ?? 0) < 2) {
+      throw new Error("Este pago ya no tiene vínculos duplicados");
+    }
+
+    const [updated] = await db.update(cashMovements)
+      .set({
+        anulado: true,
+        motivoAnulacion: motivo,
+        anuladoPor: operator,
+        anuladoAt: new Date(),
+        paymentId: null,
+      })
+      .where(eq(cashMovements.id, movementId))
+      .returning();
+    return updated;
+  }
+
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
     // Generic/manual creation is deliberately unable to link a cash movement
     // to a payment. Only registerCashMovement and transactional internal flows
@@ -7456,24 +8234,19 @@ export class DatabaseStorage implements IStorage {
 
   async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
     const conditions: any[] = [];
-    if (area) conditions.push(eq(cashClosingSummaries.area, area));
-    if (from) conditions.push(gte(cashClosingSummaries.closedAt, new Date(from)));
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setDate(toDate.getDate() + 1);
-      conditions.push(lt(cashClosingSummaries.closedAt, toDate));
-    }
+    if (area) conditions.push(eq(cashShifts.area, area));
+    // The filter and the primary date shown in Historial both refer to
+    // the closing day in Argentina, even when the shift opened before midnight.
+    const closingDate = sql`(${cashClosingSummaries.closedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`;
+    if (from) conditions.push(sql`${closingDate} >= ${from}::date`);
+    if (to) conditions.push(sql`${closingDate} <= ${to}::date`);
 
-    const summaries = await db.select().from(cashClosingSummaries)
+    const rows = await db.select({ summary: cashClosingSummaries, shift: cashShifts })
+      .from(cashClosingSummaries)
+      .innerJoin(cashShifts, eq(cashShifts.id, cashClosingSummaries.shiftId))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(cashClosingSummaries.closedAt));
-
-    const results = [];
-    for (const s of summaries) {
-      const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, s.shiftId));
-      results.push({ ...s, shift });
-    }
-    return results;
+    return rows.map(({ summary, shift }) => ({ ...summary, shift }));
   }
   async getAccountMovements(entityType: AccountEntityType, entityId: string): Promise<(AccountMovement & { saldoPendiente?: number })[]> {
     const rows = await db.select()
@@ -7492,7 +8265,10 @@ export class DatabaseStorage implements IStorage {
 
     const allocs = await db.select()
       .from(accountMovementAllocations)
-      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+      .where(and(
+        inArray(accountMovementAllocations.cargoId, cargoIds),
+        eq(accountMovementAllocations.voided, false),
+      ));
 
     const allocatedByCargo = new Map<string, number>();
     for (const a of allocs) {
@@ -7542,7 +8318,10 @@ export class DatabaseStorage implements IStorage {
     const cargoIds = movements.map(m => m.id);
     const allocations = await db.select()
       .from(accountMovementAllocations)
-      .where(inArray(accountMovementAllocations.cargoId, cargoIds));
+      .where(and(
+        inArray(accountMovementAllocations.cargoId, cargoIds),
+        eq(accountMovementAllocations.voided, false),
+      ));
 
     const allocatedByCargo = new Map<string, number>();
     for (const a of allocations) {
@@ -7613,7 +8392,7 @@ export class DatabaseStorage implements IStorage {
         const allocatedResult = await tx.execute(sql`
           SELECT cargo_id, COALESCE(SUM(amount::numeric), 0) AS allocated
           FROM account_movement_allocations
-          WHERE cargo_id IN (${idsSql})
+          WHERE cargo_id IN (${idsSql}) AND voided = false
           GROUP BY cargo_id
         `);
         const cargoById = new Map(lockedCargos.map((cargo) => [cargo.id, parseFloat(cargo.amount)]));
@@ -7642,6 +8421,7 @@ export class DatabaseStorage implements IStorage {
         retentions: data.retentions,
         createdBy: data.createdBy,
         guestName: data.guestName ?? null,
+        receiptNumber: sql`'REC-' || EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::text || '-' || LPAD(nextval('account_movement_receipt_number_seq'::regclass)::text, 4, '0')`,
       } as any).returning();
 
       const createdAllocations: AccountMovementAllocation[] = [];
@@ -7664,10 +8444,116 @@ export class DatabaseStorage implements IStorage {
       .where(eq(accountMovementAllocations.pagoId, pagoId));
   }
 
-  async getAccountSummary(): Promise<{
-    companies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    agencies: { id: string; name: string; balance: number; lastMovement: string | null }[];
-    guests: { id: string; name: string; balance: number; lastMovement: string | null }[];
+  async voidDirectAccountPayment(
+    movementId: string,
+    reason: string,
+    voidedBy: string,
+  ): Promise<{ original: AccountMovement; reversal: AccountMovement; releasedAllocations: number }> {
+    assertFinancialSchemaReady();
+    return await db.transaction(async (tx) => {
+      const originalResult = await tx.execute(sql`
+        SELECT * FROM account_movements WHERE id = ${movementId} FOR UPDATE
+      `);
+      const original = originalResult.rows[0] as any;
+      if (!original) throw Object.assign(new Error("Recibo no encontrado"), { statusCode: 404 });
+      const mapMovement = (row: any): AccountMovement => ({
+        ...row,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        reservationId: row.reservation_id,
+        reservationCode: row.reservation_code,
+        guestName: row.guest_name,
+        paymentMethod: row.payment_method,
+        paymentId: row.payment_id,
+        groupPaymentId: row.group_payment_id,
+        createdBy: row.created_by,
+        createdAt: row.created_at,
+        receiptNumber: row.receipt_number,
+        voided: row.voided,
+        voidedAt: row.voided_at,
+        voidedBy: row.voided_by,
+        voidReason: row.void_reason,
+        reversalMovementId: row.reversal_movement_id,
+        reversalOfMovementId: row.reversal_of_movement_id,
+      });
+
+      if (original.voided) {
+        const existing = original.reversal_movement_id
+          ? await tx.execute(sql`SELECT * FROM account_movements WHERE id = ${original.reversal_movement_id}`)
+          : await tx.execute(sql`SELECT * FROM account_movements WHERE reversal_of_movement_id = ${movementId}`);
+        const reversal = existing.rows[0] as any;
+        if (!reversal) throw Object.assign(new Error("El recibo figura anulado pero no tiene contraasiento"), { statusCode: 409 });
+        return { original: mapMovement(original), reversal: mapMovement(reversal), releasedAllocations: 0 };
+      }
+
+      if (!["company", "agency", "guest"].includes(String(original.entity_type))
+        || original.type !== "pago"
+        || original.reservation_id
+        || original.payment_id
+        || original.group_payment_id
+        || original.reversal_of_movement_id) {
+        throw Object.assign(new Error("Solo se pueden anular recibos directos de Cuenta Corriente"), { statusCode: 409 });
+      }
+
+      const allocationResult = await tx.execute(sql`
+        SELECT id, cargo_id FROM account_movement_allocations
+        WHERE pago_id = ${movementId} AND voided = false
+        FOR UPDATE
+      `);
+      const allocations = allocationResult.rows as { id: string; cargo_id: string }[];
+      const cargoIds = Array.from(new Set(allocations.map((allocation) => allocation.cargo_id))).sort();
+      // Match the payment path's deterministic cargo lock order. Two voids
+      // releasing allocations from the same cargos must wait, not deadlock.
+      for (const cargoId of cargoIds) {
+        await tx.execute(sql`
+          SELECT id FROM account_movements WHERE id = ${cargoId} FOR UPDATE
+        `);
+      }
+
+      const reversalResult = await tx.execute(sql`
+        INSERT INTO account_movements (
+          entity_type, entity_id, date, type, description, amount,
+          reference, payment_method, retentions, area, created_by,
+          reversal_of_movement_id
+        ) VALUES (
+          ${original.entity_type}, ${original.entity_id}, CURRENT_DATE, 'ajuste',
+          ${`Anulación de recibo ${original.receipt_number || original.id}`},
+          ${Math.abs(Number(original.amount)).toFixed(2)},
+          ${`reversal:${movementId}`}, ${original.payment_method || null},
+          NULL, ${original.area || null}, ${voidedBy},
+          ${movementId}
+        )
+        RETURNING *
+      `);
+      const reversal = reversalResult.rows[0] as any;
+
+      await tx.execute(sql`
+        UPDATE account_movement_allocations
+        SET voided = true, voided_at = NOW(), voided_by = ${voidedBy}, void_reason = ${reason}
+        WHERE pago_id = ${movementId} AND voided = false
+      `);
+      const updated = await tx.execute(sql`
+        UPDATE account_movements
+        SET voided = true, voided_at = NOW(), voided_by = ${voidedBy},
+            void_reason = ${reason}, reversal_movement_id = ${reversal.id}
+        WHERE id = ${movementId} AND voided = false
+        RETURNING *
+      `);
+      if (updated.rows.length !== 1) {
+        throw Object.assign(new Error("El recibo fue anulado por otra operación"), { statusCode: 409 });
+      }
+      return {
+        original: mapMovement(updated.rows[0]),
+        reversal: mapMovement(reversal),
+        releasedAllocations: allocations.length,
+      };
+    });
+  }
+
+  async getAccountSummary(area?: string | null): Promise<{
+    companies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    agencies: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
+    guests: { id: string; name: string; balance: number; lastMovement: string | null; oldestUnpaidDate: string | null; daysOverdue: number | null }[];
   }> {
     // Balance de empresas: usamos account_movements como fuente de verdad (igual que agencias),
     // porque el listado de movimientos muestra account_movements y el saldo debe coincidir.
@@ -7680,7 +8566,6 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                                        AS last_movement
       FROM companies c
       LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
-      WHERE c.is_active = 'true'
       GROUP BY c.id, c.nombre_fantasia, c.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -7693,7 +8578,6 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                                        AS last_movement
       FROM agencies a
       LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
-      WHERE a.is_active = 'true'
       GROUP BY a.id, a.nombre_fantasia, a.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -7712,11 +8596,92 @@ export class DatabaseStorage implements IStorage {
       ORDER BY balance DESC
     `);
 
-    return {
-      companies: (companiesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-      agencies:  (agenciesRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
-      guests:    (guestsRes.rows as any[]).map(r => ({ id: r.id, name: r.name, balance: parseFloat(r.balance), lastMovement: r.last_movement })),
+    const today = getArgentinaToday();
+
+    const withAging = async (rows: any[], entityType: AccountEntityType) => {
+      return Promise.all(rows.map(async (r) => {
+        const balance = parseFloat(r.balance);
+        let oldestUnpaidDate: string | null = null;
+        let daysOverdue: number | null = null;
+        if (balance > 0.009) {
+          const pending = await this.getPendingCharges(entityType, r.id);
+          if (pending.length > 0) {
+            oldestUnpaidDate = pending[0].date;
+            daysOverdue = daysBetweenCalendarDates(oldestUnpaidDate, today);
+          }
+        }
+        return { id: r.id, name: r.name, balance, lastMovement: r.last_movement, oldestUnpaidDate, daysOverdue };
+      }));
     };
+
+    if (!area) {
+      const [companies, agencies, guests] = await Promise.all([
+        withAging(companiesRes.rows as any[], "company"),
+        withAging(agenciesRes.rows as any[], "agency"),
+        withAging(guestsRes.rows as any[], "guest"),
+      ]);
+      return { companies, agencies, guests };
+    }
+
+    // Filtrado por área: el saldo de cada entidad pasa a ser la suma de sus
+    // cargos pendientes (amount - asignado, ver account_movement_allocations)
+    // que pertenecen a esa área — reusa getPendingCharges en vez de sumar
+    // movimientos por separado, para no divergir del cálculo que ya se usa
+    // al elegir qué comprobantes cubre un pago nuevo. Los pagos/ajustes no
+    // están etiquetados por área (no hace falta: ya redujeron el cargo
+    // específico que cubrieron vía account_movement_allocations).
+    //
+    // Candidatos: cualquier entidad con al menos un cargo de esa área, con
+    // su nombre resuelto directo desde companies/agencies/guests — no desde
+    // companiesRes/agenciesRes/guestsRes (esas ya vienen filtradas por saldo
+    // NETO <> 0 más arriba, y una entidad puede tener saldo neto cero por
+    // deuda de un área cancelada con crédito de otra, y aun así deber
+    // realmente en el área que estamos filtrando).
+    const areaCondition = area === "sin_clasificar" ? sql`m.area IS NULL` : sql`m.area = ${area}`;
+    const candidatesFor = async (entityType: AccountEntityType) => {
+      const table = entityType === "company" ? "companies" : entityType === "agency" ? "agencies" : "guests";
+      const nameExpr = entityType === "guest"
+        ? sql`e.last_name || ' ' || e.first_name`
+        : sql`COALESCE(NULLIF(e.nombre_fantasia, ''), e.razon_social)`;
+      const res = await db.execute(sql`
+        SELECT DISTINCT e.id, ${nameExpr} AS name
+        FROM account_movements m
+        JOIN ${sql.raw(table)} e ON e.id = m.entity_id
+        WHERE m.entity_type = ${entityType} AND m.type = 'cargo' AND ${areaCondition}
+      `);
+      return res.rows as { id: string; name: string }[];
+    };
+
+    const matchesArea = (movementArea: string | null | undefined) =>
+      area === "sin_clasificar" ? !movementArea : movementArea === area;
+
+    const withAreaBalance = async (entityType: AccountEntityType) => {
+      const candidates = await candidatesFor(entityType);
+      const results = await Promise.all(candidates.map(async (r) => {
+        const pending = (await this.getPendingCharges(entityType, r.id)).filter(p => matchesArea(p.area));
+        if (pending.length === 0) return null;
+        const balance = Math.round(pending.reduce((sum, p) => sum + p.saldoPendiente, 0) * 100) / 100;
+        const oldestUnpaidDate = pending[0].date;
+        const lastMovement = pending[pending.length - 1].date;
+        return {
+          id: r.id,
+          name: r.name,
+          balance,
+          lastMovement,
+          oldestUnpaidDate,
+          daysOverdue: daysBetweenCalendarDates(oldestUnpaidDate, today),
+        };
+      }));
+      return results.filter((r): r is NonNullable<typeof r> => r !== null && r.balance > 0.009);
+    };
+
+    const [companies, agencies, guests] = await Promise.all([
+      withAreaBalance("company"),
+      withAreaBalance("agency"),
+      withAreaBalance("guest"),
+    ]);
+
+    return { companies, agencies, guests };
   }
 
   // ==================== MOTOR FINANCIERO — FOLIOS ====================
@@ -7732,9 +8697,13 @@ export class DatabaseStorage implements IStorage {
       agency: "AG",
     };
     const prefix = prefixes[entityType] ?? "FL";
-    const [row] = await db.select({ cnt: sql<number>`count(*)` }).from(folios)
-      .where(eq(folios.entityType, entityType));
-    const seq = (Number(row?.cnt ?? 0) + 1).toString().padStart(6, "0");
+    // entityType is a closed union (not user input), so it's safe to fold into
+    // the sequence name. A DB sequence (see migrate.ts) makes this atomic under
+    // concurrency — the previous COUNT(*)+1 scheme let two racing inserts compute
+    // the same number (see folio-entity-unique.pg.test.ts).
+    const seqName = `folio_seq_${entityType}`;
+    const r = await db.execute(sql.raw(`SELECT nextval('${seqName}') AS seq`));
+    const seq = Number((r.rows[0] as any)?.seq ?? 1).toString().padStart(6, "0");
     return `${prefix}-${seq}`;
   }
 
@@ -7743,16 +8712,35 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
     if (existing) return existing;
     const codigo = await this.generateFolioCodigo(entityType);
-    const [created] = await db.insert(folios).values({
-      codigo,
-      entityType,
-      entityId,
-      status: "open",
-      totalCharges: "0",
-      totalPayments: "0",
-      balance: "0",
-    }).returning();
-    return created;
+    // Two near-simultaneous charges to the same entity (e.g. fire-and-forget
+    // SPA/restaurant charges posted back to back) can both reach this point
+    // having seen no existing folio. ON CONFLICT DO NOTHING plus a fallback
+    // re-select (guarded by the folios_entity_type_entity_id_unique index —
+    // see migrate.ts) makes the loser return the winner's row instead of
+    // creating a second folio that splits the entity's balance in two. The
+    // try/catch below is a second line of defense: if the insert instead trips
+    // any other unique constraint (e.g. codigo, in the unlikely case the
+    // per-type sequence was ever out of sync), that still means someone else
+    // just won the race, so fall through to the same re-select rather than
+    // letting the raw DB error escape.
+    try {
+      const [created] = await db.insert(folios).values({
+        codigo,
+        entityType,
+        entityId,
+        status: "open",
+        totalCharges: "0",
+        totalPayments: "0",
+        balance: "0",
+      }).onConflictDoNothing({ target: [folios.entityType, folios.entityId] }).returning();
+      if (created) return created;
+    } catch (err: any) {
+      if (err?.code !== "23505") throw err;
+    }
+    const [winner] = await db.select().from(folios)
+      .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
+    if (!winner) throw new Error(`No se pudo crear ni recuperar el folio para ${entityType}:${entityId}`);
+    return winner;
   }
 
   async getFolioByEntity(entityType: FolioEntityType, entityId: string): Promise<Folio | null> {
@@ -8060,35 +9048,244 @@ export class DatabaseStorage implements IStorage {
       status: data.status === undefined ? undefined : parseGiftVoucherStatus(data.status),
       valueType: data.valueType === undefined ? undefined : parseGiftVoucherValueType(data.valueType),
     };
-    const [v] = await db.insert(giftVouchers).values(voucher).returning();
-    return v;
+    return db.transaction(async (tx) => {
+      const [v] = await tx.insert(giftVouchers).values(voucher).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: v.id,
+        eventType: v.saleInvoiceId ? "facturado" : "emitido",
+        toStatus: v.status,
+        performedBy: v.createdBy ?? null,
+      });
+      return v;
+    });
   }
 
-  async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>): Promise<GiftVoucher | undefined> {
-    const { area, status, valueType, ...voucherData } = data;
-    const voucher: Partial<typeof giftVouchers.$inferInsert> = {
-      ...voucherData,
-      ...(area === undefined ? {} : { area: parseGiftVoucherArea(area) }),
-      ...(status === undefined ? {} : { status: parseGiftVoucherStatus(status) }),
-      ...(valueType === undefined ? {} : { valueType: parseGiftVoucherValueType(valueType) }),
-    };
-    const [v] = await db.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
-    return v;
+  // Campos que reflejan un hecho ya consumado de la venta (importe, comprador,
+  // medio de pago, comprobante) — nunca editables desde el PATCH, se corrigen
+  // con una operación real (cancelar + emitir de nuevo), no pisando el dato.
+  private static readonly GIFT_VOUCHER_IMMUTABLE_FIELDS = [
+    "valueAmount", "valueType", "buyerName", "buyerPhone", "buyerEmail",
+    "pricePaid", "paymentMethod", "saleInvoiceId", "area",
+  ] as const;
+
+  async updateGiftVoucher(id: string, data: Partial<InsertGiftVoucher>, performedBy?: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!existing) return undefined;
+
+      const attemptedImmutable = DatabaseStorage.GIFT_VOUCHER_IMMUTABLE_FIELDS.filter(
+        (field) => Object.prototype.hasOwnProperty.call(data, field),
+      );
+      if (attemptedImmutable.length > 0) {
+        throw new Error(
+          `Los campos ${attemptedImmutable.join(", ")} no se pueden modificar una vez emitido el voucher.`,
+        );
+      }
+      const editableWhileActiveOnly = ["beneficiaryName", "description", "expiresAt"] as const;
+      if (!["activo", "activo_facturado"].includes(existing.status)) {
+        const blocked = editableWhileActiveOnly.filter((field) => Object.prototype.hasOwnProperty.call(data, field));
+        if (blocked.length > 0) {
+          throw new Error(`No se puede editar ${blocked.join(", ")} — el voucher ya está en estado "${existing.status}".`);
+        }
+      }
+
+      const { area, status, valueType, ...rest } = data;
+      const voucher: Partial<typeof giftVouchers.$inferInsert> = { ...rest };
+      const [v] = await tx.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
+
+      const diffFields = Object.keys(rest) as (keyof typeof rest)[];
+      if (diffFields.length > 0) {
+        await tx.insert(giftVoucherEvents).values(
+          diffFields
+            .filter((field) => String((existing as any)[field] ?? "") !== String((rest as any)[field] ?? ""))
+            .map((field) => ({
+              voucherId: id,
+              eventType: "editado" as const,
+              fieldChanged: String(field),
+              oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
+              newValue: (rest as any)[field] == null ? null : String((rest as any)[field]),
+              performedBy: performedBy ?? null,
+            })),
+        );
+      }
+      return v;
+    });
   }
 
-  async markGiftVoucherUsed(id: string, usedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined> {
-    const [v] = await db.update(giftVouchers).set({
-      status: "usado",
-      usedAt: new Date(),
-      usedBy,
-      usedNotes: usedNotes ?? null,
-    }).where(eq(giftVouchers.id, id)).returning();
-    return v;
+  async applyGiftVoucher(
+    voucherId: string,
+    targetType: GiftVoucherApplicationTargetType,
+    targetId: string,
+    requestedAmount: number,
+    performedBy: string,
+  ): Promise<{ application: GiftVoucherApplication; voucher: GiftVoucher }> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, voucherId)).for("update");
+      if (!voucher) throw new Error("Voucher no encontrado");
+      if (!["activo", "activo_facturado"].includes(voucher.status)) {
+        throw new Error(`El voucher no está disponible para aplicar (estado: ${voucher.status})`);
+      }
+      if (voucher.expiresAt && voucher.expiresAt < getArgentinaToday()) {
+        throw new Error("El voucher está vencido");
+      }
+      const [existingActive] = await tx.select({ id: giftVoucherApplications.id })
+        .from(giftVoucherApplications)
+        .where(and(eq(giftVoucherApplications.voucherId, voucherId), ne(giftVoucherApplications.status, "liberado")))
+        .for("update");
+      if (existingActive) {
+        throw new Error("El voucher ya está aplicado a otra operación");
+      }
+
+      const faceValue = parseFloat(voucher.valueAmount || "0");
+      const amount = Math.max(0, Math.min(requestedAmount, faceValue)).toFixed(2);
+
+      const [application] = await tx.insert(giftVoucherApplications).values({
+        voucherId, targetType, targetId, amount, status: "reservado", createdBy: performedBy,
+      }).returning();
+
+      const [updatedVoucher] = await tx.update(giftVouchers)
+        .set({ status: "reservado" })
+        .where(eq(giftVouchers.id, voucherId))
+        .returning();
+
+      await tx.insert(giftVoucherEvents).values({
+        voucherId, eventType: "reservado", fromStatus: voucher.status, toStatus: "reservado",
+        reason: `Aplicado a ${targetType === "reservation" ? "reserva" : "pedido"} ${targetId}`,
+        performedBy,
+      });
+
+      return { application, voucher: updatedVoucher };
+    });
   }
 
-  async deleteGiftVoucher(id: string): Promise<boolean> {
-    const result = await db.delete(giftVouchers).where(eq(giftVouchers.id, id)).returning();
-    return result.length > 0;
+  async releaseGiftVoucherApplication(applicationId: string, performedBy: string, reason?: string): Promise<GiftVoucherApplication | undefined> {
+    return db.transaction(async (tx) => {
+      const [application] = await tx.select().from(giftVoucherApplications).where(eq(giftVoucherApplications.id, applicationId)).for("update");
+      if (!application) return undefined;
+      if (application.status !== "reservado") {
+        throw new Error(`No se puede liberar una aplicación en estado "${application.status}"`);
+      }
+      const [updated] = await tx.update(giftVoucherApplications)
+        .set({ status: "liberado", releasedAt: new Date(), releasedBy: performedBy, releaseReason: reason ?? null })
+        .where(eq(giftVoucherApplications.id, applicationId))
+        .returning();
+
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, application.voucherId)).for("update");
+      if (voucher && voucher.status === "reservado") {
+        const restoredStatus: GiftVoucher["status"] = voucher.saleInvoiceId ? "activo_facturado" : "activo";
+        await tx.update(giftVouchers).set({ status: restoredStatus }).where(eq(giftVouchers.id, voucher.id));
+        await tx.insert(giftVoucherEvents).values({
+          voucherId: voucher.id, eventType: "liberado", fromStatus: "reservado", toStatus: restoredStatus,
+          reason: reason ?? "Se liberó la aplicación", performedBy,
+        });
+      }
+      return updated;
+    });
+  }
+
+  async consumeGiftVoucherApplication(applicationId: string, performedBy: string): Promise<GiftVoucherApplication | undefined> {
+    return db.transaction(async (tx) => {
+      const [application] = await tx.select().from(giftVoucherApplications).where(eq(giftVoucherApplications.id, applicationId)).for("update");
+      if (!application) return undefined;
+      if (application.status !== "reservado") {
+        throw new Error(`No se puede consumir una aplicación en estado "${application.status}"`);
+      }
+      const [updated] = await tx.update(giftVoucherApplications)
+        .set({ status: "utilizado", consumedAt: new Date() })
+        .where(eq(giftVoucherApplications.id, applicationId))
+        .returning();
+
+      await tx.update(giftVouchers).set({ status: "utilizado", usedAt: new Date(), usedBy: performedBy })
+        .where(eq(giftVouchers.id, application.voucherId));
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: application.voucherId, eventType: "utilizado", fromStatus: "reservado", toStatus: "utilizado",
+        performedBy,
+      });
+      return updated;
+    });
+  }
+
+  // Una misma reserva/pedido/cuenta puede tener más de un voucher aplicado
+  // (ej. dos vouchers distintos contra la misma cuenta de SPA) — nunca
+  // asumir que hay una sola aplicación viva por destino.
+  async getGiftVoucherApplicationsForTarget(targetType: GiftVoucherApplicationTargetType, targetId: string): Promise<GiftVoucherApplication[]> {
+    return db.select().from(giftVoucherApplications)
+      .where(and(
+        eq(giftVoucherApplications.targetType, targetType),
+        eq(giftVoucherApplications.targetId, targetId),
+        eq(giftVoucherApplications.status, "reservado"),
+      ));
+  }
+
+  async getGiftVoucherApplications(voucherId: string): Promise<GiftVoucherApplication[]> {
+    return db.select().from(giftVoucherApplications)
+      .where(eq(giftVoucherApplications.voucherId, voucherId))
+      .orderBy(desc(giftVoucherApplications.createdAt));
+  }
+
+  async getGiftVoucherEvents(voucherId: string): Promise<GiftVoucherEvent[]> {
+    return db.select().from(giftVoucherEvents)
+      .where(eq(giftVoucherEvents.voucherId, voucherId))
+      .orderBy(desc(giftVoucherEvents.performedAt));
+  }
+
+  async getAvailableGiftVouchers(area: GiftVoucher["area"]): Promise<GiftVoucher[]> {
+    const today = getArgentinaToday();
+    return db.select().from(giftVouchers)
+      .where(and(
+        eq(giftVouchers.area, area),
+        inArray(giftVouchers.status, ["activo", "activo_facturado"]),
+        or(isNull(giftVouchers.expiresAt), gte(giftVouchers.expiresAt, today)),
+      ))
+      .orderBy(desc(giftVouchers.issuedAt));
+  }
+
+  // Para áreas sin circuito automatizado todavía (SPA, otro): cierra el
+  // voucher directamente, sin pasar por la tabla de aplicaciones porque no
+  // hay una operación real del sistema a la que vincularlo.
+  async markGiftVoucherUsedManually(id: string, performedBy: string, usedNotes?: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!voucher) return undefined;
+      if (!["activo", "activo_facturado"].includes(voucher.status)) {
+        throw new Error(`No se puede marcar como utilizado un voucher en estado "${voucher.status}"`);
+      }
+      const [updated] = await tx.update(giftVouchers).set({
+        status: "utilizado", usedAt: new Date(), usedBy: performedBy, usedNotes: usedNotes ?? null,
+      }).where(eq(giftVouchers.id, id)).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: id, eventType: "utilizado", fromStatus: voucher.status, toStatus: "utilizado",
+        reason: usedNotes ?? null, performedBy,
+      });
+      return updated;
+    });
+  }
+
+  async cancelGiftVoucher(id: string, performedBy: string, reason: string): Promise<GiftVoucher | undefined> {
+    return db.transaction(async (tx) => {
+      const [voucher] = await tx.select().from(giftVouchers).where(eq(giftVouchers.id, id)).for("update");
+      if (!voucher) return undefined;
+      if (voucher.status === "utilizado") {
+        throw new Error("No se puede cancelar un voucher ya utilizado");
+      }
+      if (voucher.status === "cancelado") {
+        return voucher;
+      }
+      const [existingActive] = await tx.select({ id: giftVoucherApplications.id })
+        .from(giftVoucherApplications)
+        .where(and(eq(giftVoucherApplications.voucherId, id), eq(giftVoucherApplications.status, "reservado")))
+        .for("update");
+      if (existingActive) {
+        throw new Error("El voucher tiene una aplicación reservada activa; liberala antes de cancelar");
+      }
+      const [updated] = await tx.update(giftVouchers).set({
+        status: "cancelado", cancelledAt: new Date(), cancelledBy: performedBy, cancelReason: reason,
+      }).where(eq(giftVouchers.id, id)).returning();
+      await tx.insert(giftVoucherEvents).values({
+        voucherId: id, eventType: "cancelado", fromStatus: voucher.status, toStatus: "cancelado", reason, performedBy,
+      });
+      return updated;
+    });
   }
 
   async generateVoucherCode(): Promise<string> {

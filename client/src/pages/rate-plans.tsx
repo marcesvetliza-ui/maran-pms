@@ -51,7 +51,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { RatePlanWithRoomType, RoomType, InsertRatePlan } from "@shared/schema";
 
 function RatePlanFormDialog({
@@ -130,10 +130,10 @@ function RatePlanFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "No se pudo guardar el plan tarifario. Intente nuevamente.",
+        description: parseApiError(error),
         variant: "destructive",
       });
     },
@@ -155,8 +155,8 @@ function RatePlanFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo crear la nueva versión.", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Error", description: parseApiError(error), variant: "destructive" });
     },
   });
 

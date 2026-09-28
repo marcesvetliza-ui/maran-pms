@@ -5,9 +5,9 @@ const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
 
 const TIPOS_CBT: Record<string, number> = {
-  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
-  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
-  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202,
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201, FMB: 206,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203, NCMB: 208,
+  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202, NDMB: 207,
 };
 
 export interface FECAERequest {
@@ -27,8 +27,25 @@ export interface FECAERequest {
   montoNoGravado: number;
   clienteCuit?: string;
   clienteDni?: string;
+  /** e.g. "passport" — see resolveFiscalRecipientDocument for how this maps to DocTipo. */
+  clienteDocumentType?: string;
   clienteCondicionIva: string;
   fecha: string;
+  /**
+   * Original document(s) this Nota de Crédito/Débito corrects. Mandatory for
+   * every NC/ND since RG 4540/19 (in force since 2021-04-01): ARCA rejects
+   * the request with error 10197 ("Si el comprobante es Débito o Crédito,
+   * enviar estructura CbteAsoc o PeriodoAsoc") when neither is present.
+   */
+  cbteAsoc?: Array<{
+    tipo: string;
+    puntoVenta: number;
+    numero: number;
+    /** CUIT of whoever issued the associated document (usually the same emisor). */
+    cuit?: string;
+    /** Associated document's own issuance date, AAAAMMDD. */
+    fecha?: string;
+  }>;
 }
 
 export interface FECAEResult {
@@ -86,6 +103,25 @@ export function buildIvaBlock(neto21: number, iva21: number, neto105: number, iv
   return `<ar:Iva>${parts.join("")}</ar:Iva>`;
 }
 
+function buildCbtesAsocBlock(cbteAsoc: FECAERequest["cbteAsoc"]): string {
+  if (!cbteAsoc || cbteAsoc.length === 0) return "";
+  const entries = cbteAsoc.map((asoc) => {
+    const tipo = TIPOS_CBT[asoc.tipo] ?? asoc.tipo;
+    const cuit = asoc.cuit ? `<ar:Cuit>${asoc.cuit.replace(/-/g, "")}</ar:Cuit>` : "";
+    const fecha = asoc.fecha ? `<ar:CbteFch>${asoc.fecha}</ar:CbteFch>` : "";
+    return (
+      `<ar:CbteAsoc>` +
+      `<ar:Tipo>${tipo}</ar:Tipo>` +
+      `<ar:PtoVta>${asoc.puntoVenta}</ar:PtoVta>` +
+      `<ar:Nro>${asoc.numero}</ar:Nro>` +
+      cuit +
+      fecha +
+      `</ar:CbteAsoc>`
+    );
+  }).join("");
+  return `<ar:CbtesAsoc>${entries}</ar:CbtesAsoc>`;
+}
+
 function parseCaeResult(response: string): FECAEResult | null {
   const caeM = response.match(/<CAE>([^<]+)<\/CAE>/);
   if (!caeM) return null;
@@ -97,6 +133,25 @@ function parseCaeResult(response: string): FECAEResult | null {
       ? new Date(`${vtoStr.slice(0, 4)}-${vtoStr.slice(4, 6)}-${vtoStr.slice(6, 8)}T12:00:00-03:00`)
       : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
   };
+}
+
+function buildServiceDates(fecha: string): string {
+  const year = Number(fecha.slice(0, 4));
+  const month = Number(fecha.slice(4, 6));
+  const day = Number(fecha.slice(6, 8));
+  const emission = new Date(Date.UTC(year, month - 1, day));
+  if (!/^\d{8}$/.test(fecha) || Number.isNaN(emission.getTime()) ||
+      emission.toISOString().slice(0, 10).replace(/-/g, "") !== fecha) {
+    throw new Error("Fecha de emisión inválida para las fechas de prestación de ARCA");
+  }
+  const format = (date: Date) => date.toISOString().slice(0, 10).replace(/-/g, "");
+  const nextDay = new Date(emission);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dueDate = new Date(emission);
+  dueDate.setUTCDate(dueDate.getUTCDate() + 60);
+  return `<ar:FchServDesde>${fecha}</ar:FchServDesde>` +
+    `<ar:FchServHasta>${format(nextDay)}</ar:FchServHasta>` +
+    `<ar:FchVtoPago>${format(dueDate)}</ar:FchVtoPago>`;
 }
 
 /**
@@ -148,12 +203,15 @@ export async function feCAESolicitar(
   const recipientDocument = resolveFiscalRecipientDocument({
     cuit: req.clienteCuit,
     dni: req.clienteDni,
+    documentType: req.clienteDocumentType,
   });
   const docTipo = recipientDocument.tipo;
   const docNro = recipientDocument.numero;
   const ivaBlock = buildIvaBlock(req.montoNeto21, req.montoIva21, req.montoNeto105, req.montoIva105);
   const impIva   = (req.montoIva21 + req.montoIva105).toFixed(2);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
+  const cbtesAsocBlock = buildCbtesAsocBlock(req.cbteAsoc);
+  const serviceDates = req.tipo === "FA" || req.tipo === "FB" ? buildServiceDates(req.fecha) : "";
 
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?>` +
@@ -183,8 +241,10 @@ export async function feCAESolicitar(
     `<ar:ImpOpEx>${req.montoExento.toFixed(2)}</ar:ImpOpEx>` +
     `<ar:ImpIVA>${impIva}</ar:ImpIVA>` +
     `<ar:ImpTrib>0.00</ar:ImpTrib>` +
+    serviceDates +
     `<ar:MonId>PES</ar:MonId>` +
     `<ar:MonCotiz>1</ar:MonCotiz>` +
+    `${cbtesAsocBlock}` +
     `${ivaBlock}` +
     `</ar:FECAEDetRequest></ar:FeDetReq>` +
     `</ar:FeCAEReq>` +

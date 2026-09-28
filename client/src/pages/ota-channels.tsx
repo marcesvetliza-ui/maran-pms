@@ -2,7 +2,7 @@ import { useState } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -142,7 +142,7 @@ export default function OTAChannelsPage() {
 
   const syncReservationMutation = useMutation({
     mutationFn: async (logId: string) => {
-      return apiRequest("POST", `/api/ota-reservations/${logId}/sync`);
+      return apiRequestWithGroupInventoryWarning("POST", `/api/ota-reservations/${logId}/sync`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/ota-reservations"] });

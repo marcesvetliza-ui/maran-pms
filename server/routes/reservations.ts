@@ -7,9 +7,9 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import type { PoolClient } from "pg";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
-import { emitirFactura } from "../billing/invoiceService";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth } from "../auth";
@@ -34,6 +34,22 @@ import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 import { classifyReservationPaymentMethod } from "../payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { getReservationRateValidationError, normalizeZeroRateNotes } from "@shared/reservationRate";
+import { GROUP_BLOCK_SHORTAGE_CODE, GROUP_BLOCK_WARNING_CODE } from "@shared/group-inventory";
+
+async function assertGroupInventoryForReservation(input: {
+  roomTypeId: string; checkInDate: string; checkOutDate: string;
+  excludeReservationId?: string; contextGroupId?: string; override?: boolean;
+}) {
+  const conflict = await storage.evaluateReservationInventory(input);
+  if (!conflict || (conflict.code === GROUP_BLOCK_WARNING_CODE && input.override)) return;
+  const error = conflict.code === GROUP_BLOCK_WARNING_CODE
+    ? "La operación invade el cupo blando de un grupo."
+    : "La demanda confirmada excede el inventario operativo.";
+  throw Object.assign(new Error(error), {
+    statusCode: 409,
+    response: { error, code: conflict.code, warning: conflict, canOverride: conflict.code === GROUP_BLOCK_WARNING_CODE },
+  });
+}
 
 // ─── Hotel constants (actualizar con datos reales del hotel) ─────────────────
 const HOTEL_NAME    = "Maran Suites & Towers";
@@ -247,6 +263,10 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/reservations", async (req, res) => {
     try {
+      const contextGroupId = req.body.contextGroupId as string | undefined;
+      const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      delete req.body.contextGroupId;
+      delete req.body.overrideTentativeGroupWarning;
       const numericFields = ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "earlyCheckInCharge", "lateCheckOutCharge"];
       for (const field of numericFields) {
         if (req.body[field] === "") {
@@ -291,6 +311,16 @@ export function registerReservationsRoutes(app: Express) {
             error: `La habitación ${room?.roomNumber || data.roomId} ya tiene una reserva en esas fechas.`,
           });
         }
+      }
+      if (data.roomTypeId && data.checkInDate && data.checkOutDate &&
+          !["cancelled", "checked_out", "no_show"].includes(data.status)) {
+        await assertGroupInventoryForReservation({
+          roomTypeId: data.roomTypeId,
+          checkInDate: data.checkInDate,
+          checkOutDate: data.checkOutDate,
+          contextGroupId,
+          override: overrideTentativeGroupWarning,
+        });
       }
 
       const reservation = await storage.createReservation(data);
@@ -354,16 +384,31 @@ export function registerReservationsRoutes(app: Express) {
     } catch (error: any) {
       const detail = error?.message || String(error);
       console.error("Error creating reservation:", detail);
-      res.status(500).json({ error: detail || "Error creating reservation" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: detail || "Error creating reservation" });
     }
   });
 
-  app.patch("/api/reservations/:id", async (req, res) => {
+  app.patch("/api/reservations/:id", requireAuth, async (req, res) => {
     try {
+      const requestedContextGroupId = req.body.contextGroupId as string | undefined;
+      const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      delete req.body.contextGroupId;
+      delete req.body.overrideTentativeGroupWarning;
       const existing = await storage.getReservation(req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      // The persisted link is authoritative. Generic reservation editors do not
+      // send contextGroupId, and without it an extension is counted once inside
+      // the confirmed group block and again as unrelated demand.
+      const linkedGroupId = (existing as any).groupId as string | undefined;
+      if (requestedContextGroupId && linkedGroupId && requestedContextGroupId !== linkedGroupId) {
+        return res.status(409).json({ error: "La reserva pertenece a otro grupo." });
+      }
+      if (requestedContextGroupId && !linkedGroupId) {
+        return res.status(409).json({ error: "La reserva no está vinculada al grupo indicado." });
+      }
+      const contextGroupId = linkedGroupId;
       const hasRate = Object.prototype.hasOwnProperty.call(req.body, "finalRatePerNight");
       const hasReason = Object.prototype.hasOwnProperty.call(req.body, "specialRateReason");
       const effectiveRate = hasRate ? req.body.finalRatePerNight : existing.finalRatePerNight;
@@ -426,11 +471,16 @@ export function registerReservationsRoutes(app: Express) {
         const newNights = Number(req.body.nights);
         const rate = parseFloat(existing.finalRatePerNight || "0");
         if (!isNaN(newNights) && newNights > 0 && rate > 0) {
-          req.body.totalRoomAmount = (rate * newNights).toFixed(2);
+          // El voucher descuenta una vez del total, no por noche — si la
+          // reserva ya tiene uno aplicado, el recálculo automático (drag &
+          // drop en planning) no debe hacerlo desaparecer del total.
+          const existingVoucherAmount = parseFloat(existing.voucherAppliedAmount || "0");
+          req.body.totalRoomAmount = Math.max(0, rate * newNights - existingVoucherAmount).toFixed(2);
         }
       }
 
       const finalRoomId = req.body.roomId || existing.roomId;
+      const finalRoomTypeId = req.body.roomTypeId || existing.roomTypeId;
       const finalCheckIn = req.body.checkInDate || existing.checkInDate;
       const finalCheckOut = req.body.checkOutDate || existing.checkOutDate;
 
@@ -440,6 +490,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const roomChanged = req.body.roomId && req.body.roomId !== existing.roomId;
+      const roomTypeChanged = req.body.roomTypeId && req.body.roomTypeId !== existing.roomTypeId;
       const datesChanged = (req.body.checkInDate && req.body.checkInDate !== existing.checkInDate) ||
                            (req.body.checkOutDate && req.body.checkOutDate !== existing.checkOutDate);
       if (roomChanged || datesChanged) {
@@ -456,6 +507,21 @@ export function registerReservationsRoutes(app: Express) {
           });
         }
       }
+      const finalStatus = req.body.status || existing.status;
+      const statusChanged = req.body.status && req.body.status !== existing.status;
+      if ((roomChanged || roomTypeChanged || datesChanged || statusChanged) &&
+          finalRoomTypeId && finalCheckIn && finalCheckOut &&
+          !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+        await assertGroupInventoryForReservation({
+          roomTypeId: finalRoomTypeId,
+          checkInDate: finalCheckIn,
+          checkOutDate: finalCheckOut,
+          excludeReservationId: req.params.id,
+          contextGroupId,
+          override: overrideTentativeGroupWarning,
+        });
+      }
+      if (contextGroupId) req.body._inventoryContextGroupId = contextGroupId;
 
       // Bloqueo adicional: no permitir mover una reserva checked_in a una habitación ocupada
       if (existing.status === "checked_in" && roomChanged) {
@@ -603,7 +669,7 @@ export function registerReservationsRoutes(app: Express) {
       res.json(reservation);
     } catch (error: any) {
       console.error("Error updating reservation:", error?.message || error);
-      res.status(500).json({ error: "Error updating reservation" });
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error updating reservation" });
     }
   });
 
@@ -666,6 +732,13 @@ export function registerReservationsRoutes(app: Express) {
           error: `La habitacion ${room?.roomNumber || finalRoomId} ya tiene una reserva en esas fechas`
         });
       }
+      const duplicateRoomTypeId = room?.roomTypeId || original.roomTypeId;
+      await assertGroupInventoryForReservation({
+        roomTypeId: duplicateRoomTypeId,
+        checkInDate: normalizedCheckIn,
+        checkOutDate: normalizedCheckOut,
+        override: req.body.overrideTentativeGroupWarning === true,
+      });
 
       const newCode = storage.generateReservationCode();
 
@@ -673,7 +746,7 @@ export function registerReservationsRoutes(app: Express) {
         reservationCode: newCode,
         guestId: original.guestId,
         companyId: original.companyId || null,
-        roomTypeId: room?.roomTypeId || original.roomTypeId,
+        roomTypeId: duplicateRoomTypeId,
         roomId: finalRoomId,
         ratePlanId: original.ratePlanId,
         checkInDate: normalizedCheckIn,
@@ -978,7 +1051,7 @@ export function registerReservationsRoutes(app: Express) {
           SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB')
             AND estado IN ('emitida','parcial','anulada')
         `),
         db.execute(sql`
@@ -1057,7 +1130,7 @@ export function registerReservationsRoutes(app: Express) {
                  monto_acreditado, estado, nota_credito_id, cae
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','NCA','NCB','NCC','NCT','NCM')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','NCA','NCB','NCC','NCT','NCM','NCMB')
             AND estado IN ('emitida','parcial','anulada')
           ORDER BY created_at ASC
         `),
@@ -1154,20 +1227,20 @@ export function registerReservationsRoutes(app: Express) {
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
-                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
                ), '[]'::jsonb) AS credit_source_charge_amounts,
                COALESCE((
                  SELECT jsonb_agg(nd.source_charge_amounts)
                  FROM sales_invoices nc
                  JOIN sales_invoices nd ON nd.nota_credito_id = nc.id
                  WHERE nc.nota_credito_id = si.id
-                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
-                   AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM')
+                   AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+                   AND nd.tipo_comprobante IN ('NDA', 'NDB', 'NDC', 'NDT', 'NDM', 'NDMB')
                    AND nd.estado <> 'anulada'
                ), '[]'::jsonb) AS debit_source_charge_amounts
         FROM sales_invoices si
         WHERE si.reserva_id = ${req.params.id}
-          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM')
+          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
           AND estado IN ('emitida', 'parcial', 'anulada')
           AND COALESCE(monto_total::numeric, 0) > 0
         ORDER BY si.created_at DESC
@@ -1207,7 +1280,7 @@ export function registerReservationsRoutes(app: Express) {
         FROM sales_invoices nc
         LEFT JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.reserva_id = ${req.params.id}
-          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM')
+          AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.estado IN ('emitida', 'parcial', 'anulada')
           AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status = 'conciliada')
           AND COALESCE(nc.monto_total::numeric, 0) > COALESCE(nc.monto_acreditado::numeric, 0)
@@ -1462,6 +1535,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.agencyId) {
               await storage.createAccountMovement({
@@ -1474,6 +1548,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             } else if (reservation.guestId) {
               await storage.createAccountMovement({
@@ -1486,6 +1561,7 @@ export function registerReservationsRoutes(app: Express) {
                 reservationId: reservation.id,
                 reservationCode: reservation.reservationCode,
                 guestName: guestNameCC,
+                area: "recepcion",
               });
             }
           } catch (e) {
@@ -1519,6 +1595,7 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           } else if (ccPayment.billingTarget === "agency" && reservation.agencyId) {
             await storage.createAccountMovement({
@@ -1531,8 +1608,36 @@ export function registerReservationsRoutes(app: Express) {
               reservationId: reservation.id,
               reservationCode: reservation.reservationCode,
               guestName,
+              area: "recepcion",
             });
           }
+        }
+      }
+
+      // Reserva sin nada para facturar (tarifa $0, sin cargos): no hay pago ni
+      // comprobante que registrar, pero el check-out debe quedar igual
+      // visible en Caja para trazabilidad — un movimiento informativo de $0
+      // que no suma a ningún total (mismo mecanismo que ya usa Cuenta
+      // Corriente/voucher, ver ensureInformationalMovement).
+      if (roomTotal === 0 && chargesTotal === 0) {
+        try {
+          const [existingZeroMovement] = await db.select().from(cashMovements).where(and(
+            eq(cashMovements.sourceType, "reservation_checkout_no_charge"),
+            eq(cashMovements.sourceId, reservation.id),
+          ));
+          if (!existingZeroMovement) {
+            const guestNameNoCharge = reservation.guest
+              ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
+              : "Huésped";
+            const roomNumNoCharge = reservation.room?.roomNumber || reservation.roomId;
+            await storage.registerCashMovement(
+              "recepcion", "reservation_checkout_no_charge", reservation.id,
+              `Check-out sin cargos — Hab. ${roomNumNoCharge} — ${guestNameNoCharge}`,
+              "no_fiscal", "0.00", "informational", (req as any).user?.username,
+            );
+          }
+        } catch (e) {
+          console.error("[checkout] Error registrando salida no fiscal:", e);
         }
       }
 
@@ -2591,8 +2696,46 @@ export function registerReservationsRoutes(app: Express) {
       const reservationForPayment = req.body.reservationId
         ? await storage.getReservation(req.body.reservationId)
         : null;
+      const billingTarget = req.body.billingTarget || "guest";
+      const effectiveCompanyId = billingTarget === "company"
+        ? (reservationForPayment?.companyId || req.body.companyId || null)
+        : null;
+      const effectiveAgencyId = billingTarget === "agency"
+        ? (reservationForPayment?.agencyId || req.body.agencyId || null)
+        : null;
+      // Persist the actual CC owner on the payment. Depending only on the
+      // reservation makes historical payments change meaning if its links are
+      // edited later and leaves reconciliation without a durable entity ID.
+      if (billingTarget === "company") req.body.companyId = effectiveCompanyId;
+      if (billingTarget === "agency") req.body.agencyId = effectiveAgencyId;
+      const effectiveCompany = effectiveCompanyId
+        ? ((reservationForPayment as any)?.company || await storage.getCompany(effectiveCompanyId))
+        : null;
+      const effectiveAgency = effectiveAgencyId
+        ? ((reservationForPayment as any)?.agency || await storage.getAgency(effectiveAgencyId))
+        : null;
+      const effectiveGuest = billingTarget === "guest" && reservationForPayment?.guestId
+        ? ((reservationForPayment as any)?.guest || await storage.getGuest(reservationForPayment.guestId))
+        : null;
+      if (req.body.method === "cuenta_corriente") {
+        if (billingTarget === "company" && !effectiveCompany) {
+          return res.status(400).json({ error: "La empresa seleccionada para Cuenta Corriente no existe" });
+        }
+        if (billingTarget === "agency" && !effectiveAgency) {
+          return res.status(400).json({ error: "La agencia seleccionada para Cuenta Corriente no existe" });
+        }
+        if (billingTarget === "guest" && !effectiveGuest) {
+          return res.status(400).json({ error: "La reserva no tiene un huésped válido para Cuenta Corriente" });
+        }
+      }
+      const ccOwnerName = billingTarget === "company"
+        ? (effectiveCompany?.razonSocial || effectiveCompany?.nombreFantasia || "Empresa vinculada")
+        : billingTarget === "agency"
+          ? (effectiveAgency?.razonSocial || effectiveAgency?.nombreFantasia || "Agencia vinculada")
+          : null;
       const cashLabel = reservationForPayment
         ? [
+            req.body.method === "cuenta_corriente" ? ccOwnerName : null,
             `Reserva ${reservationForPayment.reservationCode}`,
             reservationForPayment.room?.roomNumber ? `Hab. ${reservationForPayment.room.roomNumber}` : null,
             reservationForPayment.guest ? `${reservationForPayment.guest.lastName}${reservationForPayment.guest.firstName ? ", " + reservationForPayment.guest.firstName : ""}` : null,
@@ -2608,11 +2751,10 @@ export function registerReservationsRoutes(app: Express) {
         invoiceId?: number;
       } | undefined;
       if (req.body.method === "cuenta_corriente" && reservationForPayment) {
-        const billingTarget = req.body.billingTarget || "guest";
         const entityId = billingTarget === "company"
-          ? (reservationForPayment.companyId || req.body.companyId)
+          ? effectiveCompanyId
           : billingTarget === "agency"
-            ? (reservationForPayment.agencyId || req.body.agencyId)
+            ? effectiveAgencyId
             : reservationForPayment.guestId;
         if (entityId) {
           let invoiceId: number | undefined;
@@ -2807,6 +2949,7 @@ export function registerReservationsRoutes(app: Express) {
                 },
                 items: invoice.items ?? [],
                 facturaOriginalId: invoice.id,
+                comprobanteAsociado: buildComprobanteAsociado(invoice),
                 operador: user?.fullName || user?.username,
               } as any);
               await db.execute(sql`
@@ -3085,7 +3228,7 @@ export function registerReservationsRoutes(app: Express) {
       if (String(target.reserva_id) !== String(payment.reservation_id)) {
         return res.status(403).json({ error: "La factura destino no pertenece a la reserva del pago" });
       }
-      if (!["FA", "FB", "FC", "FT", "FM"].includes(String(target.tipo_comprobante)) ||
+      if (!["FA", "FB", "FC", "FT", "FM", "FMB"].includes(String(target.tipo_comprobante)) ||
         !["emitida", "parcial"].includes(String(target.estado))) {
         return res.status(409).json({ error: "La factura destino no está activa para reaplicación" });
       }
@@ -3669,14 +3812,21 @@ async function handleConfirmationPdf(req: any, res: any) {
         .text(termLine, margin + 14, ty, { width: termTextWidth });
       ty += doc.heightOfString(termLine, { width: termTextWidth }) + 6;
     });
-    y = ty + 14;
+    // Deja un renglón de aire entre el borde inferior del recuadro de
+    // Términos y el saludo — sin esto ambos quedan pegados (ver reporte de
+    // usuario: el texto "choca" contra el recuadro de arriba).
+    y = ty + 14 + 14;
 
     // ── GREETING ─────────────────────────────────────────────────────────
     if (y < pageH - 88) {
+      const greetingText = `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`;
       doc.fillColor("#666666").fontSize(9).font("Helvetica")
+        .text(greetingText, margin, y, { width: contentW, align: "center" });
+      const greetingH = doc.heightOfString(greetingText, { width: contentW });
+      doc.fillColor("#8a8a8a").fontSize(7.5).font("Helvetica-Oblique")
         .text(
-          `Estimado/a ${guestName}, gracias por elegirnos. Le esperamos con mucho gusto en nuestro establecimiento.\nAnte cualquier consulta no dude en contactarnos.`,
-          margin, y, { width: contentW, align: "center" }
+          "Recomendamos no imprimir esta información por políticas de sustentabilidad.",
+          margin, y + greetingH + 6, { width: contentW, align: "center" }
         );
     }
     const _confTs = formatArgentinaDate(new Date());

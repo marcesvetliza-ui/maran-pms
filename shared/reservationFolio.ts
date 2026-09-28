@@ -116,6 +116,15 @@ export function isReservationCreditNoteAdjustment(charge: ReservationChargeLike)
   return charge.category === "adjustment" && /\[nc:\d+:[^\]]+\]/.test(String(charge.description || ""));
 }
 
+export function isInvoiceableReservationCharge(charge: ReservationChargeLike): boolean {
+  return charge.status !== "anulado"
+    && charge.category !== "transfer_in"
+    && charge.category !== "transfer_out"
+    && !isReservationCreditNoteAdjustment(charge)
+    && Number.isFinite(Number(charge.amount))
+    && Number(charge.amount) > 0;
+}
+
 export function getOperationalReservationCharges<T extends ReservationChargeLike>(charges: T[] = []): T[] {
   return charges.filter(charge =>
     charge.status !== "anulado" && !isReservationCreditNoteAdjustment(charge)

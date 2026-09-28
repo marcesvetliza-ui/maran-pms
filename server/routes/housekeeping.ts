@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
-import { lostFoundItems, reservations, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
+import { lostFoundItems, reservations, safeBoxOpenings, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
 import { requireAuth } from "../auth";
 import { eq, desc, like, and, or, ilike, type SQL } from "drizzle-orm";
 
@@ -278,6 +278,36 @@ export function registerHousekeepingRoutes(app: Express) {
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Error updating status" });
+    }
+  });
+
+  // ==================== CAJA FUERTE (apertura/reseteo de código) ====================
+  // Reemplaza la planilla en papel: fecha, habitación, quién abrió y quién solicitó.
+
+  app.get("/api/safe-box-openings", requireAuth, async (req, res) => {
+    try {
+      const items = await db.select().from(safeBoxOpenings).orderBy(desc(safeBoxOpenings.date), desc(safeBoxOpenings.createdAt));
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching safe box openings" });
+    }
+  });
+
+  app.post("/api/safe-box-openings", requireAuth, async (req, res) => {
+    try {
+      const { roomId, date, openedBy, requestedBy } = req.body;
+      if (!roomId || !date || !String(openedBy || "").trim() || !String(requestedBy || "").trim()) {
+        return res.status(400).json({ error: "roomId, date, openedBy y requestedBy son requeridos" });
+      }
+      const [item] = await db.insert(safeBoxOpenings).values({
+        roomId,
+        date,
+        openedBy: String(openedBy).trim(),
+        requestedBy: String(requestedBy).trim(),
+      }).returning();
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating safe box opening" });
     }
   });
 }

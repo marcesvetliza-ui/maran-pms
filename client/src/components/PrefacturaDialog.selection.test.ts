@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isInvoiceableReservationCharge } from "@shared/reservationFolio";
 import {
   getAllBillableFolioItems,
   getAdvancePaymentIdsToLink,
@@ -148,6 +149,34 @@ describe("PrefacturaDialog selected folio projection", () => {
       expect.objectContaining({ id: "accommodation", amount: 120 }),
       expect.objectContaining({ id: "restaurant", originalAmount: 100, amount: 100 }),
     ]);
+  });
+
+  it("offers a positive operational adjustment while excluding a credit-note adjustment", () => {
+    const adjustedFolio = {
+      roomTotal: 504000,
+      roomNumber: "706",
+      nights: 3,
+      charges: [
+        { id: "spa", description: "SPA", amount: "70000.00", category: "spa" },
+        { id: "surcharge", description: "Recargo de cuotas", amount: "77000.00", category: "adjustment" },
+        { id: "nc-audit", description: "Nota de crédito [nc:41:spa]", amount: "-1000.00", category: "adjustment" },
+      ],
+    };
+    const original = getAllBillableFolioItems(adjustedFolio);
+    expect(original.map(item => item.id)).toEqual(["accommodation", "spa", "surcharge"]);
+    expect(isInvoiceableReservationCharge(adjustedFolio.charges[1])).toBe(true);
+    expect(isInvoiceableReservationCharge(adjustedFolio.charges[2])).toBe(false);
+    expect(isInvoiceableReservationCharge({ ...adjustedFolio.charges[1], status: "anulado" })).toBe(false);
+    expect(isInvoiceableReservationCharge({ ...adjustedFolio.charges[1], amount: "-77000.00" })).toBe(false);
+
+    const remaining = getRemainingChargeAmounts(original, getInvoicedAmountsByCharge([
+      { source_charge_amounts: { accommodation: 504000, spa: 70000 }, monto_total: "574000", monto_acreditado: "0" },
+    ]));
+    expect(getAllBillableFolioItems(adjustedFolio, {}, remaining)).toEqual([
+      expect.objectContaining({ id: "surcharge", amount: 77000, originalAmount: 77000 }),
+    ]);
+    expect(getSelectedFolioItems(new Set(["surcharge"]), adjustedFolio, {}, remaining))
+      .toEqual([expect.objectContaining({ id: "surcharge", amount: 77000 })]);
   });
 
   it("restores the whole operational charge for refactoring after a total NC", () => {

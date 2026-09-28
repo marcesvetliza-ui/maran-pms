@@ -95,13 +95,16 @@ export function registerOtaRoutes(app: Express) {
 
   app.post("/api/ota-reservations/:id/sync", async (req, res) => {
     try {
-      const reservation = await storage.syncOTAReservation(req.params.id);
+      const reservation = await storage.syncOTAReservation(
+        req.params.id,
+        req.body?.overrideTentativeGroupWarning === true,
+      );
       if (!reservation) {
         return res.status(400).json({ error: "Could not sync reservation - no available rooms or already synced" });
       }
       res.json({ success: true, reservation });
-    } catch (error) {
-      res.status(500).json({ error: "Error syncing OTA reservation" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json(error?.response || { error: "Error syncing OTA reservation" });
     }
   });
 

@@ -1,0 +1,28 @@
+Verifiqué el punto más concreto que menciona Replit antes de opinar sobre el resto — y es real, incluso peor de lo que dice.
+
+**Confirmado y es peor todavía**: `shared/receiptTypes.ts` está comentado como "Tipos de comprobante unificados en todo el sistema (Restaurant, SPA, Grupos, Recepción, Administración)" y limita venta a `FA`/`FB` — pero en la práctica **solo lo usa un archivo** (`PrefacturaDialog.tsx`). Ni `billing.tsx`, ni `purchase-invoices.tsx`, ni el botón viejo por área, ni el botón nuevo lo importan — cada uno inventa su propio vocabulario. Lo que Replit describe como "hay tres vocabularios sueltos" en realidad es "hay un archivo que se llama a sí mismo la fuente única de verdad, y nadie más lo escucha". Buen hallazgo de su parte.
+
+Dicho eso, mi opinión general:
+
+## Coincido con el diagnóstico, no con el plan de acción
+
+El análisis técnico de Replit es sólido y en varios puntos va más profundo que el mío — el vocabulario fragmentado, la separación cobro/comprobante, y el modelo de "saldo ajustable" para NC/ND parciales en vez de una bandera usado/no-usado son mejoras genuinamente buenas que yo no había planteado. Pero antes de avanzar te marcaría tres cosas:
+
+**1. La propuesta pasó de "arreglar un botón" a "rediseñar el motor financiero completo del sistema"**, y no lo dice explícitamente. Cuatro motores especializados, matriz fiscal en backend, catálogo central con 15 metadatos por tipo de documento, migración de todo el histórico de la planilla — eso es un proyecto de meses, no una corrección. El pedido original era centralizar el acceso a la emisión; la respuesta terminó proponiendo repensar Ventas, Compras, Cuenta Corriente e Inventario a la vez. Puede ser el rumbo correcto a mediano plazo, pero no lo aprobaría como paquete único antes de tocar nada — es demasiado para evaluar y aprobar de una vez, y mientras tanto seguís con los bugs de riesgo fiscal activos en producción.
+
+**2. Ya tal como está descripta, "Etapa 1" (la que Replit propone hacer *antes* de tocar Ventas) es en sí misma un proyecto grande**: unificar vocabulario de tipos (toca 4+ archivos y cualquier fila ya guardada en la base con el código viejo), buscador unificado de entidades, matriz fiscal central, permisos por familia. Si seguís ese orden, no sale nada a producción en semanas.
+
+**3. El punto de "no marcar automáticamente una factura como no disponible tras la primera NC"** — antes de asumir que hay que reconstruir esa lógica, hay que confirmar cómo se comporta hoy: uno de mis agentes encontró que `billing.tsx:2447` ya calcula montos disponibles netos de créditos previos por cargo, lo que sugiere que podría existir ya algo de soporte parcial. No daría por sentado el diagnóstico de Replit acá sin mirar el código con la misma cautela que usamos en todo lo demás.
+
+**4. El catálogo central "configurable" (15 metadatos por tipo documental, activo/inactivo, familia, sujeto, etc.)** me parece sobre-ingeniería para un hotel único. Eso tiene sentido si mañana necesitás dar de alta tipos de comprobante nuevos sin tocar código — pero si en la práctica son ~15-20 tipos reales y estables, prefiero codificarlos explícitos dentro de los 4 motores que ya está bien planteado separar (venta/compra/cobro-pago/inventario), no construir un motor de configuración genérico encima. Menos superficie para que algo salga mal, y se entiende mirando el código en vez de una tabla de configuración.
+
+## Lo que haría yo
+
+Separaría esto en dos líneas de trabajo con ritmos distintos:
+
+- **Ahora, rápido y de bajo riesgo**: arreglar en el lugar los bugs concretos que ya verifiqué con código real (compras sin validar condición IVA del proveedor, NC/ND rotas en el Centro de Comprobantes nuevo, ventas sin buscar huéspedes + fallback silencioso a Consumidor Final, impuestos de compras desconectados de los renglones, cuenta contable por ítem en vez de por factura, sacar la creación de artículos desde la factura). Esto reduce el riesgo real de ARCA/contador sin tocar la arquitectura, y lo puedo verificar con Postgres real + Playwright como venimos haciendo en toda la sesión.
+- **Después, con la contadora ya sentada en la mesa**: evaluar la separación en motores especializados de Replit como una iniciativa aparte y deliberada — ahí si tiene sentido migrar hacia esa arquitectura, pero como decisión consciente de "vamos a invertir en esto", no como prerequisito para arreglar el botón.
+
+En el punto donde ambos coincidimos sin matices: nada de esto arranca sin la contadora validando la matriz de condición IVA/tipo de comprobante, las reglas de MiPyME, y qué comprobantes de la planilla siguen realmente activos. Eso lo pondría primero en la agenda, en paralelo a que yo arregle los bugs concretos.
+
+¿Vas con ese enfoque (arreglos concretos ahora, arquitectura grande como fase aparte con la contadora), o preferís que evaluemos el plan completo de Replit como se armó?

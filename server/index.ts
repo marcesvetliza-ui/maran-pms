@@ -28,6 +28,18 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 const PORT = parseInt(process.env.PORT || "5000", 10);
+let startupReady = false;
+
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: startupReady ? "ready" : "starting" });
+});
+app.use((req, res, next) => {
+  if (startupReady) return next();
+  if (req.path === "/") {
+    return res.status(200).json({ status: "starting" });
+  }
+  return res.status(503).json({ message: "La aplicación se está iniciando" });
+});
 
 if (process.env.NODE_ENV === "production") {
   serveStaticFiles(app); // serves index.html → healthcheck returns 200
@@ -98,6 +110,7 @@ const loginLimiter = rateLimit({
   message: { error: "Demasiados intentos de inicio de sesión" },
 });
 app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/2fa/verify-login", loginLimiter);
 
 declare module "http" {
   interface IncomingMessage {
@@ -206,13 +219,25 @@ app.use((req, res, next) => {
 
     try {
       await runMigrations();
+      const { ensureSupplierExpenseSchema } = await import("./accounting/supplierExpenseSchema");
+      await ensureSupplierExpenseSchema();
+      const { ensureRoomPreventiveSchema } = await import("./maintenance/roomPreventiveSchema");
+      await ensureRoomPreventiveSchema();
     } catch (err: any) {
       logger.error(
         "[startup] Cobros maestros y Cuenta Corriente deshabilitados por un esquema incompleto.",
         err,
       );
+      if (
+        err?.code === "COMPANY_OPENING_BALANCE_IMPORT_FAILED"
+        || err?.code === "CURRENT_ACCOUNT_REALLOCATION_FAILED"
+      ) {
+        logger.error("[startup] La importación obligatoria de saldos falló; se detiene el proceso sin servir la aplicación.");
+        process.exit(1);
+      }
       return;
     }
+    startupReady = true;
 
     const { warnIfDatabaseIdentityMissing } = await import("./database-identity");
     await mig("database-identity check", warnIfDatabaseIdentityMissing);

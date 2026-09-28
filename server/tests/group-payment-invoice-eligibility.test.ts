@@ -38,6 +38,12 @@ vi.mock("../billing/invoiceService", () => ({
     montoTotal: items.reduce((total, item) => total + (Number(item.subtotal) || 0), 0),
   })),
   emitirFactura: mockEmitirFactura,
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
 }));
 
 vi.mock("../db-storage", () => ({

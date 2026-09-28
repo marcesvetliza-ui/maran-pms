@@ -99,7 +99,15 @@ vi.mock("../auth", () => ({
     return res.status(401).json({ error: "No autenticado" });
   },
 }));
-vi.mock("../billing/invoiceService", () => ({ emitirFactura: vi.fn() }));
+vi.mock("../billing/invoiceService", () => ({
+  emitirFactura: vi.fn(),
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
+}));
 vi.mock("../billing/invoicePdf", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../billing/invoicePdf")>();
   return {

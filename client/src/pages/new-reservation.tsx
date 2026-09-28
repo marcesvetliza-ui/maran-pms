@@ -28,7 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
 import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
@@ -120,11 +120,19 @@ export default function NewReservationPage() {
     queryKey: ["/api/companies"],
   });
 
+  const { data: agencies } = useQuery<Agency[]>({
+    queryKey: ["/api/agencies"],
+  });
+
   const handleGuestSelect = (guest: Guest) => {
     setSelectedGuest(guest);
     if (guest.companyId && companies) {
       const company = companies.find(c => c.id === guest.companyId);
       if (company) setSelectedCompany(company);
+    }
+    if (guest.agencyId && agencies) {
+      const agency = agencies.find(a => a.id === guest.agencyId);
+      if (agency) setSelectedAgency(agency);
     }
   };
 
@@ -273,7 +281,7 @@ export default function NewReservationPage() {
 
   const createReservationMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/reservations", {
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         reservationCode: "",
         guestId: selectedGuest!.id,
         companyId: selectedCompany?.id || null,

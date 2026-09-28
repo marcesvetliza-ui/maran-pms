@@ -224,6 +224,8 @@ function EstadoResultadosReport() {
           <LineaResultados label="Alojamiento" value={data.ingresos?.alojamiento} indent />
           <LineaResultados label="Restaurant" value={data.ingresos?.restaurant} indent />
           <LineaResultados label="Spa" value={data.ingresos?.spa} indent />
+          <LineaResultados label="Eventos" value={data.ingresos?.eventos} indent />
+          <LineaResultados label="Otros Ingresos" value={data.ingresos?.otrosServicios} indent />
           <div className="border-t my-1" />
           <LineaResultados label="TOTAL INGRESOS" value={data.ingresos?.totalIngresos} bold />
 
@@ -546,6 +548,7 @@ function IngresosReport() {
                 <Line type="monotone" dataKey="restaurant" stroke="#F59E0B" dot={false} name="Restaurant" />
                 <Line type="monotone" dataKey="spa" stroke="#10B981" dot={false} name="Spa" />
                 <Line type="monotone" dataKey="eventos" stroke="#8B5CF6" dot={false} name="Eventos" />
+                <Line type="monotone" dataKey="otros" stroke="#6B7280" dot={false} name="Otros" />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>

@@ -11,7 +11,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
   FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
-  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2,
+  FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,9 +24,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const today = () => getArgentinaToday();
 const firstOfCurrentMonth = () => today().slice(0, 7) + "-01";
@@ -75,8 +78,8 @@ function getReconciliationError(invoice: any): string | null {
   return invoice?.reconciliation_error ?? invoice?.reconciliationError ?? null;
 }
 
-const CONDICION_IVA_OPTIONS = [
-  "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento",
+export const CONDICION_IVA_OPTIONS = [
+  "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento", "No Categorizado",
 ];
 
 // Condición IVA → tipo de comprobante is a strict, mutually exclusive split:
@@ -86,9 +89,30 @@ const CONDICION_IVA_OPTIONS = [
 // and client-side in group-detail.tsx's applyStrictComprobanteForCondicion.
 // Kept in sync here too since this dialog is the single point of invoice
 // emission for reservations, restaurant, spa and events, not just groups.
-function isRiOrExento(condicionIva: string): boolean {
+export function isRiOrExento(condicionIva: string): boolean {
   const normalized = String(condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   return normalized === "responsable_inscripto" || normalized === "exento";
+}
+
+// companies.condicionIva / agencies.condicionIva store the machine IvaCondition
+// code (shared/schema.ts, e.g. "responsable_inscripto"), while the Select here
+// uses CONDICION_IVA_OPTIONS' Title Case labels as both value and display text.
+// Setting the raw DB value straight into state left the Select matching no
+// SelectItem — blank, same failure mode as the tipo-select bug above.
+const CONDICION_IVA_DB_TO_LABEL: Record<string, string> = {
+  responsable_inscripto: "Responsable Inscripto",
+  consumidor_final: "Consumidor Final",
+  monotributo: "Monotributista",
+  monotributista: "Monotributista",
+  exento: "Exento",
+  no_responsable: "Consumidor Final",
+  no_categorizado: "No Categorizado",
+};
+function normalizeCondicionIvaLabel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (CONDICION_IVA_OPTIONS.includes(raw)) return raw;
+  const key = String(raw).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CONDICION_IVA_DB_TO_LABEL[key] ?? null;
 }
 
 const AREA_LABELS: Record<string, { label: string; color: string }> = {
@@ -111,19 +135,32 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
   NDC: { nombre: "Nota Déb. C",  color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
   ticket: { nombre: "Ticket", color: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300" },
   voucher_justo: { nombre: "Voucher Justo", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300" },
-  voucher_pedidos_ya: { nombre: "Voucher PedidosYa", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+  voucher_pedidos_ya: { nombre: "Voucher Pedidos Ya", color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300" },
+  voucher_room_service: { nombre: "Room Service", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
+  voucher_consumo_interno: { nombre: "Consumo Interno", color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" },
   cierre_habitacion: { nombre: "Voucher Habitaciones", color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
   cierre_spa: { nombre: "Voucher SPA", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  cierre_spa_agustin: { nombre: "Voucher SPA — Agustín I", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  cierre_spa_cortesia: { nombre: "Voucher SPA — Cortesía", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
 };
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
-const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa"]);
+const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
+
+// cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
+// and the Centro de Comprobantes) uses "events" while pos_configs.area (see
+// pos-configs.tsx) uses the Spanish "eventos" — everything else matches as-is.
+export const CASH_AREA_TO_PV_AREA: Record<string, string> = { events: "eventos" };
 const NON_FISCAL_LABELS: Record<string, string> = {
   ticket: "Ticket — Comprobante interno",
   voucher_justo: "Voucher Justo — Comprobante interno",
-  voucher_pedidos_ya: "Voucher PedidosYa — Comprobante interno",
+  voucher_pedidos_ya: "Voucher Pedidos Ya — Comprobante interno",
+  voucher_room_service: "Room Service — Comprobante interno",
+  voucher_consumo_interno: "Consumo Interno — Comprobante interno",
   cierre_habitacion: "Voucher Habitaciones — Comprobante interno",
   cierre_spa: "Voucher SPA — Comprobante interno",
+  cierre_spa_agustin: "Voucher SPA — Agustín I — Comprobante interno",
+  cierre_spa_cortesia: "Voucher SPA — Cortesía — Comprobante interno",
 };
 
 type AmbienteMode = "ficticio" | "homologacion" | "produccion";
@@ -177,16 +214,43 @@ export default function BillingPage() {
     staleTime: 30_000,
   });
   const [showNC, setShowNC] = useState<number | null>(null);
+  const [showEdit, setShowEdit] = useState<number | null>(null);
+  const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
+  async function retryCenterSettlement(invoiceId: number) {
+    setRetryingCenterInvoiceId(invoiceId);
+    try {
+      await apiRequest("POST", `/api/billing/invoices/${invoiceId}/settle-center`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] }),
+      ]);
+      toast({ title: "Cobro registrado", description: "Caja y Cuenta Corriente quedaron conciliadas con la factura." });
+    } catch (error: any) {
+      toast({ title: "El cobro sigue pendiente", description: parseApiError(error), variant: "destructive" });
+    } finally {
+      setRetryingCenterInvoiceId(null);
+    }
+  }
   const [filtroDesde, setFiltroDesde] = useState(firstOfCurrentMonth());
   const [filtroHasta, setFiltroHasta] = useState(today());
   const [filtroTipo, setFiltroTipo] = useState("");
   const [filtroArea, setFiltroArea] = useState("");
+  const [filtroCliente, setFiltroCliente] = useState("");
+
+  // Debounced: espera a que dejen de escribir para no pegarle a la API en cada tecla.
+  const [debouncedFiltroCliente, setDebouncedFiltroCliente] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedFiltroCliente(filtroCliente), 300);
+    return () => clearTimeout(id);
+  }, [filtroCliente]);
 
   const qp = new URLSearchParams({
     desde: filtroDesde,
     hasta: filtroHasta,
     ...(filtroTipo ? { tipo: filtroTipo } : {}),
     ...(filtroArea ? { area: filtroArea } : {}),
+    ...(debouncedFiltroCliente.trim() ? { cliente: debouncedFiltroCliente.trim() } : {}),
   }).toString();
 
   const { data: invoices = [], isLoading, refetch } = useQuery<any[]>({
@@ -293,15 +357,18 @@ export default function BillingPage() {
                   <SelectItem value="FB">Factura B</SelectItem>
                   <SelectItem value="FT">Factura T</SelectItem>
                   <SelectItem value="FM">Factura MiPyme A</SelectItem>
+                  <SelectItem value="FMB">Factura MiPyme B</SelectItem>
                   <SelectItem value="FC">Factura C</SelectItem>
                   <SelectItem value="NCA">NC A</SelectItem>
                   <SelectItem value="NCB">NC B</SelectItem>
                   <SelectItem value="NCT">NC T</SelectItem>
                   <SelectItem value="NCM">NC MiPyme A</SelectItem>
+                  <SelectItem value="NCMB">NC MiPyme B</SelectItem>
                   <SelectItem value="NDA">ND A</SelectItem>
                   <SelectItem value="NDB">ND B</SelectItem>
                   <SelectItem value="NDT">ND T</SelectItem>
                   <SelectItem value="NDM">ND MiPyme A</SelectItem>
+                  <SelectItem value="NDMB">ND MiPyme B</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filtroArea || "__all__"} onValueChange={(v) => setFiltroArea(v === "__all__" ? "" : v)}>
@@ -314,6 +381,13 @@ export default function BillingPage() {
                   <SelectItem value="eventos">Eventos</SelectItem>
                 </SelectContent>
               </Select>
+              <Input
+                placeholder="Buscar por huésped o empresa..."
+                value={filtroCliente}
+                onChange={e => setFiltroCliente(e.target.value)}
+                className="w-56 text-sm h-8"
+                data-testid="input-filtro-cliente"
+              />
               <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8">
                 <RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualizar
               </Button>
@@ -428,7 +502,9 @@ export default function BillingPage() {
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
                               <td className="px-3 py-2">
-                                {isInvoiceReconciliationPending(f) ? (
+                                {f.center_settlement_status === "pending" ? (
+                                  <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
+                                ) : isInvoiceReconciliationPending(f) ? (
                                   <div>
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
@@ -440,6 +516,8 @@ export default function BillingPage() {
                                   </div>
                                 ) : f.estado === "emitida" || f.estado === "parcial" ? (
                                   <Badge variant="outline" className="text-xs text-green-700 border-green-400 bg-green-50 dark:bg-green-950/20"><CheckCircle2 className="w-3 h-3 mr-1" />Emitida</Badge>
+                                ) : f.estado === "registrada" ? (
+                                  <Badge variant="outline" className="text-xs">Registrada (emitida afuera)</Badge>
                                 ) : (
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>
                                 )}
@@ -447,9 +525,17 @@ export default function BillingPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex gap-1 justify-end">
+                                  {f.center_settlement_status === "pending" && (
+                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
+                                  )}
                                   <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
                                     <Download className="w-3.5 h-3.5" />
                                   </Button>
+                                  {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button
                                       variant="ghost"
@@ -548,6 +634,7 @@ export default function BillingPage() {
       )}
 
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
+      {showEdit !== null && <EditarComprobanteDialog invoiceId={showEdit} onClose={() => setShowEdit(null)} />}
     </div>
   );
 }
@@ -561,6 +648,15 @@ type Item = {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Origen elegido en el catálogo del Centro de Comprobantes. */
+  catalogItem?: { source: "accommodation" | "restaurant" | "spa"; id: string };
+  /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
+   * permite registrar la venta como turno vendido pendiente de agendar. */
+  spaTreatmentId?: string;
+  /** Presente solo si este tratamiento se compra para regalar — crea un
+   * gift voucher "por prestación" vinculado a la venta, a nombre de este
+   * beneficiario. Solo aplica a ítems con spaTreatmentId. */
+  giftBeneficiaryName?: string;
 };
 
 export type EmitirFacturaInitialValues = {
@@ -604,7 +700,39 @@ type GroupPaymentDestinationPreview = {
   available: number;
 };
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey }: {
+/**
+ * Renders EmitirFacturaDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `children` is touched.
+ */
+function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="emitir-factura-embedded">
+        <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded, requireLinkedRecipient = false }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -663,11 +791,24 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   skipReview?: boolean;
   /** Explicit identity for a mounted dialog that can switch between operations. */
   operationKey?: string;
+  /**
+   * When true, render the form content inline (no <Dialog>/<DialogContent> chrome)
+   * so it can be embedded directly inside a host page's own layout — e.g. the
+   * unified Centro de Comprobantes. Same content, same handlers, same fiscal
+   * logic as the modal version; only the outer wrapper changes. The three
+   * secondary confirmation dialogs (showCloseWarning/showRecipientChangeWarning/
+   * showEntityChangeWarning) and the duplicate-amount AlertDialog still render
+   * as real overlays in both modes.
+   */
+  embedded?: boolean;
+  /** Centro de Comprobantes: exigir ficha elegida o Consumidor Final explícito. */
+  requireLinkedRecipient?: boolean;
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
+  const [centerPaymentRows, setCenterPaymentRows] = useState([{ id: 1, method: "efectivo", amount: "" }]);
   const [ccEntityType, setCcEntityType] = useState<"guest" | "company" | "agency">("company");
   const [ccEntityId, setCcEntityId] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
@@ -678,8 +819,19 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [condicionIva, setCondicionIva] = useState("Consumidor Final");
   const [domicilio, setDomicilio] = useState("");
   const [items, setItems] = useState<Item[]>([newItem()]);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  // Buscador de catálogo propio de cada renglón — a diferencia del botón único
+  // "Agregar desde catálogo" (que agrega o completa la primera fila vacía), deja
+  // buscar y cambiar el concepto de una fila puntual sin tener que quitarla y
+  // volver a agregarla desde arriba.
+  const [rowCatalogPickerOpen, setRowCatalogPickerOpen] = useState<number | null>(null);
+  const [rowCatalogSearch, setRowCatalogSearch] = useState("");
+  const [retencionTipo, setRetencionTipo] = useState<"iibb" | "ganancias">("iibb");
+  const [retencionMonto, setRetencionMonto] = useState("");
   // Track the billing entity so we can update its address if the user edits domicilio
   const [selectedEntityInfo, setSelectedEntityInfo] = useState<{ type: "guest" | "company" | "agency"; id: string } | null>(null);
+  const [manualConsumerFinal, setManualConsumerFinal] = useState(false);
   const originalDomicilioRef = useRef<string>("");
   const [puntoVentaNum, setPuntoVentaNum] = useState("");
   const [entitySearch, setEntitySearch] = useState("");
@@ -702,9 +854,61 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const originalRecipientRef = useRef<Record<string, string>>({});
   const saveRecipientOnEmitRef = useRef(false);
   const initializedOperationRef = useRef<string | null>(null);
+  const pvAutoSelectedForRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
+  const { data: guestMatches = [] } = useQuery<any[]>({
+    queryKey: ["/api/guests/search", entitySearch.trim()],
+    queryFn: async () => {
+      const response = await fetch(`/api/guests/search?q=${encodeURIComponent(entitySearch.trim())}`, { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudo buscar en Huéspedes");
+      return response.json();
+    },
+    enabled: open && requireLinkedRecipient && entitySearch.trim().length >= 2,
+  });
+
+  // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
+  // fuentes siempre, sin importar cashArea: una factura de recepción a
+  // menudo también lleva un consumo de restaurant o un tratamiento de spa
+  // (y viceversa), así que restringir por área solo obligaba a cargarlos a
+  // mano. Agrupado por origen para que quede claro de dónde sale cada ítem.
+  const { data: menuItemsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/restaurant/menu/items"],
+    enabled: open,
+  });
+  const { data: spaTreatmentsData = [] } = useQuery<any[]>({
+    queryKey: ["/api/spa/treatments"],
+    enabled: open,
+  });
+  // Los platos tienen un artículo espejo en Inventario; los tratamientos y el
+  // alojamiento no tienen SKU propio. Consultar sólo el código, sin convertir
+  // artículos de stock en nuevos conceptos facturables.
+  const { data: inventoryCatalogData = [] } = useQuery<any[]>({
+    queryKey: ["/api/inventory/items"],
+    enabled: open,
+  });
+  const skuByInventoryId = new Map(inventoryCatalogData.map((item: any) => [String(item.id), String(item.sku || "")]));
+  type CatalogItem = { id: string; source: "accommodation" | "restaurant" | "spa"; descripcion: string; precioUnitario: number; codigo?: string; spaTreatmentId?: string };
+  const catalogGroups: { label: string; options: CatalogItem[] }[] = [
+    { label: "Alojamiento", options: [{ id: "alojamiento", source: "accommodation" as const, descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
+    {
+      label: "Restaurant (Café Justo)",
+      options: menuItemsData
+        .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
+        .map((m: any) => ({ id: m.id, source: "restaurant" as const, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0,
+          codigo: skuByInventoryId.get(String(m.inventoryItemId)) || undefined })),
+    },
+    {
+      label: "Spa",
+      // spaTreatmentId (no solo id, que acá coincide) deja explícito que esta
+      // es la única fuente del catálogo que registra "turno vendido" al elegirse.
+      options: spaTreatmentsData
+        .filter((t: any) => t.isActive !== "false")
+        .map((t: any) => ({ id: t.id, source: "spa" as const, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
+    },
+  ].filter(g => g.options.length > 0);
+  const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
 
   const entityResults: any[] = entitySearch.length >= 2
     ? [
@@ -714,7 +918,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
         const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
         return name.includes(entitySearch.toLowerCase()) || cuitVal.includes(entitySearch.replace(/-/g, ""));
-      }).slice(0, 8)
+      }).slice(0, 8).concat(requireLinkedRecipient ? guestMatches.filter((g: any) => g.active !== false).map((g: any) => ({
+        ...g, _type: "Huésped", razonSocial: `${g.firstName || ""} ${g.lastName || ""}`.trim(),
+        condicionIva: g.vatCondition, domicilio: g.direccion, dni: g.documentNumber,
+      })) : [])
     : [];
 
   const dialogOperationKey = JSON.stringify({
@@ -798,37 +1005,71 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dialogOperationKey]);
 
+  // Pre-select the Punto de Venta for the operation's área (e.g. Recepción)
+  // when there's exactly one active electronic PV configured for it, instead
+  // of always leaving it on the generic "PV por defecto" placeholder. Waits
+  // for posConfigsData to load and never overrides a value already set
+  // (auto or manual) for this same operation.
+  useEffect(() => {
+    if (!open || !cashArea) return;
+    if (pvAutoSelectedForRef.current === dialogOperationKey) return;
+    if (posConfigsData.length === 0) return; // wait for the PV list to load, retry next render
+    // Decide once per operation — resetForm() above always clears
+    // puntoVentaNum first, so this never fights a value it hasn't set itself;
+    // reading puntoVentaNum here would race that same-commit reset.
+    pvAutoSelectedForRef.current = dialogOperationKey;
+    const pvArea = CASH_AREA_TO_PV_AREA[cashArea] ?? cashArea;
+    const matches = posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico" && p.area === pvArea);
+    if (matches.length > 0) {
+      // Varios hoteles tienen más de un PV activo para la misma área (uno
+      // "principal" y otros para casos puntuales, p. ej. Factura T). Ante
+      // esa ambigüedad, siempre se elige el mismo de forma predecible: el de
+      // menor número, en vez de dejarlo sin elegir.
+      const preferred = [...matches].sort((a: any, b: any) => Number(a.numero) - Number(b.numero))[0];
+      setPuntoVentaNum(String(preferred.numero));
+    }
+  }, [open, cashArea, posConfigsData, dialogOperationKey]);
+
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
     const cuitVal = entity.cuilCuit || "";
-    const condVal = entity.condicionIva || (cuitVal ? "Responsable Inscripto" : "Consumidor Final");
+    // Si la ficha no tiene una condición IVA reconocible, no la adivinamos
+    // (antes se asumía "Responsable Inscripto" con CUIT o "Consumidor Final"
+    // sin él, en silencio) — se deja sin elegir y validateForm() bloquea el
+    // envío hasta que alguien la complete a mano.
+    const normalizedCond = normalizeCondicionIvaLabel(entity.condicionIva);
+    const condVal = normalizedCond ?? "";
     const domVal = entity.domicilio || entity.direccion || "";
     setRazonSocial(rs);
     setCuit(cuitVal);
+    setDni(entity.dni || "");
     setCondicionIva(condVal);
     const nextDom = domVal || "";
     setDomicilio(nextDom);
     originalDomicilioRef.current = nextDom;
     // Track the entity so we can update its address if domicilio is edited
-    const eType: "company" | "agency" = entity._type === "Agencia" ? "agency" : "company";
+    const eType: "guest" | "company" | "agency" = entity._type === "Huésped" ? "guest" : entity._type === "Agencia" ? "agency" : "company";
     setSelectedEntityInfo({ type: eType, id: entity.id });
-    if (cuitVal || condVal === "Responsable Inscripto" || condVal === "Exento" || condVal === "Monotributista") {
+    setManualConsumerFinal(false);
+    if (isRiOrExento(condVal) || condVal === "Monotributista") {
       // Responsable Inscripto/Exento may only receive FA/MiPyme A (never FB),
       // regardless of whether CUIT is present yet — a missing CUIT surfaces
       // as a validation error on submit instead of silently switching to an
       // invalid comprobante for this condición.
-      const auto = isRiOrExento(condVal) ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA") : "FB";
+      const auto = isRiOrExento(condVal)
+        ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA")
+        : (tipos.includes("FB") ? "FB" : tipos.includes("FMB") ? "FMB" : "FB");
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
       setTipo(nextTipo);
       recalcForTipo(nextTipo, tipo);
     }
     setEntitySearch("");
     setShowEntityDropdown(false);
-    setFieldErrors({});
+    setFieldErrors(normalizedCond ? {} : { condicionIva: "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir." });
   }
 
   function selectEntity(entity: any) {
-    const entityType = entity._type === "Agencia" ? "agency" : "company";
+    const entityType = entity._type === "Huésped" ? "guest" : entity._type === "Agencia" ? "agency" : "company";
     const isChangingAssociatedRecipient = !!recipientProfile
       && recipientProfile.type !== "guest"
       && (recipientProfile.type !== entityType || recipientProfile.id !== entity.id);
@@ -842,23 +1083,45 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
   function validateForm(): Record<string, string> {
     const errs: Record<string, string> = {};
+    if (requireLinkedRecipient && !selectedEntityInfo && !(manualConsumerFinal && (tipo === "FB" || tipo === "FMB"))) {
+      errs.recipientEntity = "Elegí una ficha de Empresa, Agencia o Huésped; para Factura B también podés usar Consumidor Final.";
+    }
     if (!razonSocial.trim()) errs.razonSocial = "Requerido";
     if (tipo === "FA") {
       const cuitClean = cuit.replace(/-/g, "");
       if (!cuitClean) errs.cuit = "Requerido para Factura A";
       else if (!/^\d{11}$/.test(cuitClean)) errs.cuit = "Debe tener 11 dígitos (ej: 20123456789)";
     }
-    if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
+    if (!condicionIva.trim()) {
+      errs.condicionIva = "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir.";
+    } else if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto o Exento";
-    }
-    if (tipo === "FB" && isRiOrExento(condicionIva)) {
+    } else if ((tipo === "FB" || tipo === "FMB") && isRiOrExento(condicionIva)) {
       errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto o Exento";
     }
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
+      if (requireLinkedRecipient && !it.catalogItem) errs[`catalog_${i}`] = "Elegí el concepto desde el catálogo antes de revisar.";
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
+      if (it.giftBeneficiaryName !== undefined && !it.giftBeneficiaryName.trim()) {
+        errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
+      }
     });
-    if (cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
+    if (requireLinkedRecipient) {
+      const methods = centerPaymentRows.map(row => row.method);
+      const retention = Number(retencionMonto || 0);
+      const defaultAmount = centerPaymentRows.length === 1 ? Math.max(0, totalPreview - retention) : 0;
+      const amounts = centerPaymentRows.map(row => Number(row.amount || defaultAmount));
+      const total = amounts.reduce((sum, amount) => sum + Math.round(amount * 100), Math.round(retention * 100));
+      if (new Set(methods).size !== methods.length || (retencionMonto !== "" && (!/^\d+(?:\.\d{1,2})?$/.test(retencionMonto) || retention < 0)) || amounts.some((amount, idx) => !Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(centerPaymentRows[idx].amount || defaultAmount.toFixed(2)))) {
+        errs.centerPayments = "Ingresá un importe positivo, con dos decimales como máximo, para cada medio sin repetirlo.";
+      } else if (total !== Math.round(totalPreview * 100)) {
+        errs.centerPayments = "La suma de cobros y retenciones debe coincidir con el total del comprobante.";
+      } else if (methods.includes("cuenta_corriente") && !selectedEntityInfo) {
+        errs.centerPayments = "Cuenta Corriente requiere un huésped, empresa o agencia elegido como receptor.";
+      }
+    }
+    if (!requireLinkedRecipient && cashFormaPago === "cuenta_corriente" && (!ccEntityId || !["guest", "company", "agency"].includes(ccEntityType))) {
       errs.ccEntity = `Seleccione ${ccEntityType === "company" ? "una empresa" : ccEntityType === "agency" ? "una agencia" : "un huésped"}`;
     }
     return errs;
@@ -886,33 +1149,78 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }));
   }
 
+  // Shared by updateItem (one field at a time) and addCatalogItem (a whole
+  // item at once) so both stay in sync with the same FA/FC/FB rounding rules.
+  function computeItemTotals(item: Item): Item {
+    const base = item.cantidad * item.precioUnitario;
+    const fa = tipo === "FA";
+    const fc = tipo === "FC";
+    const next = { ...item };
+    if (fc) {
+      // Factura C no discrimina IVA: el importe ingresado es el total final.
+      next.alicuotaIva = "no_gravado";
+      next.subtotalNeto = base; next.subtotal = base;
+    } else if (!fa) {
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    } else {
+      // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
+      if (next.alicuotaIva === "21") { next.subtotalNeto = Number((base / 1.21).toFixed(2)); next.subtotal = base; }
+      else if (next.alicuotaIva === "10.5") { next.subtotalNeto = Number((base / 1.105).toFixed(2)); next.subtotal = base; }
+      else { next.subtotalNeto = base; next.subtotal = base; }
+    }
+    return next;
+  }
+
   function updateItem(idx: number, field: keyof Item, value: any) {
     setItems(prev => {
       const updated = [...prev];
-      const item = { ...updated[idx], [field]: value };
-      const base = item.cantidad * item.precioUnitario;
-      const fa = tipo === "FA";
-      const fc = tipo === "FC";
-      if (fc) {
-        // Factura C no discrimina IVA: el importe ingresado es el total final.
-        item.alicuotaIva = "no_gravado";
-        item.subtotalNeto = base; item.subtotal = base;
-      } else if (!fa) {
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      } else {
-        // FA: el precio ingresado ya incluye IVA → extraer el neto dividiendo (igual que FB)
-        if (item.alicuotaIva === "21") { item.subtotalNeto = Number((base / 1.21).toFixed(2)); item.subtotal = base; }
-        else if (item.alicuotaIva === "10.5") { item.subtotalNeto = Number((base / 1.105).toFixed(2)); item.subtotal = base; }
-        else { item.subtotalNeto = base; item.subtotal = base; }
-      }
-      updated[idx] = item;
+      updated[idx] = computeItemTotals({ ...updated[idx], [field]: value });
       return updated;
     });
   }
 
-  function removeItem(idx: number) { setItems(prev => prev.filter((_, i) => i !== idx)); }
+  // Elegir un ítem del catálogo (alojamiento fijo / carta de restaurant / tratamientos
+  // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
+  // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
+  // elige del catálogo sin haber tocado nada todavía.
+  function addCatalogItem(option: CatalogItem) {
+    const { descripcion, precioUnitario, spaTreatmentId, source, id } = option;
+    const built = computeItemTotals({
+      descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
+      catalogItem: { source, id },
+      alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
+      subtotalNeto: 0, subtotal: 0,
+    });
+    setItems(prev => {
+      const emptyIdx = prev.findIndex(it => !it.descripcion.trim() && it.precioUnitario === 0);
+      if (emptyIdx >= 0) {
+        const updated = [...prev];
+        updated[emptyIdx] = built;
+        return updated;
+      }
+      return [...prev, built];
+    });
+  }
+
+  // Elegir (o cambiar) el concepto de UN renglón puntual desde su propio buscador
+  // inline — a diferencia de addCatalogItem (botón único arriba de la lista, que
+  // siempre completa la primera fila vacía), esto reemplaza exactamente la fila
+  // en la que se hizo clic, sin importar si ya tenía otro concepto cargado.
+  function selectCatalogItemForRow(idx: number, option: CatalogItem) {
+    const { descripcion, precioUnitario, spaTreatmentId, source, id } = option;
+    const built = computeItemTotals({
+      descripcion, cantidad: 1, precioUnitario, spaTreatmentId,
+      catalogItem: { source, id },
+      alicuotaIva: (tipo === "FC" || tipo === "FT") ? "no_gravado" : "21",
+      subtotalNeto: 0, subtotal: 0,
+    });
+    setItems(prev => prev.map((it, i) => i === idx ? built : it));
+    if (fieldErrors[`catalog_${idx}`]) setFieldErrors(p => ({ ...p, [`catalog_${idx}`]: "" }));
+  }
+
+  function removeItem(idx: number) { setItems(prev => prev.length === 1 ? [newItem()] : prev.filter((_, i) => i !== idx)); }
 
   // Mirrors calcularMontos() in server/billing/invoiceService.ts: accumulate the
   // *gross* per-bucket amounts first, then round once at the aggregate level.
@@ -1001,6 +1309,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       });
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
+      if (requireLinkedRecipient && data.cashMovementError) {
+        setEmittedInvoiceData(data);
+        setLinkError(true);
+        toast({ title: "Factura emitida; cobro pendiente", description: data.cashMovementError, variant: "destructive" });
+        return;
+      }
 
       // Persist only changes the operator explicitly confirmed. This keeps the
       // reservation's guest/company/agency profile aligned with the receipt.
@@ -1158,17 +1472,23 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   });
 
   function resetForm() {
-    setTipo("FB"); setRazonSocial(""); setCuit(""); setDni("");
+    // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
+    // locking a single tipo already chosen in its selector) instead of always
+    // forcing FB — FB may not even be an allowed option, which left the
+    // Select with a tipo value that matched no SelectItem (blank dropdown).
+    setTipo(tipos.includes("FB") ? "FB" : tipos[0]); setRazonSocial(""); setCuit(""); setDni("");
     setGuestFirstName(""); setGuestLastName("");
     setCondicionIva("Consumidor Final"); setDomicilio(""); setItems([newItem()]);
-    setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCcEntityType("company"); setCcEntityId("");
+    setPuntoVentaNum(""); setCashFormaPago("efectivo"); setCenterPaymentRows([{ id: 1, method: "efectivo", amount: "" }]); setCcEntityType("company"); setCcEntityId("");
     setEntitySearch(""); setShowEntityDropdown(false); setFieldErrors({});
     setShowConfirm(false); setShowCloseWarning(false); setEmitted(false);
     setShowRecipientChangeWarning(false); setPendingEntity(null); setShowEntityChangeWarning(false);
     setLinkPending(false); setLinkError(false); setLinkRetrying(false); setEmittedInvoiceData(null);
     setGroupRecoveryReady(false);
     setSelectedEntityInfo(null); originalDomicilioRef.current = "";
+    setManualConsumerFinal(false);
     setShowDuplicateAmountConfirm(false); setDuplicateAmountWarnings([]); setDuplicateAmountAcknowledged(false);
+    setRetencionTipo("iibb"); setRetencionMonto("");
   }
 
   const isFA = tipo === "FA" || tipo === "FM";
@@ -1365,9 +1685,16 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     const groupSourceAmounts = resolvedGroupId
       ? allocateGroupInvoiceSources(groupInvoiceSources || [], grossItemsTotal(items))
       : undefined;
+    const centerRetention = Number(retencionMonto || 0);
+    const centerPaymentDetail = requireLinkedRecipient ? [
+      ...centerPaymentRows.map(row => ({ method: row.method, amount: Number(row.amount || (totalPreview - centerRetention).toFixed(2)) })),
+      ...(centerRetention > 0 ? [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: centerRetention }] : []),
+    ] : [];
     mutation.mutate({
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
+      ...(requireLinkedRecipient ? { recipientMode: "centro_comprobantes", recipientConsumerFinal: manualConsumerFinal } : {}),
+      ...(requireLinkedRecipient && selectedEntityInfo ? { recipientEntity: selectedEntityInfo } : {}),
       items,
       ...(paymentId ? { paymentId } : {}),
       ...(reservationId ? { reservaId: reservationId } : {}),
@@ -1386,11 +1713,24 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       ...((cashArea || showPaymentMethod || cashFormaPago === "cuenta_corriente")
         ? {
             ...(cashArea ? { cashArea } : {}),
-            cashFormaPago,
+            cashFormaPago: requireLinkedRecipient ? (centerPaymentDetail.length === 1 ? centerPaymentDetail[0].method : "pago_dividido") : cashFormaPago,
               ...(cashArea ? {
-              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}`,
+              cashLabel: `${TIPO_LABELS[tipo]?.nombre ?? tipo} — ${razonSocial}${
+                parseFloat(retencionMonto) > 0
+                  ? ` — Ret. ${retencionTipo === "iibb" ? "IIBB" : "Ganancias"} $${fPeso(retencionMonto)}`
+                  : ""
+              }`,
             } : {}),
-              ...(cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              ...(!requireLinkedRecipient && cashFormaPago === "cuenta_corriente" ? { ccEntityType, ccEntityId } : {}),
+              ...(requireLinkedRecipient ? { cashFormaPagoDetalle: centerPaymentDetail } : {}),
+               // An existing reservation advance has already been collected.
+               // Its invoice must describe that payment in full, not collect
+               // it again. The server requires detail summing to the invoice.
+               ...(!requireLinkedRecipient && reservationId && paymentId
+                 ? { cashFormaPagoDetalle: [{ method: cashFormaPago, amount: grossItemsTotal(items) }] }
+                 : !requireLinkedRecipient && parseFloat(retencionMonto) > 0
+                   ? { cashFormaPagoDetalle: [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: parseFloat(retencionMonto) }] }
+                   : {}),
           }
         : {}),
     });
@@ -1415,9 +1755,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
   return (
     <>
-    <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>{linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}</DialogTitle></DialogHeader>
+    <FacturaFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={o => { if (!o) handleClose(); }}
+      title={linkPending ? ((groupId || groupPaymentGroupId) ? "Vinculando factura al folio del grupo…" : "Vinculando factura al pago…") : linkError ? "Factura emitida — vínculo pendiente" : showConfirm ? "Revisar y confirmar" : "Emitir comprobante"}
+    >
 
         {linkPending ? (
           <div className="space-y-4 py-2">
@@ -1441,6 +1784,25 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <p className="text-blue-700 dark:text-blue-400 text-xs mt-0.5">Por favor espere. No cierre este diálogo.</p>
               </div>
             </div>
+          </div>
+        ) : linkError && emittedInvoiceData && requireLinkedRecipient ? (
+          <div className="space-y-3 p-3" data-testid="center-settlement-pending">
+            <p className="font-semibold text-amber-700">Factura emitida; registro del cobro pendiente</p>
+            <p className="text-sm">La factura {emittedInvoiceData.tipo_comprobante} {padNum(emittedInvoiceData.punto_venta, 4)}-{padNum(emittedInvoiceData.numero, 8)} ya existe. No vuelvas a emitirla. Podés reintentar el registro de Caja y Cuenta Corriente sin pedir otro CAE.</p>
+            <Button disabled={linkRetrying} onClick={async () => {
+              setLinkRetrying(true);
+              try {
+                await apiRequest("POST", `/api/billing/invoices/${emittedInvoiceData.id}/settle-center`);
+                queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+                toast({ title: "Cobro registrado", description: "La factura y sus movimientos ya están conciliados." });
+                onClose(); resetForm();
+              } catch (error: any) {
+                toast({ title: "Cobro todavía pendiente", description: parseApiError(error), variant: "destructive" });
+              } finally {
+                setLinkRetrying(false);
+              }
+            }} data-testid="center-retry-settlement">{linkRetrying ? "Reintentando…" : "Reintentar registro del cobro"}</Button>
           </div>
         ) : linkError && emittedInvoiceData ? (
           <div className="space-y-4 py-2">
@@ -1602,7 +1964,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               )}
               {(cashArea || showPaymentMethod) && (
                 <div className="text-xs text-muted-foreground pt-1 border-t">
-                  Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}
+                  {requireLinkedRecipient ? <>Cobro: {centerPaymentRows.map(row => `${row.method.replaceAll("_", " ")} $${fPeso(Number(row.amount || (totalPreview - Number(retencionMonto || 0)).toFixed(2)))}`).join(" · ")}{Number(retencionMonto) > 0 ? ` · Retención $${fPeso(retencionMonto)}` : ""}</> : <>Forma de pago: {cashFormaPago === "efectivo" ? "Efectivo" : cashFormaPago === "tarjeta_credito" ? "Tarjeta Crédito" : cashFormaPago === "tarjeta_debito" ? "Tarjeta Débito" : cashFormaPago === "transferencia" ? "Transferencia" : cashFormaPago === "mercadopago" ? "MercadoPago" : cashFormaPago === "cuenta_corriente" ? "Cuenta Corriente" : cashFormaPago}</>}
                 </div>
               )}
             </div>
@@ -1645,6 +2007,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         ) : (
         <>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
         <div className="space-y-1">
           <Label>Tipo de comprobante</Label>
           <Select value={tipo} onValueChange={v => {
@@ -1654,7 +2017,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               // clobbered into Responsable Inscripto); only correct it when
               // the current value would be an invalid pairing.
               if (!isRiOrExento(condicionIva)) setCondicionIva("Responsable Inscripto");
-            } else if (v === "FB" && isRiOrExento(condicionIva)) {
+            } else if ((v === "FB" || v === "FMB") && isRiOrExento(condicionIva)) {
               setCondicionIva("Consumidor Final");
             } else if (v === "FC" || v === "FT") {
               setCondicionIva("Consumidor Final");
@@ -1666,6 +2029,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               {tipos.includes("FA") && <SelectItem value="FA">Factura A</SelectItem>}
               {tipos.includes("FB") && <SelectItem value="FB">Factura B</SelectItem>}
               {tipos.includes("FM") && <SelectItem value="FM">Factura MiPyme A</SelectItem>}
+              {tipos.includes("FMB") && <SelectItem value="FMB">Factura MiPyme B</SelectItem>}
               {tipos.filter(t => NON_FISCAL_TIPOS_SET.has(t)).map(t => (
                 <SelectItem key={t} value={t}>{NON_FISCAL_LABELS[t] ?? t}</SelectItem>
               ))}
@@ -1697,7 +2061,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           )}
         </div>
 
-        {(cashArea || showPaymentMethod) && (
+        {!requireLinkedRecipient && (cashArea || showPaymentMethod) && (
           <div className="space-y-1">
             <Label>Forma de pago</Label>
             <Select disabled={!!paymentId} value={cashFormaPago} onValueChange={v => { setCashFormaPago(v); if (v !== "cuenta_corriente") setCcEntityId(""); }}>
@@ -1749,6 +2113,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
           </div>
         )}
+        </div>
 
         <Separator />
 
@@ -1756,14 +2121,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           <Label className="text-sm font-semibold">Datos del receptor</Label>
 
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground flex items-center gap-1"><Search className="w-3 h-3" /> Buscar empresa/agencia para autocompletar</Label>
+            <Label className="text-xs text-muted-foreground flex items-center gap-1"><Search className="w-3 h-3" /> Buscar empresa, agencia o huésped para autocompletar</Label>
             <div className="relative">
               <Input
                 value={entitySearch}
                 onChange={e => { setEntitySearch(e.target.value); setShowEntityDropdown(true); }}
                 onFocus={() => setShowEntityDropdown(true)}
                 onBlur={() => setTimeout(() => setShowEntityDropdown(false), 200)}
-                placeholder="Nombre o CUIT de empresa/agencia..."
+                placeholder="Nombre, CUIT o documento..."
                 className="text-sm"
                 data-testid="input-entity-search"
               />
@@ -1771,7 +2136,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="absolute z-50 w-full bg-popover border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
                   {entityResults.map((e: any) => (
                     <button
-                      key={e.id}
+                      key={`${e._type}-${e.id}`}
                       type="button"
                       className="w-full text-left px-3 py-2 text-sm hover:bg-muted cursor-pointer flex items-center justify-between"
                       onMouseDown={() => selectEntity(e)}
@@ -1780,7 +2145,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                         <span className="font-medium">{e.razonSocial || e.nombreFantasia}</span>
                         <span className="text-muted-foreground text-xs ml-2">{e._type}</span>
                       </span>
-                      {e.cuilCuit && <span className="text-muted-foreground text-xs">{e.cuilCuit}</span>}
+                      {(e.cuilCuit || e.dni) && <span className="text-muted-foreground text-xs">{e.cuilCuit || e.dni}</span>}
                     </button>
                   ))}
                 </div>
@@ -1791,6 +2156,20 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 </div>
               )}
             </div>
+            {requireLinkedRecipient && (
+              <div className="space-y-1">
+                {(tipo === "FB" || tipo === "FMB") && (
+                  <Button type="button" variant="outline" size="sm" onClick={() => {
+                    setManualConsumerFinal(true); setSelectedEntityInfo(null);
+                    setRazonSocial("Consumidor Final"); setCuit(""); setDni(""); setDomicilio("");
+                    setCondicionIva("Consumidor Final"); setFieldErrors({});
+                    setEntitySearch(""); setShowEntityDropdown(false);
+                  }} data-testid="button-consumidor-final">Usar Consumidor Final</Button>
+                )}
+                {selectedEntityInfo && <p className="text-xs text-muted-foreground" data-testid="recipient-linked">Ficha vinculada: {selectedEntityInfo.type === "guest" ? "Huésped" : selectedEntityInfo.type === "company" ? "Empresa" : "Agencia"}</p>}
+                {fieldErrors.recipientEntity && <p className="text-xs text-red-500" data-testid="recipient-entity-error">{fieldErrors.recipientEntity}</p>}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1802,23 +2181,23 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   <Input value={guestFirstName} onChange={e => { const value = e.target.value; setGuestFirstName(value); setRazonSocial(`${guestLastName} ${value}`.trim()); }} placeholder="Nombre" data-testid="input-guest-first-name" />
                 </div>
               ) : (
-                <Input value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
+                <Input readOnly={requireLinkedRecipient && (!!selectedEntityInfo || manualConsumerFinal)} value={razonSocial} onChange={e => { setRazonSocial(e.target.value); if (fieldErrors.razonSocial) setFieldErrors(p => ({ ...p, razonSocial: "" })); }} placeholder="EMPRESA S.A." data-testid="input-razon-social" className={fieldErrors.razonSocial ? "border-red-500" : ""} />
               )}
               {fieldErrors.razonSocial && <p className="text-xs text-red-500">{fieldErrors.razonSocial}</p>}
             </div>
             {isFA ? (
               <div className="space-y-1">
                 <Label className="text-xs">CUIT *</Label>
-                <Input value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
+                <Input readOnly={requireLinkedRecipient && !!selectedEntityInfo} value={cuit} onChange={e => { const d = e.target.value.replace(/\D/g, "").slice(0, 11); const f = d.length <= 2 ? d : d.length <= 10 ? `${d.slice(0,2)}-${d.slice(2)}` : `${d.slice(0,2)}-${d.slice(2,10)}-${d[10]}`; setCuit(f); if (fieldErrors.cuit) setFieldErrors(p => ({ ...p, cuit: "" })); }} placeholder="XX-XXXXXXXX-X" data-testid="input-cuit" className={fieldErrors.cuit ? "border-red-500" : ""} />
                 {fieldErrors.cuit && <p className="text-xs text-red-500">{fieldErrors.cuit}</p>}
                 {initialValues?.documentType && dni && <p className="text-[11px] text-muted-foreground">{initialValues.documentType}: {dni}</p>}
               </div>
             ) : (
-              <div className="space-y-1"><Label className="text-xs">{initialValues?.documentType || "DNI"} (opcional)</Label><Input value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
+              <div className="space-y-1"><Label className="text-xs">{initialValues?.documentType || "DNI"} (opcional)</Label><Input readOnly={requireLinkedRecipient && !!selectedEntityInfo} value={dni} onChange={e => setDni(e.target.value)} placeholder="00000000" data-testid="input-dni" /></div>
             )}
             <div className="space-y-1">
               <Label className="text-xs">Condición IVA</Label>
-              {lockCondicionIva ? (
+              {lockCondicionIva || (requireLinkedRecipient && !!selectedEntityInfo && !!condicionIva) ? (
                 <div className="h-9 flex items-center px-3 border rounded-md bg-muted/30 text-sm text-muted-foreground">{condicionIva}</div>
               ) : (
                 <Select value={condicionIva} onValueChange={v => {
@@ -1828,9 +2207,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   // current one invalid — same strict split as the tipo
                   // selector above, applied in the other direction.
                   const nowRiExento = isRiOrExento(v);
-                  if (!nowRiExento && (tipo === "FA" || tipo === "FM") && tipos.includes("FB")) {
-                    const prevTipo = tipo; setTipo("FB"); recalcForTipo("FB", prevTipo);
-                  } else if (nowRiExento && tipo === "FB") {
+                  if (!nowRiExento && (tipo === "FA" || tipo === "FM") && (tipos.includes("FB") || tipos.includes("FMB"))) {
+                    const next = tipos.includes("FB") ? "FB" : "FMB";
+                    const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo);
+                  } else if (nowRiExento && (tipo === "FB" || tipo === "FMB")) {
                     const next = tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : tipo;
                     if (next !== tipo) { const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo); }
                   }
@@ -1860,7 +2240,62 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
-             {!hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            <div className="flex gap-2">
+              {!hideAddItems && !lockItems && catalogOptions.length > 0 && (
+                <Popover open={catalogPickerOpen} onOpenChange={(o) => { setCatalogPickerOpen(o); if (!o) setCatalogSearch(""); }}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" data-testid="btn-add-item-from-catalog">
+                      <BookOpen className="w-3.5 h-3.5 mr-1" /> Agregar desde catálogo
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="end">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Buscar por nombre o código..."
+                        value={catalogSearch}
+                        onValueChange={setCatalogSearch}
+                        data-testid="input-catalog-search"
+                      />
+                      <CommandList>
+                        <CommandEmpty>Sin resultados.</CommandEmpty>
+                        {catalogGroups.map(group => {
+                          const term = catalogSearch.trim().toLowerCase();
+                          const matches = term
+                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
+                            : group.options;
+                          if (matches.length === 0) return null;
+                          return (
+                            <CommandGroup key={group.label} heading={group.label}>
+                              {matches.slice(0, 50).map(o => (
+                                <CommandItem
+                                  key={o.id}
+                                  value={o.id}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onSelect={() => {
+                                    addCatalogItem(o);
+                                    setCatalogPickerOpen(false);
+                                    setCatalogSearch("");
+                                  }}
+                                  data-testid={`catalog-item-${o.id}`}
+                                >
+                                  <span className="min-w-0 flex-1 break-words">{o.descripcion}
+                                    {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
+                                  </span>
+                                  {o.precioUnitario > 0 && (
+                                    <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                  )}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          );
+                        })}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              )}
+              {!requireLinkedRecipient && !hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
+            </div>
           </div>
           <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
@@ -1869,8 +2304,70 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6 space-y-1">
                     <Label className="text-xs">Descripción *</Label>
-                      <Input data-testid={`item-description-${idx}`} disabled={false} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder="Hospedaje habitación..." className={fieldErrors[`desc_${idx}`] ? "border-red-500" : ""} />
+                    {requireLinkedRecipient && !lockItems && catalogOptions.length > 0 ? (
+                      <Popover open={rowCatalogPickerOpen === idx} onOpenChange={o => { setRowCatalogPickerOpen(o ? idx : null); if (!o) setRowCatalogSearch(""); }}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            className={`w-full justify-between font-normal h-9 text-sm ${fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""}`}
+                            data-testid={`item-description-${idx}`}
+                          >
+                            <span className={`truncate ${item.descripcion ? "" : "text-muted-foreground"}`}>{item.descripcion || "Elegí un concepto del catálogo"}</span>
+                            <Search className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="start">
+                          <Command shouldFilter={false}>
+                            <CommandInput
+                              placeholder="Buscar por nombre o código..."
+                              value={rowCatalogSearch}
+                              onValueChange={setRowCatalogSearch}
+                              data-testid={`input-item-catalog-search-${idx}`}
+                            />
+                            <CommandList>
+                              <CommandEmpty>Sin resultados.</CommandEmpty>
+                              {catalogGroups.map(group => {
+                                const term = rowCatalogSearch.trim().toLowerCase();
+                                const matches = term
+                                  ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
+                                  : group.options;
+                                if (matches.length === 0) return null;
+                                return (
+                                  <CommandGroup key={group.label} heading={group.label}>
+                                    {matches.slice(0, 50).map(o => (
+                                      <CommandItem
+                                        key={o.id}
+                                        value={o.id}
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onSelect={() => {
+                                          selectCatalogItemForRow(idx, o);
+                                          setRowCatalogPickerOpen(null);
+                                          setRowCatalogSearch("");
+                                        }}
+                                        data-testid={`item-catalog-option-${idx}-${o.id}`}
+                                      >
+                                        <span className="min-w-0 flex-1 break-words">{o.descripcion}
+                                          {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
+                                        </span>
+                                        {o.precioUnitario > 0 && (
+                                          <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
+                                        )}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                );
+                              })}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    ) : (
+                      <Input data-testid={`item-description-${idx}`} readOnly={requireLinkedRecipient} value={item.descripcion} onChange={e => { updateItem(idx, "descripcion", e.target.value); if (fieldErrors[`desc_${idx}`]) setFieldErrors(p => ({ ...p, [`desc_${idx}`]: "" })); }} placeholder={requireLinkedRecipient ? "Elegí un concepto del catálogo" : "Hospedaje habitación..."} className={fieldErrors[`desc_${idx}`] || fieldErrors[`catalog_${idx}`] ? "border-red-500" : ""} />
+                    )}
                     {fieldErrors[`desc_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`desc_${idx}`]}</p>}
+                    {fieldErrors[`catalog_${idx}`] && <p className="text-xs text-red-500" data-testid={`catalog-error-${idx}`}>{fieldErrors[`catalog_${idx}`]}</p>}
                   </div>
                    <div className="col-span-2 space-y-1"><Label className="text-xs">Cant.</Label><Input data-testid={`item-quantity-${idx}`} disabled={lockItems} type="number" min="1" value={item.cantidad} onChange={e => updateItem(idx, "cantidad", parseFloat(e.target.value) || 1)} /></div>
                   <div className="col-span-2 space-y-1">
@@ -1895,6 +2392,31 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                     )}
                   </div>
                 </div>
+                {item.spaTreatmentId && (
+                  <div className="space-y-1.5 border-t pt-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`item-is-gift-${idx}`}
+                        data-testid={`checkbox-item-is-gift-${idx}`}
+                        checked={item.giftBeneficiaryName !== undefined}
+                        onCheckedChange={(checked) => updateItem(idx, "giftBeneficiaryName", checked ? "" : undefined)}
+                      />
+                      <Label htmlFor={`item-is-gift-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
+                        <Gift className="w-3.5 h-3.5" /> Es un regalo — genera un voucher por prestación
+                      </Label>
+                    </div>
+                    {item.giftBeneficiaryName !== undefined && (
+                      <Input
+                        data-testid={`item-gift-beneficiary-${idx}`}
+                        value={item.giftBeneficiaryName}
+                        onChange={e => updateItem(idx, "giftBeneficiaryName", e.target.value)}
+                        placeholder="Nombre del beneficiario"
+                        className={fieldErrors[`gift_beneficiary_${idx}`] ? "border-red-500" : ""}
+                      />
+                    )}
+                    {fieldErrors[`gift_beneficiary_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`gift_beneficiary_${idx}`]}</p>}
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">
                     {isFA
@@ -1903,12 +2425,94 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                       ? `Total (sin IVA): $${fPeso(item.subtotal)}`
                       : `Total con IVA: $${fPeso(item.subtotal)} (neto: $${fPeso(item.subtotalNeto)})`}
                   </span>
-                   {!lockItems && items.length > 1 && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
+                   {!lockItems && (items.length > 1 || (requireLinkedRecipient && !!item.catalogItem)) && <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 text-xs" onClick={() => removeItem(idx)}>Quitar</Button>}
                 </div>
               </div>
             ))}
           </div>
         </div>
+
+        {requireLinkedRecipient && (
+          <div className="space-y-3 border rounded-lg p-3" data-testid="center-payment-split">
+            <div className="flex justify-between items-center">
+              <Label className="font-semibold">Formas de cobro</Label>
+              <span className="text-sm font-semibold">Total: ${fPeso(totalPreview)}</span>
+            </div>
+            {centerPaymentRows.map((row, index) => (
+              <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                <Select value={row.method} onValueChange={method => setCenterPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, method } : r))}>
+                  <SelectTrigger className="col-span-6" data-testid={`center-method-${index}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {([
+                      ["efectivo", "Efectivo"], ["tarjeta_debito", "Tarjeta Débito"], ["tarjeta_credito", "Tarjeta Crédito"],
+                      ["transferencia", "Transferencia"], ["mercadopago", "MercadoPago"], ["cuenta_corriente", "Cuenta Corriente"],
+                    ] as const).map(([method, label]) => (
+                      <SelectItem key={method} value={method} disabled={centerPaymentRows.some(other => other.id !== row.id && other.method === method) || (method === "cuenta_corriente" && !selectedEntityInfo)}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input className="col-span-5" type="number" step="0.01" min="0" value={row.amount}
+                  onChange={e => setCenterPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, amount: e.target.value } : r))}
+                  placeholder={centerPaymentRows.length === 1 ? `Total ${fPeso(Math.max(0, totalPreview - Number(retencionMonto || 0)))}` : "Importe"}
+                  data-testid={`center-amount-${index}`} />
+                <Button type="button" variant="ghost" size="icon" className="col-span-1" disabled={centerPaymentRows.length === 1}
+                  onClick={() => setCenterPaymentRows(rows => rows.filter(r => r.id !== row.id))}>×</Button>
+              </div>
+            ))}
+            <Button type="button" size="sm" variant="outline" disabled={centerPaymentRows.length >= (selectedEntityInfo ? 6 : 5)} onClick={() => setCenterPaymentRows(rows => [
+              ...rows.map(row => row.amount ? row : { ...row, amount: Math.max(0, totalPreview - Number(retencionMonto || 0)).toFixed(2) }),
+              { id: Math.max(...rows.map(row => row.id)) + 1, method: ["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago", "cuenta_corriente"].find(method => !rows.some(row => row.method === method) && (method !== "cuenta_corriente" || selectedEntityInfo)) || "efectivo", amount: "" },
+            ])} data-testid="center-add-payment">Agregar forma de cobro</Button>
+            {centerPaymentRows.length === 1 && !centerPaymentRows[0].amount && <p className="text-xs text-muted-foreground">Si usás un solo medio, se toma el importe restante hasta completar el total.</p>}
+            {centerPaymentRows.some(row => row.method === "cuenta_corriente") && <p className="text-xs text-muted-foreground">Solo el importe indicado como Cuenta Corriente se cargará como deuda a la ficha del receptor.</p>}
+            {fieldErrors.centerPayments && <p className="text-xs text-red-500" data-testid="center-payment-error">{fieldErrors.centerPayments}</p>}
+          </div>
+        )}
+
+        {(cashArea || showPaymentMethod) && (requireLinkedRecipient || cashFormaPago !== "cuenta_corriente") && (
+          <div className="space-y-1">
+            <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-amber-800 dark:text-amber-300">Retención impositiva</span>
+                {parseFloat(retencionMonto) > 0 && (
+                  <Button
+                    type="button" variant="ghost" size="sm" className="h-5 w-5 p-0 text-amber-700"
+                    onClick={() => setRetencionMonto("")}
+                    data-testid="btn-remove-retencion"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs mb-1 block">Tipo</Label>
+                  <Select value={retencionTipo} onValueChange={v => setRetencionTipo(v as "iibb" | "ganancias")}>
+                    <SelectTrigger className="h-7 text-xs" data-testid="select-retencion-tipo"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="iibb">IIBB (Ingresos Brutos)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">Monto retenido</Label>
+                  <Input
+                    type="number" step="0.01" min="0" value={retencionMonto}
+                    onChange={e => setRetencionMonto(e.target.value)}
+                    placeholder="0.00" className="h-7 text-xs"
+                    data-testid="input-retencion-monto"
+                  />
+                </div>
+              </div>
+              {parseFloat(retencionMonto) > 0 && (
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  Ret. {retencionTipo === "iibb" ? "IIBB" : "Ganancias"} ${fPeso(retencionMonto)} — se registra como referencia junto al cobro, no cambia el total facturado.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
           {isFC ? (
@@ -1932,8 +2536,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         </DialogFooter>
         </>
         )}
-      </DialogContent>
-    </Dialog>
+      </FacturaFormShell>
 
     <Dialog open={showCloseWarning} onOpenChange={o => { if (!o) setShowCloseWarning(false); }}>
       <DialogContent className="max-w-sm">
@@ -2033,6 +2636,12 @@ function parseAdminNcJson(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try { return JSON.parse(value); } catch { return null; }
 }
+
+const NC_PAYMENT_METHOD_LABELS: Record<string, string> = {
+  efectivo: "Efectivo", tarjeta_debito: "Tarjeta Débito", tarjeta_credito: "Tarjeta Crédito",
+  transferencia: "Transferencia", mercadopago: "MercadoPago", cuenta_corriente: "Cuenta Corriente",
+  retencion_iibb: "Retención IIBB", retencion_ganancias: "Retención Ganancias",
+};
 
 export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId: number; onClose: () => void; onSuccess?: (ncData: any) => void }) {
   const { toast } = useToast();
@@ -2195,7 +2804,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
     );
   }
 
-  const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A" };
+  const tipoNC: Record<string, string> = { FA: "Nota de Crédito A", FT: "Nota de Crédito T", FM: "Nota de Crédito MiPyme A", FMB: "Nota de Crédito MiPyme B" };
   const tipoNCLabel = tipoNC[invoice.tipo_comprobante] ?? "Nota de Crédito B";
   const totalOriginal = parseFloat(invoice.monto_total) || 0;
   const saldoPendiente = Math.max(0, totalOriginal - (parseFloat(invoice.monto_acreditado || "0") || 0));
@@ -2232,7 +2841,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-md max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+      <DialogContent className="max-w-2xl max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4"><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-3">
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
@@ -2253,11 +2862,24 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
               <div className="text-muted-foreground">Heredado y bloqueado</div>
             </div>
             <div className="rounded border bg-muted/20 p-2">
-              <div className="text-muted-foreground">Forma de pago</div>
-              <div className="font-medium">{invoice.cash_forma_pago || "No informada"}</div>
+              <div className="text-muted-foreground">Cómo se cobró</div>
+              {Array.isArray(invoice.cash_forma_pago_detalle) && invoice.cash_forma_pago_detalle.length > 0 ? (
+                <div className="font-medium space-y-0.5">
+                  {invoice.cash_forma_pago_detalle.map((row: { method: string; amount: number }, i: number) => (
+                    <div key={i}>{NC_PAYMENT_METHOD_LABELS[row.method] ?? row.method}: ${fPeso(row.amount)}</div>
+                  ))}
+                </div>
+              ) : (
+                <div className="font-medium">{invoice.cash_forma_pago || "No informada"}</div>
+              )}
               <div className="text-muted-foreground">Heredada y bloqueada</div>
             </div>
           </div>
+          {Array.isArray(invoice.cash_forma_pago_detalle) && invoice.cash_forma_pago_detalle.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-2.5 text-xs text-amber-800 dark:text-amber-200" data-testid="nc-payment-untouched-warning">
+              Esta Nota de Crédito no modifica los cobros de la factura original ni el saldo de Cuenta Corriente. Si corresponde reintegrar dinero o ajustar un saldo, hacelo como una operación aparte.
+            </div>
+          )}
           {isSourceMappedInvoice ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -2278,9 +2900,9 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
                   </Button>
                 </div>
               ) : (
-                <div className="rounded-md border divide-y max-h-48 overflow-y-auto">
+                <div className="rounded-md border divide-y max-h-80 overflow-y-auto">
                   {ncItems.map(item => (
-                    <div key={item.sourceId} className="flex items-center gap-2 p-2.5">
+                    <div key={item.sourceId} className={`flex items-center gap-2 p-2.5 ${item.selected ? "bg-orange-50 dark:bg-orange-950/20" : ""}`}>
                       <input
                         type="checkbox"
                         checked={item.selected}
@@ -2329,19 +2951,331 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
           )}
           <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
             {isSourceMappedInvoice
-              ? `Se emitirá una ${tipoNC} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
+              ? `Se emitirá una ${tipoNCLabel} por $${fPeso(montoNC)} con el concepto seleccionado. Receptor, punto de venta y forma de pago se heredan de la factura original.`
               : modoParcial
-                ? `Se emitirá una ${tipoNC} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
-                : `Se emitirá una ${tipoNC} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
+                ? `Se emitirá una ${tipoNCLabel} parcial por $${fPeso(montoNC)}. La factura original permanece vigente (no se anula).`
+                : `Se emitirá una ${tipoNCLabel} por el mismo importe que anula la factura original. La factura original quedará marcada como anulada.`}
           </div>
           <div className="space-y-1"><Label>Motivo *</Label><Textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Error en facturación, devolución de servicio..." rows={2} /></div>
         </div>
         <DialogFooter className="shrink-0 border-t px-6 py-4">
           <Button variant="outline" onClick={onClose} data-testid="button-nc-cancel">Cancelar</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending || montoInvalido} className="bg-orange-600 hover:bg-orange-700" data-testid="btn-nc-confirmar">
-            {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNC}`}
+            {mutation.isPending ? "Emitiendo NC..." : `Emitir ${tipoNCLabel}`}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Editar un comprobante ya emitido ──────────────────────────────────────────
+// Alcance acotado a propósito (ver PATCH /api/billing/invoices/:id en
+// server/billing/routes.ts): un comprobante ARCA cobrado desde el Centro de
+// Comprobantes solo permite corregir la forma de pago (revirtiendo y
+// rehaciendo Caja/Cta Cte reales); uno "registrado" (cargado a mano) también
+// solo la forma de pago, pero puramente informativa; un voucher no fiscal
+// solo permite corregir los datos del cliente. Las NC/ND nunca se editan.
+const EDIT_PAYMENT_METHODS = [
+  ["efectivo", "Efectivo"], ["tarjeta_debito", "Tarjeta Débito"], ["tarjeta_credito", "Tarjeta Crédito"],
+  ["transferencia", "Transferencia"], ["mercadopago", "MercadoPago"], ["cuenta_corriente", "Cuenta Corriente"],
+] as const;
+
+export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
+  const { toast } = useToast();
+  const { data: invoice } = useQuery<any>({
+    queryKey: ["/api/billing/invoices", invoiceId],
+    queryFn: () => fetch(`/api/billing/invoices/${invoiceId}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!invoiceId,
+  });
+
+  const isNonFiscal = invoice ? NON_FISCAL_TIPOS_SET.has(invoice.tipo_comprobante) : false;
+  const isRegistrada = invoice?.estado === "registrada";
+  const isCentro = !!invoice?.center_settlement_area;
+  // Factura de Recepción (reserva) cobrada con un único medio real de Caja —
+  // no pasó por el Centro de Comprobantes. Alcance acotado a propósito (ver
+  // editReservationInvoiceCashMethod): no cubre Cuenta Corriente todavía.
+  const isReservaCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !!invoice.reserva_id;
+  // Pedido de Restaurante cobrado con un único medio real de Caja — mismo
+  // alcance acotado que arriba (ver editRestaurantInvoiceCashMethod).
+  const isRestaurantCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !!invoice.restaurant_order_id;
+  // Factura de Evento con un único pago activo, con un medio real de Caja —
+  // mismo alcance acotado (ver editEventInvoiceCashMethod). El vínculo lo da
+  // el join del propio GET (events.invoice_id), no una columna en la factura.
+  const isEventCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !!invoice.event_id;
+  // Factura de SPA (siempre un único pago real, por diseño de link-invoice)
+  // — mismo alcance acotado (ver editSpaInvoiceCashMethod).
+  const isSpaCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash && !!invoice.spa_account_id;
+  // Factura de Grupo con un único método real de Caja, sin retención — mismo
+  // alcance acotado (ver editGroupInvoiceCashMethod). Grupos no tiene folio.
+  const isGroupCash = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash && !isSpaCash && !!invoice.group_payment_id;
+  const isBloqueado = invoice && !isNonFiscal && !isRegistrada && !isCentro && !isReservaCash && !isRestaurantCash && !isEventCash && !isSpaCash && !isGroupCash;
+
+  const [razonSocial, setRazonSocial] = useState("");
+  const [cuit, setCuit] = useState("");
+  const [dni, setDni] = useState("");
+  const [condicionIva, setCondicionIva] = useState("Consumidor Final");
+  const [domicilio, setDomicilio] = useState("");
+  const [registradaMethod, setRegistradaMethod] = useState("efectivo");
+  const [reservaMethod, setReservaMethod] = useState("efectivo");
+  const [restaurantMethod, setRestaurantMethod] = useState("efectivo");
+  const [eventMethod, setEventMethod] = useState("efectivo");
+  const [spaMethod, setSpaMethod] = useState("efectivo");
+  const [groupMethod, setGroupMethod] = useState("efectivo");
+  const [paymentRows, setPaymentRows] = useState<{ id: number; method: string; amount: string }[]>([{ id: 1, method: "efectivo", amount: "" }]);
+
+  useEffect(() => {
+    if (!invoice) return;
+    setRazonSocial(invoice.cliente_razon_social || "");
+    setCuit(invoice.cliente_cuit || "");
+    setDni(invoice.cliente_dni || "");
+    setCondicionIva(invoice.cliente_condicion_iva || "Consumidor Final");
+    setDomicilio(invoice.cliente_domicilio || "");
+    setRegistradaMethod(invoice.cash_forma_pago || "efectivo");
+    setReservaMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
+    setRestaurantMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
+    setEventMethod(invoice.event_payment_method || (invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo"));
+    setSpaMethod(invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo");
+    setGroupMethod(invoice.group_payment_method || (invoice.cash_forma_pago && invoice.cash_forma_pago !== "cuenta_corriente" ? invoice.cash_forma_pago : "efectivo"));
+    const detalle = Array.isArray(invoice.cash_forma_pago_detalle) ? invoice.cash_forma_pago_detalle : null;
+    setPaymentRows(detalle && detalle.length
+      ? detalle.map((row: { method: string; amount: number }, i: number) => ({ id: i + 1, method: row.method, amount: String(row.amount) }))
+      : [{ id: 1, method: invoice.cash_forma_pago || "efectivo", amount: String(invoice.monto_total || "") }]);
+  }, [invoice]);
+
+  const montoTotal = parseFloat(invoice?.monto_total || "0") || 0;
+  const hasRecipient = !!invoice?.recipient_entity_id;
+  const rowsTotal = paymentRows.reduce((sum, row) => sum + (parseFloat(row.amount) || 0), 0);
+  const paymentRowsValid = paymentRows.length > 0 && paymentRows.every(row => parseFloat(row.amount) > 0) &&
+    Math.abs(rowsTotal - montoTotal) < 0.01 && new Set(paymentRows.map(row => row.method)).size === paymentRows.length;
+
+  const mutation = useMutation({
+    mutationFn: async (body: any) => {
+      const response = await apiRequest("PATCH", `/api/billing/invoices/${invoiceId}`, body);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      toast({ title: "Comprobante actualizado" });
+      onClose();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo editar", description: error.message, variant: "destructive" }),
+  });
+
+  if (!invoice) return null;
+
+  return (
+    <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Editar comprobante</DialogTitle></DialogHeader>
+        <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
+          <div className="font-medium">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)}</div>
+          <div className="text-muted-foreground text-xs">{invoice.cliente_razon_social} · Total: ${fPeso(invoice.monto_total)}</div>
+        </div>
+
+        {isNonFiscal ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Voucher no fiscal — solo se pueden corregir los datos del cliente.</p>
+            <div><Label className="text-xs">Razón Social *</Label><Input value={razonSocial} onChange={e => setRazonSocial(e.target.value)} data-testid="input-edit-razon-social" /></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">CUIT</Label><Input value={cuit} onChange={e => setCuit(e.target.value)} data-testid="input-edit-cuit" /></div>
+              <div><Label className="text-xs">DNI</Label><Input value={dni} onChange={e => setDni(e.target.value)} data-testid="input-edit-dni" /></div>
+            </div>
+            <div>
+              <Label className="text-xs">Condición IVA</Label>
+              <Select value={condicionIva} onValueChange={setCondicionIva}>
+                <SelectTrigger data-testid="select-edit-condicion-iva"><SelectValue /></SelectTrigger>
+                <SelectContent>{CONDICION_IVA_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs">Domicilio</Label><Input value={domicilio} onChange={e => setDomicilio(e.target.value)} data-testid="input-edit-domicilio" /></div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={!razonSocial.trim() || mutation.isPending}
+                onClick={() => mutation.mutate({ cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined } })}
+                data-testid="btn-guardar-edicion-cliente"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isRegistrada ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Comprobante registrado — la forma de pago es informativa, no genera movimientos de Caja.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={registradaMethod} onValueChange={setRegistradaMethod}>
+                <SelectTrigger data-testid="select-edit-registrada-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: registradaMethod })}
+                data-testid="btn-guardar-edicion-fp-registrada"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isReservaCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Factura de reserva cobrada con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={reservaMethod} onValueChange={setReservaMethod}>
+                <SelectTrigger data-testid="select-edit-reserva-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: reservaMethod })}
+                data-testid="btn-guardar-edicion-fp-reserva"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isRestaurantCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Pedido de Restaurante cobrado con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente ni Cuenta de Habitación.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={restaurantMethod} onValueChange={setRestaurantMethod}>
+                <SelectTrigger data-testid="select-edit-restaurant-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: restaurantMethod })}
+                data-testid="btn-guardar-edicion-fp-restaurant"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isEventCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Evento cobrado con un único pago real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente ni Cuenta de Habitación.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={eventMethod} onValueChange={setEventMethod}>
+                <SelectTrigger data-testid="select-edit-event-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: eventMethod })}
+                data-testid="btn-guardar-edicion-fp-event"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isSpaCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Factura de SPA cobrada con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={spaMethod} onValueChange={setSpaMethod}>
+                <SelectTrigger data-testid="select-edit-spa-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: spaMethod })}
+                data-testid="btn-guardar-edicion-fp-spa"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isGroupCash ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Factura de Grupo cobrada con un único medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <div>
+              <Label className="text-xs">Forma de pago</Label>
+              <Select value={groupMethod} onValueChange={setGroupMethod}>
+                <SelectTrigger data-testid="select-edit-group-fp"><SelectValue /></SelectTrigger>
+                <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPago: groupMethod })}
+                data-testid="btn-guardar-edicion-fp-group"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : isBloqueado ? (
+          <div className="space-y-3">
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+              Este comprobante no se cobró desde el Centro de Comprobantes — no se puede editar la forma de pago desde acá.
+            </div>
+            <DialogFooter><Button variant="outline" onClick={onClose}>Cerrar</Button></DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Corrige la forma de pago y revierte/rehace los movimientos reales de Caja y Cuenta Corriente.</p>
+            <div className="space-y-2 border rounded-lg p-3">
+              <div className="flex justify-between items-center">
+                <Label className="font-semibold text-xs">Formas de cobro</Label>
+                <span className="text-xs font-semibold">Total: ${fPeso(montoTotal)}</span>
+              </div>
+              {paymentRows.map((row, index) => (
+                <div key={row.id} className="grid grid-cols-12 gap-2 items-center">
+                  <Select value={row.method} onValueChange={method => setPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, method } : r))}>
+                    <SelectTrigger className="col-span-6" data-testid={`edit-fp-method-${index}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {EDIT_PAYMENT_METHODS.map(([method, label]) => (
+                        <SelectItem key={method} value={method} disabled={paymentRows.some(other => other.id !== row.id && other.method === method) || (method === "cuenta_corriente" && !hasRecipient)}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input className="col-span-5" type="number" step="0.01" min="0" value={row.amount}
+                    onChange={e => setPaymentRows(rows => rows.map(r => r.id === row.id ? { ...r, amount: e.target.value } : r))}
+                    data-testid={`edit-fp-amount-${index}`} />
+                  <Button type="button" variant="ghost" size="icon" className="col-span-1" disabled={paymentRows.length === 1}
+                    onClick={() => setPaymentRows(rows => rows.filter(r => r.id !== row.id))}>×</Button>
+                </div>
+              ))}
+              <Button type="button" size="sm" variant="outline" disabled={paymentRows.length >= (hasRecipient ? 6 : 5)} onClick={() => setPaymentRows(rows => [
+                ...rows,
+                { id: Math.max(...rows.map(row => row.id)) + 1, method: EDIT_PAYMENT_METHODS.map(([m]) => m).find(method => !rows.some(row => row.method === method) && (method !== "cuenta_corriente" || hasRecipient)) || "efectivo", amount: "" },
+              ])} data-testid="edit-fp-add">Agregar forma de cobro</Button>
+              {!paymentRowsValid && <p className="text-xs text-red-500" data-testid="edit-fp-error">La suma de los importes debe coincidir con el total, sin repetir forma de pago.</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cancelar</Button>
+              <Button
+                disabled={!paymentRowsValid || mutation.isPending}
+                onClick={() => mutation.mutate({ cashFormaPagoDetalle: paymentRows.map(row => ({ method: row.method, amount: Number(row.amount) })) })}
+                data-testid="btn-guardar-edicion-fp"
+              >
+                Guardar
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

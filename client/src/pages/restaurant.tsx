@@ -9,6 +9,8 @@ import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import type { GiftVoucher } from "@shared/schema";
+import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -283,7 +285,10 @@ const receiptTypeLabels: Record<string, string> = {
   factura_b: "Factura B",
   voucher: "Voucher Justo",
   voucher_pedidos_ya: "Voucher Pedidos Ya",
+  voucher_room_service: "Room Service",
+  voucher_consumo_interno: "Consumo Interno",
 };
+const restaurantVoucherTypes = new Set(["voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno"]);
 
 const paymentMethodLabels: Record<string, string> = {
   efectivo: "Efectivo",
@@ -306,6 +311,15 @@ function vatConditionShortLabel(vc: string | null | undefined): string {
   if (vc === "monotributista" || vc === "monotributo") return "Monotributista";
   if (vc === "exento") return "Exento";
   return "Cons. Final";
+}
+
+// Un ítem "Fuera de Menú" guarda su nombre real entre corchetes al inicio de
+// notes (server/routes/restaurant.ts) — no hay una columna de nombre propia.
+function displayItemName(item: { notes?: string | null; menuItem?: { name?: string } | null }): string {
+  if (item.notes?.startsWith("[")) {
+    return item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item";
+  }
+  return item.menuItem?.name || "Item";
 }
 
 function useElapsedTime(openedAt: string | null | undefined): string {
@@ -745,6 +759,12 @@ export default function RestaurantPage() {
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferTargetOrderId, setTransferTargetOrderId] = useState<string>("");
   const [transferNewWaiter, setTransferNewWaiter] = useState("");
+  const [addingMozoFor, setAddingMozoFor] = useState<null | "new" | "direct" | "transfer">(null);
+  const [newMozoEventualName, setNewMozoEventualName] = useState("");
+  // Descripción de factura editable por ítem al momento de cerrar/cobrar —
+  // por defecto usa displayItemName(item) (el nombre real de un "Fuera de
+  // Menú"), pero el mozo/cajero puede corregirla antes de emitir.
+  const [invoiceDescriptionOverrides, setInvoiceDescriptionOverrides] = useState<Record<string, string>>({});
   const [reservationClientSearch, setReservationClientSearch] = useState("");
   const [showReservationClientDropdown, setShowReservationClientDropdown] = useState(false);
   const [editingCovers, setEditingCovers] = useState(false);
@@ -874,9 +894,8 @@ export default function RestaurantPage() {
   const [closeBillingClientSearch, setCloseBillingClientSearch] = useState("");
   const [closeBillingClientSearchOpen, setCloseBillingClientSearchOpen] = useState(false);
   const [showAlternateClientSearch, setShowAlternateClientSearch] = useState(false);
-  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher">("__default__");
-  const [closeGiftVoucherCode, setCloseGiftVoucherCode] = useState("");
-  const [closeGiftVoucherData, setCloseGiftVoucherData] = useState<any>(null);
+  const [closeNonFiscalOverride, setCloseNonFiscalOverride] = useState<"__default__" | "ticket" | "voucher" | "voucher_pedidos_ya" | "voucher_room_service" | "voucher_consumo_interno">("__default__");
+  const [closeGiftVoucher, setCloseGiftVoucher] = useState<GiftVoucher | null>(null);
   const [closePaymentSplits, setClosePaymentSplits] = useState<{id: string; method: string; amount: string; roomId?: string; roomSearch?: string}[]>([{id: "1", method: "efectivo", amount: ""}]);
 
   // Clientes tab state
@@ -999,10 +1018,56 @@ export default function RestaurantPage() {
     queryFn: async () => { const r = await apiRequest("GET", "/api/billing/config"); return r.json(); },
     enabled: isEmitirComprobanteOpen,
   });
-  const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string }[]>({
+  const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string; esMozo: string | null }[]>({
     queryKey: ["/api/staff/users"],
   });
-  const restaurantUsers = allUsers.filter(u => u.role === "restaurant");
+  // esMozo es independiente del rol (ver administration.tsx): permite sumar
+  // gente de otras áreas que también atiende mesas y sacar de la lista a
+  // quien comparte el rol "restaurant" pero no es mozo (ej. cocina). Antes
+  // era puramente role === "restaurant".
+  const restaurantUsers = allUsers.filter(u => u.esMozo === "true");
+  const { data: eventualWaiters = [] } = useQuery<{ id: string; fullName: string; isActive: string }[]>({
+    queryKey: ["/api/restaurant/eventual-waiters"],
+  });
+  // Selector de mozo unificado: usuarios reales (esMozo === "true") + mozos
+  // eventuales (sin usuario del sistema, ver eventualWaiters arriba). Ambos
+  // solo aportan un nombre — restaurant_orders.waiterName ya es un snapshot
+  // de texto libre, no una FK, así que no hace falta "unir" nada más.
+  const mozoOptions = [
+    ...restaurantUsers.filter(u => u.fullName || u.username).map(u => ({
+      id: u.id, fullName: u.fullName || u.username, username: u.username as string | null, eventual: false,
+    })),
+    ...eventualWaiters.map(w => ({ id: w.id, fullName: w.fullName, username: null as string | null, eventual: true })),
+  ];
+  // Selector de mozo compartido por los 3 diálogos que asignan uno (nuevo
+  // pedido, pedido directo y transferencia a nueva cuenta) — un botón "+" al
+  // lado abre el diálogo de alta de mozo eventual (setAddingMozoFor).
+  const renderMozoSelect = (value: string, onValueChange: (v: string) => void, testId: string, context: "new" | "direct" | "transfer") => (
+    <div className="flex gap-2">
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger data-testid={testId} className="flex-1">
+          <SelectValue placeholder="Seleccionar mozo..." />
+        </SelectTrigger>
+        <SelectContent>
+          {mozoOptions.map(opt => (
+            <SelectItem key={opt.id} value={opt.fullName}>
+              {opt.fullName}
+              {opt.username && <span className="text-muted-foreground text-xs ml-1">(@{opt.username})</span>}
+              {opt.eventual && <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0">Eventual</Badge>}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        type="button" variant="outline" size="icon"
+        onClick={() => setAddingMozoFor(context)}
+        data-testid={`button-add-mozo-eventual-${context}`}
+        title="Agregar mozo eventual"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  );
   const { data: agencies = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ["/api/agencies"],
   });
@@ -1256,6 +1321,21 @@ export default function RestaurantPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
     },
+  });
+
+  const createEventualWaiterMutation = useMutation({
+    mutationFn: async (fullName: string) => {
+      const res = await apiRequest("POST", "/api/restaurant/eventual-waiters", { fullName });
+      return res.json();
+    },
+    onSuccess: (created: { id: string; fullName: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/eventual-waiters"] });
+      if (addingMozoFor === "new" || addingMozoFor === "direct") setNewWaiterName(created.fullName);
+      if (addingMozoFor === "transfer") setTransferNewWaiter(created.fullName);
+      setAddingMozoFor(null);
+      setNewMozoEventualName("");
+    },
+    onError: () => toast({ title: "Error al crear mozo eventual", variant: "destructive" }),
   });
 
   const createOrderMutation = useMutation({
@@ -1677,6 +1757,7 @@ export default function RestaurantPage() {
       customerDni?: string; puntoVenta?: number; reservationAdvanceCredit?: number;
       paymentSplits?: {method: string; amount: number; roomReservationId?: string}[];
       voucherCode?: string; voucherId?: string;
+      itemDescriptions?: Record<string, string>;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1699,6 +1780,7 @@ export default function RestaurantPage() {
         paymentSplits: data.paymentSplits,
         voucherCode: data.voucherCode,
         voucherId: data.voucherId,
+        itemDescriptions: data.itemDescriptions,
       });
       return res.json();
     },
@@ -1744,8 +1826,7 @@ export default function RestaurantPage() {
       setCloseCcEntityId("");
       setBillingSearch("");
       setFbIsExento(false);
-      setCloseGiftVoucherCode("");
-      setCloseGiftVoucherData(null);
+      setCloseGiftVoucher(null);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/table-reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
       if (data?.invoiceId) {
@@ -1997,13 +2078,57 @@ export default function RestaurantPage() {
               setSelectedCategory(null);
               setIsOrderDialogOpen(true);
             } else {
-              // No hay orden activa hoy — mesa trabada. Refetch inmediato de tables
-              // para que closeStaleOrders corra y la libere en la respuesta.
-              queryClient.refetchQueries({ queryKey: ["/api/restaurant/tables"] });
-              toast({
-                title: "Mesa sin pedido activo",
-                description: "La mesa quedó ocupada de una jornada anterior. Se está liberando…",
-              });
+              // No hay orden de HOY, pero puede haber un pedido de un día anterior
+              // que closeStaleOrders todavía no barrió (o que un turno anterior dejó
+              // sin cerrar). En vez de descartarlo en silencio, lo abrimos directo en
+              // el diálogo de cobro: el mozo decide cómo cerrarlo y queda registrado
+              // en Caja igual que cualquier otro cierre — la mesa se libera como
+              // efecto del cierre normal del pedido.
+              const staleOrder = freshOrders.find(
+                (o) => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled"
+              );
+              if (staleOrder) {
+                setCurrentOrder(staleOrder);
+                setClosePaymentMethod("efectivo");
+                setCloseDiscount("");
+                setCloseDiscountType("percent");
+                setCloseRoomId("");
+                setRoomSearchFilter("");
+                const _todayISO = getArgentinaToday();
+                const _tableRes = reservations.find(r => r.tableId === staleOrder.tableId && (r.status === "check_in" || r.status === "seated" || r.status === "confirmed") && r.reservationDate === _todayISO);
+                const _resClient = (_tableRes as any)?.clientId ? restaurantGuests.find(g => g.id === (_tableRes as any).clientId) : null;
+                const _needsFactura = _resClient && _resClient.vatCondition && !["consumidor_final", ""].includes(_resClient.vatCondition || "");
+                setCloseReceiptType(_needsFactura ? "factura_a" : "ticket");
+                setCloseBillingName(_needsFactura ? `${_resClient!.firstName} ${_resClient!.lastName}`.toUpperCase() : (_tableRes ? _tableRes.guestName : ""));
+                setCloseBillingCuit(_needsFactura ? (_resClient!.cuilCuit || "") : "");
+                setCloseBillingCompanyId("");
+                setCloseCcEntityType("company");
+                setCloseCcEntityId("");
+                setBillingSearch("");
+                setFbIsExento(false);
+                setSplitCustomerNames({});
+                setSplitCustomerCuits({});
+                setSplitVatConditions({});
+                setSplitFbIsExento({});
+                setIsSplitMode(false);
+                setIsCloseDialogOpen(true);
+                toast({
+                  title: "Pedido de una jornada anterior",
+                  description: "Cerralo para liberar la mesa — queda registrado en Caja como un cierre normal.",
+                });
+              } else {
+                // Mesa realmente huérfana: no tiene ningún pedido activo asociado
+                // (quedó "occupied" por un bug o una sesión cortada a mitad de nada).
+                // No hay nada que cobrar, así que se libera directo.
+                apiRequest("PATCH", `/api/restaurant/tables/${table.id}`, { status: "available" })
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
+                    toast({ title: "Mesa liberada", description: "No tenía ningún pedido activo asociado." });
+                  })
+                  .catch(() => {
+                    toast({ title: "No se pudo liberar la mesa", variant: "destructive" });
+                  });
+              }
             }
           })
           .catch((err) => {
@@ -2393,7 +2518,7 @@ export default function RestaurantPage() {
       return toast({ title: `Seleccione ${compCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
     }
     const pvNum = compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined);
-    const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : compTipo === "voucher_pedidos_ya" ? "Voucher PedidosYa" : compTipo;
+    const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : receiptTypeLabels[compTipo] || compTipo;
     emitirComprobanteMutation.mutate({
       tipoComprobante: compTipo,
       cliente: { razonSocial: compRazonSocial, cuit: compCuit || undefined, dni: compDni || undefined, condicionIva: compCondicionIva, domicilio: compDomicilio || undefined },
@@ -4240,18 +4365,7 @@ export default function RestaurantPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="waiter-name">Mozo *</Label>
-              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
-                <SelectTrigger id="waiter-name" data-testid="select-waiter-name">
-                  <SelectValue placeholder="Seleccionar mozo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
-                    <SelectItem key={u.id} value={u.fullName || u.username}>
-                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {renderMozoSelect(newWaiterName, setNewWaiterName, "select-waiter-name", "new")}
             </div>
             <div className="space-y-2">
               <Label htmlFor="covers">Cantidad de comensales</Label>
@@ -4288,6 +4402,41 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Agregar mozo eventual — compartido por los 3 selectores de mozo */}
+      <Dialog open={addingMozoFor !== null} onOpenChange={(open) => { if (!open) { setAddingMozoFor(null); setNewMozoEventualName(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar mozo eventual</DialogTitle>
+            <DialogDescription>Para personal ocasional sin usuario del sistema. Queda disponible para elegir de nuevo la próxima vez.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="mozo-eventual-name">Nombre y apellido</Label>
+            <Input
+              id="mozo-eventual-name"
+              value={newMozoEventualName}
+              onChange={(e) => setNewMozoEventualName(e.target.value)}
+              placeholder="Ej: Juan Pérez"
+              data-testid="input-mozo-eventual-name"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAddingMozoFor(null); setNewMozoEventualName(""); }}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (newMozoEventualName.trim()) createEventualWaiterMutation.mutate(newMozoEventualName.trim());
+              }}
+              disabled={createEventualWaiterMutation.isPending || !newMozoEventualName.trim()}
+              data-testid="button-confirm-mozo-eventual"
+            >
+              {createEventualWaiterMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Agregar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Direct Order Dialog (tableless areas) */}
       <Dialog open={isDirectOrderDialogOpen} onOpenChange={(open) => { if (open) setIsDirectOrderDialogOpen(true); }}>
         <DialogContent onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
@@ -4308,18 +4457,7 @@ export default function RestaurantPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-waiter">Mozo *</Label>
-              <Select value={newWaiterName} onValueChange={setNewWaiterName}>
-                <SelectTrigger id="direct-waiter" data-testid="select-direct-waiter">
-                  <SelectValue placeholder="Seleccionar mozo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {restaurantUsers.filter(u => u.fullName || u.username).map(u => (
-                    <SelectItem key={u.id} value={u.fullName || u.username}>
-                      {u.fullName || u.username} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {renderMozoSelect(newWaiterName, setNewWaiterName, "select-direct-waiter", "direct")}
             </div>
             <div className="space-y-2">
               <Label htmlFor="direct-covers">Comensales (opcional)</Label>
@@ -4605,18 +4743,7 @@ export default function RestaurantPage() {
                   {transferTargetOrderId === "new" && (
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Mozo del nuevo ticket *</label>
-                      <Select value={transferNewWaiter} onValueChange={setTransferNewWaiter}>
-                        <SelectTrigger className="h-8 text-sm" data-testid="select-transfer-new-waiter">
-                          <SelectValue placeholder="Seleccionar mozo..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {restaurantUsers.map(u => (
-                            <SelectItem key={u.id} value={u.fullName}>
-                              {u.fullName} <span className="text-muted-foreground text-xs ml-1">(@{u.username})</span>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {renderMozoSelect(transferNewWaiter, setTransferNewWaiter, "select-transfer-new-waiter", "transfer")}
                     </div>
                   )}
                   <Button
@@ -5280,7 +5407,7 @@ export default function RestaurantPage() {
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -5313,13 +5440,16 @@ export default function RestaurantPage() {
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {getOrderItems().map((item) => (
-                  <div key={item.id} className="flex items-center justify-between py-2 border-b">
-                    <div>
-                      <span>{item.menuItem?.name || "Item"}</span>
-                      <span className="text-muted-foreground ml-2">x{item.quantity}</span>
-                      {item.course && item.course > 1 && <Badge variant="outline" className="ml-1 text-[10px]">{courseLabels[item.course]}</Badge>}
-                    </div>
-                    <span>
+                  <div key={item.id} className="flex items-center gap-2 py-2 border-b">
+                    <Input
+                      value={invoiceDescriptionOverrides[item.id] ?? displayItemName(item)}
+                      onChange={(e) => setInvoiceDescriptionOverrides((p) => ({ ...p, [item.id]: e.target.value }))}
+                      className="h-7 text-sm flex-1 min-w-0"
+                      data-testid={`input-invoice-description-${item.id}`}
+                    />
+                    <span className="text-muted-foreground shrink-0">x{item.quantity}</span>
+                    {item.course && item.course > 1 && <Badge variant="outline" className="text-[10px] shrink-0">{courseLabels[item.course]}</Badge>}
+                    <span className="shrink-0">
                       ${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                     </span>
                   </div>
@@ -5561,7 +5691,7 @@ export default function RestaurantPage() {
                             )}
                           </div>
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
-                            setCloseNonFiscalOverride(v as "__default__" | "ticket" | "voucher");
+                            setCloseNonFiscalOverride(v as typeof closeNonFiscalOverride);
                             if (v) setCloseSalesCondition("contado");
                           }}>
                             <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
@@ -5570,7 +5700,10 @@ export default function RestaurantPage() {
                             <SelectContent>
                               <SelectItem value="__default__">Según cliente</SelectItem>
                               <SelectItem value="ticket">Ticket</SelectItem>
-                              <SelectItem value="voucher">Voucher</SelectItem>
+                              <SelectItem value="voucher">Voucher Justo</SelectItem>
+                              <SelectItem value="voucher_pedidos_ya">Voucher Pedidos Ya</SelectItem>
+                              <SelectItem value="voucher_room_service">Room Service</SelectItem>
+                              <SelectItem value="voucher_consumo_interno">Consumo Interno</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -5750,57 +5883,29 @@ export default function RestaurantPage() {
                         </div>
                       )}
 
-                      {/* ── VOUCHER DE REGALO: código ── */}
+                      {/* ── VOUCHER DE REGALO ── */}
                       {closePaymentSplits.some(s => s.method === "gift_voucher") && (
                         <div className="space-y-2 p-3 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-md">
                           <p className="text-xs font-semibold text-purple-800 dark:text-purple-200 flex items-center gap-1.5">
-                            <Tag className="h-3.5 w-3.5" />Código del Voucher de Regalo
+                            <Tag className="h-3.5 w-3.5" />Voucher de Regalo
                           </p>
-                          <div className="flex gap-2">
-                            <Input
-                              value={closeGiftVoucherCode}
-                              onChange={e => { setCloseGiftVoucherCode(e.target.value.toUpperCase()); setCloseGiftVoucherData(null); }}
-                              placeholder="VCHR-2024-XXXX"
-                              className="h-8 text-sm font-mono flex-1"
-                              data-testid="input-gift-voucher-code"
-                            />
-                            <Button size="sm" variant="outline" className="h-8 shrink-0"
-                              onClick={async () => {
-                                const code = closeGiftVoucherCode.trim();
-                                if (!code) return;
-                                try {
-                                  const res = await fetch(`/api/gift-vouchers?search=${encodeURIComponent(code)}&status=activo`);
-                                  const list = await res.json();
-                                  const found = Array.isArray(list) ? list.find((v: any) => v.voucherCode === code) : null;
-                                  if (found) {
-                                    setCloseGiftVoucherData(found);
-                                    if (found.valueType === "monetario" && found.valueAmount) {
-                                      const vAmt = parseFloat(found.valueAmount);
-                                      setClosePaymentSplits(prev => prev.map(s =>
-                                        s.method === "gift_voucher" && !parseFloat(s.amount || "0")
-                                          ? { ...s, amount: String(Math.min(vAmt, finalTotal).toFixed(2)) }
-                                          : s
-                                      ));
-                                    }
-                                  } else {
-                                    setCloseGiftVoucherData({ error: "Voucher no encontrado o inactivo" });
-                                  }
-                                } catch {
-                                  setCloseGiftVoucherData({ error: "Error al validar el voucher" });
-                                }
-                              }}
-                              data-testid="button-validate-voucher"
-                            >Validar</Button>
-                          </div>
-                          {closeGiftVoucherData && (
-                            closeGiftVoucherData.error
-                              ? <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><XCircle className="h-3.5 w-3.5 shrink-0" />{closeGiftVoucherData.error}</p>
-                              : <div className="text-xs bg-purple-100 dark:bg-purple-900/30 rounded px-2.5 py-1.5 space-y-0.5 text-purple-800 dark:text-purple-200">
-                                  <p className="font-medium flex items-center gap-1"><CheckCircle className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />{closeGiftVoucherData.beneficiaryName || closeGiftVoucherData.buyerName}</p>
-                                  {closeGiftVoucherData.valueType === "monetario" && <p>Valor: ${parseFloat(closeGiftVoucherData.valueAmount || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>}
-                                  {closeGiftVoucherData.description && <p className="text-muted-foreground">{closeGiftVoucherData.description}</p>}
-                                </div>
-                          )}
+                          <GiftVoucherSelect
+                            area="restaurant"
+                            selectedVoucher={closeGiftVoucher}
+                            onSelect={(v) => {
+                              setCloseGiftVoucher(v);
+                              if (v?.valueType === "monetario" && v.valueAmount) {
+                                const vAmt = parseFloat(v.valueAmount);
+                                setClosePaymentSplits(prev => prev.map(s =>
+                                  s.method === "gift_voucher"
+                                    ? { ...s, amount: String(Math.min(vAmt, finalTotal).toFixed(2)) }
+                                    : s
+                                ));
+                              }
+                            }}
+                            label=""
+                            data-testid="select-close-gift-voucher"
+                          />
                         </div>
                       )}
 
@@ -6193,7 +6298,7 @@ export default function RestaurantPage() {
                       <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
                         {allItems.length === 0 && <p className="text-sm text-muted-foreground text-center py-3">No hay ítems pendientes</p>}
                         {allItems.map((item: any) => (
-                          <label key={item.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30">
+                          <div key={item.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30">
                             <Checkbox
                               checked={payItemSelectedIds.has(item.id)}
                               onCheckedChange={() => {
@@ -6202,9 +6307,15 @@ export default function RestaurantPage() {
                                 setPayItemSelectedIds(next);
                               }}
                             />
-                            <span className="flex-1 text-sm">{item.menuItem?.name || "Ítem"} <span className="text-muted-foreground text-xs">x{item.quantity}</span></span>
-                            <span className="text-sm font-medium">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                          </label>
+                            <Input
+                              value={invoiceDescriptionOverrides[item.id] ?? displayItemName(item)}
+                              onChange={(e) => setInvoiceDescriptionOverrides((p) => ({ ...p, [item.id]: e.target.value }))}
+                              className="h-7 text-sm flex-1 min-w-0"
+                              data-testid={`input-invoice-description-${item.id}`}
+                            />
+                            <span className="text-muted-foreground text-xs shrink-0">x{item.quantity}</span>
+                            <span className="text-sm font-medium shrink-0">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                          </div>
                         ))}
                       </div>
 
@@ -6421,6 +6532,11 @@ export default function RestaurantPage() {
                               customerCuit: isFactura ? (payItemBillingCuit || undefined) : undefined,
                               discount: payItemDiscount || undefined,
                               discountType: payItemDiscountType,
+                              itemDescriptions: Object.fromEntries(
+                                selectedItems
+                                  .filter((item: any) => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))
+                                  .map((item: any) => [item.id, invoiceDescriptionOverrides[item.id]]),
+                              ),
                             });
                           }}
                           data-testid="button-confirm-pay-items"
@@ -6465,8 +6581,7 @@ export default function RestaurantPage() {
                 setShowAlternateClientSearch(false);
                 setCloseNonFiscalOverride("__default__");
                 setClosePaymentSplits([{ id: "1", method: "efectivo", amount: "" }]);
-                setCloseGiftVoucherCode("");
-                setCloseGiftVoucherData(null);
+                setCloseGiftVoucher(null);
               }}
               className="w-full sm:w-auto"
             >
@@ -6533,8 +6648,10 @@ export default function RestaurantPage() {
                         amount: parseFloat(s.amount || "0"),
                         roomReservationId: s.method === "cuenta_habitacion" ? s.roomId : undefined,
                       }));
-                // Consumo interno: forzar receipt no-fiscal
-                const finalReceiptType = primaryPaymentMethod === "consumo_interno" ? "consumo_interno" : effReceiptType;
+                // Keep an explicitly selected voucher identifiable even when the
+                // payment method is Consumo Interno (which still records an expense).
+                const finalReceiptType = primaryPaymentMethod === "consumo_interno" && closeNonFiscalOverride === "__default__"
+                  ? "consumo_interno" : effReceiptType;
                 // Gift voucher: incluir código y id del voucher si está validado
                 const hasGiftVoucher = closePaymentSplits.some(s => s.method === "gift_voucher");
                 closeOrderMutation.mutate({
@@ -6558,8 +6675,13 @@ export default function RestaurantPage() {
                   puntoVenta: isFactura && selectedPosNumero ? selectedPosNumero : undefined,
                   reservationAdvanceCredit: totalAdvanceCredit > 0 ? totalAdvanceCredit : undefined,
                   paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
-                  voucherCode: hasGiftVoucher ? (closeGiftVoucherData?.voucherCode || closeGiftVoucherCode || undefined) : undefined,
-                  voucherId: hasGiftVoucher ? (closeGiftVoucherData?.id || undefined) : undefined,
+                  voucherCode: hasGiftVoucher ? (closeGiftVoucher?.voucherCode || undefined) : undefined,
+                  voucherId: hasGiftVoucher ? (closeGiftVoucher?.id || undefined) : undefined,
+                  itemDescriptions: Object.fromEntries(
+                    getOrderItems()
+                      .filter(item => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))
+                      .map(item => [item.id, invoiceDescriptionOverrides[item.id]]),
+                  ),
                 });
               };
               return (
@@ -6775,7 +6897,7 @@ export default function RestaurantPage() {
             const formatNroLocal = (i: any) => `${String(i.punto_venta || 1).padStart(4, "0")}-${String(i.numero).padStart(8, "0")}`;
             const montoAcreditado = parseFloat(inv.monto_acreditado || "0");
             const saldoPendiente = parseFloat(inv.monto_total || "0") - montoAcreditado;
-            const isNC = ["NCA","NCB","NCC","NCT","NCM"].includes(inv.tipo_comprobante);
+            const isNC = ["NCA","NCB","NCC","NCT","NCM","NCMB"].includes(inv.tipo_comprobante);
             return (
               <div className="space-y-4">
                 {/* Invoice info */}
@@ -6920,22 +7042,24 @@ export default function RestaurantPage() {
                 <SelectItem value="FA">Factura A</SelectItem>
                 <SelectItem value="FB">Factura B</SelectItem>
                 <SelectItem value="voucher_justo">Voucher Justo</SelectItem>
-                <SelectItem value="voucher_pedidos_ya">Voucher PedidosYa</SelectItem>
+                <SelectItem value="voucher_pedidos_ya">Voucher Pedidos Ya</SelectItem>
+                <SelectItem value="voucher_room_service">Room Service</SelectItem>
+                <SelectItem value="voucher_consumo_interno">Consumo Interno</SelectItem>
               </SelectContent>
             </Select>
-            {(compTipo === "voucher_justo" || compTipo === "voucher_pedidos_ya") && (
+            {restaurantVoucherTypes.has(compTipo) && (
               <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Comprobante interno — no es una factura fiscal (sin CAE)
               </p>
             )}
-            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "ficticio" && (
+            {!restaurantVoucherTypes.has(compTipo) && compAmbiente === "ficticio" && (
               <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Modo ficticio — CAE simulado, no válido fiscalmente
               </p>
             )}
-            {compTipo !== "voucher_justo" && compTipo !== "voucher_pedidos_ya" && compAmbiente === "homologacion" && (
+            {!restaurantVoucherTypes.has(compTipo) && compAmbiente === "homologacion" && (
               <p className="text-xs text-blue-700 dark:text-blue-400 flex items-center gap-1 mt-1">
                 <AlertTriangle className="w-3 h-3" />
                 Homologación — CAE real de ARCA, ambiente de pruebas

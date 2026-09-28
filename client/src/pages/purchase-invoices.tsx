@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -11,10 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
-  SelectSeparator, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -41,8 +38,11 @@ import {
   calculatePurchaseInvoiceTotal,
   isCardSettlement,
   isReceivedRetention,
+  isSupplierPayableDocument,
+  isValidPurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   receivedRetentionAccountCode,
+  suggestPurchaseAmountsFromArticles,
 } from "@shared/purchaseInvoiceTotals";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -70,10 +70,12 @@ interface Invoice {
   retencionGanancias?: string;
   retencionIva?: string;
   retencionSuss?: string;
+  retencionMunicipal?: string;
   impuestosInternos?: string;
   ley25413?: string;
   montoTotal: string;
-  estado: "pendiente" | "pagado" | "anulado";
+  saldoPendiente?: string;
+  estado: "pendiente" | "parcial" | "pagado" | "registrado" | "anulado";
   centroCosto?: string;
   observaciones?: string;
   supplierId?: number;
@@ -85,7 +87,7 @@ interface Invoice {
   subtipoRetencion?: string;
 }
 
-interface Supplier {
+export interface Supplier {
   id: number;
   razonSocial: string;
   cuit: string;
@@ -96,7 +98,7 @@ interface Supplier {
   cuentaContableId?: number;
 }
 
-interface AccountingAccount {
+export interface AccountingAccount {
   id: number;
   codigo: string;
   nombre: string;
@@ -125,6 +127,10 @@ const TIPOS = [
   { value: "NC-A", label: "Nota de Crédito A" },
   { value: "NC-B", label: "Nota de Crédito B" },
   { value: "NC-C", label: "Nota de Crédito C" },
+  { value: "NC-M", label: "Nota de Crédito M" },
+  { value: "ND-A", label: "Nota de Débito A" },
+  { value: "ND-B", label: "Nota de Débito B" },
+  { value: "ND-C", label: "Nota de Débito C" },
   { value: "RESUMEN-BANCO", label: "Resumen Bancario" },
   { value: "LIQ-TARJETA", label: "Liquidación Tarjeta" },
   { value: "RETENCION", label: "Retención Recibida" },
@@ -132,12 +138,91 @@ const TIPOS = [
   { value: "RECIBO-B", label: "Recibo B" },
   { value: "RECIBO-C", label: "Recibo C" },
 ];
+
+// Solo para el layout unificado del Centro de Comprobantes — el asistente
+// original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
+const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }];
+
+// Sugerencia (no validación dura, confirmado con el usuario): al elegir un
+// proveedor, la letra del comprobante se ajusta según su condición IVA —
+// Responsable Inscripto → A, Monotributo → C, Exento → B — pero el
+// operador la puede cambiar a mano (hay proveedores RI cuyo concepto es
+// exento). Solo toca comprobantes "con letra" (Factura/NC/Recibo); no
+// altera Factura M, Remito, Resumen Bancario, Liquidación de Tarjeta ni
+// Retención, que no siguen esa regla.
+const LETRA_POR_CONDICION_IVA: Record<string, "A" | "B" | "C"> = {
+  "Responsable Inscripto": "A",
+  "Monotributo": "C",
+  "Exento": "B",
+};
+const TIPOS_CON_LETRA = new Set(["FACT-A", "FACT-B", "FACT-C", "NC-A", "NC-B", "NC-C", "ND-A", "ND-B", "ND-C", "RECIBO-A", "RECIBO-B", "RECIBO-C"]);
+function sugerirTipoPorCondicionIva(tipoActual: string, condicionIva: string | undefined | null): string {
+  const letra = condicionIva ? LETRA_POR_CONDICION_IVA[condicionIva] : undefined;
+  if (!letra || !TIPOS_CON_LETRA.has(tipoActual)) return tipoActual;
+  const familia = tipoActual.split("-")[0];
+  return `${familia}-${letra}`;
+}
 const FORMAS_PAGO = [
   { value: "transferencia", label: "Transferencia" },
   { value: "efectivo", label: "Efectivo" },
   { value: "cheque", label: "Cheque" },
   { value: "dep_bancario", label: "Depósito Bancario" },
 ];
+
+export type PurchaseInventoryOption = {
+  id: string;
+  name: string;
+  isActive?: string | null;
+  sku?: string | null;
+  category?: { name: string } | null;
+  currentStock?: string | null;
+  unit?: string | null;
+  costPrice?: string | null;
+};
+
+export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index }: {
+  items: PurchaseInventoryOption[];
+  selectedId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (id: string) => void;
+  index: number;
+}) {
+  const selected = items.find(item => String(item.id) === selectedId);
+  return (
+    <div>
+      <Label className="text-xs mb-1 block">Artículo del inventario</Label>
+      <Popover modal={true} open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-8 text-sm" data-testid={`select-existing-item-${index}`}>
+            <span className="truncate">{selected?.name || "Seleccionar artículo..."}</span>
+            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(520px,calc(100vw-2rem))] p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Buscar por nombre o SKU..." />
+            <CommandList>
+              <CommandEmpty>No se encontraron artículos</CommandEmpty>
+              <CommandGroup>
+                {[...items].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
+                  <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => onSelect(String(item.id))} className="items-start gap-2 py-2">
+                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium break-words">{item.name}</span>
+                      <span className="block text-xs text-muted-foreground break-words">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span>
+                      <span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span>
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 const $n = (v: string | undefined | null) => parseFloat(v || "0") || 0;
 const fmt = (v: string | number) =>
@@ -183,7 +268,13 @@ const emptyForm = () => ({
   numeroComprobante: "",
   fechaEmision: getLocalToday(),
   periodo: calcPeriodo(getLocalToday()),
-  condicionPago: "contado",
+  condicionPago: "cuenta_corriente",
+  formaPagoInmediata: "cuenta_corriente",
+  montoPagadoAhora: "",
+  // Formas de pago adicionales cuando se combina más de una al cargar el
+  // comprobante (ej. parte efectivo, parte transferencia) — formaPagoInmediata
+  // + montoPagadoAhora siguen siendo la primera fila.
+  formasPagoExtra: [] as Array<{ formaPago: string; monto: string }>,
   alicuotaIva: "21",
   montoNeto: "",
   montoIva21: "",
@@ -200,10 +291,10 @@ const emptyForm = () => ({
   retencionGanancias: "",
   retencionIva: "",
   retencionSuss: "",
+  retencionMunicipal: "",
   impuestosInternos: "",
   ley25413: "",
   cuentaContableId: "",
-  centroCosto: "",
   observaciones: "",
   subtipoRetencion: "",
 });
@@ -211,24 +302,15 @@ const emptyForm = () => ({
 // ─── Subcomponent: New Invoice Dialog ────────────────────────────────────────
 
 interface InvItemRow {
-  mode: "new" | "existing";
-  name: string;
   existingItemId: string;
-  categoryId: string;
-  supplierId: string;
-  itemKind: string;
-  minStock: string;
   quantity: string;
   unit: string;
   costPrice: string;
   warehouseId: string;
+  vatRate: string;
 }
 
 const UNITS = ["unidad", "kg", "g", "litro", "ml", "caja", "paquete", "rollo", "metro", "par"];
-
-const emptyQuickSupplier = {
-  razonSocial: "", cuit: "", condicionIva: "Responsable Inscripto", cuentaContableId: "",
-};
 
 const IVA_MAP: Record<string, { field: string; rate: number }> = {
   "5":   { field: "montoIva5",   rate: 5 },
@@ -272,41 +354,112 @@ function calcIvaField(neto: string, alicuota: string): Record<string, string> {
   return { ...ALL_IVA_FIELDS, [entry.field]: (n * entry.rate / 100).toFixed(2) };
 }
 
-function InvoiceDialog({
+/**
+ * Renders InvoiceDialog's form content either as a real modal (default,
+ * unchanged behavior) or inline with no Dialog chrome, so the exact same
+ * content — same handlers, same fiscal logic — can be embedded inside a host
+ * page's own layout (the unified Centro de Comprobantes). Only the wrapper
+ * changes; nothing about what is inside `header`/`children` is touched.
+ */
+function InvoiceFormShell({ embedded, open, onOpenChange, title, headerExtra, children }: {
+  embedded?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Plain text/node — rendered as a real Radix DialogTitle in modal mode, or a plain heading when embedded (DialogTitle requires a real <Dialog> ancestor and throws otherwise). */
+  title: React.ReactNode;
+  /** Non-title header content (e.g. the step indicator) — rendered the same way in both modes. */
+  headerExtra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  if (embedded) {
+    return (
+      <div className="space-y-4" data-testid="invoice-form-embedded">
+        <div>
+          <h2 className="text-lg font-semibold leading-none tracking-tight">{title}</h2>
+          {headerExtra}
+        </div>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-2xl max-h-[92vh] overflow-y-auto"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {headerExtra}
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function InvoiceDialog({
   open,
   onClose,
   suppliers,
   accounts,
   editingInvoice,
+  embedded,
+  unifiedLayout,
+  initialTipo,
 }: {
   open: boolean;
   onClose: () => void;
   suppliers: Supplier[];
   accounts: AccountingAccount[];
   editingInvoice?: Invoice | null;
+  embedded?: boolean;
+  /** Tipo elegido en el Centro de Comprobantes antes de abrir este formulario. */
+  initialTipo?: string;
+  /**
+   * Renders the same form as one continuous page (Tipo/Condición → Datos del
+   * emisor → Artículos → Impuestos y totales) matching EmitirFacturaDialog's
+   * layout, instead of the original 5-step wizard. Same state, validation and
+   * submit as the wizard — only the JSX arrangement differs. Used by the
+   * Centro de Comprobantes; the standalone Facturas de Compra page keeps the
+   * wizard unchanged.
+   */
+  unifiedLayout?: boolean;
 }) {
   const { toast } = useToast();
-  const [form, setForm] = useState(emptyForm());
+  const newForm = () => {
+    const result = emptyForm();
+    if (initialTipo) {
+      result.tipoComprobante = initialTipo;
+      if (["FACT-C", "NC-C", "ND-C", "RECIBO-C", "RETENCION"].includes(initialTipo)) {
+        result.alicuotaIva = "0";
+      }
+    }
+    return result;
+  };
+  const [form, setForm] = useState(newForm);
   const [step, setStep] = useState(0);
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
-  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const [quickForm, setQuickForm] = useState({ ...emptyQuickSupplier });
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
+  const supplierBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSupplierBlur = () => {
+    if (supplierBlurTimer.current) clearTimeout(supplierBlurTimer.current);
+    supplierBlurTimer.current = null;
+  };
+  useEffect(() => () => cancelSupplierBlur(), []);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
+  const [automaticNetos, setAutomaticNetos] = useState(true);
 
-  const { data: costCenters = [] } = useQuery<{ id: number; nombre: string }[]>({
-    queryKey: ["/api/cost-centers"],
-  });
-
-  const TIPOS_C = ["FACT-C", "NC-C", "RECIBO-C"];
+  const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
   const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
 
   const applyNetoLines = (updated: NetoLine[]) => {
     setForm(p => {
-      if (TIPOS_IMPORTE_UNICO.includes(p.tipoComprobante)) {
+      if (TIPOS_IMPORTE_UNICO.includes(p.tipoComprobante) || (p.tipoComprobante === "FACT-B" && !isEditing)) {
         // Factura C / Retención Recibida: no IVA — el importe cargado es el total, no calcular IVA
         const netoTotal = updated.reduce((sum, l) => sum + (parseFloat(l.neto) || 0), 0);
         return { ...p, montoNeto: netoTotal > 0 ? netoTotal.toFixed(2) : "", ...ALL_IVA_FIELDS };
@@ -316,14 +469,16 @@ function InvoiceDialog({
   };
 
   const updateNetoLine = (i: number, field: keyof NetoLine, val: string) => {
+    setAutomaticNetos(false);
     setNetoLines(prev => {
       const updated = prev.map((l, j) => j === i ? { ...l, [field]: val } : l);
       applyNetoLines(updated);
       return updated;
     });
   };
-  const addNetoLine = () => setNetoLines(prev => [...prev, emptyNetoLine()]);
+  const addNetoLine = () => { setAutomaticNetos(false); setNetoLines(prev => [...prev, emptyNetoLine()]); };
   const removeNetoLine = (i: number) => {
+    setAutomaticNetos(false);
     setNetoLines(prev => {
       const updated = prev.filter((_, j) => j !== i);
       applyNetoLines(updated);
@@ -334,7 +489,13 @@ function InvoiceDialog({
   const isEditing = !!editingInvoice;
 
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
-  const qf = (k: string, v: string) => setQuickForm((p) => ({ ...p, [k]: v }));
+
+  // Si se abandona una liquidación antes de guardar, sus retenciones no deben
+  // quedar ocultas en otro tipo de comprobante y alterar el total enviado.
+  const clearCardRetentions = (previous: ReturnType<typeof emptyForm>, nextType: string) =>
+    previous.tipoComprobante === "LIQ-TARJETA" && nextType !== "LIQ-TARJETA"
+      ? { retencionIibb: "", retencionGanancias: "", retencionIva: "", retencionSuss: "", retencionMunicipal: "" }
+      : {};
 
   useEffect(() => {
     if (open && editingInvoice) {
@@ -347,7 +508,10 @@ function InvoiceDialog({
         numeroComprobante: editingInvoice.numeroComprobante || "",
         fechaEmision: editingInvoice.fechaEmision || "",
         periodo: editingInvoice.periodo || "",
-        condicionPago: editingInvoice.condicionPago || "contado",
+        condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
+        formaPagoInmediata: "cuenta_corriente",
+        montoPagadoAhora: "",
+        formasPagoExtra: [],
         alicuotaIva: "21",
         montoNeto: editingInvoice.montoNeto || "",
         montoIva21: editingInvoice.montoIva21 || "",
@@ -364,51 +528,23 @@ function InvoiceDialog({
         retencionGanancias: editingInvoice.retencionGanancias || "",
         retencionIva: editingInvoice.retencionIva || "",
         retencionSuss: editingInvoice.retencionSuss || "",
+        retencionMunicipal: editingInvoice.retencionMunicipal || "",
         impuestosInternos: editingInvoice.impuestosInternos || "",
         ley25413: editingInvoice.ley25413 || "",
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
-        centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
       });
       setNetoLines(linesFromInvoice(editingInvoice));
+      setAutomaticNetos(false);
       setStep(1);
     } else if (open && !editingInvoice) {
-      setForm(emptyForm());
+      setForm(newForm());
       setNetoLines([emptyNetoLine()]);
+      setAutomaticNetos(true);
       setStep(0);
     }
-  }, [open, editingInvoice]);
-
-  const quickCreateMut = useMutation({
-    mutationFn: (data: any) => apiRequest("POST", "/api/accounting-suppliers", data),
-    onSuccess: (res: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
-      setQuickCreateOpen(false);
-      setQuickForm({ ...emptyQuickSupplier });
-      if (res?.id) {
-        f("supplierId", String(res.id));
-        f("proveedorNombre", res.razon_social || "");
-        f("proveedorCuit", res.cuit || "");
-        if (res.cuenta_contable_id) f("cuentaContableId", String(res.cuenta_contable_id));
-      }
-      toast({ title: "Proveedor creado y seleccionado" });
-    },
-    onError: (e: any) => toast({ title: "Error al crear proveedor", description: e.message, variant: "destructive" }),
-  });
-
-  const handleQuickCreateSubmit = () => {
-    if (!quickForm.razonSocial || !quickForm.cuit || !quickForm.condicionIva) {
-      toast({ title: "Complete razón social, CUIT y condición IVA", variant: "destructive" });
-      return;
-    }
-    quickCreateMut.mutate({
-      razonSocial: quickForm.razonSocial,
-      cuit: quickForm.cuit,
-      condicionIva: quickForm.condicionIva,
-      cuentaContableId: quickForm.cuentaContableId || null,
-    });
-  };
+  }, [open, editingInvoice, initialTipo]);
 
   const { data: itemCategories = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/categories"],
@@ -420,17 +556,61 @@ function InvoiceDialog({
     enabled: open,
   });
 
-  const addInvRow = () => setInvItems((p) => [...p, { mode: "new", name: "", existingItemId: "", categoryId: "", supplierId: "", itemKind: "materia_prima", minStock: "0", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: "" }]);
+  const defaultWarehouseId = useMemo(() => {
+    const general = (invWarehouses as any[]).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
+    return general ? String(general.id) : "";
+  }, [invWarehouses]);
+
+  const addInvRow = () => setInvItems((p) => [...p, { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" }]);
+
+  // Un Remito solo existe para sumar artículos al inventario (sin
+  // impuestos/total) — a diferencia de una Factura, donde no tener artículos
+  // es válido (servicio sin movimiento de stock), acá arrancar sin ningún
+  // renglón para completar no tiene sentido. Mismo criterio que ya usa
+  // TransferForm (Transferencia entre Depósitos).
+  useEffect(() => {
+    if (!open || editingInvoice || initialTipo !== "REMITO") return;
+    setInvItems((current) => current.length > 0 ? current : [
+      { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
+    ]);
+  }, [open, editingInvoice, initialTipo, defaultWarehouseId]);
   const removeInvRow = (i: number) => setInvItems((p) => p.filter((_, j) => j !== i));
   const updateInvRow = (i: number, field: keyof InvItemRow, val: string) =>
     setInvItems((p) => p.map((r, j) => j === i ? { ...r, [field]: val } : r));
-  const toggleInvRowMode = (i: number, mode: "new" | "existing") =>
-    setInvItems((p) => p.map((r, j) => j === i ? { ...r, mode, name: "", existingItemId: "" } : r));
 
   const { data: existingInvItems = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/items"],
-    enabled: open && step === 4,
+    enabled: open && (unifiedLayout || step === 4),
   });
+
+  const selectExistingInvItem = (i: number, id: string) => {
+    const selected = (existingInvItems as any[]).find((it: any) => String(it.id) === id);
+    setInvItems((p) => p.map((r, j) => j === i ? {
+      ...r,
+      existingItemId: id,
+      vatRate: r.vatRate || (selected?.ivaRate ? String(selected.ivaRate) : r.vatRate),
+    } : r));
+  };
+
+  const canSuggestArticles = !isEditing && ["FACT-A", "FACT-B", "FACT-M", "FACT-C"].includes(form.tipoComprobante);
+  const completedArticles = invItems.filter(row => row.existingItemId && Number(row.quantity) > 0 && Number(row.costPrice) >= 0);
+  const vatSelectionComplete = ["FACT-B", "FACT-C"].includes(form.tipoComprobante) || completedArticles.every(row => row.vatRate);
+  const articleSuggestion = useMemo(() => suggestPurchaseAmountsFromArticles(
+    completedArticles.map(row => ({ quantity: row.quantity, unitPrice: row.costPrice, vatRate: row.vatRate })),
+    form.tipoComprobante,
+  ), [invItems, form.tipoComprobante]);
+
+  useEffect(() => {
+    if (!canSuggestArticles || !automaticNetos || !completedArticles.length || !vatSelectionComplete) return;
+    setNetoLines(articleSuggestion.lines);
+    setForm(previous => ({ ...previous, ...articleSuggestion.fields }));
+  }, [articleSuggestion, automaticNetos, canSuggestArticles, vatSelectionComplete]);
+
+  const restoreArticleSuggestion = () => {
+    setAutomaticNetos(true);
+    setNetoLines(articleSuggestion.lines);
+    setForm(previous => ({ ...previous, ...articleSuggestion.fields }));
+  };
 
   const handleSupplierChange = (id: string) => {
     const s = suppliers.find((x) => String(x.id) === id);
@@ -438,108 +618,175 @@ function InvoiceDialog({
       f("supplierId", id);
       f("proveedorNombre", s.razonSocial);
       f("proveedorCuit", s.cuit);
+      if (!initialTipo) {
+        f("tipoComprobante", sugerirTipoPorCondicionIva(form.tipoComprobante, s.condicionIva));
+      }
       if (s.alicuotaIibb) f("alicuotaIibbProveedor", String(s.alicuotaIibb));
       if (!isReceivedRetention(form.tipoComprobante) && s.cuentaContableId) {
         f("cuentaContableId", String(s.cuentaContableId));
       }
     } else {
-      f("supplierId", "");
+      setForm((p) => ({ ...p, supplierId: "", proveedorNombre: "", proveedorCuit: "" }));
     }
   };
+
+  // Si todavía no hay Cuenta Contable de Gasto asignada, la sugiere a partir
+  // de la categoría de los artículos cargados (cuando todos comparten una
+  // misma cuenta configurada en su categoría). No pisa un valor ya elegido
+  // (por proveedor o elegido en el formulario).
+  useEffect(() => {
+    if (isReceivedRetention(form.tipoComprobante) || form.cuentaContableId) return;
+    const resolvedAccountIds = new Set<string>();
+    for (const row of invItems) {
+      const categoryId = existingInvItems.find((it: any) => String(it.id) === row.existingItemId)?.categoryId;
+      if (!categoryId) continue;
+      const accountId = itemCategories.find((c: any) => c.id === categoryId)?.accountId;
+      if (accountId) resolvedAccountIds.add(String(accountId));
+    }
+    if (resolvedAccountIds.size === 1) {
+      f("cuentaContableId", [...resolvedAccountIds][0]);
+    }
+  }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
   const total = useMemo(() => {
     return calculatePurchaseInvoiceTotal(form);
   }, [form]);
 
-  const resetDialog = () => { onClose(); setForm(emptyForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); };
+  // Se puede combinar más de una forma de pago real al cargar el comprobante
+  // (ej. parte efectivo, parte transferencia), igual que en Ventas — antes
+  // solo admitía una. formaPagoInmediata/montoPagadoAhora son la primera
+  // fila; formasPagoExtra son las que se van agregando. Compartido entre el
+  // layout unificado (Centro de Comprobantes) y el asistente clásico.
+  const montoPagadoAhoraTotal = $n(form.montoPagadoAhora) + form.formasPagoExtra.reduce((s, r) => s + $n(r.monto), 0);
+  const formaPagoInmediataSection = (
+    <div>
+      <Label>Forma de Pago</Label>
+      <Select
+        value={form.formaPagoInmediata}
+        onValueChange={(v) => setForm((p) => ({
+          ...p,
+          formaPagoInmediata: v,
+          montoPagadoAhora: v === "cuenta_corriente" ? "" : (p.montoPagadoAhora || total.toFixed(2)),
+          formasPagoExtra: v === "cuenta_corriente" ? [] : p.formasPagoExtra,
+        }))}
+      >
+        <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {form.formaPagoInmediata !== "cuenta_corriente" && (
+        <>
+          <div className="mt-2">
+            <Label>Monto a pagar ahora ($)</Label>
+            <Input
+              type="number" min="0" step="0.01" max={total}
+              value={form.montoPagadoAhora}
+              onChange={(e) => f("montoPagadoAhora", e.target.value)}
+              data-testid="input-monto-pagado-ahora"
+            />
+          </div>
+          {form.formasPagoExtra.map((row, i) => (
+            <div key={i} className="flex gap-2 items-end mt-2">
+              <div className="flex-1">
+                <Label>Otra forma de pago</Label>
+                <Select
+                  value={row.formaPago}
+                  onValueChange={(v) => setForm((p) => {
+                    const extra = [...p.formasPagoExtra];
+                    extra[i] = { ...extra[i], formaPago: v };
+                    return { ...p, formasPagoExtra: extra };
+                  })}
+                >
+                  <SelectTrigger data-testid={`select-forma-pago-extra-${i}`}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1">
+                <Label>Monto ($)</Label>
+                <Input
+                  type="number" min="0" step="0.01"
+                  value={row.monto}
+                  onChange={(e) => setForm((p) => {
+                    const extra = [...p.formasPagoExtra];
+                    extra[i] = { ...extra[i], monto: e.target.value };
+                    return { ...p, formasPagoExtra: extra };
+                  })}
+                  data-testid={`input-monto-pagado-extra-${i}`}
+                />
+              </div>
+              <Button
+                type="button" variant="ghost" size="icon" className="text-destructive"
+                onClick={() => setForm((p) => ({ ...p, formasPagoExtra: p.formasPagoExtra.filter((_, idx) => idx !== i) }))}
+                data-testid={`button-remove-forma-pago-extra-${i}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button" variant="ghost" size="sm" className="mt-2 px-0"
+            onClick={() => setForm((p) => ({ ...p, formasPagoExtra: [...p.formasPagoExtra, { formaPago: "transferencia", monto: "" }] }))}
+            data-testid="button-add-forma-pago-extra"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Agregar otra forma de pago
+          </Button>
+        </>
+      )}
+      <p className="text-xs text-muted-foreground mt-1">
+        {form.formaPagoInmediata === "cuenta_corriente"
+          ? "El pago se registra desde la cuenta corriente del proveedor."
+          : montoPagadoAhoraTotal < total - 0.005
+            ? `Se genera la OP por $${fmt(montoPagadoAhoraTotal)} y el resto ($${fmt(total - montoPagadoAhoraTotal)}) queda pendiente en cuenta corriente.`
+            : "Se genera la Orden de Pago automáticamente y el comprobante queda registrado como pagado."}
+      </p>
+    </div>
+  );
+
+  const articleAmountComparison = canSuggestArticles && completedArticles.length > 0 && vatSelectionComplete && (
+    <div className={`rounded-md border p-3 text-xs ${Math.abs(total - articleSuggestion.articleTotal) > 0.01 ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`} data-testid="article-amount-comparison">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>Artículos: ${fmt(articleSuggestion.articleTotal)} · Total comprobante: ${fmt(total)}</span>
+        {!automaticNetos && <Button type="button" size="sm" variant="outline" onClick={restoreArticleSuggestion}>Volver a sugerir desde artículos</Button>}
+      </div>
+      {Math.abs(total - articleSuggestion.articleTotal) > 0.01 && <p className="mt-1">Diferencia: ${fmt(total - articleSuggestion.articleTotal)}. Revisá artículos, servicios, percepciones o ajustes manuales antes de guardar.</p>}
+      {automaticNetos && <p className="mt-1 text-muted-foreground">Importes sugeridos desde artículos; podés corregirlos manualmente.</p>}
+    </div>
+  );
+
+  const resetDialog = () => { onClose(); setForm(newForm()); setStep(0); setInvItems([]); setNetoLines([emptyNetoLine()]); setAutomaticNetos(true); };
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/purchase-invoices", data);
+      const res = await apiRequest("POST", "/api/purchase-invoices", {
+        ...data,
+        // Un renglón sin artículo elegido (p. ej. el que arranca precargado
+        // en Remito) no se manda — el servidor rechaza cualquier fila sin
+        // itemId (parsePurchaseStockRows).
+        stockItems: invItems.filter((row) => row.existingItemId).map((row) => ({
+          itemId: row.existingItemId,
+          warehouseId: row.warehouseId || null,
+          quantity: row.quantity,
+          unitCost: row.costPrice,
+          vatRate: row.vatRate || null,
+        })),
+      });
       return res.json();
     },
-    onSuccess: async (invoice: any) => {
-      let inventoryCount = 0;
-      const invoiceRef = `Comprobante ${invoice.numero_comprobante_ext || invoice.numero_comprobante || invoice.id} — ${form.proveedorNombre}`;
-
-      const validNew = invItems.filter((r) => r.mode === "new" && r.name.trim());
-      const validExisting = invItems.filter((r) => r.mode === "existing" && r.existingItemId);
-
-      // Create new inventory items
-      for (const row of validNew) {
-        try {
-          const itemRes = await apiRequest("POST", "/api/inventory/items", {
-            name: row.name.trim(),
-            categoryId: row.categoryId || undefined,
-            supplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
-            unit: row.unit,
-            costPrice: row.costPrice,
-            currentStock: row.quantity,
-            minStock: parseInt(row.minStock) || 0,
-            itemKind: row.itemKind || "materia_prima",
-            warehouseId: row.warehouseId || undefined,
-          });
-          const item = await itemRes.json();
-          // Only create a generic movement if no warehouse was selected (warehouse route already recorded it)
-          if (!row.warehouseId) {
-            await apiRequest("POST", "/api/inventory/movements", {
-              itemId: item.id,
-              type: "entrada",
-              quantity: row.quantity,
-              reason: invoiceRef,
-              sourceType: "purchase_invoice",
-              sourceId: String(invoice.id),
-            });
-          }
-          inventoryCount++;
-        } catch (e) {
-          console.warn("Error creating inventory item:", e);
-        }
-      }
-
-      // Add stock to existing inventory items
-      for (const row of validExisting) {
-        try {
-          if (row.warehouseId) {
-            await apiRequest("POST", `/api/inventory/warehouses/${row.warehouseId}/movements`, {
-              itemId: row.existingItemId,
-              movementType: "entrada",
-              quantity: row.quantity,
-              notes: invoiceRef,
-              unitCost: parseFloat(row.costPrice) > 0 ? row.costPrice : undefined,
-            });
-          } else {
-            await apiRequest("POST", "/api/inventory/movements", {
-              itemId: row.existingItemId,
-              type: "entrada",
-              quantity: row.quantity,
-              reason: invoiceRef,
-              sourceType: "purchase_invoice",
-              sourceId: String(invoice.id),
-            });
-            // Update cost price on the item if provided
-            if (parseFloat(row.costPrice) > 0) {
-              await apiRequest("PATCH", `/api/inventory/items/${row.existingItemId}`, {
-                costPrice: row.costPrice,
-              });
-            }
-          }
-          inventoryCount++;
-        } catch (e) {
-          console.warn("Error updating existing inventory item:", e);
-        }
-      }
-
-      if (inventoryCount > 0) {
+    onSuccess: () => {
+      if (invItems.length > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       resetDialog();
-      const desc = inventoryCount > 0
-        ? `El asiento contable fue generado. Se ingresaron ${inventoryCount} artículo(s) al inventario.`
-        : "El asiento contable fue generado automáticamente.";
+      const desc = invItems.length > 0
+        ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
+        : "El comprobante fue registrado correctamente.";
       toast({ title: "Comprobante registrado", description: desc });
     },
     onError: (e: any) => {
@@ -576,6 +823,10 @@ function InvoiceDialog({
       setStep(0);
       return;
     }
+    if (!isValidPurchaseInvoiceTotal(form.tipoComprobante, total)) {
+      toast({ title: "El total del comprobante debe ser mayor a $0,00", variant: "destructive" });
+      return;
+    }
     if (isEditing) {
       patchMut.mutate({ ...form, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
       return;
@@ -584,13 +835,39 @@ function InvoiceDialog({
       toast({ title: "Ingrese el número de comprobante", variant: "destructive" });
       return;
     }
-    const validItems = invItems.filter(
-      (r) => (r.mode === "new" && r.name.trim()) || (r.mode === "existing" && r.existingItemId)
-    );
+    if (!suppliers.some((supplier) => String(supplier.id) === form.supplierId)) {
+      toast({ title: "Elegí un proveedor cargado en el ABM", variant: "destructive" });
+      return;
+    }
+    if (canSuggestArticles && completedArticles.length > 0 && !vatSelectionComplete) {
+      toast({ title: "Elegí la alícuota de IVA de cada artículo", variant: "destructive" });
+      return;
+    }
+    if (form.formaPagoInmediata !== "cuenta_corriente") {
+      if (!form.montoPagadoAhora || $n(form.montoPagadoAhora) <= 0) {
+        toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
+        return;
+      }
+      if (form.formasPagoExtra.some((r) => $n(r.monto) <= 0)) {
+        toast({ title: "Cada forma de pago agregada necesita un monto mayor a $0,00", variant: "destructive" });
+        return;
+      }
+      if (montoPagadoAhoraTotal > total + 0.005) {
+        toast({ title: "El monto a pagar ahora debe ser mayor a $0,00 y no superar el total del comprobante", variant: "destructive" });
+        return;
+      }
+    }
     // Nota: no se valida que la suma de artículos coincida con el neto —
     // los precios de costo en inventario pueden diferir del total facturado
     // (descuentos exclusivos, artículos sin cargo, etc.).
-    createMut.mutate({ ...form, supplierId: form.supplierId ? parseInt(form.supplierId) : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
+    createMut.mutate({
+      ...form,
+      supplierId: form.supplierId ? parseInt(form.supplierId) : null,
+      cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
+      formasPago: form.formaPagoInmediata !== "cuenta_corriente"
+        ? [{ formaPago: form.formaPagoInmediata, monto: form.montoPagadoAhora }, ...form.formasPagoExtra]
+        : [],
+    });
   };
 
   const steps = isEditing
@@ -598,12 +875,28 @@ function InvoiceDialog({
     : ["Encabezado", "Montos", "Retenciones", "Clasificación", "Inventario"];
   const isResumen = form.tipoComprobante === "RESUMEN-BANCO" || form.tipoComprobante === "LIQ-TARJETA";
   const isLiquidacionTarjeta = isCardSettlement(form.tipoComprobante);
+  const hasHistoricalRetentions = isEditing && !isLiquidacionTarjeta && !isReceivedRetention(form.tipoComprobante) &&
+    [form.retencionIibb, form.retencionGanancias, form.retencionIva, form.retencionSuss, form.retencionMunicipal]
+      .some((value) => Number(value) !== 0);
+  const historicalRetentionsNote = hasHistoricalRetentions && (
+    <p className="text-xs text-muted-foreground" data-testid="historical-purchase-retentions">
+      Este comprobante conserva retenciones cargadas anteriormente por ${fmt(
+        $n(form.retencionIibb) + $n(form.retencionGanancias) + $n(form.retencionIva) +
+        $n(form.retencionSuss) + $n(form.retencionMunicipal)
+      )}. Siguen descontándose del total; consultá el detalle antes de modificarlo.
+    </p>
+  );
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
-  const isFacturaC = ["FACT-C", "NC-C", "RECIBO-C"].includes(form.tipoComprobante);
+  const isFacturaC = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"].includes(form.tipoComprobante);
+  // Remito: solo existe en el layout unificado — llega mercadería sin datos de
+  // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
+  // los datos del emisor y los artículos recibidos.
+  const isRemito = form.tipoComprobante === "REMITO";
+  const isSupplierPayable = isSupplierPayableDocument(form.tipoComprobante);
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
-  const isImporteUnico = isFacturaC || isRetencion;
+  const isImporteUnico = isFacturaC || isRetencion || (form.tipoComprobante === "FACT-B" && !isEditing);
 
   useEffect(() => {
     if (!isRetencion) return;
@@ -617,74 +910,133 @@ function InvoiceDialog({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(v) => { if (!v) resetDialog(); }}>
-      <DialogContent
-        className="max-w-2xl max-h-[92vh] overflow-y-auto"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onInteractOutside={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>{isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}</DialogTitle>
-          {/* Step indicator */}
-          <div className="flex gap-1 mt-2">
-            {steps.map((s, i) => (
-              <div key={i} className="flex items-center">
-                <button
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
-                  onClick={() => i < step && setStep(i)}
-                >
-                  {i + 1}. {s}
-                </button>
-                {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
-              </div>
-            ))}
-          </div>
-        </DialogHeader>
-
+    <InvoiceFormShell
+      embedded={embedded}
+      open={open}
+      onOpenChange={(v) => { if (!v) resetDialog(); }}
+      title={isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
+      headerExtra={
+        unifiedLayout ? undefined : (
+        <div className="flex gap-1 mt-2">
+          {steps.map((s, i) => (
+            <div key={i} className="flex items-center">
+              <button
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${i === step ? "bg-primary text-primary-foreground" : i < step ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+                onClick={() => i < step && setStep(i)}
+              >
+                {i + 1}. {s}
+              </button>
+              {i < steps.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />}
+            </div>
+          ))}
+        </div>
+        )
+      }
+    >
         <div className="py-2 space-y-4">
-          {/* STEP 0: Encabezado */}
-          {step === 0 && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
+          {unifiedLayout ? (
+          <>
+          <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Tipo de Comprobante</Label>
-                  <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
+                  <Select value={form.tipoComprobante} disabled={isEditing || !!initialTipo} onValueChange={(v) => {
                     // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
-                    if (v === "FACT-C" || v === "NC-C" || v === "RECIBO-C" || v === "RETENCION") {
+                    if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
                       setForm((p) => ({
                         ...p,
+                        ...clearCardRetentions(p, v),
                         tipoComprobante: v,
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
                         ...ALL_IVA_FIELDS,
                       }));
+                    } else if (v === "REMITO") {
+                      // Remito: no lleva impuestos ni totales — limpiar cualquier importe
+                      // cargado antes de cambiar de tipo para no enviarlo oculto.
+                      setForm((p) => ({
+                        ...p,
+                        tipoComprobante: v,
+                        montoNeto: "",
+                        montoExento: "",
+                        montoNoGravado: "",
+                        impuestosInternos: "",
+                        ley25413: "",
+                        percepcionIibb: "",
+                        percepcionIva: "",
+                        percepcionGanancias: "",
+                        retencionIibb: "",
+                        retencionGanancias: "",
+                        retencionIva: "",
+                        retencionSuss: "",
+                        retencionMunicipal: "",
+                        subtipoRetencion: "",
+                        ...ALL_IVA_FIELDS,
+                      }));
+                      setNetoLines([emptyNetoLine()]);
+                      // Un Remito solo existe para sumar artículos al inventario — a
+                      // diferencia de una Factura, arrancar sin ningún renglón para
+                      // completar no tiene sentido acá.
+                      setInvItems((current) => current.length > 0 ? current : [
+                        { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
+                      ]);
                     } else {
-                      f("tipoComprobante", v);
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {TIPOS_UNIFIED.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
+                {isSupplierPayable ? (
+                  isEditing || form.tipoComprobante.startsWith("NC") ? (
+                    <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                      El pago se registra desde la cuenta corriente del proveedor.
+                    </div>
+                  ) : formaPagoInmediataSection
+                ) : (
+                  <div>
+                    <Label>Condición de Pago</Label>
+                    <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
+                      <SelectTrigger data-testid="select-condicion-pago"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+          </div>
+              {isRetencion && (
                 <div>
-                  <Label>Condición de Pago</Label>
-                  <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
-                    <SelectTrigger data-testid="select-condicion-pago">
-                      <SelectValue />
+                  <Label>Tipo de Retención</Label>
+                  <Select value={form.subtipoRetencion || undefined} onValueChange={(v) => f("subtipoRetencion", v)}>
+                    <SelectTrigger data-testid="select-subtipo-retencion">
+                      <SelectValue placeholder="Seleccionar tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="contado">Contado</SelectItem>
-                      <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      <SelectItem value="municipal">Municipal</SelectItem>
+                      <SelectItem value="iibb">Ingresos Brutos (IIBB)</SelectItem>
+                      <SelectItem value="ganancias">Ganancias</SelectItem>
+                      <SelectItem value="iva">IVA</SelectItem>
+                      <SelectItem value="suss">SUSS</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+              )}
+
+          <Separator />
+
+          <div className="space-y-3">
+            <Label className="text-sm font-semibold">Datos del emisor</Label>
+            <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <Label>Proveedor</Label>
+                <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
                   <div className="flex gap-2 items-center">
                     <div className="relative flex-1">
                       <input
@@ -693,26 +1045,18 @@ function InvoiceDialog({
                         placeholder="Buscar proveedor..."
                         value={supplierDropdownOpen
                           ? supplierSearch
-                          : form.supplierId === "manual"
-                          ? "— Ingreso manual —"
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
                           : ""}
-                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onBlur={() => setTimeout(() => setSupplierDropdownOpen(false), 150)}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
                         data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
-                          <div
-                            className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                            onMouseDown={() => { handleSupplierChange("manual"); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
-                          >
-                            <Check className={`h-4 w-4 shrink-0 ${form.supplierId === "manual" ? "opacity-100" : "opacity-0"}`} />
-                            — Ingresar manual —
-                          </div>
                           {[...suppliers]
                             .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
@@ -721,7 +1065,7 @@ function InvoiceDialog({
                               <div
                                 key={s.id}
                                 className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
@@ -736,30 +1080,476 @@ function InvoiceDialog({
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
+                <div>
+                  <Label>Razón Social</Label>
+                  <Input value={form.proveedorNombre} readOnly data-testid="input-proveedor-nombre" />
+                </div>
+                <div>
+                  <Label>CUIT</Label>
+                  <Input value={form.proveedorCuit} readOnly data-testid="input-proveedor-cuit" />
+                </div>
+                <div>
+                  <Label>Punto de Venta</Label>
+                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
+                </div>
+                <div>
+                  <Label>Número</Label>
+                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" data-testid="input-numero-comprobante" />
+                </div>
+                <div>
+                  <Label>Fecha de Emisión</Label>
+                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} data-testid="input-fecha-emision" />
+                </div>
+                <div>
+                  <Label>Período</Label>
+                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" data-testid="input-periodo" />
+                </div>
+                <div className="col-span-2">
+                  <Label>{isRetencion ? "Cuenta Contable de Activo" : "Cuenta Contable de Gasto"}</Label>
+                  <Select
+                    value={form.cuentaContableId || "__none__"}
+                    disabled={isRetencion}
+                    onValueChange={(v) => f("cuentaContableId", v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger data-testid="select-cuenta-contable">
+                      <SelectValue placeholder="Seleccionar cuenta..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
+                      {accounts
+                        .filter((a) => a.id && (
+                          isRetencion
+                            ? a.tipo === "activo" && a.codigo.startsWith("1.1.")
+                            : a.tipo === "egreso"
+                        ))
+                        .map((a) => (
+                          <SelectItem key={a.id} value={String(a.id)}>
+                            {a.codigo} — {a.nombre}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isRetencion
+                      ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento". Se sugiere sola según la categoría de los artículos cargados.'}
+                  </p>
+                </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {!isEditing && (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Artículos</Label>
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
+                <Package className="h-4 w-4 shrink-0" />
+                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
+              </div>
+
+              {invItems.length > 0 && (
+                <div className="space-y-3">
+                  {invItems.map((row, i) => (
+                    <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
+                      <div className="flex justify-end">
+                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+
+                      {/* Article selector / name */}
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
+
+                      {/* Quantity, unit, cost */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs mb-1 block">Cantidad</Label>
+                          <Input type="number" min="0" step="0.001" value={row.quantity} onChange={(e) => updateInvRow(i, "quantity", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-qty-${i}`} />
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">Unidad</Label>
+                          <Select value={row.unit} onValueChange={(v) => updateInvRow(i, "unit", v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs mb-1 block">{form.tipoComprobante === "FACT-B" ? "Precio final unit. ($)" : "Costo unit. neto ($)"}</Label>
+                          <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
+                        </div>
+                      </div>
+
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
+                        <div>
+                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                              <SelectItem value="27">27%</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
+
+                      {/* Warehouse selector */}
+                      {invWarehouses.length > 0 && (
+                        <div>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Sin depósito (stock general)" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— Sin depósito —</SelectItem>
+                              {(invWarehouses as any[]).filter((w: any) => w.id).map((wh: any) => (
+                                <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <Button type="button" variant="outline" size="sm" onClick={addInvRow} data-testid="btn-add-inv-item">
+                <Plus className="h-4 w-4 mr-2" />Agregar artículo
+              </Button>
+
+              {articleAmountComparison}
+
+              {invItems.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin artículos — el comprobante se registrará sin modificar el inventario.
+                </p>
+              )}
+            </div>
+            </div>
+          )}
+
+          {isRemito && (
+            <p className="text-xs text-muted-foreground text-center py-2" data-testid="text-remito-sin-impuestos">
+              Remito — no lleva impuestos ni total, solo suma los artículos al inventario.
+            </p>
+          )}
+
+          {!isRemito && (
+          <>
+          <Separator />
+
+          <div className="space-y-4">
+            <Label className="text-sm font-semibold">Impuestos y totales</Label>
+              {/* ── Netos gravados — multi-línea ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">
+                    {isImporteUnico ? "Importe" : "Netos Gravados"}
+                    {isResumen && !isImporteUnico && <span className="ml-1 text-xs font-normal text-muted-foreground">(base para IVA)</span>}
+                  </Label>
+                  {!isImporteUnico && (
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon"
-                      onMouseDown={(e) => { e.preventDefault(); setSupplierDropdownOpen(false); setQuickCreateOpen(true); }}
-                      title="Crear nuevo proveedor"
-                      data-testid="btn-quick-create-supplier"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={addNetoLine}
+                      data-testid="btn-add-neto-line"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="h-3 w-3" /> Agregar línea
                     </Button>
+                  )}
+                </div>
+
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50 border-b">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs">{isImporteUnico ? "Importe total $" : "Neto gravado $"}</th>
+                        {!isImporteUnico && <th className="text-left px-3 py-2 font-medium text-muted-foreground text-xs w-2/5">Alícuota IVA</th>}
+                        {!isImporteUnico && <th className="text-right px-3 py-2 font-medium text-muted-foreground text-xs">IVA calculado $</th>}
+                        <th className="w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {netoLines.map((line, i) => {
+                        const n = parseFloat(line.neto) || 0;
+                        const entry = IVA_MAP[line.alicuota];
+                        const ivaCalc = !isImporteUnico && entry && n > 0 ? n * entry.rate / 100 : 0;
+                        return (
+                          <tr key={i} className="bg-background">
+                            <td className="px-2 py-1.5">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                placeholder="0.00"
+                                value={line.neto}
+                                onChange={e => updateNetoLine(i, "neto", e.target.value)}
+                                className="h-8 text-sm"
+                                data-testid={`input-neto-line-${i}`}
+                              />
+                            </td>
+                            {!isImporteUnico && (
+                              <td className="px-2 py-1.5">
+                                <Select
+                                  value={line.alicuota}
+                                  onValueChange={v => updateNetoLine(i, "alicuota", v)}
+                                >
+                                  <SelectTrigger className="h-8 text-sm" data-testid={`select-alicuota-line-${i}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="5">5%</SelectItem>
+                                    <SelectItem value="10.5">10.5%</SelectItem>
+                                    <SelectItem value="21">21%</SelectItem>
+                                    <SelectItem value="25">2.5%</SelectItem>
+                                    <SelectItem value="27">27%</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                            )}
+                            {!isImporteUnico && (
+                              <td className="px-3 py-1.5 text-right font-mono text-sm text-muted-foreground whitespace-nowrap">
+                                {ivaCalc > 0 ? `$${fmt(ivaCalc)}` : "—"}
+                              </td>
+                            )}
+                            <td className="px-1 py-1.5 text-center">
+                              {netoLines.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeNetoLine(i)}
+                                  className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 mx-auto"
+                                  data-testid={`btn-remove-neto-line-${i}`}
+                                  title="Quitar línea"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="border-t bg-muted/30">
+                      <tr>
+                        <td colSpan={2} className="px-3 py-2 text-xs text-muted-foreground">
+                          {isImporteUnico ? "Total:" : "Total neto:"} <span className="font-bold text-foreground font-mono">${fmt(form.montoNeto || "0")}</span>
+                        </td>
+                        {!isImporteUnico && (
+                          <td className="px-3 py-2 text-xs text-right text-muted-foreground">
+                            Total IVA: <span className="font-bold text-foreground font-mono">
+                              ${fmt($n(form.montoIva5) + $n(form.montoIva25) + $n(form.montoIva105) + $n(form.montoIva21) + $n(form.montoIva27))}
+                            </span>
+                          </td>
+                        )}
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* IVA desagregado — solo se muestra si hay importes */}
+                {($n(form.montoIva21) > 0 || $n(form.montoIva105) > 0 || $n(form.montoIva27) > 0 || $n(form.montoIva5) > 0 || $n(form.montoIva25) > 0) && (
+                  <div className="rounded-md bg-blue-50 border border-blue-100 dark:bg-blue-950/20 dark:border-blue-900 px-3 py-2 space-y-1">
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">IVA desagregado por alícuota</p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
+                      {$n(form.montoIva21)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 21%</span><span className="font-mono font-medium">${fmt(form.montoIva21)}</span></div>}
+                      {$n(form.montoIva105) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 10.5%</span><span className="font-mono font-medium">${fmt(form.montoIva105)}</span></div>}
+                      {$n(form.montoIva27)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 27%</span><span className="font-mono font-medium">${fmt(form.montoIva27)}</span></div>}
+                      {$n(form.montoIva5)   > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 5%</span><span className="font-mono font-medium">${fmt(form.montoIva5)}</span></div>}
+                      {$n(form.montoIva25)  > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IVA 2.5%</span><span className="font-mono font-medium">${fmt(form.montoIva25)}</span></div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Otros conceptos ── */}
+              {!isRetencion && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>Exento</Label><Input type="number" step="0.01" value={form.montoExento} onChange={(e) => f("montoExento", e.target.value)} data-testid="input-exento" /></div>
+                  <div><Label>No Gravado</Label><Input type="number" step="0.01" value={form.montoNoGravado} onChange={(e) => f("montoNoGravado", e.target.value)} data-testid="input-no-gravado" /></div>
+                  <div><Label>Imp. Internos</Label><Input type="number" step="0.01" value={form.impuestosInternos} onChange={(e) => f("impuestosInternos", e.target.value)} data-testid="input-imp-internos" /></div>
+                  <div><Label>Ley 25.413</Label><Input type="number" step="0.01" value={form.ley25413} onChange={(e) => f("ley25413", e.target.value)} data-testid="input-ley25413" /></div>
+                </div>
+              )}
+              {isRetencion ? (
+                <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  Una retención recibida ya representa el crédito fiscal final. No lleva percepciones ni retenciones adicionales.
+                </div>
+              ) : (
+                <>
+              <p className="text-sm font-semibold text-muted-foreground">Percepciones (DEBE)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Percep. IIBB</Label><Input type="number" step="0.01" value={form.percepcionIibb} onChange={(e) => f("percepcionIibb", e.target.value)} data-testid="input-percep-iibb" /></div>
+                <div><Label>Percep. IVA</Label><Input type="number" step="0.01" value={form.percepcionIva} onChange={(e) => f("percepcionIva", e.target.value)} data-testid="input-percep-iva" /></div>
+                <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
+              </div>
+              {isLiquidacionTarjeta && (
+              <>
+              <Separator />
+              <p className="text-sm font-semibold text-muted-foreground">Retenciones sufridas (DEBE — suman al total)</p>
+                <p className="text-xs text-muted-foreground">
+                  Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
+                </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
+                <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
+                <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
+                <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
+                <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
+              </div>
+              </>
+              )}
+              {historicalRetentionsNote}
+                </>
+              )}
+                <div className="col-span-2">
+                  <Label>Observaciones</Label>
+                  <Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} data-testid="input-observaciones" />
+                </div>
+              {/* Total preview */}
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="pt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold">Total Comprobante</span>
+                    <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {isSupplierPayable
+                      ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
+                        ? ($n(form.montoPagadoAhora) < total - 0.005
+                          ? `Se paga $${fmt(form.montoPagadoAhora)} al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata}); resto en cuenta corriente`
+                          : `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`)
+                        : "Pendiente de pago en cuenta corriente")
+                      : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
+                  </div>
+                </CardContent>
+              </Card>
+          </div>
+          </>
+          )}
+          </>
+          ) : (
+          <>
+          {/* STEP 0: Encabezado */}
+          {step === 0 && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Tipo de Comprobante</Label>
+                  <Select value={form.tipoComprobante} disabled={isEditing} onValueChange={(v) => {
+                    // Factura C / Retención Recibida: sin IVA, forzar alícuota 0 y limpiar campos IVA
+                    if (v === "FACT-C" || v === "NC-C" || v === "ND-C" || v === "RECIBO-C" || v === "RETENCION") {
+                      setForm((p) => ({
+                        ...p,
+                        ...clearCardRetentions(p, v),
+                        tipoComprobante: v,
+                        alicuotaIva: "0",
+                        cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
+                        subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
+                        ...ALL_IVA_FIELDS,
+                      }));
+                    } else {
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
+                    }
+                  }}>
+                    <SelectTrigger data-testid="select-tipo-comprobante">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIPOS.filter(t => isEditing || !["RESUMEN-BANCO", "RETENCION"].includes(t.value)).map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {/* Un Remito solo se crea desde el Centro de Comprobantes (layout
+                          unificado) — esta opción no se ofrece acá, solo se muestra si
+                          se está editando uno ya existente para no dejar el select en blanco. */}
+                      {isEditing && form.tipoComprobante === "REMITO" && (
+                        <SelectItem value="REMITO">Remito</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {isSupplierPayable ? (
+                  isEditing || form.tipoComprobante.startsWith("NC") ? (
+                    <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
+                      El pago se registra desde la cuenta corriente del proveedor.
+                    </div>
+                  ) : formaPagoInmediataSection
+                ) : (
+                  <div>
+                    <Label>Condición de Pago</Label>
+                    <Select value={form.condicionPago} onValueChange={(v) => f("condicionPago", v)}>
+                      <SelectTrigger data-testid="select-condicion-pago"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contado">Contado</SelectItem>
+                        <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="col-span-2">
+                  <Label>Proveedor</Label>
+                <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
+                  <div className="flex gap-2 items-center">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        placeholder="Buscar proveedor..."
+                        value={supplierDropdownOpen
+                          ? supplierSearch
+                          : form.supplierId
+                          ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
+                          : ""}
+                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
+                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
+                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
+                        data-testid="select-supplier"
+                        autoComplete="off"
+                      />
+                      {supplierDropdownOpen && (
+                        <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
+                          {[...suppliers]
+                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
+                            .slice(0, 60)
+                            .map((s) => (
+                              <div
+                                key={s.id}
+                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
+                                  <span className="truncate">{s.razonSocial}</span>
+                                </div>
+                                <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
+                              </div>
+                            ))}
+                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-                {(form.supplierId === "manual" || !form.supplierId) && (
-                  <>
-                    <div>
-                      <Label>Razón Social</Label>
-                      <Input value={form.proveedorNombre} onChange={(e) => f("proveedorNombre", e.target.value)} data-testid="input-proveedor-nombre" />
-                    </div>
-                    <div>
-                      <Label>CUIT</Label>
-                      <Input value={form.proveedorCuit} onChange={(e) => f("proveedorCuit", e.target.value)} data-testid="input-proveedor-cuit" />
-                    </div>
-                  </>
-                )}
+                <div>
+                  <Label>Razón Social</Label>
+                  <Input value={form.proveedorNombre} readOnly data-testid="input-proveedor-nombre" />
+                </div>
+                <div>
+                  <Label>CUIT</Label>
+                  <Input value={form.proveedorCuit} readOnly data-testid="input-proveedor-cuit" />
+                </div>
                 <div>
                   <Label>Punto de Venta</Label>
                   <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
@@ -951,23 +1741,23 @@ function InvoiceDialog({
                 <div><Label>Percep. IVA</Label><Input type="number" step="0.01" value={form.percepcionIva} onChange={(e) => f("percepcionIva", e.target.value)} data-testid="input-percep-iva" /></div>
                 <div><Label>Percep. Ganancias</Label><Input type="number" step="0.01" value={form.percepcionGanancias} onChange={(e) => f("percepcionGanancias", e.target.value)} data-testid="input-percep-ganancias" /></div>
               </div>
-              <Separator />
-              <p className="text-sm font-semibold text-muted-foreground">
-                {isLiquidacionTarjeta
-                  ? "Retenciones sufridas (DEBE — suman al total)"
-                  : "Retenciones (HABER — descuentan el pago)"}
-              </p>
               {isLiquidacionTarjeta && (
+              <>
+              <Separator />
+              <p className="text-sm font-semibold text-muted-foreground">Retenciones sufridas (DEBE — suman al total)</p>
                 <p className="text-xs text-muted-foreground">
                   Son retenciones realizadas a Maran por la tarjeta; se consideran importes a favor y no reducen este comprobante.
                 </p>
-              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Ret. IIBB</Label><Input type="number" step="0.01" value={form.retencionIibb} onChange={(e) => f("retencionIibb", e.target.value)} data-testid="input-ret-iibb" /></div>
                 <div><Label>Ret. Ganancias</Label><Input type="number" step="0.01" value={form.retencionGanancias} onChange={(e) => f("retencionGanancias", e.target.value)} data-testid="input-ret-ganancias" /></div>
                 <div><Label>Ret. IVA</Label><Input type="number" step="0.01" value={form.retencionIva} onChange={(e) => f("retencionIva", e.target.value)} data-testid="input-ret-iva" /></div>
                 <div><Label>Ret. SUSS</Label><Input type="number" step="0.01" value={form.retencionSuss} onChange={(e) => f("retencionSuss", e.target.value)} data-testid="input-ret-suss" /></div>
+                <div><Label>Ret. Municipal</Label><Input type="number" step="0.01" value={form.retencionMunicipal} onChange={(e) => f("retencionMunicipal", e.target.value)} data-testid="input-ret-municipal" /></div>
               </div>
+              </>
+              )}
+              {historicalRetentionsNote}
                 </>
               )}
             </>
@@ -1005,22 +1795,7 @@ function InvoiceDialog({
                   <p className="text-xs text-muted-foreground mt-1">
                     {isRetencion
                       ? "Se asigna automáticamente según el tipo de retención y nunca se registra como gasto."
-                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento".'}
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <Label>Centro de Costo</Label>
-                  <Select value={form.centroCosto || "__none__"} onValueChange={(v) => f("centroCosto", v === "__none__" ? "" : v)}>
-                    <SelectTrigger data-testid="select-centro-costo">
-                      <SelectValue placeholder="Seleccionar área..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">— Sin clasificar —</SelectItem>
-                      {costCenters.map((c) => <SelectItem key={c.id} value={c.nombre}>{c.nombre}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Informativo. El reporte "Costos por Departamento" agrupa por la Cuenta Contable de Gasto, no por este campo.
+                      : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento". Se sugiere sola según la categoría de los artículos cargados.'}
                   </p>
                 </div>
                 <div className="col-span-2">
@@ -1037,7 +1812,13 @@ function InvoiceDialog({
                     <span className="text-2xl font-bold text-primary">${fmt(total)}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    Condición: {form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}
+                    {isSupplierPayable
+                      ? (!isEditing && form.formaPagoInmediata !== "cuenta_corriente" && !form.tipoComprobante.startsWith("NC")
+                        ? ($n(form.montoPagadoAhora) < total - 0.005
+                          ? `Se paga $${fmt(form.montoPagadoAhora)} al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata}); resto en cuenta corriente`
+                          : `Se paga al guardar (${FORMAS_PAGO.find(fp => fp.value === form.formaPagoInmediata)?.label || form.formaPagoInmediata})`)
+                        : "Pendiente de pago en cuenta corriente")
+                      : `Condición: ${form.condicionPago === "contado" ? "Contado (pago inmediato)" : "Cuenta Corriente (queda pendiente)"}`}
                   </div>
                 </CardContent>
               </Card>
@@ -1048,150 +1829,22 @@ function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Opcional — Agregá los productos recibidos. Podés sumar stock a artículos existentes o crear artículos nuevos.</span>
+                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
               </div>
 
               {invItems.length > 0 && (
                 <div className="space-y-3">
                   {invItems.map((row, i) => (
                     <div key={i} data-testid={`row-inv-item-${i}`} className="border rounded-lg p-3 space-y-3 bg-muted/20">
-                      {/* Mode toggle */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex rounded-md border overflow-hidden text-xs">
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "existing" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "existing")}
-                            data-testid={`btn-mode-existing-${i}`}
-                          >
-                            Artículo existente
-                          </button>
-                          <button
-                            type="button"
-                            className={`px-3 py-1.5 font-medium transition-colors ${row.mode === "new" ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
-                            onClick={() => toggleInvRowMode(i, "new")}
-                            data-testid={`btn-mode-new-${i}`}
-                          >
-                            Artículo nuevo
-                          </button>
-                        </div>
-                        <div className="flex-1" />
+                      <div className="flex justify-end">
                         <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeInvRow(i)} data-testid={`btn-remove-inv-${i}`}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
 
                       {/* Article selector / name */}
-                      {row.mode === "existing" ? (
-                        <div>
-                          <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-                          <Popover modal={true} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen((p) => ({ ...p, [i]: v }))}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between font-normal h-8 text-sm"
-                                data-testid={`select-existing-item-${i}`}
-                              >
-                                <span className="truncate">
-                                  {row.existingItemId
-                                    ? (existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.name || "Seleccionar artículo..."
-                                    : "Seleccionar artículo..."}
-                                </span>
-                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[340px] p-0" align="start">
-                              <Command>
-                                <CommandInput placeholder="Buscar artículo..." />
-                                <CommandList>
-                                  <CommandEmpty>No se encontraron artículos</CommandEmpty>
-                                  <CommandGroup>
-                                    {[...existingInvItems]
-                                      .sort((a: any, b: any) => a.name.localeCompare(b.name, "es"))
-                                      .map((item: any) => (
-                                        <CommandItem
-                                          key={item.id}
-                                          value={item.name}
-                                          onMouseDown={(e) => e.preventDefault()}
-                                          onSelect={() => {
-                                            updateInvRow(i, "existingItemId", String(item.id));
-                                            setExistingItemOpen((p) => ({ ...p, [i]: false }));
-                                          }}
-                                        >
-                                          <Check className={`mr-2 h-4 w-4 ${row.existingItemId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                                          <span className="flex-1">{item.name}</span>
-                                          <span className="text-xs text-muted-foreground ml-2">Stock: {item.currentStock} {item.unit}</span>
-                                        </CommandItem>
-                                      ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Nombre del artículo *</Label>
-                              <Input value={row.name} onChange={(e) => updateInvRow(i, "name", e.target.value)} placeholder="Ej: Aceite de Oliva 1L" className="h-8 text-sm" data-testid={`input-inv-name-${i}`} />
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Categoría</Label>
-                              <Select value={row.categoryId || "__none__"} onValueChange={(v) => updateInvRow(i, "categoryId", v === "__none__" ? "" : v)}>
-                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Sin categoría" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="__none__">— Sin categoría —</SelectItem>
-                                  {(() => {
-                                    const cats = (itemCategories as any[]);
-                                    const groups = cats.filter((c: any) => c.isGroup);
-                                    const leafCats = cats.filter((c: any) => !c.isGroup && c.id);
-                                    const result: JSX.Element[] = [];
-                                    for (const g of groups) {
-                                      const children = leafCats.filter((c: any) => c.parentId === g.id);
-                                      if (!children.length) continue;
-                                      result.push(
-                                        <SelectGroup key={g.id}>
-                                          <SelectLabel>{g.name}</SelectLabel>
-                                          {children.map((cat: any) => (
-                                            <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                          ))}
-                                        </SelectGroup>
-                                      );
-                                    }
-                                    const ungrouped = leafCats.filter((c: any) => !c.parentId);
-                                    if (ungrouped.length) {
-                                      if (result.length) result.push(<SelectSeparator key="sep" />);
-                                      ungrouped.forEach((cat: any) => result.push(
-                                        <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
-                                      ));
-                                    }
-                                    return result;
-                                  })()}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <Label className="text-xs mb-1 block">Tipo de artículo</Label>
-                              <Select value={row.itemKind || "materia_prima"} onValueChange={(v) => updateInvRow(i, "itemKind", v)}>
-                                <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-kind-${i}`}><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
-                                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
-                                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label className="text-xs mb-1 block">Stock mínimo</Label>
-                              <Input type="number" min="0" step="1" value={row.minStock} onChange={(e) => updateInvRow(i, "minStock", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-minstock-${i}`} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
                       <div className="grid grid-cols-3 gap-2">
@@ -1209,10 +1862,25 @@ function InvoiceDialog({
                           </Select>
                         </div>
                         <div>
-                          <Label className="text-xs mb-1 block">Costo unit. ($)</Label>
+                          <Label className="text-xs mb-1 block">{form.tipoComprobante === "FACT-B" ? "Precio final unit. ($)" : "Costo unit. neto ($)"}</Label>
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
+                        <div>
+                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                              <SelectItem value="27">27%</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
 
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
@@ -1238,6 +1906,8 @@ function InvoiceDialog({
                 <Plus className="h-4 w-4 mr-2" />Agregar artículo
               </Button>
 
+              {articleAmountComparison}
+
               {invItems.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-2">
                   Sin artículos — el comprobante se registrará sin modificar el inventario.
@@ -1245,7 +1915,22 @@ function InvoiceDialog({
               )}
             </div>
           )}
+          </>
+          )}
 
+          {unifiedLayout ? (
+        <DialogFooter>
+          <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
+            data-testid="btn-submit-invoice"
+          >
+            {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
+            {isEditing ? "Guardar cambios" : isRemito ? "Registrar remito" : "Factura completa"}
+          </Button>
+        </DialogFooter>
+          ) : (
         <DialogFooter className="flex items-center justify-between">
           <div>
             {step > 0 && (
@@ -1259,7 +1944,7 @@ function InvoiceDialog({
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={createMut.isPending || patchMut.isPending}
+                disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
                 data-testid="btn-submit-invoice"
               >
                 {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -1268,65 +1953,10 @@ function InvoiceDialog({
             )}
           </div>
         </DialogFooter>
+          )}
         </div>
-      </DialogContent>
+    </InvoiceFormShell>
 
-    </Dialog>
-
-    {/* Quick-create supplier dialog — rendered OUTSIDE main Dialog to avoid Radix nesting issues */}
-    <Dialog open={quickCreateOpen} onOpenChange={setQuickCreateOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Nuevo Proveedor</DialogTitle>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-2">
-          <div className="col-span-2">
-            <Label>Razón Social *</Label>
-            <Input value={quickForm.razonSocial} onChange={(e) => qf("razonSocial", e.target.value)} data-testid="input-quick-razon-social" />
-          </div>
-          <div>
-            <Label>CUIT *</Label>
-            <Input value={quickForm.cuit} onChange={(e) => qf("cuit", e.target.value)} placeholder="20-12345678-9" data-testid="input-quick-cuit" />
-          </div>
-          <div>
-            <Label>Condición IVA *</Label>
-            <Select value={quickForm.condicionIva} onValueChange={(v) => qf("condicionIva", v)}>
-              <SelectTrigger data-testid="select-quick-condicion-iva">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["Responsable Inscripto","Monotributo","Exento","No Responsable","Consumidor Final"].map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="col-span-2">
-            <Label>Cuenta contable por defecto</Label>
-            <Select value={quickForm.cuentaContableId || "__none__"} onValueChange={(v) => qf("cuentaContableId", v === "__none__" ? "" : v)}>
-              <SelectTrigger data-testid="select-quick-cuenta-contable">
-                <SelectValue placeholder="Sin cuenta por defecto" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Sin cuenta por defecto</SelectItem>
-                {accounts.filter((a: any) => a.id).map((a) => (
-                  <SelectItem key={a.id} value={String(a.id)}>
-                    {a.codigo} — {a.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setQuickCreateOpen(false)}>Cancelar</Button>
-          <Button onClick={handleQuickCreateSubmit} disabled={quickCreateMut.isPending} data-testid="btn-submit-quick-supplier">
-            {quickCreateMut.isPending && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-            Crear proveedor
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
     </>
   );
 }
@@ -1376,6 +2006,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ...(invoice.retencionGanancias && parseFloat(invoice.retencionGanancias) !== 0 ? [[retentionLabel("Ret. Ganancias"), retentionValue(invoice.retencionGanancias)] as [string, string]] : []),
     ...(invoice.retencionIva && parseFloat(invoice.retencionIva) !== 0 ? [[retentionLabel("Ret. IVA"), retentionValue(invoice.retencionIva)] as [string, string]] : []),
     ...(invoice.retencionSuss && parseFloat(invoice.retencionSuss) !== 0 ? [[retentionLabel("Ret. SUSS"), retentionValue(invoice.retencionSuss)] as [string, string]] : []),
+    ...(invoice.retencionMunicipal && parseFloat(invoice.retencionMunicipal) !== 0 ? [[retentionLabel("Ret. Municipal"), retentionValue(invoice.retencionMunicipal)] as [string, string]] : []),
     ...(invoice.impuestosInternos && parseFloat(invoice.impuestosInternos) !== 0 ? [["Imp. Internos", fmt2(invoice.impuestosInternos)] as [string, string]] : []),
     ...(invoice.ley25413 && parseFloat(invoice.ley25413) !== 0 ? [["Ley 25.413", fmt2(invoice.ley25413)] as [string, string]] : []),
   ];
@@ -1413,12 +2044,6 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               </div>
             </div>
           </div>
-          {invoice.centroCosto && (
-            <div>
-              <div className="text-xs text-muted-foreground">Centro de costo</div>
-              <div className="text-sm">{invoice.centroCosto}</div>
-            </div>
-          )}
           {invoice.estado === "pagado" && (
             <>
               <Separator />
@@ -1510,9 +2135,10 @@ function PaymentOrderDialog({
 
   const selectedFacturas = facturas.filter((inv) => selectedInvoices.includes(inv.id));
   const isNC = (inv: Invoice) => (inv.tipoComprobante || "").startsWith("NC");
-  // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones
+  // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones.
+  // Para una factura "parcial" se usa el saldo pendiente, no el total original.
   const totalSelected = selectedFacturas.reduce(
-    (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.montoTotal), 0);
+    (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.saldoPendiente ?? inv.montoTotal), 0);
   const baseNetosIibb = selectedFacturas.reduce(
     (s, inv) => isNC(inv) ? s : s + $n(inv.montoNeto), 0);
 
@@ -1663,11 +2289,15 @@ function PaymentOrderDialog({
                       <div className="text-sm font-medium flex items-center gap-1.5">
                         {inv.tipoComprobante} {inv.numeroComprobanteExt || inv.numeroComprobante}
                         {esNC && <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 px-1.5 py-0.5 rounded font-normal">resta del total</span>}
+                        {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
-                      <div className="text-xs text-muted-foreground">{inv.fechaEmision}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {inv.fechaEmision}
+                        {inv.estado === "parcial" && ` · Total ${fmt(inv.montoTotal)}, ya pagado ${fmt($n(inv.montoTotal) - $n(inv.saldoPendiente))}`}
+                      </div>
                     </div>
                     <div className={`font-semibold ${esNC ? "text-orange-600 dark:text-orange-400" : ""}`}>
-                      {esNC ? "−" : ""}${fmt(inv.montoTotal)}
+                      {esNC ? "−" : ""}${fmt(esNC ? inv.montoTotal : (inv.saldoPendiente ?? inv.montoTotal))}
                     </div>
                   </div>
                 );
@@ -2115,7 +2745,9 @@ export default function PurchaseInvoices() {
 
   const estadoBadge = (estado: string) => {
     if (estado === "pendiente") return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pendiente</Badge>;
+    if (estado === "parcial") return <Badge variant="outline" className="border-blue-500 text-blue-600"><Clock className="h-3 w-3 mr-1" />Parcial</Badge>;
     if (estado === "pagado") return <Badge variant="outline" className="border-green-500 text-green-600"><CheckCircle2 className="h-3 w-3 mr-1" />Pagado</Badge>;
+    if (estado === "registrado") return <Badge variant="outline">Solo gasto</Badge>;
     return <Badge variant="secondary">Anulado</Badge>;
   };
 
@@ -2156,14 +2788,14 @@ export default function PurchaseInvoices() {
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-amber-600">{invoices.filter((i) => i.estado === "pendiente").length}</div>
+              <div className="text-2xl font-bold text-amber-600">{invoices.filter((i) => i.estado === "pendiente" || i.estado === "parcial").length}</div>
               <div className="text-xs text-muted-foreground">Pendientes de pago</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold text-destructive">
-                ${invoices.filter((i) => i.estado === "pendiente").reduce((s, i) => s + $n(i.montoTotal), 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
+                ${invoices.filter((i) => i.estado === "pendiente" || i.estado === "parcial").reduce((s, i) => s + $n(i.saldoPendiente ?? i.montoTotal), 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}
               </div>
               <div className="text-xs text-muted-foreground">Deuda total en CC</div>
             </CardContent>
@@ -2206,6 +2838,7 @@ export default function PurchaseInvoices() {
                     <SelectContent>
                       <SelectItem value="todos">Todos</SelectItem>
                       <SelectItem value="pendiente">Pendiente</SelectItem>
+                      <SelectItem value="parcial">Parcial</SelectItem>
                       <SelectItem value="pagado">Pagado</SelectItem>
                       <SelectItem value="anulado">Anulado</SelectItem>
                     </SelectContent>
@@ -2275,15 +2908,13 @@ export default function PurchaseInvoices() {
                                   >
                                     <Pencil className="h-4 w-4 text-muted-foreground" />
                                   </Button>
-                                  <Button
-                                    variant="ghost" size="icon"
-                                    onClick={() => setAnularId(inv.id)}
-                                    title="Anular"
-                                    data-testid={`btn-anular-invoice-${inv.id}`}
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
                                 </>
+                              )}
+                              {(inv.estado === "pendiente" || inv.estado === "registrado") && (
+                                <Button variant="ghost" size="icon" onClick={() => setAnularId(inv.id)}
+                                  title="Anular" data-testid={`btn-anular-invoice-${inv.id}`}>
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
                               )}
                             </div>
                           </TableCell>

@@ -16,6 +16,8 @@ import {
   agencies,
   webCheckins,
   events,
+  giftVouchers,
+  giftVoucherEvents,
 } from "@shared/schema";
 import { loadReservationOperationalSummaries } from "./reservation-operational-balances";
 import { isZeroReservationRate } from "@shared/reservationRate";
@@ -439,17 +441,18 @@ async function runNightAuditUnlocked(options: {
           reservationId: r.id, reservationCode: r.reservationCode,
           scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival",
           roomId: r.roomId, guestId: r.guestId, specialRateReason: r.specialRateReason,
-          companyId: r.companyId, companyName: r.companyId ? companyNames.get(r.companyId) ?? null : null,
-          agencyId: r.agencyId, agencyName: r.agencyId ? agencyNames.get(r.agencyId) ?? null : null,
+          companyId: r.companyId, agencyId: r.agencyId,
+          ...stableById.get(r.id),
         })),
         rateIssues: allReservations.flatMap(r => {
           const kind = classifyReservationRate(r.finalRatePerNight, r.specialRateReason);
           if (!kind) return [];
           return [{ reservationId: r.id, reservationCode: r.reservationCode,
-            scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", kind }];
+            scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", kind,
+            ...stableById.get(r.id) }];
         }),
         missingBedType: allReservations.filter(r => !r.bedTypeId && !r.bedTypeNotes)
-          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", roomId: r.roomId })),
+          .map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", roomId: r.roomId, ...stableById.get(r.id) })),
         webCheckin: allReservations.map(r => ({
           reservationId: r.id, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", status: checkinStatus.get(r.id) ?? "missing",
         })),
@@ -457,7 +460,7 @@ async function runNightAuditUnlocked(options: {
         sourceIssues: allReservations.filter(r =>
           (r.source === "agencia" && !r.agencyId) ||
           (["booking", "expedia", "airbnb", "despegar", "hotelbeds", "agoda", "ota"].includes(r.source as string) && !r.otaChannelId)
-        ).map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", source: r.source })),
+        ).map(r => ({ reservationId: r.id, reservationCode: r.reservationCode, scope: inHouseReservations.some(h => h.id === r.id) ? "inHouse" : "arrival", source: r.source, ...stableById.get(r.id) })),
        },
       },
     };
@@ -481,6 +484,58 @@ async function runNightAuditUnlocked(options: {
         id: randomUUID(),
         ...auditPayload,
       }).returning();
+
+    // ============================================================
+    // PASO 3.5 — Vouchers de regalo: vencimiento automático + alerta
+    // ============================================================
+    // Doble resguardo: además de este paso nocturno, cualquier búsqueda de
+    // vouchers disponibles (getAvailableGiftVouchers) ya filtra por fecha en
+    // el momento — así que aunque este paso no llegue a correr una noche, un
+    // voucher vencido nunca aparece seleccionable igual.
+    // "reservado" queda afuera a propósito: ya está comprometido con una
+    // operación real (una reserva futura), no tiene sentido que venza por
+    // debajo de esa reserva — sigue su curso hasta que se libere o consuma.
+    if (!reportingOnlyRerun) try {
+      const expired = await db.update(giftVouchers)
+        .set({ status: "vencido" })
+        .where(and(
+          lte(giftVouchers.expiresAt, auditDate),
+          inArray(giftVouchers.status, ["activo", "activo_facturado"]),
+        ))
+        .returning({ id: giftVouchers.id });
+      if (expired.length > 0) {
+        await db.insert(giftVoucherEvents).values(
+          expired.map(v => ({
+            voucherId: v.id,
+            eventType: "vencido" as const,
+            toStatus: "vencido" as const,
+            reason: "Vencimiento automático (night audit)",
+            performedBy: "sistema",
+          })),
+        );
+      }
+
+      const expiringTomorrow = await db.select({ voucherCode: giftVouchers.voucherCode })
+        .from(giftVouchers)
+        .where(and(
+          eq(giftVouchers.expiresAt, tomorrow),
+          inArray(giftVouchers.status, ["activo", "activo_facturado"]),
+        ));
+      if (expiringTomorrow.length > 0) {
+        await db.insert(systemNotifications).values({
+          id: randomUUID(),
+          type: "gift_voucher_expiring" as any,
+          title: `${expiringTomorrow.length} voucher(s) de regalo vencen mañana`,
+          message: expiringTomorrow.map(v => v.voucherCode).join(", "),
+          targetArea: "all",
+          priority: "normal" as any,
+          isRead: false,
+          createdAt: new Date(),
+        });
+      }
+    } catch (e) {
+      console.error("[NightAudit] Error procesando vencimiento de vouchers:", e);
+    }
 
     // ============================================================
     // PASO 4 — Notificación interna

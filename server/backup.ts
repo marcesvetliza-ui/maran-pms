@@ -1,8 +1,7 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import nodemailer from "nodemailer";
-import type SMTPTransport from "nodemailer/lib/smtp-transport";
-import { emailConfig, backupLogs } from "@shared/schema";
+import { sendEmailWithPdfAttachment } from "./email-service";
+import { backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
 import { shouldBlockExternalComm } from "./external-comms-policy";
@@ -180,6 +179,11 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 }
 
 // ─── Send backup by email ─────────────────────────────────────────────────────
+// Reutiliza el mismo mecanismo de envío que el resto del sistema (SMTP o
+// Resend, lo que esté configurado en Configuración > Emails) en vez de
+// requerir SMTP siempre — muchos hosts (ej. Railway fuera del plan Pro)
+// bloquean las conexiones SMTP salientes, mientras que Resend (HTTPS) sí
+// funciona ahí.
 export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
   const start = Date.now();
 
@@ -194,40 +198,28 @@ export async function sendBackupByEmail(targetEmail: string, type: string = "man
     throw new Error("El envío de backups por email está bloqueado en este ambiente (piloto/desarrollo/test).");
   }
 
-  const cfgRows = await db.select().from(emailConfig).limit(1);
-  const cfg = cfgRows[0];
-  if (!cfg || !cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass) {
-    await logBackup({ type, status: "error", destination: targetEmail, errorMessage: "SMTP no configurado" });
-    throw new Error("SMTP no configurado. Configurá el servidor de correo en Configuración > Emails.");
-  }
-
-  const transportOptions: SMTPTransport.Options & { family: number } = {
-    host: cfg.smtpHost,
-    port: cfg.smtpPort ?? 587,
-    secure: cfg.smtpSecure ?? false,
-    auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-    family: 4, // force IPv4 — Replit production has no IPv6 route
-  };
-  const transport = nodemailer.createTransport(transportOptions);
 
   const sqlBuffer = await generateBackupSql();
-  const dateStr = new Date().toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
     .replace(/\//g, "-");
-  const filename = `maran-backup-${dateStr}.sql`;
+  const timeStr = now.toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", hour12: false });
+  const filename = `maran-backup-${dateStr}-${timeStr.replace(":", "")}hs.sql`;
 
-  try {
-    await transport.sendMail({
-      from: `"${cfg.fromName || "Maran Suite System"}" <${cfg.fromEmail || cfg.smtpUser}>`,
-      to: targetEmail,
-      subject: `[Maran] Backup automático de base de datos — ${dateStr}`,
-      text: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las 03:00 hs.\n\nEste email es automático, no respondas.`,
-      attachments: [{ filename, content: sqlBuffer, contentType: "application/sql" }],
-    });
-    await logBackup({ type, status: "success", destination: targetEmail, fileSizeBytes: sqlBuffer.length, durationMs: Date.now() - start });
-  } catch (err: any) {
-    await logBackup({ type, status: "error", destination: targetEmail, durationMs: Date.now() - start, errorMessage: err.message });
-    throw err;
+  const result = await sendEmailWithPdfAttachment({
+    to: targetEmail,
+    subject: `[Maran] Backup automático de base de datos — ${dateStr} ${timeStr} hs`,
+    body: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las ${timeStr} hs.\n\nEste email es automático, no respondas.`,
+    attachmentFilename: filename,
+    attachmentBuffer: sqlBuffer,
+    attachmentContentType: "application/sql",
+  });
+
+  if (!result.ok) {
+    await logBackup({ type, status: "error", destination: targetEmail, durationMs: Date.now() - start, errorMessage: result.error });
+    throw new Error(result.error || "Error enviando el backup por email");
   }
+  await logBackup({ type, status: "success", destination: targetEmail, fileSizeBytes: sqlBuffer.length, durationMs: Date.now() - start });
 }
 
 // ─── Log manual download ───────────────────────────────────────────────────────
@@ -235,7 +227,16 @@ export async function logManualDownload(fileSizeBytes: number): Promise<void> {
   await logBackup({ type: "manual_download", status: "success", fileSizeBytes });
 }
 
-// ─── Scheduler — corre a las 03:00 hora Argentina ────────────────────────────
+// ─── Scheduler — corre a las 03:00 y 15:00 hora Argentina (cada 12hs) ────────
+export const BACKUP_HOURS = [3, 15];
+
+export function isBackupTime(date: Date): boolean {
+  const argTime = new Date(
+    date.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }),
+  );
+  return BACKUP_HOURS.includes(argTime.getHours()) && argTime.getMinutes() === 0;
+}
+
 let backupSchedulerStarted = false;
 
 export function setupBackupScheduler() {
@@ -249,10 +250,9 @@ export function setupBackupScheduler() {
         now.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }),
       );
       const hour = argTime.getHours();
-      const minute = argTime.getMinutes();
 
-      if (hour === 3 && minute === 0) {
-        backupLog("Hora de backup alcanzada (03:00 ARG) — iniciando...");
+      if (isBackupTime(now)) {
+        backupLog(`Hora de backup alcanzada (${String(hour).padStart(2, "0")}:00 ARG) — iniciando...`);
 
         // Read config from system_settings
         const enabledRow = await db.select().from(systemSettings)
@@ -281,5 +281,5 @@ export function setupBackupScheduler() {
     }
   }, 60_000);
 
-  backupLog("Backup scheduler iniciado (verifica a las 03:00 ARG)");
+  backupLog("Backup scheduler iniciado (verifica a las 03:00 y 15:00 ARG)");
 }

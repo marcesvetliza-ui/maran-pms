@@ -16,9 +16,10 @@ const INVOICE_PAYMENT_GRID_METHODS = [
   "transferencia",
   "cheque",
   "cuenta_corriente",
+  "retencion",
 ] as const;
 
-function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] {
+function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] | null {
   return method === "tarjeta" || method === "tarjeta_credito" ? "tarjeta"
     : method === "debito" || method === "tarjeta_debito" ? "debito"
     : method === "cheque" || method === "echeq" ? "cheque"
@@ -26,7 +27,12 @@ function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METH
     : method === "transferencia" ? "transferencia"
     : method === "cuenta_corriente" ? "cuenta_corriente"
     : method === "adelanto" ? "adelanto"
-    : "efectivo";
+    : method === "efectivo" ? "efectivo"
+    // Una retención (IIBB/Ganancias/IVA) que nos practica quien nos paga: no
+    // es plata que haya entrado en Caja, así que tiene su propia columna —
+    // nunca debe contarse como efectivo/transferencia/etc.
+    : method.startsWith("retencion_") ? "retencion"
+    : null;
 }
 
 export function getInvoicePaymentAmounts(
@@ -44,10 +50,12 @@ export function getInvoicePaymentAmounts(
       const amount = $n(entry?.amount);
       if (amount <= 0) continue;
       const key = invoicePaymentGridKey(String(entry?.method ?? ""));
+      if (!key) continue;
       amounts[key] += amount;
     }
   } else if (cashFormaPago) {
-    amounts[invoicePaymentGridKey(cashFormaPago)] = montoTotal;
+    const key = invoicePaymentGridKey(cashFormaPago);
+    if (key) amounts[key] = montoTotal;
   }
 
   return amounts;
@@ -57,6 +65,7 @@ export function getInvoiceRecipientDocument(factura: any) {
   const document = resolveFiscalRecipientDocument({
     cuit: factura.cliente_cuit ?? factura.clienteCuit,
     dni: factura.cliente_dni ?? factura.clienteDni,
+    documentType: factura.cliente_document_type ?? factura.clienteDocumentType,
   });
   return { tipoDocRec: document.tipo, nroDocRec: Number(document.numero) };
 }
@@ -152,17 +161,28 @@ const TIPO_LABELS: Record<string, { nombre: string; letra: string; codigo: strin
   FC:  { nombre: "FACTURA",             letra: "C", codigo: "011" },
   FT:  { nombre: "FACTURA",             letra: "T", codigo: "195" },
   FM:  { nombre: "FACTURA MiPyME",      letra: "A", codigo: "201" },
+  FMB: { nombre: "FACTURA MiPyME",      letra: "B", codigo: "206" },
   NCA: { nombre: "NOTA DE CRÉDITO",     letra: "A", codigo: "003" },
   NCB: { nombre: "NOTA DE CRÉDITO",     letra: "B", codigo: "008" },
   NCC: { nombre: "NOTA DE CRÉDITO",     letra: "C", codigo: "013" },
   NCT: { nombre: "NOTA DE CRÉDITO",     letra: "T", codigo: "197" },
   NCM: { nombre: "NOTA DE CRÉDITO MiPyME", letra: "A", codigo: "203" },
+  NCMB: { nombre: "NOTA DE CRÉDITO MiPyME", letra: "B", codigo: "208" },
   NDA: { nombre: "NOTA DE DÉBITO",      letra: "A", codigo: "002" },
   NDB: { nombre: "NOTA DE DÉBITO",      letra: "B", codigo: "007" },
   NDC: { nombre: "NOTA DE DÉBITO",      letra: "C", codigo: "012" },
   NDT: { nombre: "NOTA DE DÉBITO",      letra: "T", codigo: "196" },
   NDM: { nombre: "NOTA DE DÉBITO MiPyME", letra: "A", codigo: "202" },
+  NDMB: { nombre: "NOTA DE DÉBITO MiPyME", letra: "B", codigo: "207" },
+  voucher_justo: { nombre: "Voucher Justo", letra: "—", codigo: "000" },
+  voucher_pedidos_ya: { nombre: "Voucher Pedidos Ya", letra: "—", codigo: "000" },
+  voucher_room_service: { nombre: "Room Service", letra: "—", codigo: "000" },
+  voucher_consumo_interno: { nombre: "Consumo Interno", letra: "—", codigo: "000" },
 };
+
+export function getInvoiceTypePresentation(tipoKey: string) {
+  return TIPO_LABELS[tipoKey] ?? { nombre: tipoKey, letra: "?", codigo: "000" };
+}
 
 // ── Guest data (optional, enriched from reservation) ─────────────────────────
 export interface InvoiceGuestData {
@@ -230,6 +250,9 @@ export async function generarFacturaPDF(
     const clienteDomicilio    = factura.cliente_domicilio     ?? factura.clienteDomicilio     ?? "—";
     const clienteCuit         = factura.cliente_cuit          ?? factura.clienteCuit          ?? null;
     const clienteDni          = factura.cliente_dni           ?? factura.clienteDni           ?? null;
+    const clienteDocumentType = factura.cliente_document_type ?? factura.clienteDocumentType  ?? null;
+    const clienteDniLabel     = ["passport", "pasaporte"].includes(String(clienteDocumentType ?? "").toLowerCase())
+      ? "Pasaporte" : "D.N.I.";
     const clienteCondicionIva = factura.cliente_condicion_iva ?? factura.clienteCondicionIva  ?? "—";
 
     const montoNeto      = $n(factura.monto_neto       ?? factura.montoNeto       ?? 0);
@@ -239,7 +262,7 @@ export async function generarFacturaPDF(
     const montoIva105    = $n(factura.monto_iva105     ?? factura.montoIva105     ?? 0);
     const montoTotal     = $n(factura.monto_total      ?? factura.montoTotal      ?? factura.total ?? 0);
 
-    const tipo = TIPO_LABELS[tipoKey] ?? { nombre: tipoKey, letra: "?", codigo: "000" };
+    const tipo = getInvoiceTypePresentation(String(tipoKey));
     const PV   = padNum(Number(puntoVenta), 4);
     const NRO  = padNum(Number(numero), 8);
 
@@ -249,7 +272,11 @@ export async function generarFacturaPDF(
     // Reserve enough space for payment totals, transparency, QR/CAE and footer.
     // Shrink FOOTER_TOP when optional sections (notaCredito, ficticio) consume extra space.
     const transparenciaFiscal = ["FB", "NCB", "NDB"].includes(tipoKey);
-    const FOOTER_H = 271 + (transparenciaFiscal ? 34 : 0);
+    // Decreto 1043/2016 — Factura T/NC T ya facturan el neto (turista
+    // extranjero, alojamiento/desayuno); el comprobante debe mostrar el IVA
+    // que se hubiera aplicado y el reintegro que lo cancela, más la leyenda.
+    const isTurismoReintegro = tipoKey === "FT" || tipoKey === "NCT";
+    const FOOTER_H = 271 + (transparenciaFiscal ? 34 : 0) + (isTurismoReintegro ? 34 : 0);
     const FOOTER_TOP = Math.floor(841.89 - 30 - FOOTER_H)
       - (notaCredito  ? 62 : 0)
       - (modoFicticio ? 16 : 0);
@@ -267,6 +294,7 @@ export async function generarFacturaPDF(
     const cfgInicio       = config?.inicioActividades ?? "01/01/2000";
 
     const discriminaIVA = ["FA", "NCA", "NDA", "FM", "NCM", "NDM"].includes(tipoKey);
+    const turismoIva = isTurismoReintegro ? $n((montoNoGravado * 0.21).toFixed(2)) : 0;
 
     // ── Helpers ────────────────────────────────────────────────────────────
     function hline(yy: number, lx = x0, lw = W, color = "#ccc") {
@@ -373,7 +401,7 @@ export async function generarFacturaPDF(
     if (clienteCuit) {
       doc.text(`C.U.I.T.: ${clienteCuit}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
     } else if (clienteDni) {
-      doc.text(`D.N.I.: ${clienteDni}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
+      doc.text(`${clienteDniLabel}: ${clienteDni}`, rvx, rvy, { width: x0 + W - rvx - 5 }); rvy += 11;
     }
     doc.text(`I.V.A.: ${clienteCondicionIva}`, rvx, rvy, { width: x0 + W - rvx - 5 });
 
@@ -521,6 +549,7 @@ export async function generarFacturaPDF(
       cheque: "Cheque", tarjeta: "Tarjeta Cto.", debito: "Tarjeta Dbo.",
       mercadopago: "Mercado Pago", compensacion: "Compensación",
       cuenta_corriente: "Cta. Corriente", adelanto: "Adelantos", otro: "Otros",
+      retencion: "Retención",
     };
 
     // Grid de formas de pago
@@ -533,6 +562,7 @@ export async function generarFacturaPDF(
       { key: "transferencia", label: "Depósitos" },
       { key: "cheque",        label: "Cheques" },
       { key: "cuenta_corriente", label: "Cta. Corriente" },
+      { key: "retencion",     label: "Retención" },
     ];
 
     // Determine amounts
@@ -608,6 +638,11 @@ export async function generarFacturaPDF(
     if (discriminaIVA && montoNoGravado !== 0) totRows.push(["Importe No Gravado",   montoNoGravado]);
     if (discriminaIVA && montoIva21 !== 0)     totRows.push(["IVA 21%",              montoIva21]);
     if (discriminaIVA && montoIva105 !== 0)    totRows.push(["IVA 10.5%",            montoIva105]);
+    if (isTurismoReintegro) {
+      totRows.push(["Neto gravado",                              montoNoGravado]);
+      totRows.push(["IVA 21%",                                   turismoIva]);
+      totRows.push(["Reintegro Decreto 1043/2016",               -turismoIva]);
+    }
 
     for (const [label, val] of totRows) {
       doc.text(label, totX + 4, ty, { width: totW * 0.55 });
@@ -647,6 +682,18 @@ export async function generarFacturaPDF(
         .text("IVA contenido", x0 + 6, y + 17, { width: W * 0.55 })
         .font("Helvetica-Bold")
         .text(`$${fPeso(ivaContenido)}`, x0 + W * 0.62, y + 17, { width: W * 0.35, align: "right" });
+      doc.fillColor("#000");
+      y += 34;
+    }
+
+    if (isTurismoReintegro) {
+      box(x0, y, W, 30, "#9ca3af");
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#111827")
+        .text("Alcanzada por el beneficio de reintegro del IVA — Decreto 1043/2016", x0 + 6, y + 5, { width: W - 12 });
+      doc.font("Helvetica").fontSize(7.5)
+        .text("IVA reintegrado", x0 + 6, y + 17, { width: W * 0.55 })
+        .font("Helvetica-Bold")
+        .text(`$${fPeso(turismoIva)}`, x0 + W * 0.62, y + 17, { width: W * 0.35, align: "right" });
       doc.fillColor("#000");
       y += 34;
     }

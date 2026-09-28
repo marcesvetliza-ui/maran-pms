@@ -33,7 +33,19 @@ declare global {
       department: string | null;
       phone: string | null;
       isActive: string | null;
+      totpEnabled: string | null;
     }
+  }
+}
+
+declare module "express-session" {
+  interface SessionData {
+    // true mientras la sesión pasó el usuario/contraseña pero todavía no el
+    // segundo factor — bloquea todo excepto /api/auth/2fa/verify-login y logout.
+    pending2FA?: boolean;
+    // Secreto TOTP (cifrado) de un enrolamiento en curso, hasta que se
+    // confirme con un código válido — si el usuario abandona, no persiste.
+    pendingTotpSecret?: string;
   }
 }
 
@@ -205,6 +217,7 @@ export function setupAuth(app: Express) {
           department: user.department,
           phone: user.phone,
           isActive: user.isActive,
+          totpEnabled: user.totpEnabled,
         });
       } catch (err) {
         return done(err);
@@ -234,6 +247,7 @@ export function setupAuth(app: Express) {
         department: user.department,
         phone: user.phone,
         isActive: user.isActive,
+        totpEnabled: user.totpEnabled,
       });
     } catch (err) {
       done(err);
@@ -241,16 +255,27 @@ export function setupAuth(app: Express) {
   });
 }
 
+/**
+ * true si pasó usuario/contraseña pero el segundo factor (TOTP) sigue
+ * pendiente — esa sesión no cuenta como autenticada para el resto de la API.
+ */
+function isPending2FA(req: Request): boolean {
+  return req.session?.pending2FA === true;
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated()) {
+  if (req.isAuthenticated() && !isPending2FA(req)) {
     return next();
+  }
+  if (req.isAuthenticated() && isPending2FA(req)) {
+    return res.status(401).json({ message: "Falta completar la verificación en dos pasos", pending2FA: true });
   }
   res.status(401).json({ message: "No autenticado" });
 }
 
 export function requireRole(roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.isAuthenticated()) {
+    if (!req.isAuthenticated() || isPending2FA(req)) {
       return res.status(401).json({ message: "No autenticado" });
     }
     const userRole = (req.user as Express.User).role;

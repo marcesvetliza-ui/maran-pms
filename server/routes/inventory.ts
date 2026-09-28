@@ -49,46 +49,8 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  // Suppliers
-  app.get("/api/inventory/suppliers", async (req, res) => {
-    try {
-      const suppliers = await storage.getSuppliers();
-      res.json(suppliers);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching suppliers" });
-    }
-  });
-
-  app.post("/api/inventory/suppliers", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      const supplier = await storage.createSupplier(req.body);
-      res.status(201).json(supplier);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating supplier" });
-    }
-  });
-
-  app.patch("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      const supplier = await storage.updateSupplier(req.params.id, req.body);
-      if (!supplier) return res.status(404).json({ error: "Supplier not found" });
-      res.json(supplier);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating supplier" });
-    }
-  });
-
-  app.delete("/api/inventory/suppliers/:id", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
-    try {
-      await storage.deleteSupplier(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting supplier" });
-    }
-  });
-
   // Inventory Items
-  app.get("/api/inventory/items", async (req, res) => {
+  app.get("/api/inventory/items", requireAuth, async (req, res) => {
     try {
       let items = await storage.getInventoryItems();
       const area = req.query.area as string | undefined;
@@ -104,11 +66,12 @@ export function registerInventoryRoutes(app: Express) {
       }
       res.json(items);
     } catch (error) {
+      console.error("[inventory/items] error:", error);
       res.status(500).json({ error: "Error fetching inventory items" });
     }
   });
 
-  app.get("/api/inventory/items/low-stock", async (req, res) => {
+  app.get("/api/inventory/items/low-stock", requireAuth, async (req, res) => {
     try {
       const items = await storage.getInventoryItemsBelowMinStock();
       res.json(items);
@@ -171,8 +134,9 @@ export function registerInventoryRoutes(app: Express) {
       }
 
       res.status(201).json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating inventory item" });
+    } catch (error: any) {
+      const status = error?.message?.includes("proveedor") ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Error creating inventory item" });
     }
   });
 
@@ -181,8 +145,9 @@ export function registerInventoryRoutes(app: Express) {
       const item = await storage.updateInventoryItem(req.params.id, req.body);
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating inventory item" });
+    } catch (error: any) {
+      const status = error?.message?.includes("proveedor") ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Error updating inventory item" });
     }
   });
 
@@ -383,62 +348,77 @@ export function registerInventoryRoutes(app: Express) {
   });
 
   // Transfer stock between warehouses — POST /api/inventory/transfer
+  // Accepts one or more items for the same origin/destination pair; all of
+  // them move (or none do) inside a single transaction so a mid-batch stock
+  // shortfall never leaves some items moved and others not.
   app.post("/api/inventory/transfer", requireRole(INVENTORY_WRITE_ROLES), async (req, res) => {
     try {
-      const { itemId, fromWarehouseId, toWarehouseId, quantity, notes } = req.body;
-      if (!itemId || !fromWarehouseId || !toWarehouseId || !quantity) {
+      const { fromWarehouseId, toWarehouseId, notes } = req.body;
+      const items: { itemId: string; quantity: number }[] = Array.isArray(req.body.items)
+        ? req.body.items
+        : (req.body.itemId && req.body.quantity ? [{ itemId: req.body.itemId, quantity: req.body.quantity }] : []);
+
+      if (!fromWarehouseId || !toWarehouseId || items.length === 0) {
         return res.status(400).json({ error: "Faltan campos requeridos" });
       }
       if (fromWarehouseId === toWarehouseId) {
         return res.status(400).json({ error: "Los depósitos origen y destino deben ser distintos" });
       }
-      const qty = parseFloat(String(quantity));
-
-      // Get source warehouse stock
-      const fromStockRows = await db.execute(sql`
-        SELECT current_stock FROM warehouse_stock WHERE warehouse_id = ${fromWarehouseId} AND item_id = ${itemId}
-      `);
-      const fromStock = parseFloat(String((fromStockRows.rows[0] as any)?.current_stock ?? 0));
-
-      if (fromStock < qty) {
-        return res.status(400).json({ error: `Stock insuficiente en depósito origen. Disponible: ${fromStock}` });
+      const itemIds = items.map((it) => it.itemId);
+      if (!itemIds.every(Boolean) || new Set(itemIds).size !== itemIds.length) {
+        return res.status(400).json({ error: "Los artículos deben estar completos y no repetirse" });
       }
 
-      const newFromStock = fromStock - qty;
+      const results = await db.transaction(async (tx) => {
+        const out: { itemId: string; fromStock: number; toStock: number }[] = [];
+        for (const { itemId, quantity } of items) {
+          const qty = parseFloat(String(quantity));
+          if (!qty || qty <= 0) {
+            throw Object.assign(new Error("Cantidad inválida"), { status: 400 });
+          }
 
-      // Get dest warehouse stock
-      const toStockRows = await db.execute(sql`
-        SELECT current_stock FROM warehouse_stock WHERE warehouse_id = ${toWarehouseId} AND item_id = ${itemId}
-      `);
-      const toStock = parseFloat(String((toStockRows.rows[0] as any)?.current_stock ?? 0));
-      const newToStock = toStock + qty;
+          const fromStockRows = await tx.execute(sql`
+            SELECT current_stock FROM warehouse_stock WHERE warehouse_id = ${fromWarehouseId} AND item_id = ${itemId}
+          `);
+          const fromStock = parseFloat(String((fromStockRows.rows[0] as any)?.current_stock ?? 0));
 
-      // Update source
-      await db.execute(sql`
-        INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
-        VALUES (${fromWarehouseId}, ${itemId}, ${newFromStock}, now())
-        ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${newFromStock}, updated_at = now()
-      `);
+          if (fromStock < qty) {
+            throw Object.assign(new Error(`Stock insuficiente en depósito origen. Disponible: ${fromStock}`), { status: 400 });
+          }
 
-      // Update dest
-      await db.execute(sql`
-        INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
-        VALUES (${toWarehouseId}, ${itemId}, ${newToStock}, now())
-        ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${newToStock}, updated_at = now()
-      `);
+          const newFromStock = fromStock - qty;
 
-      // Record movement
-      const item = await storage.getInventoryItem(itemId);
-      const totalPrev = parseFloat(String(item?.currentStock ?? 0));
+          const toStockRows = await tx.execute(sql`
+            SELECT current_stock FROM warehouse_stock WHERE warehouse_id = ${toWarehouseId} AND item_id = ${itemId}
+          `);
+          const toStock = parseFloat(String((toStockRows.rows[0] as any)?.current_stock ?? 0));
+          const newToStock = toStock + qty;
 
-      await db.execute(sql`
-        INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, source_type, created_at, warehouse_id, to_warehouse_id)
-        VALUES (${itemId}, 'transferencia', ${qty}, ${fromStock}, ${newFromStock}, ${notes || null}, 'manual', now(), ${fromWarehouseId}, ${toWarehouseId})
-      `);
+          await tx.execute(sql`
+            INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
+            VALUES (${fromWarehouseId}, ${itemId}, ${newFromStock}, now())
+            ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${newFromStock}, updated_at = now()
+          `);
 
-      res.json({ success: true, fromStock: newFromStock, toStock: newToStock });
+          await tx.execute(sql`
+            INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
+            VALUES (${toWarehouseId}, ${itemId}, ${newToStock}, now())
+            ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${newToStock}, updated_at = now()
+          `);
+
+          await tx.execute(sql`
+            INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, source_type, created_at, warehouse_id, to_warehouse_id)
+            VALUES (${itemId}, 'transferencia', ${qty}, ${fromStock}, ${newFromStock}, ${notes || null}, 'manual', now(), ${fromWarehouseId}, ${toWarehouseId})
+          `);
+
+          out.push({ itemId, fromStock: newFromStock, toStock: newToStock });
+        }
+        return out;
+      });
+
+      res.json({ success: true, items: results });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Error en transferencia" });
+      res.status(error.status || 500).json({ error: error.message || "Error en transferencia" });
     }
   });
 

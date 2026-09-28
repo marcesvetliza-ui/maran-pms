@@ -68,3 +68,10 @@
 - [REUB virtual Planning row](reub-virtual-room.md) — REUB is an operational staging row below Notas, never hotel inventory or an occupancy/revenue metric input.
 - [Invoice payment-method detail](invoice-payment-method-detail.md) — invoice PDFs use persisted method+amount rows; keep the legacy single method only for compatibility.
 - [Restaurant breakfast navigation](restaurant-breakfast-navigation.md) — reuse the dashboard breakfast view in Restaurant as a button/dialog, not another main tab.
+- [Channex staging ACK](channex-staging-ack.md) — real staging ACK removes the revision from the pending feed while preserving only the local Channex inbox row.
+- [Group room inventory priority](group-room-inventory-priority.md) — confirmed/in-house blocks are hard capacity; tentative/blocked are overridable warnings; physical overlap never is.
+- [Reservation CC fiscal identity](reservation-cc-fiscal-identity.md) — link reservation CC cargos to payments by payment_id; reservation invoices always originate in Recepción, independent of fiscal POS.
+- [Reservation invoice payment snapshots](reservation-invoice-payment-snapshots.md) — payment methods must come from atomically reserved applications; never infer an advance’s instrument from its timing.
+- [Bulk financial repair safety](bulk-financial-repair-safety.md) — never expose mutating historical reconciliation as a one-click action; require preview, batch identity, and exact reversal.
+- [Inventory-neutral group edits](inventory-neutral-group-edits.md) — guest-only placeholder edits must remain possible despite pre-existing inventory shortages; only demand-changing fields trigger inventory guards.
+- [Direct CC receipt voiding](direct-cc-receipt-voiding.md) — void only direct CC receipts; preserve identity/audit and reverse accounting exactly once without touching linked collection flows.

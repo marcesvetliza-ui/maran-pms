@@ -8,6 +8,7 @@ import { requireAuth } from "./auth";
 import { calcNeto, calcIva21 } from "./lib/pricing";
 import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 import { formatArgentinaDate, formatArgentinaDateTime, formatArgentinaFilenameTimestamp } from "./utils/argentinaDateTime";
+import { TIPOS_CBT_WSFE } from "./billing/invoiceService";
 
 // ─── Hotel Constants ──────────────────────────────────────────────────────────
 const H = {
@@ -92,20 +93,48 @@ function tipoInfo(tipo: string) {
     "FACT-A":        { arca: "001", codcom: "1",   label: "PROV FACT -A-" },
     "FACT-B":        { arca: "002", codcom: "2",   label: "PROV FACT -B-" },
     "FACT-C":        { arca: "002", codcom: "2",   label: "PROV FACT -C-" },
+    // Confirmado con ARCA: el Recibo C es un tipo de comprobante propio (no
+    // una factura) pero se trata igual que Factura C a los fines fiscales —
+    // sin discriminar IVA. Mismo bucket arca/codcom que FACT-C acá, ya que
+    // este export ya agrupa las letras de una misma clase de comprobante.
+    "RECIBO-C":      { arca: "002", codcom: "2",   label: "PROV RECIBO -C-" },
     "FACT-M":        { arca: "051", codcom: "2",   label: "PROV FACT -M-" },
     "NC-A":          { arca: "003", codcom: "3",   label: "PROV N.CRED -A-" },
     "NC-B":          { arca: "003", codcom: "3",   label: "PROV N.CRED -B-" },
     "NC-C":          { arca: "003", codcom: "3",   label: "PROV N.CRED -C-" },
+    "NC-M":          { arca: "053", codcom: "3",   label: "PROV N.CRED -M-" },
+    // codcom "4" sigue el mismo patrón que esta tabla ya usa para NC (un
+    // bucket propio, compartido entre letras) — no confirmado todavía con el
+    // código real del sistema contable externo del usuario.
+    "ND-A":          { arca: "004", codcom: "4",   label: "PROV N.DEB -A-" },
+    "ND-B":          { arca: "004", codcom: "4",   label: "PROV N.DEB -B-" },
+    "ND-C":          { arca: "004", codcom: "4",   label: "PROV N.DEB -C-" },
     "RESUMEN-BANCO": { arca: "099", codcom: "183", label: "PROV RESUMEN BANCOS" },
     "LIQ-TARJETA":   { arca: "011", codcom: "195", label: "PROV LIQ TARJETA" },
   };
   return m[tipo] || { arca: "001", codcom: "1", label: tipo };
 }
 
+// Código AFIP "Condición IVA del Receptor" (tabla CondicionIVAReceptorId,
+// WSFEv1 RG 4291) usado en los archivos de Libro IVA Digital. La tabla real
+// es 1=Responsable Inscripto, 4=Exento, 5=Consumidor Final, 6=Monotributo,
+// 7=No Categorizado (Extranjero, el que usa Factura T) — la versión anterior
+// tenía Monotributo y Exento invertidos (4↔6), mandaba Consumidor Final al
+// código 6 en vez de 5, y "No Categorizado" no matcheaba nada y caía en el
+// default de Responsable Inscripto. condicion_iva es texto libre con varios
+// formatos reales ("Responsable Inscripto", "responsable_inscripto",
+// "R.Inscrp.", "No Categorizado (Extranjero)") — se normaliza antes de
+// comparar en vez de depender de un formato exacto.
 function ivaCodiva(condIva: string): string {
-  if (condIva?.includes("onotr")) return "4";
-  if (condIva?.includes("xento")) return "5";
-  if (condIva?.includes("o Resp") || condIva?.includes("onsumidor")) return "6";
+  const norm = (condIva || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z]/g, "");
+  if (norm.includes("categorizado")) return "7";
+  if (norm.includes("monotribut")) return "6";
+  if (norm.includes("exento")) return "4";
+  if (norm.includes("noresponsable") || norm.includes("consumidor")) return "5";
   return "1"; // Responsable Inscripto
 }
 
@@ -156,20 +185,76 @@ function cbteComprasLine(inv: any): string {
   ].join("");
 }
 
+// ─── Neto gravado por alícuota (para no repetir el neto total en cada tasa) ──
+//
+// purchase_invoices solo guarda UN monto_neto agregado (más los montos de IVA
+// separados por alícuota) — no alcanza para saber cuánto de ese neto
+// corresponde a cada tasa cuando un comprobante mezcla alícuotas (ej. $100 al
+// 21% + $100 al 10,5%). purchase_invoice_lines sí guarda el neto real de cada
+// renglón junto con su alícuota (server/purchase-invoice-stock.ts), así que
+// se prioriza sumarizar eso; solo cuando el comprobante no tiene renglones
+// (comprobantes de gasto sin artículos — RESUMEN-BANCO, RETENCION, etc., o
+// comprobantes viejos previos a purchase_invoice_lines) se aproxima el neto de
+// cada alícuota activa como iva ÷ tasa, ya que iva = neto × tasa por diseño.
+type GravadoPorAlicuota = { g21: number; g105: number; g27: number; g5: number; g25: number };
+
+async function netoPorAlicuotaPorFactura(invoiceIds: number[]): Promise<Map<number, Record<string, number>>> {
+  const map = new Map<number, Record<string, number>>();
+  if (!invoiceIds.length) return map;
+  const result = await db.execute(sql`
+    SELECT invoice_id, vat_rate, SUM(line_total) AS neto
+    FROM purchase_invoice_lines
+    WHERE invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)}) AND vat_rate IS NOT NULL
+    GROUP BY invoice_id, vat_rate
+  `);
+  for (const row of result.rows as any[]) {
+    const invId = Number(row.invoice_id);
+    if (!map.has(invId)) map.set(invId, {});
+    map.get(invId)![String(row.vat_rate)] = $n(row.neto);
+  }
+  return map;
+}
+
+function gravadoPorAlicuota(inv: any, netoPorTasa: Record<string, number> | undefined): GravadoPorAlicuota {
+  if (netoPorTasa && Object.keys(netoPorTasa).length) {
+    return {
+      g21: netoPorTasa["21"] || 0,
+      g105: netoPorTasa["10.5"] || 0,
+      g27: netoPorTasa["27"] || 0,
+      g5: netoPorTasa["5"] || 0,
+      g25: netoPorTasa["2.5"] || 0,
+    };
+  }
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const iva21 = $n(inv.monto_iva21), iva105 = $n(inv.monto_iva105), iva27 = $n(inv.monto_iva27),
+    iva5 = $n(inv.monto_iva5), iva25 = $n(inv.monto_iva25);
+  if (!iva21 && !iva105 && !iva27 && !iva5 && !iva25) {
+    return { g21: $n(inv.monto_neto), g105: 0, g27: 0, g5: 0, g25: 0 };
+  }
+  return {
+    g21: iva21 ? round2(iva21 / 0.21) : 0,
+    g105: iva105 ? round2(iva105 / 0.105) : 0,
+    g27: iva27 ? round2(iva27 / 0.27) : 0,
+    g5: iva5 ? round2(iva5 / 0.05) : 0,
+    g25: iva25 ? round2(iva25 / 0.025) : 0,
+  };
+}
+
 // ─── ALICUOTAS compras TXT ────────────────────────────────────────────────────
-function alicuotasComprasLines(inv: any): string[] {
+function alicuotasComprasLines(inv: any, netoPorTasa: Record<string, number> | undefined): string[] {
   const t = tipoInfo(inv.tipo_comprobante);
   const pv = String(inv.punto_venta || "1").padStart(5, "0");
   const num = String(inv.numero_comprobante || "0").padStart(20, "0");
   const cuit = (inv.proveedor_cuit || "").replace(/-/g, "").padStart(11, "0");
   const lines: string[] = [];
+  const g = gravadoPorAlicuota(inv, netoPorTasa);
 
   const alicuotas = [
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva21), cod: "0210" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva105), cod: "0105" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva27), cod: "0270" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva5),  cod: "0050" },
-    { base: $n(inv.monto_neto), iva: $n(inv.monto_iva25), cod: "0025" },
+    { base: g.g21, iva: $n(inv.monto_iva21), cod: "0210" },
+    { base: g.g105, iva: $n(inv.monto_iva105), cod: "0105" },
+    { base: g.g27, iva: $n(inv.monto_iva27), cod: "0270" },
+    { base: g.g5, iva: $n(inv.monto_iva5),  cod: "0050" },
+    { base: g.g25, iva: $n(inv.monto_iva25), cod: "0025" },
   ].filter((a) => a.iva > 0);
 
   for (const a of alicuotas) {
@@ -185,28 +270,58 @@ function alicuotasComprasLines(inv: any): string[] {
   return lines;
 }
 
+// ─── Gravado por alícuota de una venta ────────────────────────────────────────
+//
+// sales_invoices solo guarda monto_iva21 y monto_iva105 (nunca 27/5/2.5 — las
+// ventas del hotel no usan esas alícuotas), pero el neto de cada una no está
+// separado en columnas propias. A diferencia de Compras, acá se puede derivar
+// exacto: el IVA de cada línea se calculó como neto × tasa al emitir, así que
+// neto = iva ÷ tasa es siempre exacto, no una aproximación.
+function ventaGravadoPorAlicuota(sale: any): { g21: number; g105: number } {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const iva21 = $n(sale.monto_iva21), iva105 = $n(sale.monto_iva105);
+  if (!iva21 && !iva105) return { g21: $n(sale.monto_neto), g105: 0 };
+  return { g21: iva21 ? round2(iva21 / 0.21) : 0, g105: iva105 ? round2(iva105 / 0.105) : 0 };
+}
+
 // ─── CBTE ventas TXT ──────────────────────────────────────────────────────────
 function cbteVentasLine(sale: any): string {
   const fecha = (() => {
-    const d = new Date((sale.fecha || "2026-01-01") + "T12:00:00");
+    const d = new Date((sale.fecha_emision || "2026-01-01") + "T12:00:00");
     return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
   })();
-  const pv = "0001"; // hotel point of sale
-  const num = String(sale.id || "0").padStart(20, "0");
-  const cuit = (sale.cuit || "").replace(/-/g, "").padStart(11, "0");
-  const nombre = pad(((sale.guest_name || sale.nombre || "Consumidor Final")).toUpperCase(), 30, " ", true);
-  const total = String(Math.round($n(sale.total) * 100)).padStart(15, "0");
+  const cbteTipo = String(TIPOS_CBT_WSFE[sale.tipo_comprobante] ?? 6).padStart(3, "0");
+  const pv = String(sale.punto_venta || "1").padStart(5, "0");
+  const num = String(sale.numero || "0").padStart(20, "0");
+  const cuit = (sale.cliente_cuit || "").replace(/-/g, "").padStart(11, "0");
+  const nombre = pad((sale.cliente_razon_social || "Consumidor Final").toUpperCase(), 30, " ", true);
+  const total = String(Math.round($n(sale.monto_total) * 100)).padStart(15, "0");
+  const codIva = ivaCodiva(sale.cliente_condicion_iva || "");
 
-  return [fecha, "001", pv, num, num, "8", cuit, nombre, total].join("");
+  return [fecha, cbteTipo, pv, num, num, codIva, cuit, nombre, total].join("");
 }
 
 // ─── ALICUOTAS ventas TXT ─────────────────────────────────────────────────────
-function alicuotasVentasLine(sale: any): string {
-  const pv = "0001";
-  const num = String(sale.id || "0").padStart(20, "0");
-  const neto = String(Math.round($n(sale.neto) * 100)).padStart(15, "0");
-  const ivaM = String(Math.round($n(sale.iva) * 100)).padStart(15, "0");
-  return `001${pv}${num}${neto}0210${ivaM}`;
+function alicuotasVentasLine(sale: any): string[] {
+  const cbteTipo = String(TIPOS_CBT_WSFE[sale.tipo_comprobante] ?? 6).padStart(3, "0");
+  const pv = String(sale.punto_venta || "1").padStart(5, "0");
+  const num = String(sale.numero || "0").padStart(20, "0");
+  const g = ventaGravadoPorAlicuota(sale);
+  const lines: string[] = [];
+  const alicuotas = [
+    { base: g.g21, iva: $n(sale.monto_iva21), cod: "0210" },
+    { base: g.g105, iva: $n(sale.monto_iva105), cod: "0105" },
+  ].filter((a) => a.iva > 0);
+  for (const a of alicuotas) {
+    const base = String(Math.round(a.base * 100)).padStart(15, "0");
+    const ivaM = String(Math.round(a.iva * 100)).padStart(15, "0");
+    lines.push(`${cbteTipo}${pv}${num}${base}${a.cod}${ivaM}`);
+  }
+  if (!lines.length) {
+    const base = String(Math.round($n(sale.monto_neto) * 100)).padStart(15, "0");
+    lines.push(`${cbteTipo}${pv}${num}${base}0000000000000000000`);
+  }
+  return lines;
 }
 
 // ─── Route registration ───────────────────────────────────────────────────────
@@ -356,12 +471,14 @@ export function registerExportRoutes(app: Express) {
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
         WHERE pi.periodo = ${periodo} AND pi.estado != 'anulado'
+          AND pi.estado != 'registrado'
         ORDER BY pi.fecha_emision, pi.numero_comprobante
       `)).rows as any[];
 
       const [mm, yyyy] = periodo.split("/");
       const periodoCode = ivaPeriodo(periodo);
       const ts = `${mm}${yyyy}`;
+      const netoPorFactura = await netoPorAlicuotaPorFactura(rows.map((r) => Number(r.id)));
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();
@@ -379,6 +496,7 @@ export function registerExportRoutes(app: Express) {
 
         for (const r of rows) {
           const ti = tipoInfo(r.tipo_comprobante);
+          const g = gravadoPorAlicuota(r, netoPorFactura.get(Number(r.id)));
           ws.addRow([
             periodoCode,
             ivaCodiva(r.condicion_iva || ""),
@@ -391,8 +509,7 @@ export function registerExportRoutes(app: Express) {
             r.supplier_id || 0,
             r.supplier_nombre || r.proveedor_nombre || "",
             (r.proveedor_cuit || "").replace(/-/g, ""),
-            $n(r.monto_neto),
-            0, 0, 0, 0, // gravado10_5, 27, 2_5, 5
+            g.g21, g.g105, g.g27, g.g25, g.g5,
             $n(r.monto_iva21),
             $n(r.monto_iva105),
             $n(r.monto_iva27),
@@ -416,9 +533,14 @@ export function registerExportRoutes(app: Express) {
         }
 
         // Totals row
+        const gravadoTotals = rows.reduce((acc, r) => {
+          const g = gravadoPorAlicuota(r, netoPorFactura.get(Number(r.id)));
+          acc.g21 += g.g21; acc.g105 += g.g105; acc.g27 += g.g27; acc.g25 += g.g25; acc.g5 += g.g5;
+          return acc;
+        }, { g21: 0, g105: 0, g27: 0, g25: 0, g5: 0 });
         const totRow = ws.addRow([
           "", "", "", "TOTALES", "", "", "", "", "", "", "",
-          rows.reduce((s, r) => s + $n(r.monto_neto), 0), 0, 0, 0, 0,
+          gravadoTotals.g21, gravadoTotals.g105, gravadoTotals.g27, gravadoTotals.g25, gravadoTotals.g5,
           rows.reduce((s, r) => s + $n(r.monto_iva21), 0),
           rows.reduce((s, r) => s + $n(r.monto_iva105), 0),
           rows.reduce((s, r) => s + $n(r.monto_iva27), 0),
@@ -441,7 +563,7 @@ export function registerExportRoutes(app: Express) {
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_COMPRAS_CBTE_p_${mm}_${yyyy}.txt"`);
         res.send(content);
       } else if (tipo === "alicuotas") {
-        const lines = rows.flatMap(alicuotasComprasLines);
+        const lines = rows.flatMap((r) => alicuotasComprasLines(r, netoPorFactura.get(Number(r.id))));
         const content = lines.join("\r\n");
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_COMPRAS_ALICUOTAS_p_${mm}_${yyyy}.txt"`);
@@ -459,26 +581,25 @@ export function registerExportRoutes(app: Express) {
       const { desde, hasta, tipo = "excel" } = req.query as Record<string, string>;
       if (!desde || !hasta) return res.status(400).json({ error: "Se requieren 'desde' y 'hasta'" });
 
-      // Sales: payments + reservations + guests
+      // Antes armaba esto a partir de payments+reservations+guests, asumiendo
+      // que todo cobro era una Factura B al 21% flat — ignoraba el tipo de
+      // comprobante real, la condición de IVA del cliente, y cualquier venta
+      // de Restaurant/Spa/Eventos/Grupos (que no pasan por reservation
+      // payments). Ahora lee directo de sales_invoices, la fuente real.
       const rows = (await db.execute(sql`
-        SELECT
-          p.id, p.date AS fecha, p.amount AS total, p.method,
-          p.reservation_id,
-          CONCAT(g.first_name, ' ', g.last_name) AS guest_name,
-          COALESCE(g.cuil_cuit, '00000000000') AS cuit,
-          r.reservation_code
-        FROM payments p
-        LEFT JOIN reservations r ON r.id = p.reservation_id
-        LEFT JOIN guests g ON g.id = r.guest_id
-        WHERE p.date BETWEEN ${desde} AND ${hasta}
-        ORDER BY p.date, p.id
+        SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.fecha_emision,
+               si.cliente_razon_social, si.cliente_cuit, si.cliente_condicion_iva,
+               si.monto_neto, si.monto_iva21, si.monto_iva105, si.monto_exento,
+               si.monto_no_gravado, si.monto_total
+        FROM sales_invoices si
+        WHERE si.fecha_emision BETWEEN ${desde} AND ${hasta}
+          AND si.estado != 'anulado'
+          AND (si.modo_ficticio = false OR si.modo_ficticio IS NULL)
+        ORDER BY si.fecha_emision, si.id
       `)).rows as any[];
 
       const [d1, d2] = [desde.replace(/-/g, ""), hasta.replace(/-/g, "")];
       const ts = `${d1}-${d2}`;
-
-      // Calculate IVA 21% from total (total includes 21% IVA) — from shared pricing module
-      const calcIVA = (total: number) => calcIva21(calcNeto(total));
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();
@@ -489,10 +610,11 @@ export function registerExportRoutes(app: Express) {
 
         for (const r of rows) {
           ws.addRow([
-            fDate(r.fecha), "FACT-B", "0001", r.id,
-            r.reservation_code, r.guest_name,
-            (r.cuit || "").replace(/-/g, ""),
-            $n(r.total), calcNeto($n(r.total)), calcIVA($n(r.total)), 0, 0,
+            fDate(r.fecha_emision), r.tipo_comprobante, r.punto_venta || 1, r.numero,
+            "", r.cliente_razon_social || "Consumidor Final",
+            (r.cliente_cuit || "").replace(/-/g, ""),
+            $n(r.monto_total), $n(r.monto_neto), $n(r.monto_iva21) + $n(r.monto_iva105),
+            $n(r.monto_exento), $n(r.monto_no_gravado),
           ]);
         }
         const buf = await wb.xlsx.writeBuffer();
@@ -505,9 +627,7 @@ export function registerExportRoutes(app: Express) {
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_VENTAS_CBTE_f_${ts}.txt"`);
         res.send(lines.join("\r\n"));
       } else if (tipo === "alicuotas") {
-        const lines = rows.map((r) =>
-          alicuotasVentasLine({ ...r, neto: calcNeto($n(r.total)), iva: calcIVA($n(r.total)) })
-        );
+        const lines = rows.flatMap(alicuotasVentasLine);
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.setHeader("Content-Disposition", `attachment; filename="LIBRO_IVA_DIGITAL_VENTAS_ALICUOTAS_f_${ts}.txt"`);
         res.send(lines.join("\r\n"));
@@ -561,10 +681,12 @@ export function registerExportRoutes(app: Express) {
         FA:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
         FM:  { code: 11100, label: "FACT -A- ELECT HOTEL" },
         FB:  { code: 11101, label: "FACT -B- ELECT HOTEL" },
+        FMB: { code: 11101, label: "FACT -B- ELECT HOTEL" },
         FC:  { code: 11103, label: "FACT -C- ELECT HOTEL" },
         NCA: { code: 11300, label: "NC -A- ELECT HOTEL"   },
         NCM: { code: 11300, label: "NC -A- ELECT HOTEL"   },
         NCB: { code: 11301, label: "NC -B- ELECT HOTEL"   },
+        NCMB: { code: 11301, label: "NC -B- ELECT HOTEL"   },
         NCC: { code: 11303, label: "NC -C- ELECT HOTEL"   },
       };
 
@@ -1146,14 +1268,22 @@ export function registerExportRoutes(app: Express) {
       const createdAt = new Date(mov.created_at);
       const year = createdAt.getFullYear();
 
-      const numResult = await db.execute(sql`
-        SELECT COUNT(*)::int AS num FROM account_movements
-        WHERE type = 'pago'
-          AND EXTRACT(YEAR FROM created_at) = ${year}
-          AND created_at <= ${mov.created_at}
-      `);
-      const recNum = parseInt((numResult.rows[0] as any).num) || 1;
-      const recibo = `REC-${year}-${String(recNum).padStart(4, "0")}`;
+      // Assigned at creation and backfilled once by migrate.ts. It must not
+      // change when a previous receipt is voided.
+      let recibo = mov.receipt_number as string | null;
+      if (!recibo) {
+        // Linked reservation/group payments are outside this feature and may
+        // still have no durable number. Preserve their legacy PDF numbering
+        // instead of changing them to an ID-derived fallback.
+        const numResult = await db.execute(sql`
+          SELECT COUNT(*)::int AS num FROM account_movements
+          WHERE type = 'pago'
+            AND EXTRACT(YEAR FROM created_at) = ${year}
+            AND created_at <= ${mov.created_at}
+        `);
+        const recNum = parseInt((numResult.rows[0] as any).num) || 1;
+        recibo = `REC-${year}-${String(recNum).padStart(4, "0")}`;
+      }
 
       let entityName = "";
       let entityDoc = "";
@@ -1227,6 +1357,13 @@ export function registerExportRoutes(app: Express) {
           .text("RECIBO", pageW - 145, 18, { width: 120, align: "right" });
         doc.font("Helvetica-Bold").fontSize(10)
           .text(`Nº ${recibo}`, pageW - 145, 48, { width: 120, align: "right" });
+        if (mov.voided) {
+          doc.save();
+          doc.rotate(-12, { origin: [pageW / 2, 75] });
+          doc.fillColor("#d32f2f").opacity(0.85).font("Helvetica-Bold").fontSize(38)
+            .text("ANULADO", 185, 60, { width: 250, align: "center" });
+          doc.restore();
+        }
 
         // ─── Bloque: Recibimos de ─────────────────────────────────────────
         let y = 128;
@@ -1318,6 +1455,12 @@ export function registerExportRoutes(app: Express) {
         doc.font("Helvetica").fontSize(9).fill("#333")
           .text(`Fecha de pago: ${fDate(mov.date || mov.created_at)}`, x0, y)
           .text(`Registrado: ${fDate(mov.created_at)}`, x0, y + 14);
+        if (mov.voided) {
+          doc.font("Helvetica-Bold").fontSize(9).fill("#b91c1c")
+            .text(`ANULADO: ${fDate(mov.voided_at)} · ${mov.voided_by || "—"}`, x0, y + 30);
+          doc.font("Helvetica").fontSize(8).fill("#7f1d1d")
+            .text(`Motivo: ${mov.void_reason || "—"}`, x0, y + 44, { width: pageW - 100 });
+        }
 
         // ─── Líneas de firma ──────────────────────────────────────────────
         const sigY = y + 60;

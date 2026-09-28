@@ -15,23 +15,50 @@ export interface InvoiceItem {
   alicuotaIva: "21" | "10.5" | "exento" | "no_gravado";
   subtotalNeto: number;
   subtotal: number;
+  /** Fuente elegida al emitir desde el Centro de Comprobantes. */
+  catalogItem?: { source: "accommodation" | "restaurant" | "spa"; id: string };
+  /** Tratamiento de spa_treatments elegido del catálogo — permite registrar
+   * la venta como "turno vendido" pendiente de agendar. */
+  spaTreatmentId?: string;
+  /** Presente solo si este tratamiento se compra para regalar — crea un
+   * gift voucher "por prestación" vinculado a la venta, a nombre de este
+   * beneficiario. Requiere spaTreatmentId. */
+  giftBeneficiaryName?: string;
 }
 
-export type NonFiscalTipo = "ticket" | "voucher_justo" | "voucher_pedidos_ya" | "cierre_habitacion" | "cierre_spa";
+export type NonFiscalTipo =
+  | "ticket"
+  | "voucher_justo"
+  | "voucher_pedidos_ya"
+  | "voucher_room_service"
+  | "voucher_consumo_interno"
+  | "cierre_habitacion"
+  | "cierre_spa"
+  | "cierre_spa_agustin"
+  | "cierre_spa_cortesia";
 
 export const NON_FISCAL_TIPOS: NonFiscalTipo[] = [
-  "ticket", "voucher_justo", "voucher_pedidos_ya", "cierre_habitacion", "cierre_spa",
+  "ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno",
+  "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia",
 ];
 
+export function isNonFiscalTipo(tipo: string): tipo is NonFiscalTipo {
+  return NON_FISCAL_TIPOS.includes(tipo as NonFiscalTipo);
+}
+
 export interface NewInvoiceData {
-  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NDA" | "NDB" | "NDT" | "NDM" | "NDC" | NonFiscalTipo;
+  tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "FMB" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NCMB" | "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
     cuit?: string;
     dni?: string;
+    /** e.g. "passport" — Factura T (turismo) receptores extranjeros. */
+    documentType?: string;
     condicionIva: string;
     domicilio?: string;
   };
+  recipientEntity?: { type: "guest" | "company" | "agency"; id: string };
+  centerSettlementArea?: string;
   items: InvoiceItem[];
   reservaId?: string;
   /** Reservation payment this document must be linked to after authorization. */
@@ -44,8 +71,22 @@ export interface NewInvoiceData {
   /** SPA folio claimed by this invoice at issuance time. */
   spaAccountId?: string;
   restaurantOrderId?: string;
-  folioId?: number;
+  folioId?: string;
   facturaOriginalId?: number; // para NC
+  /**
+   * The original document this NC/ND corrects, exactly as ARCA needs to
+   * identify it (RG 4540/19's CbtesAsoc — mandatory for every NC/ND since
+   * 2021-04-01, or ARCA rejects the request with error 10197). Required
+   * whenever facturaOriginalId is set and this is a real ARCA call
+   * (ficticio mode never talks to ARCA, so it doesn't need this).
+   */
+  comprobanteAsociado?: {
+    tipo: string;
+    puntoVenta: number;
+    numero: number;
+    /** AAAAMMDD, no dashes. */
+    fecha: string;
+  };
   operador?: string;
   puntoVentaOverride?: number; // PV específico del área; si está presente, ignora billing_config.puntoVenta
   cashFormaPago?: string; // forma de pago para registrar en el comprobante
@@ -70,12 +111,35 @@ export interface NewInvoiceData {
 }
 
 export const TIPOS_CBT_WSFE: Record<string, number> = {
-  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201,
-  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203,
-  NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDC: 12,
+  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201, FMB: 206,
+  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203, NCMB: 208,
+  NDA: 2, NDB: 7, NDT: 196, NDM: 202, NDMB: 207, NDC: 12,
 };
 
-const UNSUPPORTED_SALE_TYPES = new Set(["FC", "FT", "NCC", "NCT", "NDC", "NDT"]);
+function invoiceRowValue(doc: any, snakeCase: string, camelCase: string) {
+  return doc?.[snakeCase] ?? doc?.[camelCase];
+}
+
+/**
+ * Builds the `comprobanteAsociado` every NC/ND must pass to emitirFactura —
+ * ARCA's CbtesAsoc (RG 4540/19, mandatory since 2021-04-01: without it ARCA
+ * rejects the request with error 10197). `doc` is the sales_invoices row
+ * (snake_case from a raw query, or camelCase) this NC/ND corrects.
+ */
+export function buildComprobanteAsociado(doc: any): NewInvoiceData["comprobanteAsociado"] {
+  return {
+    tipo: String(invoiceRowValue(doc, "tipo_comprobante", "tipoComprobante")),
+    puntoVenta: Number(invoiceRowValue(doc, "punto_venta", "puntoVenta")),
+    numero: Number(invoiceRowValue(doc, "numero", "numero")),
+    fecha: String(invoiceRowValue(doc, "fecha_emision", "fechaEmision") || "").replace(/-/g, ""),
+  };
+}
+
+// FC/NCC/NDC (Factura C — monotributistas) siguen sin implementarse. FT y sus
+// notas T ya tienen el circuito completo: reglas de elegibilidad (solo
+// huésped extranjero con alojamiento), armado del pedido a ARCA con Pasaporte
+// como tipo de documento, y el PDF con el encabezado correspondiente.
+const UNSUPPORTED_SALE_TYPES = new Set(["FC", "NCC", "NDC"]);
 
 export function isUnsupportedSaleType(tipo: string): boolean {
   return UNSUPPORTED_SALE_TYPES.has(tipo);
@@ -233,7 +297,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   }
   const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
-  const esNoFiscal = (NON_FISCAL_TIPOS as string[]).includes(data.tipoComprobante);
+  const esNoFiscal = isNonFiscalTipo(data.tipoComprobante);
   const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
   // All operational owners are captured in the local draft before ARCA.  The
   // later link is deliberately idempotent, but must never be the only place
@@ -275,8 +339,13 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       clienteRazonSocial: data.cliente.razonSocial,
       clienteCuit: data.cliente.cuit || null,
       clienteDni: data.cliente.dni || null,
+      clienteDocumentType: data.cliente.documentType || null,
       clienteCondicionIva: data.cliente.condicionIva,
       clienteDomicilio: data.cliente.domicilio || null,
+      recipientEntityType: data.recipientEntity?.type || null,
+      recipientEntityId: data.recipientEntity?.id || null,
+      centerSettlementArea: data.centerSettlementArea || null,
+      centerSettlementStatus: data.centerSettlementArea ? "pending" : null,
       montoNeto: String(montos.montoNeto),
       montoIva21: String(montos.montoIva21),
       montoIva105: String(montos.montoIva105),
@@ -380,14 +449,27 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       await insertPendingInvoice();
     }
 
-    const now = new Date();
-    const fecha =
-      `${now.getFullYear()}` +
-      `${String(now.getMonth() + 1).padStart(2, "0")}` +
-      `${String(now.getDate()).padStart(2, "0")}`;
+    // The fiscal dates must use the same Argentina calendar day stored on the invoice.
+    const fecha = getArgentinaToday().replace(/-/g, "");
 
     try {
       const { feCAESolicitar, feCompConsultar } = await import("./wsfevClient");
+      // Since RG 4540/19 (2021-04-01), ARCA rejects every NC/ND with error
+      // 10197 ("Si el comprobante es Débito o Crédito, enviar estructura
+      // CbteAsoc o PeriodoAsoc") unless it can identify the original document
+      // it corrects. The caller already has that row loaded (it had to, to
+      // build facturaOriginalId in the first place), so it passes the fields
+      // directly rather than this doing a second lookup.
+      const cbteAsoc = data.comprobanteAsociado
+        ? [{
+            tipo: data.comprobanteAsociado.tipo,
+            puntoVenta: data.comprobanteAsociado.puntoVenta,
+            numero: data.comprobanteAsociado.numero,
+            cuit: cuitAuth,
+            fecha: data.comprobanteAsociado.fecha,
+          }]
+        : undefined;
+
       // A pending draft may have been authorized just before a network/process
       // failure. Query ARCA by its already persisted number first; only an
       // explicit "not found" allows a new authorization request.
@@ -408,8 +490,10 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
             ...montos,
             clienteCuit: data.cliente.cuit,
             clienteDni: data.cliente.dni,
+            clienteDocumentType: data.cliente.documentType,
             clienteCondicionIva: data.cliente.condicionIva,
             fecha,
+            cbteAsoc,
           },
           ambiente as "homologacion" | "produccion"
         );
@@ -460,8 +544,13 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     clienteRazonSocial: data.cliente.razonSocial,
     clienteCuit: data.cliente.cuit || null,
     clienteDni: data.cliente.dni || null,
+    clienteDocumentType: data.cliente.documentType || null,
     clienteCondicionIva: data.cliente.condicionIva,
     clienteDomicilio: data.cliente.domicilio || null,
+    recipientEntityType: data.recipientEntity?.type || null,
+    recipientEntityId: data.recipientEntity?.id || null,
+    centerSettlementArea: data.centerSettlementArea || null,
+    centerSettlementStatus: data.centerSettlementArea ? "pending" : null,
     montoNeto: String(montos.montoNeto),
     montoIva21: String(montos.montoIva21),
     montoIva105: String(montos.montoIva105),

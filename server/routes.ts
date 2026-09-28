@@ -7,7 +7,7 @@ import passport from "passport";
 import { storage, getArgentinaToday } from "./db-storage";
 import { assertFinancialSchemaReady } from "./migrate";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks, rooms } from "@shared/schema";
-import { charges, payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
+import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
 import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
@@ -15,18 +15,23 @@ import { getAppEnv, isPilotEnv } from "./app-env";
 import { authorizePilotExternalRole } from "./pilot-external-role";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
+import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
 import { HELP_MANUAL } from "./help-manual";
-import { generarAsiento, generarAsientoOP } from "./accounting";
+import { generarAsiento } from "./accounting";
+import { enterPurchaseInvoiceStock, parsePurchaseStockRows } from "./purchase-invoice-stock";
+import { createPaymentOrder } from "./paymentOrder";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
 import { registerReportsRoutes } from "./reports/routes";
+import { registerOperationalReportRoutes } from "./reports/operational";
 import { registerHospitalityRoutes } from "./routes/hospitality";
 import { registerOtaRoutes } from "./routes/ota";
+import { registerChannexRoutes } from "./routes/channex";
 import { registerPlanningRoutes } from "./routes/planning";
 import { registerPackagesRoutes } from "./routes/packages";
 import { registerRoomsRoutes } from "./routes/rooms";
@@ -54,15 +59,16 @@ import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-cen
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 import {
   calculatePurchaseInvoiceTotal,
+  isValidPurchaseInvoiceTotal,
   isReceivedRetention,
+  isSupplierPayableDocument,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
+  condicionIvaPermiteComprobante,
 } from "@shared/purchaseInvoiceTotals";
 import {
   buildPendingOperationalReservationRows,
   loadReservationOperationalBalances,
-  loadReservationOperationalSummaries,
-  projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
 
 function normalizeReceivedRetentionAmounts(body: any, tipoComprobante: string): any {
@@ -90,6 +96,17 @@ function normalizeReceivedRetentionAmounts(body: any, tipoComprobante: string): 
     retencionMunicipal: 0,
     monotributoCompBC: 0,
   };
+}
+
+const PURCHASE_RETENTION_FIELDS = [
+  "retencionIibb", "retencionGanancias", "retencionIva", "retencionSuss", "retencionMunicipal",
+] as const;
+
+function hasPurchaseRetentions(values: Record<string, unknown>): boolean {
+  return PURCHASE_RETENTION_FIELDS.some((field) => {
+    const value = values[field];
+    return value !== null && value !== undefined && value !== "" && Number(value) !== 0;
+  });
 }
 
 async function resolveReceivedRetentionAccountId(body: any): Promise<number> {
@@ -154,7 +171,7 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
       FROM jsonb_array_elements(COALESCE(gp.retention_detail, '[]'::jsonb)) item
     ) stored ON true
     LEFT JOIN LATERAL (
-      SELECT si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social, si.monto_total
+      SELECT si.id, si.tipo_comprobante, si.punto_venta, si.numero, si.cliente_razon_social, si.monto_total
       FROM sales_invoices si
       WHERE si.id = gp.invoice_id OR si.group_payment_id = gp.id
       ORDER BY CASE WHEN si.id = gp.invoice_id THEN 0 ELSE 1 END, si.created_at DESC
@@ -164,6 +181,60 @@ async function enrichGroupCashMovements<T extends { id: string; sourceType: stri
   `);
   const details = new Map((result.rows as Array<Record<string, unknown>>).map((row) => [String(row.id), row]));
   return movements.map((movement) => ({ ...movement, ...(details.get(String(movement.id)) || {}) }));
+}
+
+async function enrichRestaurantCashMovements<T extends { sourceType: string; sourceId?: string | null }>(
+  movements: T[],
+): Promise<Array<T & { restaurantInvoices?: Array<{
+  id: number;
+  type: string;
+  pointOfSale: number;
+  number: number;
+  status: string | null;
+  creditNoteOfInvoiceId: number | null;
+}> }>> {
+  const orderIds = [...new Set(
+    movements
+      .filter((movement) => movement.sourceType === "restaurant_order" && movement.sourceId)
+      .map((movement) => movement.sourceId as string),
+  )];
+  if (!orderIds.length) return movements;
+
+  // Credit notes link to the original invoice, not necessarily to the order.
+  // Split payments may share an order; references never count as additional cash.
+  const result = await db.execute(sql`
+    SELECT original.restaurant_order_id AS "orderId", document.id,
+           document.tipo_comprobante AS "type",
+           document.punto_venta AS "pointOfSale", document.numero AS "number",
+           document.estado AS "status",
+           document.nota_credito_id AS "creditNoteOfInvoiceId"
+    FROM sales_invoices original
+    JOIN sales_invoices document
+      ON document.id = original.id OR document.nota_credito_id = original.id
+    WHERE original.restaurant_order_id IN (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})
+    ORDER BY original.restaurant_order_id, document.created_at ASC, document.id ASC
+  `);
+  const byOrder = new Map<string, Array<{
+    id: number; type: string; pointOfSale: number; number: number;
+    status: string | null; creditNoteOfInvoiceId: number | null;
+  }>>();
+  for (const row of result.rows as Array<Record<string, unknown>>) {
+    const orderId = String(row.orderId);
+    const invoices = byOrder.get(orderId) || [];
+    if (invoices.some((invoice) => invoice.id === Number(row.id))) continue;
+    invoices.push({
+      id: Number(row.id),
+      type: String(row.type),
+      pointOfSale: Number(row.pointOfSale),
+      number: Number(row.number),
+      status: row.status == null ? null : String(row.status),
+      creditNoteOfInvoiceId: row.creditNoteOfInvoiceId == null ? null : Number(row.creditNoteOfInvoiceId),
+    });
+    byOrder.set(orderId, invoices);
+  }
+  return movements.map((movement) => movement.sourceType === "restaurant_order"
+    ? { ...movement, restaurantInvoices: byOrder.get(movement.sourceId || "") || [] }
+    : movement);
 }
 
 function timeToMinutes(time: string): number {
@@ -224,6 +295,10 @@ export async function registerRoutes(
       }
       req.logIn(user, async (err) => {
         if (err) return next(err);
+        if (user.totpEnabled === "true") {
+          req.session.pending2FA = true;
+          return res.json({ pending2FA: true, username: user.username });
+        }
         await audit(req, "login", "auth", `Inicio de sesión: ${user.username}`);
         return res.json(user);
       });
@@ -241,13 +316,20 @@ export async function registerRoutes(
   });
 
   app.get("/api/auth/me", (req, res) => {
-    if (req.isAuthenticated()) {
+    if (req.isAuthenticated() && !req.session.pending2FA) {
       return res.json(req.user);
+    }
+    if (req.isAuthenticated() && req.session.pending2FA) {
+      return res.status(401).json({ message: "Falta completar la verificación en dos pasos", pending2FA: true });
     }
     res.status(401).json({ message: "No autenticado" });
   });
 
   registerAuthBootstrapRoute(app);
+  // Registrado antes del gate: /2fa/verify-login necesita ser alcanzable con
+  // una sesión "pending2FA" (que requireAuth del gate rechazaría), y las
+  // demás rutas de 2FA ya traen su propio requireAuth.
+  registerTwoFactorRoutes(app);
 
   app.use("/api", (req, res, next) => {
     const publicPaths = [
@@ -257,15 +339,15 @@ export async function registerRoutes(
       "/api/auth/setup",
       "/api/health",
     ];
-    
+
     if (publicPaths.includes(req.path)) {
       return next();
     }
-    
+
     if (req.path.startsWith("/public/")) {
       return next();
     }
-    
+
     if ((req.path === "/api/webhook/chatbot" || req.path === "/webhook/chatbot") && req.method === "POST") {
       return next();
     }
@@ -564,7 +646,7 @@ export async function registerRoutes(
     }
   });
 
-  // Breakfast list for tomorrow: reservations staying tonight (checked_in, non-virtual rooms)
+  // Breakfast list for tomorrow: guests staying tonight, including today's pending arrivals.
   app.get(
     "/api/dashboard/breakfasts",
     requireRole(["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"]),
@@ -586,7 +668,13 @@ export async function registerRoutes(
         LEFT JOIN guests g ON g.id = r.guest_id
         WHERE r.check_in_date <= ${today}
           AND r.check_out_date > ${today}
-          AND r.status = 'checked_in'
+          AND (
+            r.status = 'checked_in'
+            OR (
+              r.check_in_date = ${today}
+              AND r.status IN ('confirmed', 'web_checkin', 'pending')
+            )
+          )
           AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
         ORDER BY rm.room_number
       `);
@@ -636,7 +724,7 @@ export async function registerRoutes(
   app.get("/api/staff/users", requireAuth, async (req, res) => {
     try {
       const users = await storage.getSystemUsers();
-      res.json(users.map(({ password: _, ...u }) => ({ id: u.id, username: u.username, fullName: (u as any).fullName ?? null, role: u.role })));
+      res.json(users.map(({ password: _, ...u }) => ({ id: u.id, username: u.username, fullName: (u as any).fullName ?? null, role: u.role, esMozo: (u as any).esMozo ?? null })));
     } catch (error) {
       res.status(500).json({ error: "Error fetching staff" });
     }
@@ -928,6 +1016,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (billingTarget === "agency" && effectiveAgencyId) {
@@ -941,6 +1030,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else if (billingTarget === "guest" && guestId) {
@@ -954,6 +1044,7 @@ export async function registerRoutes(
               reservationId: pay.reservation_id,
               reservationCode: pay.reservation_code,
               guestName,
+              area: "recepcion",
             });
             created++;
           } else {
@@ -974,131 +1065,6 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error en reconciliación CC:", error);
       res.status(500).json({ error: "Error en reconciliación" });
-    }
-  });
-
-  // Revisar saldos pendientes de checkout: crea cargos CC faltantes para reservas checked_out con balance > 0
-  app.post("/api/admin/reconcile-checkout-debts", requireRole(["admin", "manager"]), async (req, res) => {
-    try {
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-
-      // Obtener todas las reservas checked_out con empresa, agencia o huésped
-      const checkedOutRows = await db.execute(sql`
-        SELECT r.id, r.reservation_code, r.company_id, r.agency_id, r.guest_id,
-               r.total_room_amount, r.final_rate_per_night, r.nights,
-               r.room_id, ro.room_number,
-               g.first_name, g.last_name,
-               COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.reservation_id = r.id AND (c.status IS NULL OR c.status = 'active')), 0) AS charges_total,
-               COALESCE((SELECT SUM(p.amount::numeric) FROM payments p WHERE p.reservation_id = r.id AND (p.status IS NULL OR p.status = 'active')), 0) AS payments_total
-        FROM reservations r
-        LEFT JOIN rooms ro ON r.room_id = ro.id
-        LEFT JOIN guests g ON r.guest_id = g.id
-        WHERE r.status = 'checked_out'
-          AND (r.company_id IS NOT NULL OR r.agency_id IS NOT NULL OR r.guest_id IS NOT NULL)
-      `);
-
-      let created = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      for (const row of (checkedOutRows.rows as any[])) {
-        try {
-          const savedRoomTotal = parseFloat(row.total_room_amount || "0");
-          const roomTotal = savedRoomTotal > 0
-            ? savedRoomTotal
-            : parseFloat(row.final_rate_per_night || "0") * (parseInt(row.nights) || 0);
-          const chargesTotal = parseFloat(row.charges_total || "0");
-          const paymentsTotal = parseFloat(row.payments_total || "0");
-          const balance = roomTotal + chargesTotal - paymentsTotal;
-
-          if (balance <= 0.01) { skipped++; continue; }
-
-          // Verificar si ya existe un cargo de deuda para esta reserva
-          const existingMov = await storage.getAccountMovementsByReservation(row.id);
-          const legacyCandidate = await db.execute(sql`
-            SELECT 1
-            FROM account_movements m
-            JOIN sales_invoices si
-              ON m.reference = si.tipo_comprobante || '-' || lpad(si.numero::text, 8, '0')
-            WHERE si.reserva_id = ${row.id}
-              AND (m.reservation_id = ${row.id} OR m.reservation_id IS NULL)
-              AND m.type = 'cargo'
-              AND m.amount::numeric = ${balance}
-              AND si.estado IN ('emitida','parcial')
-              AND si.cash_forma_pago = 'cuenta_corriente'
-            LIMIT 1
-          `);
-          if (legacyCandidate.rows.length) { skipped++; continue; }
-          // A canonical invoice settlement already has its own CC payment and
-          // cargo. Never turn the historical checkout fallback into a second
-          // cargo for that same invoice/payment identity.
-          const alreadyHasDebtCargo = existingMov.some(
-            m => m.type === "cargo" && m.description?.includes("cierre con deuda")
-          );
-          if (alreadyHasDebtCargo) { skipped++; continue; }
-
-          const guestName = row.first_name ? `${row.first_name} ${row.last_name}` : "Huésped";
-          const roomNum = row.room_number || row.room_id || "N/A";
-          const descCC = `Saldo por estadía ${row.reservation_code} — Hab. ${roomNum} (cierre con deuda)`;
-          const amtCC = balance.toFixed(2);
-
-          if (row.company_id) {
-            await storage.createAccountMovement({
-              entityType: "company",
-              entityId: row.company_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-            });
-            created++;
-          } else if (row.agency_id) {
-            await storage.createAccountMovement({
-              entityType: "agency",
-              entityId: row.agency_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-            });
-            created++;
-          } else if (row.guest_id) {
-            await storage.createAccountMovement({
-              entityType: "guest",
-              entityId: row.guest_id,
-              date: today,
-              type: "cargo",
-              description: descCC,
-              amount: amtCC,
-              reservationId: row.id,
-              reservationCode: row.reservation_code,
-              guestName,
-            });
-            created++;
-          } else {
-            skipped++;
-          }
-        } catch (rowError) {
-          failed++;
-          console.error(`[reconcile-checkout-debts] Error procesando reserva ${row?.id}:`, rowError);
-        }
-      }
-
-      res.json({
-        created,
-        skipped,
-        failed,
-        message: `${created} cargo(s) creado(s), ${skipped} omitido(s)${failed > 0 ? `, ${failed} con error` : ""}`,
-      });
-    } catch (error) {
-      console.error("Error en revisión de saldos pendientes:", error);
-      res.status(500).json({ error: "Error al revisar saldos pendientes" });
     }
   });
 
@@ -1599,104 +1565,6 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/reports/arrivals-departures", requireAuth, async (req, res) => {
-    try {
-      const { from, to } = req.query as { from: string; to: string };
-      if (!from || !to) return res.status(400).json({ error: "from y to son requeridos" });
-
-      const rowMapper = (r: any) => ({
-        id: r.id,
-        code: r.code,
-        guest: r.guest,
-        room: r.room,
-        roomType: r.room_type,
-        checkIn: r.check_in,
-        checkOut: r.check_out,
-        nights: Number(r.nights),
-        pax: Number(r.pax),
-        status: r.status,
-        totalRoomAmount: r.total_room_amount,
-        finalRatePerNight: r.final_rate_per_night,
-      });
-
-      const arrRows = await db.execute(sql`
-        SELECT r.id, r.reservation_code AS code,
-               g.first_name || ' ' || g.last_name AS guest,
-               ro.room_number AS room, rt.name AS room_type,
-               r.check_in_date AS check_in, r.check_out_date AS check_out,
-               r.nights, r.number_of_guests AS pax, r.status,
-               r.total_room_amount, r.final_rate_per_night
-        FROM reservations r
-        LEFT JOIN guests g ON r.guest_id = g.id
-        LEFT JOIN rooms ro ON r.room_id = ro.id
-        LEFT JOIN room_types rt ON r.room_type_id = rt.id
-        WHERE r.check_in_date BETWEEN ${from} AND ${to} AND r.status != 'cancelled'
-        ORDER BY r.check_in_date, ro.room_number
-      `);
-
-      const depRows = await db.execute(sql`
-        SELECT r.id, r.reservation_code AS code,
-               g.first_name || ' ' || g.last_name AS guest,
-               ro.room_number AS room, rt.name AS room_type,
-               r.check_in_date AS check_in, r.check_out_date AS check_out,
-               r.nights, r.number_of_guests AS pax, r.status,
-               r.total_room_amount, r.final_rate_per_night
-        FROM reservations r
-        LEFT JOIN guests g ON r.guest_id = g.id
-        LEFT JOIN rooms ro ON r.room_id = ro.id
-        LEFT JOIN room_types rt ON r.room_type_id = rt.id
-        WHERE r.check_out_date BETWEEN ${from} AND ${to} AND r.status != 'cancelled'
-        ORDER BY r.check_out_date, ro.room_number
-      `);
-
-      const arrivals = (arrRows.rows as any[]).map(rowMapper);
-      const departures = (depRows.rows as any[]).map(rowMapper);
-      const uniqueReservations = Array.from(
-        new Map([...arrivals, ...departures].map(row => [row.id, row])).values(),
-      );
-      const summaries = await loadReservationOperationalSummaries(uniqueReservations);
-      const cleanReportRow = ({ id, totalRoomAmount, finalRatePerNight, ...row }: any) => row;
-      res.json({
-        arrivals: projectReservationOperationalReportRows(arrivals, summaries).map(cleanReportRow),
-        departures: projectReservationOperationalReportRows(departures, summaries).map(cleanReportRow),
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.get("/api/reports/pending-balances", requireAuth, async (req, res) => {
-    try {
-      const rows = await db.execute(sql`
-        SELECT r.id, r.reservation_code AS code,
-               g.first_name || ' ' || g.last_name AS guest,
-               ro.room_number AS room, rt.name AS room_type,
-               r.check_in_date AS check_in, r.check_out_date AS check_out,
-               r.nights, r.number_of_guests AS pax, r.status,
-               r.total_room_amount, r.final_rate_per_night
-        FROM reservations r
-        LEFT JOIN guests g ON r.guest_id = g.id
-        LEFT JOIN rooms ro ON r.room_id = ro.id
-        LEFT JOIN room_types rt ON r.room_type_id = rt.id
-        WHERE r.status IN ('checked_in', 'confirmed', 'pending')
-        ORDER BY room
-      `);
-      const reportRows = (rows.rows as any[]).map((r: any) => ({
-        id: r.id, code: r.code, guest: r.guest, room: r.room, roomType: r.room_type,
-        checkIn: r.check_in, checkOut: r.check_out,
-        nights: Number(r.nights), pax: Number(r.pax), status: r.status,
-        totalRoomAmount: r.total_room_amount,
-        finalRatePerNight: r.final_rate_per_night,
-      }));
-      const summaries = await loadReservationOperationalSummaries(reportRows);
-      res.json(projectReservationOperationalReportRows(reportRows, summaries, true).map(
-        ({ id, totalRoomAmount, finalRatePerNight, ...row }) => row,
-      ));
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
   app.get("/api/reports/payments", requireAuth, async (req, res) => {
     try {
       const { from, to } = req.query as { from: string; to: string };
@@ -1899,88 +1767,6 @@ export async function registerRoutes(
     }
   });
 
-  // Deuda consolidada por huésped — alojamiento + extras de reservas activas
-  app.get("/api/reports/guest-debt", requireAuth, async (req, res) => {
-    try {
-      const rows = (await db.execute(sql`
-        SELECT
-          g.id AS guest_id,
-          g.first_name || ' ' || g.last_name AS guest_name,
-          g.document_number,
-          g.document_type,
-          r.id AS reservation_id,
-          r.reservation_code,
-          r.check_in_date,
-          r.check_out_date,
-          r.status,
-          rm.room_number,
-           r.total_room_amount,
-           r.final_rate_per_night,
-           r.nights
-        FROM reservations r
-        JOIN guests g ON g.id = r.guest_id
-        LEFT JOIN rooms rm ON rm.id = r.room_id
-        WHERE r.status IN ('confirmed', 'checked_in')
-        ORDER BY g.last_name, g.first_name, r.check_in_date
-      `)).rows as any[];
-      const debtSummaries = await loadReservationOperationalSummaries(rows.map(row => ({
-        id: row.reservation_id,
-        totalRoomAmount: row.total_room_amount,
-        finalRatePerNight: row.final_rate_per_night,
-        nights: Number(row.nights),
-      })));
-
-      // Group by guest
-      const byGuest: Record<string, any> = {};
-      for (const row of rows) {
-        const summary = debtSummaries.get(row.reservation_id);
-        if (!summary || summary.operationalFolioBalance <= 0.01) continue;
-        const gid = row.guest_id;
-        if (!byGuest[gid]) {
-          byGuest[gid] = {
-            guestId: gid,
-            guestName: row.guest_name,
-            documentNumber: row.document_number,
-            documentType: row.document_type,
-            reservations: [],
-            totalAlojamiento: 0,
-            totalExtras: 0,
-            totalPagado: 0,
-            totalDeuda: 0,
-          };
-        }
-        const savedRoomTotal = parseFloat(row.total_room_amount || "0");
-        const aloj = savedRoomTotal > 0
-          ? savedRoomTotal
-          : (parseFloat(row.final_rate_per_night || "0") || 0) * (Number(row.nights) || 0);
-        const extr = summary.operationalServices - aloj;
-        const pag = summary.activeHistoricalSettlements;
-        const saldo = summary.operationalFolioBalance;
-        byGuest[gid].reservations.push({
-          reservationId: row.reservation_id,
-          reservationCode: row.reservation_code,
-          roomNumber: row.room_number,
-          checkInDate: row.check_in_date,
-          checkOutDate: row.check_out_date,
-          status: row.status,
-          alojamiento: aloj,
-          extras: extr,
-          pagado: pag,
-          saldo,
-        });
-        byGuest[gid].totalAlojamiento += aloj;
-        byGuest[gid].totalExtras += extr;
-        byGuest[gid].totalPagado += pag;
-        byGuest[gid].totalDeuda += saldo;
-      }
-
-      res.json(Object.values(byGuest));
-    } catch (error) {
-      console.error("Error fetching guest debt report:", error);
-      res.status(500).json({ error: "Error al obtener deuda por huésped" });
-    }
-  });
-
   app.get("/api/reports/restaurant", requireAuth, async (req, res) => {
     try {
       const { from, to } = req.query as { from: string; to: string };
@@ -2093,7 +1879,8 @@ export async function registerRoutes(
   app.get("/api/cash/shifts/:id", requireAuth, async (req, res) => {
     try {
       const detail = await storage.getShiftDetail(req.params.id);
-      res.json({ ...detail, movements: await enrichGroupCashMovements(detail.movements, req.params.id) });
+      const grouped = await enrichGroupCashMovements(detail.movements, req.params.id);
+      res.json({ ...detail, movements: await enrichRestaurantCashMovements(grouped) });
     } catch (error: any) {
       res.status(404).json({ error: error.message || "Shift not found" });
     }
@@ -2104,7 +1891,8 @@ export async function registerRoutes(
       const { shiftId } = req.query as { shiftId: string };
       if (!shiftId) return res.status(400).json({ error: "shiftId is required" });
       const movements = await storage.getCashMovements(shiftId);
-      res.json(await enrichGroupCashMovements(movements, shiftId));
+      const grouped = await enrichGroupCashMovements(movements, shiftId);
+      res.json(await enrichRestaurantCashMovements(grouped));
     } catch (error) {
       res.status(500).json({ error: "Error fetching movements" });
     }
@@ -2115,6 +1903,33 @@ export async function registerRoutes(
       res.json(await storage.getOrphanedCashPaymentLinks());
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Error al auditar vínculos de pagos en Caja" });
+    }
+  });
+
+  app.get("/api/admin/cash/duplicate-payment-links", requireRole(["admin", "manager"]), async (_req, res) => {
+    try {
+      res.json(await storage.getDuplicateCashPaymentLinks());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error al auditar vínculos duplicados de Caja" });
+    }
+  });
+
+  // Desvincula puntualmente un movimiento de caja duplicado (ver
+  // resolveDuplicateCashPaymentLink en db-storage.ts) — a propósito no
+  // reutiliza PATCH /api/cash/movements/:id/anular: esa ruta reversa el pago
+  // real de la reserva, y acá el pago es válido; lo único a corregir es que
+  // quedó anotado dos veces en la caja.
+  app.patch("/api/admin/cash/movements/:id/resolve-duplicate-link", requireRole(["admin", "manager"]), async (req, res) => {
+    try {
+      const { motivo } = req.body;
+      if (!motivo?.trim()) return res.status(400).json({ error: "Motivo requerido" });
+      const user = req.user as any;
+      const operator = user?.username || "sistema";
+      const updated = await storage.resolveDuplicateCashPaymentLink(req.params.id, motivo.trim(), operator);
+      res.json(updated);
+    } catch (error: any) {
+      const notFound = error.message === "Movimiento no encontrado";
+      res.status(notFound ? 404 : 400).json({ error: error.message || "Error al desvincular el movimiento duplicado" });
     }
   });
 
@@ -2885,9 +2700,9 @@ export async function registerRoutes(
     try {
       const result = await db.execute(sql`
         SELECT s.*,
-          COALESCE(SUM(CASE WHEN pi.estado = 'pendiente' THEN pi.monto_total::numeric ELSE 0 END), 0) AS saldo_cc
+          COALESCE(SUM(CASE WHEN pi.estado IN ('pendiente', 'parcial') THEN pi.saldo_pendiente::numeric ELSE 0 END), 0) AS saldo_cc
         FROM accounting_suppliers s
-        LEFT JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+        LEFT JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado IN ('pendiente', 'parcial')
         WHERE s.activo = true
         GROUP BY s.id
         ORDER BY s.razon_social
@@ -2908,22 +2723,22 @@ export async function registerRoutes(
           ? sql`
               SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
                 COUNT(pi.id) AS facturas_pendientes,
-                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+                COALESCE(SUM(pi.saldo_pendiente::numeric), 0) AS total_saldo
               FROM accounting_suppliers s
               INNER JOIN purchase_invoices pi
                 ON pi.supplier_id = s.id
-                AND pi.estado = 'pendiente'
+                AND pi.estado IN ('pendiente', 'parcial')
                 AND pi.fecha_emision <= ${fechaCorte}::date
               GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
-              HAVING COALESCE(SUM(pi.monto_total::numeric), 0) > 0
+              HAVING COALESCE(SUM(pi.saldo_pendiente::numeric), 0) > 0
               ORDER BY total_saldo DESC
             `
           : sql`
               SELECT s.id, s.razon_social, s.cuit, s.condicion_iva,
                 COUNT(pi.id) AS facturas_pendientes,
-                COALESCE(SUM(pi.monto_total::numeric), 0) AS total_saldo
+                COALESCE(SUM(pi.saldo_pendiente::numeric), 0) AS total_saldo
               FROM accounting_suppliers s
-              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado = 'pendiente'
+              INNER JOIN purchase_invoices pi ON pi.supplier_id = s.id AND pi.estado IN ('pendiente', 'parcial')
               GROUP BY s.id, s.razon_social, s.cuit, s.condicion_iva
               ORDER BY total_saldo DESC
             `
@@ -2953,7 +2768,7 @@ export async function registerRoutes(
 
       const facturas = await db.execute(sql`
         SELECT * FROM purchase_invoices
-        WHERE supplier_id = ${id} AND estado = 'pendiente'
+        WHERE supplier_id = ${id} AND estado IN ('pendiente', 'parcial')
         ORDER BY fecha_emision DESC
       `);
 
@@ -3088,15 +2903,140 @@ export async function registerRoutes(
         WHERE poi.invoice_id = ${id}
         ORDER BY po.fecha DESC, po.id DESC
       `);
-      res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows });
+      const articleLines = await db.execute(sql`
+        SELECT * FROM purchase_invoice_lines WHERE invoice_id = ${id} ORDER BY line_number
+      `);
+      res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows, articleLines: articleLines.rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  app.post("/api/purchase-invoices", requireAuth, async (req, res) => {
+  app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
+      // Estos registros alimentan los informes por cuenta de gasto; el
+      // emisor identifica su origen, pero nunca queda como acreedor ni se mueve
+      // Caja, banco, stock o el Libro IVA. Las filas históricas de esos mismos
+      // tipos conservan su tratamiento anterior y se distinguen por estado.
+      // Liquidación Tarjeta se sumó acá: antes tenía sus propias retenciones
+      // sufridas y movía Caja al liquidarse; confirmado con el usuario que
+      // pase a ser puramente informativa, igual que Resumen Bancario/Retención.
+      if (["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"].includes(req.body.tipoComprobante)) {
+        const input = req.body;
+        const supplierId = Number(input.supplierId);
+        const numero = typeof input.numeroComprobante === "string" ? input.numeroComprobante.trim() : "";
+        const fecha = input.fechaEmision;
+        const amountText = String(input.montoNeto ?? "");
+        const amount = Number(amountText);
+        const date = typeof fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+          ? new Date(`${fecha}T12:00:00Z`) : null;
+        if (!Number.isSafeInteger(supplierId) || supplierId <= 0 || !numero || !date ||
+            Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== fecha ||
+            !/^\d+(?:\.\d{1,2})?$/.test(amountText) ||
+            !Number.isFinite(amount) || amount <= 0 || amount > 999999999999.99) {
+          return res.status(400).json({ error: "Elegí emisor, número, fecha e importe positivo con hasta dos decimales." });
+        }
+        if (input.stockItems !== undefined && (!Array.isArray(input.stockItems) || input.stockItems.length > 0)) {
+          return res.status(400).json({ error: "Los registros de gasto no admiten movimientos de stock." });
+        }
+        // Las líneas son descriptivas: se vinculan al artículo existente sin
+        // invocar enterPurchaseInvoiceStock ni alterar costo, proveedor o stock.
+        const expenseItems = input.expenseItems === undefined ? [] : input.expenseItems;
+        if (!Array.isArray(expenseItems) || expenseItems.length > 500) {
+          return res.status(400).json({ error: "La lista de artículos del gasto es inválida." });
+        }
+        const lines: { itemId: string; quantity: number; unitPrice: number; vatRate: string | null; total: number }[] = [];
+        for (const [index, row] of expenseItems.entries()) {
+          const itemId = typeof row?.itemId === "string" ? row.itemId.trim() : "";
+          const quantityText = String(row?.quantity ?? "");
+          const priceText = String(row?.unitPrice ?? "");
+          const quantity = Number(quantityText);
+          const unitPrice = Number(priceText);
+          const vatRate = row?.vatRate == null || row.vatRate === "" ? null : String(row.vatRate);
+          const total = Math.round(quantity * unitPrice * 100) / 100;
+          if (!itemId || !/^\d+(?:\.\d{1,3})?$/.test(quantityText) || quantity <= 0 || quantity > 9999999 ||
+              !/^\d+(?:\.\d{1,2})?$/.test(priceText) || unitPrice < 0 || unitPrice > 99999999 ||
+              (vatRate && !["2.5", "5", "10.5", "21", "27", "exento", "no_gravado"].includes(vatRate)) ||
+              !Number.isFinite(total) || total > 999999999999.99) {
+            return res.status(400).json({ error: `Artículo ${index + 1}: verificá artículo, cantidad, importe y alícuota.` });
+          }
+          lines.push({ itemId, quantity, unitPrice, vatRate, total });
+        }
+        if (lines.length && Math.round(lines.reduce((sum, row) => sum + row.total, 0) * 100) !== Math.round(amount * 100)) {
+          return res.status(400).json({ error: "El total del gasto debe coincidir con la suma de sus artículos." });
+        }
+        const emitter = await db.execute(sql`
+          SELECT s.razon_social, s.cuit, aa.id AS account_id
+          FROM accounting_suppliers s
+          LEFT JOIN accounting_accounts aa ON aa.id = s.cuenta_contable_id
+            AND aa.tipo = 'egreso' AND aa.activo = true
+          WHERE s.id = ${supplierId} AND s.activo = true
+        `);
+        if (!emitter.rows.length || !emitter.rows[0].account_id) {
+          return res.status(400).json({ error: "El emisor debe estar activo y tener una cuenta de gasto activa asignada en el ABM." });
+        }
+        const period = `${fecha.slice(5, 7)}/${fecha.slice(0, 4)}`;
+        const result = await db.transaction(async (tx) => {
+          const duplicate = await tx.execute(sql`
+            SELECT id FROM purchase_invoices
+            WHERE tipo_comprobante = ${input.tipoComprobante} AND supplier_id = ${supplierId}
+              AND numero_comprobante = ${numero} AND estado != 'anulado' LIMIT 1
+          `);
+          if (duplicate.rows.length) {
+            throw Object.assign(new Error("Este registro ya existe para el emisor y número indicados."), { statusCode: 409 });
+          }
+          const inserted = await tx.execute(sql`
+            INSERT INTO purchase_invoices (
+              tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
+              numero_comprobante, fecha_emision, periodo, condicion_pago,
+              monto_neto, monto_total, cuenta_contable_id, estado, observaciones
+            ) VALUES (
+              ${input.tipoComprobante}, ${supplierId}, ${emitter.rows[0].razon_social}, ${emitter.rows[0].cuit},
+              ${numero}, ${fecha}, ${period}, 'registro',
+              ${amount}, ${amount}, ${emitter.rows[0].account_id}, 'registrado',
+              ${typeof input.observaciones === "string" ? input.observaciones.trim() : null}
+            ) RETURNING *
+          `);
+          for (const [index, row] of lines.entries()) {
+            const item = await tx.execute(sql`
+              SELECT id, name, sku FROM inventory_items WHERE id = ${row.itemId} AND is_active = 'true'
+            `);
+            if (!item.rows.length) {
+              throw Object.assign(new Error(`Artículo ${index + 1}: no existe o está inactivo.`), { statusCode: 400 });
+            }
+            await tx.execute(sql`
+              INSERT INTO purchase_invoice_lines
+                (invoice_id, line_number, item_id, item_name, item_sku, quantity, unit_price, vat_rate, line_total)
+              VALUES (${inserted.rows[0].id}, ${index + 1}, ${row.itemId}, ${item.rows[0].name}, ${item.rows[0].sku},
+                ${row.quantity}, ${row.unitPrice}, ${row.vatRate}, ${row.total})
+            `);
+          }
+          return inserted;
+        });
+        return res.status(201).json(result.rows[0]);
+      }
       const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
+      if (isSupplierPayableDocument(body.tipoComprobante) && hasPurchaseRetentions(body)) {
+        return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
+      }
+      const supplierId = Number(body.supplierId);
+      if (!Number.isSafeInteger(supplierId) || supplierId <= 0) {
+        return res.status(400).json({ error: "Elegí un proveedor cargado en el ABM." });
+      }
+      const supplierResult = await db.execute(sql`
+        SELECT razon_social, cuit, condicion_iva FROM accounting_suppliers WHERE id = ${supplierId}
+      `);
+      if (!supplierResult.rows.length) {
+        return res.status(400).json({ error: "El proveedor seleccionado no existe en el ABM." });
+      }
+      body.supplierId = supplierId;
+      body.proveedorNombre = supplierResult.rows[0].razon_social;
+      body.proveedorCuit = supplierResult.rows[0].cuit;
+      if (!condicionIvaPermiteComprobante(supplierResult.rows[0].condicion_iva as string, body.tipoComprobante)) {
+        return res.status(400).json({
+          error: `Un proveedor "${supplierResult.rows[0].condicion_iva}" no puede emitir ${body.tipoComprobante}. Revisá la condición IVA del proveedor o el tipo de comprobante.`,
+        });
+      }
       if (isReceivedRetention(body.tipoComprobante)) {
         body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
       }
@@ -3140,9 +3080,46 @@ export async function registerRoutes(
       // Calcular montoTotal
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal = calculatePurchaseInvoiceTotal(body);
+      if (!isValidPurchaseInvoiceTotal(body.tipoComprobante, montoTotal)) {
+        return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
+      }
+      const stockRows = parsePurchaseStockRows(body.stockItems);
 
-      // Estado según condición de pago
-      const estado = body.condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
+      // Las facturas, notas y recibos se pagan desde la cuenta corriente del
+      // proveedor. Ignorar "contado" enviado por clientes anteriores: cargar
+      // un comprobante no equivale a registrar una salida de dinero.
+      const condicionPago = isSupplierPayableDocument(body.tipoComprobante)
+        ? "cuenta_corriente"
+        : body.condicionPago || "contado";
+      const estado = condicionPago === "cuenta_corriente" ? "pendiente" : "pagado";
+
+      // Si se eligieron formas de pago reales (no Cuenta Corriente), se paga
+      // total o parcialmente al cargarla — ver el bloque más abajo, dentro
+      // de la transacción. Se puede combinar más de una (ej. parte efectivo,
+      // parte transferencia), igual que en Ventas. Las NC quedan afuera: no
+      // tiene sentido "pagarlas" solas, se aplican contra otra factura
+      // pendiente desde la OP manual.
+      const FORMAS_PAGO_INMEDIATAS = ["transferencia", "efectivo", "cheque", "dep_bancario"];
+      const formasPagoInput = Array.isArray(body.formasPago) ? body.formasPago : [];
+      for (const row of formasPagoInput) {
+        const monto = Number(row?.monto);
+        if (!FORMAS_PAGO_INMEDIATAS.includes(row?.formaPago) || !Number.isFinite(monto) || monto <= 0) {
+          return res.status(400).json({ error: "Cada forma de pago debe tener un método válido y un monto mayor a $0,00." });
+        }
+      }
+      const formasPago: Array<{ formaPago: string; monto: number }> = formasPagoInput.map((row: any) => ({
+        formaPago: row.formaPago as string, monto: Number(row.monto),
+      }));
+      const pagaAlCargar = formasPago.length > 0 && condicionPago === "cuenta_corriente" && !body.tipoComprobante.startsWith("NC");
+      let montoPagadoAhora = montoTotal;
+      if (pagaAlCargar) {
+        montoPagadoAhora = Math.round(formasPago.reduce((sum, r) => sum + r.monto, 0) * 100) / 100;
+        if (montoPagadoAhora > montoTotal + 0.005) {
+          return res.status(400).json({ error: "El monto a pagar ahora debe ser mayor a $0,00 y no puede superar el total del comprobante." });
+        }
+        montoPagadoAhora = Math.min(montoPagadoAhora, montoTotal);
+      }
+      const esPagoParcial = pagaAlCargar && montoPagadoAhora < montoTotal - 0.005;
 
       // Formatear numero comprobante ext
       const numeroComprobanteExt = body.puntoVenta && body.numeroComprobante
@@ -3150,7 +3127,8 @@ export async function registerRoutes(
         : body.numeroComprobante;
 
       // Insertar comprobante
-      const result = await db.execute(sql`
+      const rawInvoice = await db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
         INSERT INTO purchase_invoices (
           tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
           punto_venta, numero_comprobante, numero_comprobante_ext,
@@ -3160,17 +3138,18 @@ export async function registerRoutes(
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
           percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
           retencion_suss, retencion_municipal, monotributo_comp_bc,
-          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
-          ${body.fechaEmision}, ${body.periodo||null}, ${body.condicionPago||"contado"},
+          ${body.fechaEmision}, ${body.periodo||null}, ${condicionPago},
           ${n("montoNeto")}, ${body.alicuotaIva||"21"}, ${n("montoIva27")}, ${n("montoIva21")}, ${n("montoIva105")},
           ${n("montoIva5")}, ${n("montoIva25")}, ${n("montoExento")}, ${n("montoNoGravado")},
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
-          ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null}
+          ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null},
+          ${estado === "pendiente" ? montoTotal : 0}
         )
         RETURNING *
       `);
@@ -3220,13 +3199,12 @@ export async function registerRoutes(
         updatedAt: rawInvoice.updated_at,
       };
 
-      // Generar asiento automático
-      try {
-        const entryId = await generarAsiento(invoice);
-        await db.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
-        invoice.asientoId = entryId;
-      } catch (ae) {
-        console.error("Error generando asiento:", ae);
+      // Generar asiento automático — el Remito no tiene datos de facturación
+      // (sin IVA ni total), así que no genera asiento contable.
+      if (invoice.tipoComprobante !== "REMITO") {
+        const entryId = await generarAsiento(invoice, tx);
+        await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${invoice.id}`);
+        rawInvoice.asiento_id = entryId;
       }
 
       // Si tiene retención IIBB → insertar en iibb_retentions
@@ -3235,34 +3213,72 @@ export async function registerRoutes(
         body.supplierId &&
         shouldRegisterPracticedIibbRetention(body.tipoComprobante)
       ) {
-        try {
-          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
+          const nroRes = await tx.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
           const nroConstancia = (nroRes.rows[0] as any).next;
-          await db.execute(sql`
+          await tx.execute(sql`
             INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, letra_factura, importe_base, alicuota, importe_retenido, invoice_id)
             VALUES (${nroConstancia}, ${body.supplierId}, ${body.proveedorCuit||""}, ${body.fechaEmision}, ${body.fechaEmision}, ${parseInt(body.numeroComprobante)||0}, ${body.tipoComprobante?.slice(-1)||null}, ${n("montoNeto")}, ${body.alicuotaIibbProveedor||0}, ${n("retencionIibb")}, ${invoice.id})
           `);
-        } catch (re) {
-          console.error("Error inserting iibb_retention:", re);
-        }
       }
+      await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
+        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`);
 
+      // Si se eligió una forma de pago real (no Cuenta Corriente), generar
+      // de una la Orden de Pago de esta factura para que quede pagada (total
+      // o parcialmente) al cargarla, en vez de quedar pendiente hasta una OP
+      // manual aparte. Si es parcial, el resto queda con saldo pendiente en
+      // cuenta corriente — ver createPaymentOrder.
+      if (pagaAlCargar) {
+        const sumaPorMetodo = (metodo: string) => Math.round(
+          formasPago.filter((r) => r.formaPago === metodo).reduce((sum, r) => sum + r.monto, 0) * 100,
+        ) / 100;
+        const formaPagoLabel = [...new Set(formasPago.map((r) => r.formaPago))].join("+");
+        const { op } = await createPaymentOrder(tx, {
+          supplierId,
+          fecha: body.fechaEmision,
+          facturaIds: [invoice.id],
+          montoParcial: esPagoParcial ? montoPagadoAhora : undefined,
+          formaPago: formaPagoLabel,
+          depBancario: sumaPorMetodo("dep_bancario"),
+          efectivo: sumaPorMetodo("efectivo"),
+          cheques: sumaPorMetodo("cheque"),
+          observaciones: esPagoParcial ? "OP automática (pago parcial) al cargar el comprobante" : "OP automática al cargar el comprobante",
+        }, getArgentinaToday);
+        const updated = await tx.execute(sql`SELECT estado, saldo_pendiente FROM purchase_invoices WHERE id = ${invoice.id}`);
+        rawInvoice.estado = (updated.rows[0] as any).estado;
+        rawInvoice.saldo_pendiente = (updated.rows[0] as any).saldo_pendiente;
+        rawInvoice.orden_pago_id = op.id;
+        rawInvoice.orden_pago_numero = op.numero;
+      }
+      return rawInvoice;
+      });
       res.status(201).json(rawInvoice);
     } catch (e: any) {
       res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 
-  app.patch("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+  app.patch("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const existing = await db.execute(sql`SELECT estado, tipo_comprobante FROM purchase_invoices WHERE id = ${id}`);
+      const existing = await db.execute(sql`
+        SELECT estado, tipo_comprobante, retencion_iibb AS "retencionIibb",
+          retencion_ganancias AS "retencionGanancias", retencion_iva AS "retencionIva",
+          retencion_suss AS "retencionSuss", retencion_municipal AS "retencionMunicipal"
+        FROM purchase_invoices WHERE id = ${id}
+      `);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
       if ((existing.rows[0] as any).estado !== "pendiente") {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
       const body = normalizeReceivedRetentionAmounts(req.body, tipoComprobante);
+      // Las correcciones de comprobantes históricos conservan sus retenciones;
+      // uno que nunca las tuvo no puede incorporarlas desde este formulario.
+      if (isSupplierPayableDocument(tipoComprobante) &&
+          !hasPurchaseRetentions(existing.rows[0] as Record<string, unknown>) && hasPurchaseRetentions(body)) {
+        return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
+      }
       if (isReceivedRetention(tipoComprobante)) {
         body.cuentaContableId = await resolveReceivedRetentionAccountId(body);
       }
@@ -3277,6 +3293,9 @@ export async function registerRoutes(
 
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal = calculatePurchaseInvoiceTotal({ ...body, tipoComprobante });
+      if (!isValidPurchaseInvoiceTotal(tipoComprobante, montoTotal)) {
+        return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
+      }
       const updatedInvoice = await db.transaction(async (tx) => {
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET
@@ -3289,6 +3308,7 @@ export async function registerRoutes(
             percepcion_ganancias = ${n("percepcionGanancias")},
             retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
             retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
+            retencion_municipal = ${n("retencionMunicipal")},
             monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
             subtipo_retencion = ${body.subtipoRetencion||null},
@@ -3327,6 +3347,7 @@ export async function registerRoutes(
           retencionGanancias: raw.retencion_ganancias,
           retencionIva: raw.retencion_iva,
           retencionSuss: raw.retencion_suss,
+          retencionMunicipal: raw.retencion_municipal,
           montoTotal: raw.monto_total,
           cuentaContableId: raw.cuenta_contable_id,
           centroCosto: raw.centro_costo,
@@ -3335,11 +3356,16 @@ export async function registerRoutes(
           subtipoRetencion: raw.subtipo_retencion,
         };
 
-        const entryId = await generarAsiento(invoiceForEntry, tx);
-        await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
-        if (previousEntryId && previousEntryId !== entryId) {
-          await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
-          await tx.execute(sql`DELETE FROM accounting_entries WHERE id = ${previousEntryId}`);
+        // El Remito no tiene datos de facturación (sin IVA ni total), así que
+        // nunca genera asiento contable — ni al crearlo ni al editarlo.
+        let entryId = previousEntryId ?? null;
+        if (tipoComprobante !== "REMITO") {
+          entryId = await generarAsiento(invoiceForEntry, tx);
+          await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
+          if (previousEntryId && previousEntryId !== entryId) {
+            await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
+            await tx.execute(sql`DELETE FROM accounting_entries WHERE id = ${previousEntryId}`);
+          }
         }
 
         if (!shouldRegisterPracticedIibbRetention(tipoComprobante)) {
@@ -3385,13 +3411,26 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
+  app.delete("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await db.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);
+      const changed = await db.transaction(async (tx) => {
+        const invoice = await tx.execute(sql`SELECT id FROM purchase_invoices WHERE id = ${id} FOR UPDATE`);
+        if (!invoice.rows.length) return false;
+        const movements = await tx.execute(sql`
+          SELECT id FROM stock_movements
+          WHERE source_type = 'purchase_invoice' AND source_id = ${String(id)} LIMIT 1
+        `);
+        if (movements.rows.length) {
+          throw Object.assign(new Error("Este comprobante ingresó artículos al stock. La anulación requiere revertir primero esos movimientos."), { statusCode: 409 });
+        }
+        await tx.execute(sql`UPDATE purchase_invoices SET estado = 'anulado' WHERE id = ${id}`);
+        return true;
+      });
+      if (!changed) return res.status(404).json({ error: "Comprobante no encontrado" });
       res.json({ ok: true });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -3448,108 +3487,12 @@ export async function registerRoutes(
 
   app.post("/api/payment-orders", requireAuth, async (req, res) => {
     try {
-      const { supplierId, fecha, facturaIds, retencionIibb, retencionGanancias,
-        retencionIva, retencionProfLibs, compensacion, formaPago, depBancario,
-        efectivo, cheques, observaciones, alicuotaIibb } = req.body;
-
-      if (!supplierId || !facturaIds?.length) {
-        return res.status(400).json({ error: "Proveedor y facturas son requeridos" });
-      }
-
-      // Verificar facturas — usar IN con valores sanitizados para evitar "malformed array literal"
-      const idsInt = facturaIds.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id));
-      if (idsInt.length === 0) {
-        return res.status(400).json({ error: "IDs de facturas inválidos" });
-      }
-      const idsSQL = sql.raw(idsInt.join(","));
-      const facturasRes = await db.execute(sql`
-        SELECT id, monto_total, monto_neto, tipo_comprobante, estado, supplier_id FROM purchase_invoices
-        WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado = 'pendiente'
-      `);
-      if (facturasRes.rows.length !== idsInt.length) {
-        const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
-        const todosRes = await db.execute(sql`SELECT id, estado FROM purchase_invoices WHERE id IN (${idsSQL})`);
-        const noEncontradas = idsInt.filter((id: number) => !todosRes.rows.find((r: any) => Number(r.id) === id));
-        const noPendientes = todosRes.rows
-          .filter((r: any) => r.estado !== "pendiente" && !idsEncontrados.includes(Number(r.id)))
-          .map((r: any) => `#${r.id} (${r.estado})`);
-        let errorMsg = "No se pudo generar la OP: ";
-        if (noEncontradas.length > 0) errorMsg += `Facturas no encontradas: ${noEncontradas.join(", ")}. `;
-        if (noPendientes.length > 0) errorMsg += `Facturas no pendientes: ${noPendientes.join(", ")}. `;
-        if (noEncontradas.length === 0 && noPendientes.length === 0) errorMsg += `Proveedor no coincide con las facturas seleccionadas (supplierId: ${supplierId}).`;
-        return res.status(400).json({ error: errorMsg });
-      }
-
-      // Calcular totales — las NC (Notas de Crédito) restan del total a abonar
-      const isNC = (r: any) => (r.tipo_comprobante || "").startsWith("NC");
-      const totalFacturas = facturasRes.rows.reduce((s: number, r: any) =>
-        isNC(r) ? s - parseFloat(r.monto_total) : s + parseFloat(r.monto_total), 0);
-      const baseNetosIibb = facturasRes.rows.reduce((s: number, r: any) =>
-        isNC(r) ? s : s + parseFloat(r.monto_neto || "0"), 0);
-      const retIibb = parseFloat(retencionIibb || "0");
-      const retGan = parseFloat(retencionGanancias || "0");
-      const retIva = parseFloat(retencionIva || "0");
-      const retProf = parseFloat(retencionProfLibs || "0");
-      const comp = parseFloat(compensacion || "0");
-      const totalAbonado = totalFacturas - retIibb - retGan - retIva - retProf - comp;
-
-      // Número de OP autoincremental
-      const numRes = await db.execute(sql`
-        SELECT COALESCE(MAX(CAST(SPLIT_PART(numero, '-', 2) AS INTEGER)), 0) + 1 AS next FROM payment_orders
-      `);
-      const nextNum = (numRes.rows[0] as any).next as number;
-      const numero = `000-${String(nextNum).padStart(8, "0")}`;
-
-      // Insertar OP
-      const dep = parseFloat(depBancario || "0");
-      const ef = parseFloat(efectivo || "0");
-      const ch = parseFloat(cheques || "0");
-      const opRes = await db.execute(sql`
-        INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones, alicuota_iibb_op)
-        VALUES (${numero}, ${supplierId}, ${fecha || getArgentinaToday()}, ${formaPago||"transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones||null}, ${parseFloat(alicuotaIibb||"0")||null})
-        RETURNING *
-      `);
-      const op = opRes.rows[0] as any;
-
-      // Marcar facturas como pagadas e insertar ítems
-      // Las NC se insertan con importe_cancelado negativo (reducen el total de la OP)
-      for (const fid of idsInt) {
-        const factura = facturasRes.rows.find((r: any) => Number(r.id) === fid) as any;
-        const importeCancelado = isNC(factura)
-          ? -Math.abs(parseFloat(factura.monto_total))
-          : parseFloat(factura.monto_total);
-        await db.execute(sql`UPDATE purchase_invoices SET estado = 'pagado' WHERE id = ${fid}`);
-        await db.execute(sql`
-          INSERT INTO payment_order_items (payment_order_id, invoice_id, importe_cancelado)
-          VALUES (${op.id}, ${fid}, ${importeCancelado})
-        `);
-      }
-
-      // Generar asiento contable
-      try {
-        const supplier = await db.execute(sql`SELECT razon_social FROM accounting_suppliers WHERE id = ${supplierId}`);
-        const entryId = await generarAsientoOP({ ...op, supplier: supplier.rows[0] as any });
-        await db.execute(sql`UPDATE payment_orders SET asiento_id = ${entryId} WHERE id = ${op.id}`);
-      } catch (ae) { console.error("Error generando asiento OP:", ae); }
-
-      // Insertar retención IIBB si corresponde
-      if (retIibb > 0) {
-        try {
-          const nroRes = await db.execute(sql`SELECT COALESCE(MAX(nro_constancia), 0) + 1 AS next FROM iibb_retentions`);
-          const nroConstancia = (nroRes.rows[0] as any).next;
-          const sup = await db.execute(sql`SELECT cuit FROM accounting_suppliers WHERE id = ${supplierId}`);
-          const cuit = (sup.rows[0] as any)?.cuit || "";
-          await db.execute(sql`
-            INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, importe_base, alicuota, importe_retenido)
-            VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${fecha||getArgentinaToday()}, ${fecha||getArgentinaToday()}, ${nextNum}, ${baseNetosIibb > 0 ? baseNetosIibb : totalFacturas}, ${parseFloat(alicuotaIibb||"0") || 0}, ${retIibb})
-          `);
-        } catch (re) { console.error("Error inserting iibb_retention for OP:", re); }
-      }
-
-      // Retornar OP completa con facturas
-      res.status(201).json({ ...op, facturas: facturasRes.rows, numero });
+      const { op, numero, facturas } = await db.transaction(async (tx) =>
+        createPaymentOrder(tx, req.body, getArgentinaToday)
+      );
+      res.status(201).json({ ...op, facturas, numero });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -3953,6 +3896,7 @@ export async function registerRoutes(
   registerRoomsRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);
+  registerChannexRoutes(app);
   registerPlanningRoutes(app);
   registerPackagesRoutes(app);
   registerExportRoutes(app);
@@ -3960,6 +3904,7 @@ export async function registerRoutes(
   registerBillingRoutes(app);
   registerReportsRoutes(app);
   registerMaraRoutes(app);
+  registerOperationalReportRoutes(app);
 
   // ==================== NIGHT AUDIT ====================
   app.post("/api/night-audit/run", requireAuth, requireRole(["admin", "manager", "reception", "jefe_recepcion"]), async (req, res) => {

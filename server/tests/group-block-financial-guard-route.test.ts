@@ -116,6 +116,35 @@ describe("DELETE /api/group-blocks/:id financial activity guard", () => {
 });
 
 describe("DELETE /api/groups/:groupId/reservations/:reservationId transactional guard", () => {
+  it("preserva la reserva y el bloque cuando el folio tiene cargos extra", async () => {
+    vi.clearAllMocks();
+    state.routeExecuteResults = [
+      { rows: [{ has_financial_activity: false }] },
+      { rows: [{ cnt: "1" }] },
+    ];
+    state.getGroup.mockResolvedValue({
+      id: block.groupId,
+      name: "Grupo con cargo",
+      reservations: [{
+        id: "reservation-protected",
+        reservationCode: "RES-PROTECTED",
+        roomId: "room-protected",
+        roomTypeId: block.roomTypeId,
+        status: "confirmed",
+      }],
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/groups/${block.groupId}/reservations/reservation-protected`, { method: "DELETE" });
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("1 cargo(s) extra");
+    });
+
+    expect(state.txUpdate).not.toHaveBeenCalled();
+    expect(state.txDelete).not.toHaveBeenCalled();
+    expect(state.deleteGroupBlock).not.toHaveBeenCalled();
+  });
+
   it("propagates the transaction's 409 and performs no reservation, room, block, or link mutation", async () => {
     state.hasFinancialActivity = false;
     state.routeExecuteResults = [

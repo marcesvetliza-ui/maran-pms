@@ -9,14 +9,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
-  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
-  hashPassword: vi.fn(),
-}));
-vi.mock("../audit", () => ({ audit: vi.fn() }));
-vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
-vi.mock("../db-storage", () => ({
-  storage: new Proxy({}, { get: () => vi.fn() }),
-  getArgentinaToday: () => "2026-09-11",
 }));
 vi.mock("../db", () => ({
   db: {
@@ -99,13 +91,13 @@ function configureBulkFinancialReads() {
 }
 
 async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
-  const { registerRoutes } = await import("../routes");
+  const { registerOperationalReportRoutes } = await import("../reports/operational");
   const app = express();
   app.use(express.json());
   const server: Server = await new Promise((resolve) => {
     const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
   });
-  await registerRoutes(server, app);
+  registerOperationalReportRoutes(app);
   const address = server.address();
   try {
     return await run(`http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`);

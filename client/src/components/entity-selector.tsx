@@ -42,7 +42,7 @@ export function NationalityCombobox({ value, afipCode, onChange }: {
           </div>
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
+      <PopoverContent className="w-72 p-0 z-[100] pointer-events-auto" align="start">
         <Command>
           <CommandInput placeholder="Buscar país..." value={search} onValueChange={setSearch} />
           <CommandList>

@@ -105,7 +105,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
+import { recoverGroupFiscalCollection } from "@/lib/group-fiscal-collection-recovery";
 import {
   availableGroupInvoiceTotal,
   buildGroupInvoiceItems,
@@ -138,6 +139,7 @@ const CONDICION_IVA_OPTIONS = [
   "Monotributista",
   "Exento",
   "No Responsable",
+  "No Categorizado",
 ];
 
 // Guests/companies/agencies persist Condición IVA in different shapes (snake_case
@@ -153,6 +155,7 @@ const CONDICION_IVA_NORMALIZE_MAP: Record<string, string> = {
   monotributista: "Monotributista",
   exento: "Exento",
   no_responsable: "No Responsable",
+  no_categorizado: "No Categorizado",
 };
 function normalizeCondicionIva(raw: string | null | undefined): string {
   if (!raw) return "Consumidor Final";
@@ -246,16 +249,26 @@ function AddBlockDialog({
     queryKey: ["/api/room-types"],
   });
 
-  const fetchAvailability = async (rtId: string, ci: string, co: string) => {
-    if (!rtId || !ci || !co || co <= ci) { setAvailableCount(null); return; }
-    try {
-      const res = await fetch(`/api/rooms/available?checkIn=${ci}&checkOut=${co}&roomTypeId=${rtId}`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableCount(Array.isArray(data) ? data.length : null);
-      }
-    } catch { setAvailableCount(null); }
-  };
+  useEffect(() => {
+    const ci = useCustomDates ? blockCheckInDate : group.checkInDate;
+    const co = useCustomDates ? blockCheckOutDate : group.checkOutDate;
+    setAvailableCount(null);
+    if (!open || !roomTypeId || !ci || !co || co <= ci) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ checkIn: ci, checkOut: co, roomTypeId });
+    fetch(`/api/rooms/available?${params}`, { credentials: "include", signal: controller.signal })
+      .then(async res => {
+        if (!res.ok) throw new Error("No se pudo consultar disponibilidad");
+        return res.json();
+      })
+      .then(data => {
+        if (!controller.signal.aborted) setAvailableCount(Array.isArray(data) ? data.length : null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAvailableCount(null);
+      });
+    return () => controller.abort();
+  }, [open, roomTypeId, useCustomDates, blockCheckInDate, blockCheckOutDate, group.checkInDate, group.checkOutDate]);
 
   const { data: ratePlans } = useQuery<RatePlan[]>({
     queryKey: ["/api/rate-plans/by-room-type", roomTypeId],
@@ -269,7 +282,7 @@ function AddBlockDialog({
 
   const createMutation = useMutation({
     mutationFn: () =>
-      apiRequest("POST", `/api/groups/${groupId}/blocks`, {
+      apiRequestWithGroupInventoryWarning("POST", `/api/groups/${groupId}/blocks`, {
         roomTypeId,
         quantity: Number(quantity),
         ratePlanId: ratePlanId || null,
@@ -324,12 +337,7 @@ function AddBlockDialog({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Tipo de Habitación *</Label>
-              <Select value={roomTypeId} onValueChange={(v) => {
-                setRoomTypeId(v);
-                const ci = useCustomDates ? blockCheckInDate : group.checkInDate;
-                const co = useCustomDates ? blockCheckOutDate : group.checkOutDate;
-                fetchAvailability(v, ci, co);
-              }}>
+              <Select value={roomTypeId} onValueChange={setRoomTypeId}>
                 <SelectTrigger data-testid="select-block-room-type">
                   <SelectValue placeholder="Seleccionar tipo" />
                 </SelectTrigger>
@@ -347,23 +355,19 @@ function AddBlockDialog({
               <Label>
                 Cantidad *
                 {availableCount !== null && (
-                  <span className={`ml-1 font-normal text-xs ${availableCount === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                    ({availableCount} disponibles)
+                  <span className="ml-1 font-normal text-xs text-muted-foreground">
+                    ({availableCount} hab. físicas libres)
                   </span>
                 )}
               </Label>
               <Input
                 type="number"
                 min={1}
-                max={availableCount ?? undefined}
                 value={quantity}
                 onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
                 data-testid="input-block-quantity"
-                className={availableCount !== null && quantity > availableCount ? 'border-destructive' : ''}
               />
-              {availableCount !== null && quantity > availableCount && (
-                <p className="text-xs text-destructive mt-1">Supera la disponibilidad actual</p>
-              )}
+              <p className="text-xs text-muted-foreground mt-1">El cupo de bloques confirmados se verifica al guardar.</p>
             </div>
           </div>
 
@@ -1174,84 +1178,17 @@ export default function GroupDetailPage() {
   useEffect(() => {
     for (const pending of pendingFiscalCollections) {
       const invoiceId = Number(pending?.id);
-      const intent = pending?.intent;
-      if (!invoiceId || recoveringFiscalInvoices.current.has(invoiceId) || !intent?.endpoint || !intent?.body) continue;
-      const allowedEndpoints = new Set([
-        `/api/groups/${groupId}/payment`,
-        `/api/groups/${groupId}/master-payment`,
-      ]);
-      if (!allowedEndpoints.has(String(intent.endpoint))) continue;
+      if (!invoiceId || recoveringFiscalInvoices.current.has(invoiceId)) continue;
       recoveringFiscalInvoices.current.add(invoiceId);
-      const finalConcepts = (Array.isArray(pending.items) ? pending.items : [])
-        .map((item: any) => ({
-          description: String(item.descripcion || item.description || "").trim(),
-          amount: Number(item.subtotal ?? (Number(item.precioUnitario || 0) * Number(item.cantidad || 1))),
-        }))
-        .filter((item: any) => item.description && item.amount > 0);
-      const oldTotal = (intent.body.concepts || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
-      const newTotal = finalConcepts.reduce((sum: number, item: any) => sum + item.amount, 0);
-      const sourceRows = intent.body.paymentRows || [];
-      // An emitted invoice can have been created by an older client which put
-      // its gross document amount in paymentRows even though an advance had
-      // already settled part of it. The persisted settlement breakdown is the
-      // authoritative recovery instruction: never recreate that overpayment
-      // from the stale payment rows. This also keeps an operator's edited
-      // invoice total aligned with the original advance application.
-      const appliedAdvances = Math.min(
-        newTotal,
-        Math.max(0, Number(intent.body.settlementBreakdown?.appliedAdvances || 0)),
-      );
-      const targetGrossCents = Math.round((newTotal - appliedAdvances) * 100);
-      const retentionCents = Math.round(sourceRows.reduce((sum: number, row: any) =>
-        sum + Number(row.retention?.monto || 0), 0) * 100);
-      if (targetGrossCents <= retentionCents || targetGrossCents <= 0) {
-        recoveringFiscalInvoices.current.delete(invoiceId);
-        toast({
-          title: "Cobro fiscal pendiente",
-          description: "El comprobante emitido requiere revisar sus retenciones antes de poder registrar el cobro.",
-          variant: "destructive",
+      recoverGroupFiscalCollection(groupId, pending)
+        .then((result) => {
+          if (result !== "recovered") recoveringFiscalInvoices.current.delete(invoiceId);
+        })
+        .catch(() => {
+          recoveringFiscalInvoices.current.delete(invoiceId);
         });
-        continue;
-      }
-      const eligible = sourceRows.map((row: any, index: number) => ({ row, index }))
-        .filter(({ row }: any) => row.method !== "retencion" && Number(row.amount || 0) > 0);
-      const weightTotal = eligible.reduce((sum: number, entry: any) => sum + Number(entry.row.amount || 0), 0);
-      let allocated = 0;
-      const centsByIndex = new Map<number, number>();
-      eligible.forEach((entry: any, position: number) => {
-        const cents = position === eligible.length - 1
-          ? targetGrossCents - retentionCents - allocated
-          : Math.floor((targetGrossCents - retentionCents) * Number(entry.row.amount || 0) / weightTotal);
-        centsByIndex.set(entry.index, cents);
-        allocated += cents;
-      });
-      const paymentRows = sourceRows.map((row: any, index: number) =>
-        centsByIndex.has(index) ? { ...row, amount: (centsByIndex.get(index)! / 100).toFixed(2) } : row
-      );
-      apiRequest("POST", intent.endpoint, {
-        ...intent.body,
-        paymentRows,
-        concepts: finalConcepts,
-        settlementBreakdown: {
-          documentTotal: newTotal,
-          appliedAdvances,
-          newCollection: targetGrossCents / 100,
-        },
-        // The post-emission snapshot no longer has a non-fiscal advance (the
-        // invoice consumes fiscal availability). Supply its persisted intent
-        // so the server can validate the same advance split on recovery.
-        invoiceData: { id: invoiceId, groupPaymentIntent: intent },
-      }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "pending-fiscal-collections"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
-        toast({ title: "Cobro fiscal recuperado", description: "Se completó un cobro confirmado que había quedado pendiente." });
-      }).catch(() => {
-        recoveringFiscalInvoices.current.delete(invoiceId);
-      });
     }
-  }, [pendingFiscalCollections, groupId, queryClient, toast]);
+  }, [pendingFiscalCollections, groupId]);
 
   const refreshGroupBillingState = async () => {
     await Promise.all([
@@ -1400,7 +1337,7 @@ export default function GroupDetailPage() {
 
   const changeRoomMutation = useMutation({
     mutationFn: async ({ reservationId, roomId, roomTypeId }: { reservationId: string; roomId: string; roomTypeId: string }) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId });
+      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
@@ -1483,10 +1420,10 @@ export default function GroupDetailPage() {
       if (!groupPaymentReceptorLocked) {
         throw new Error("Seleccioná y confirmá el receptor antes de registrar el pago.");
       }
-      if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a") {
+      if (validRows.length === 0 && groupPaymentReceiptType !== "factura_mipyme_a" && groupPaymentReceiptType !== "factura_mipyme_b") {
         throw new Error("Ingresá al menos un monto");
       }
-      if (!["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType)
+      if (!["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType)
         && validRows.some(row => !row.reference.trim())) {
         throw new Error("El Anticipo requiere una referencia para cada medio de pago.");
       }
@@ -1499,7 +1436,7 @@ export default function GroupDetailPage() {
             ? { tipo: r.retencionTipo, monto: parseFloat(r.retencionMonto || "0") }
             : undefined,
         }));
-      const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+      const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
       const grossPaymentTotal = validRows.reduce((sum, row) =>
         sum + (parseFloat(row.amount || "0") || 0)
         + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0);
@@ -1944,7 +1881,7 @@ export default function GroupDetailPage() {
     });
   };
 
-  const autoSyncFiscalPayment = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
+  const autoSyncFiscalPayment = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
   const autoSyncItemsTotal = groupPaymentItems.reduce((sum, item) => sum + item.subtotal, 0);
   const autoSyncRequiredCollection = requiredGroupInvoiceCollection(
     autoSyncItemsTotal,
@@ -1954,6 +1891,7 @@ export default function GroupDetailPage() {
     if (!showGroupPaymentDialog
       || !autoSyncFiscalPayment
       || groupPaymentReceiptType === "factura_mipyme_a"
+      || groupPaymentReceiptType === "factura_mipyme_b"
       || groupPaymentCloseAll
       || groupPaymentRows.length !== 1) {
       return;
@@ -1996,8 +1934,8 @@ export default function GroupDetailPage() {
 
   // Keep the three financial validations independent: collection media,
   // fiscal concepts, and source availability represent different ledgers.
-  const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
-  const groupPaymentIsMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+  const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
+  const groupPaymentIsMipyme = (groupPaymentReceiptType === "factura_mipyme_a" || groupPaymentReceiptType === "factura_mipyme_b");
   const groupPaymentHasCuentaCorriente = groupPaymentRows.some(r => r.method === "cuenta_corriente");
   const groupPaymentEntityRequired = (groupPaymentIsFiscal && !groupPaymentIsMipyme) || groupPaymentHasCuentaCorriente;
   const groupPaymentHasEntityData = !!groupPaymentRazonSocial.trim();
@@ -2858,6 +2796,7 @@ export default function GroupDetailPage() {
                               : gp.receiptType === "factura_b" ? "Factura B"
                               : gp.receiptType === "factura_t" ? "Factura T"
                               : gp.receiptType === "factura_mipyme_a" ? "MiPyme A"
+                              : gp.receiptType === "factura_mipyme_b" ? "MiPyme B"
                               : gp.receiptType;
                             // Bug 7: resolve entity name from companies/agencies
                             const entityName = (() => {
@@ -3921,8 +3860,8 @@ export default function GroupDetailPage() {
           </DialogHeader>
 
           {(() => {
-            const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a"].includes(groupPaymentReceiptType);
-            const isMipyme = groupPaymentReceiptType === "factura_mipyme_a";
+            const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
+            const isMipyme = (groupPaymentReceiptType === "factura_mipyme_a" || groupPaymentReceiptType === "factura_mipyme_b");
             const isFA = groupPaymentReceiptType === "factura_a";
             // CUIT vs. DNI must follow WHO the receptor is (Empresa/Agencia always has
             // CUIT; only a Huésped may show a DNI instead), never which comprobante is
@@ -3942,6 +3881,7 @@ export default function GroupDetailPage() {
               factura_a: "Factura A",
               factura_b: "Factura B",
               factura_mipyme_a: "Factura MiPyme A",
+              factura_mipyme_b: "Factura MiPyme B",
               factura_t: "Factura T",
             };
             // Factura T ("solo alojamiento") is only fiscally valid when the master folio is
@@ -4297,6 +4237,7 @@ export default function GroupDetailPage() {
                           {condicionSupportsFA && <SelectItem value="factura_a">Factura A</SelectItem>}
                           {!condicionSupportsFA && <SelectItem value="factura_b">Factura B</SelectItem>}
                           {condicionSupportsFA && <SelectItem value="factura_mipyme_a">Factura MiPyme A</SelectItem>}
+                          {!condicionSupportsFA && <SelectItem value="factura_mipyme_b">Factura MiPyme B</SelectItem>}
                           {allowFT && <SelectItem value="factura_t">Factura T (solo alojamiento)</SelectItem>}
                         </SelectContent>
                       </Select>
@@ -4927,6 +4868,7 @@ export default function GroupDetailPage() {
             groupPaymentReceiptType === "factura_a" ? ["FA"] :
             groupPaymentReceiptType === "factura_t" ? ["FT"] :
             groupPaymentReceiptType === "factura_mipyme_a" ? ["FM"] :
+            groupPaymentReceiptType === "factura_mipyme_b" ? ["FMB"] :
             ["FB"]
           }
           compactMode={!groupFacturaFromResumen}
@@ -4990,6 +4932,7 @@ export default function GroupDetailPage() {
           factura_a: ["FA"],
           factura_b: ["FB"],
           factura_mipyme_a: ["FM"],
+          factura_mipyme_b: ["FMB"],
           factura_t: ["FT"],
         };
 

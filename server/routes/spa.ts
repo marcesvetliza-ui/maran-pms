@@ -12,6 +12,7 @@ import {
   spaAccountItems,
   spaAppointments,
   spaTreatments,
+  spaTreatmentSales,
   spaTreatmentResources,
   spaAppointmentResources,
   spaCabins,
@@ -20,13 +21,15 @@ import {
   cashMovements,
   folios,
   auditLogs,
+  giftVouchers,
+  giftVoucherEvents,
+  type GiftVoucherStatus,
 } from "@shared/schema";
 import { requireAuth, requireRole } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
-import { emitirFactura } from "../billing/invoiceService";
-import { sendEmailWithPdfAttachment } from "../email-service";
+import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { visibleGuestCondition } from "../guest-visibility";
 
@@ -43,15 +46,25 @@ function minutesToTime(minutes: number): string {
 
 type SpaResourceBookingInput = {
   templateResourceId: string;
-  cabinId: string;
+  cabinId?: string | null;
+  resourceTreatmentId?: string | null;
   startTime: string;
 };
 
-type NormalizedSpaResourceBooking = SpaResourceBookingInput & {
+// A resource is always exactly one kind, fixed by its template row: a
+// gabinete (cabinId) or a plain treatment bundled into the circuit, like a
+// massage (resourceTreatmentId) — the other stays null. Only cabin-kind
+// resources are checked for booking conflicts (see lockAndAssertSpaAvailability);
+// a treatment resource today carries no staff-availability check.
+type NormalizedSpaResourceBooking = {
+  templateResourceId: string;
+  cabinId: string | null;
+  resourceTreatmentId: string | null;
+  startTime: string;
   endTime: string;
   durationMinutes: number;
   sortOrder: number;
-  cabinName: string;
+  label: string;
 };
 
 const ACTIVE_SPA_STATUSES = ["pending", "confirmed", "in_progress"] as const;
@@ -107,12 +120,15 @@ function isValidSpaStatus(value: unknown): value is typeof ALL_SPA_STATUSES[numb
 }
 
 function assertNoInternalSpaResourceOverlap(
-  bookings: Array<{ cabinId: string; startTime: string; endTime: string; label: string }>,
+  bookings: Array<{ cabinId: string | null; startTime: string; endTime: string; label: string }>,
 ) {
-  for (let i = 0; i < bookings.length; i++) {
-    for (let j = i + 1; j < bookings.length; j++) {
-      const current = bookings[i];
-      const other = bookings[j];
+  // A treatment resource (cabinId null) has no physical room to double-book,
+  // so there is nothing to check it against.
+  const cabinBookings = bookings.filter((booking) => booking.cabinId);
+  for (let i = 0; i < cabinBookings.length; i++) {
+    for (let j = i + 1; j < cabinBookings.length; j++) {
+      const current = cabinBookings[i];
+      const other = cabinBookings[j];
       if (
         current.cabinId === other.cabinId
         && current.startTime < other.endTime
@@ -150,11 +166,16 @@ async function normalizeSpaResourceBookings(
 
   const templateMap = new Map<string, any>(templates.map((template: any) => [template.id, template]));
   const usedTemplateIds = new Set<string>();
-  const cabinIds = [...new Set(inputs.map((input) => input?.cabinId).filter(Boolean))];
+  const cabinIds = [...new Set(inputs.map((input) => input?.cabinId).filter((id): id is string => !!id))];
   const resourceCabins = cabinIds.length > 0
     ? await tx.select().from(spaCabins).where(inArray(spaCabins.id, cabinIds))
     : [];
   const cabinMap = new Map<string, any>(resourceCabins.map((cabin: any) => [cabin.id, cabin]));
+  const resourceTreatmentIds = [...new Set(inputs.map((input) => input?.resourceTreatmentId).filter((id): id is string => !!id))];
+  const candidateTreatments = resourceTreatmentIds.length > 0
+    ? await tx.select().from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+    : [];
+  const treatmentMap = new Map<string, any>(candidateTreatments.map((treatment: any) => [treatment.id, treatment]));
 
   return inputs.map((input) => {
     const template = templateMap.get(input?.templateResourceId);
@@ -163,28 +184,44 @@ async function normalizeSpaResourceBookings(
     }
     usedTemplateIds.add(template.id);
 
-    const cabin = cabinMap.get(input.cabinId);
-    if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-      throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
+    let cabinId: string | null = null;
+    let resourceTreatmentId: string | null = null;
+    let label: string;
+    if (template.resourceTreatmentId) {
+      const treatment = input.resourceTreatmentId ? treatmentMap.get(input.resourceTreatmentId) : undefined;
+      if (!treatment || treatment.isActive !== "true" || treatment.isCircuit) {
+        throw Object.assign(new Error("El tratamiento seleccionado no está disponible para circuitos."), { statusCode: 400 });
+      }
+      resourceTreatmentId = treatment.id;
+      label = treatment.name;
+    } else {
+      const cabin = input.cabinId ? cabinMap.get(input.cabinId) : undefined;
+      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+        throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
+      }
+      cabinId = cabin.id;
+      label = cabin.name;
     }
+
     if (!isValidSpaTime(input.startTime)) {
-      throw Object.assign(new Error(`El horario seleccionado para ${cabin.name} no es válido.`), { statusCode: 400 });
+      throw Object.assign(new Error(`El horario seleccionado para ${label} no es válido.`), { statusCode: 400 });
     }
 
     const startMinutes = timeToMinutes(input.startTime);
     const endMinutes = startMinutes + Number(template.durationMinutes);
     if (endMinutes > SPA_CLOSE_MINUTES) {
-      throw Object.assign(new Error(`${cabin.name} debe finalizar antes de las 22:00.`), { statusCode: 400 });
+      throw Object.assign(new Error(`${label} debe finalizar antes de las 22:00.`), { statusCode: 400 });
     }
 
     return {
       templateResourceId: template.id,
-      cabinId: cabin.id,
+      cabinId,
+      resourceTreatmentId,
       startTime: input.startTime,
       endTime: minutesToTime(endMinutes),
       durationMinutes: Number(template.durationMinutes),
       sortOrder: Number(template.sortOrder),
-      cabinName: cabin.name,
+      label,
     };
   });
 }
@@ -192,11 +229,16 @@ async function normalizeSpaResourceBookings(
 async function lockAndAssertSpaAvailability(
   tx: any,
   appointmentDate: string,
-  bookings: Array<{ cabinId: string; startTime: string; endTime: string; label: string }>,
+  bookings: Array<{ cabinId: string | null; startTime: string; endTime: string; label: string }>,
   excludeAppointmentId?: string,
 ) {
   assertNoInternalSpaResourceOverlap(bookings);
-  const cabinIds = [...new Set(bookings.map((booking) => booking.cabinId))].sort();
+  // A treatment resource (cabinId null) is not a room booking, so it has
+  // nothing to lock or check for conflicts against.
+  const cabinBookings = bookings.filter(
+    (booking): booking is { cabinId: string; startTime: string; endTime: string; label: string } => !!booking.cabinId,
+  );
+  const cabinIds = [...new Set(cabinBookings.map((booking) => booking.cabinId))].sort();
 
   // Serialize reservations per date/cabin. The final conflict query still runs
   // inside the transaction, closing the race between availability and insert.
@@ -205,7 +247,7 @@ async function lockAndAssertSpaAvailability(
   }
 
   const excludedId = excludeAppointmentId ?? "";
-  for (const booking of bookings) {
+  for (const booking of cabinBookings) {
     const conflict = await tx.execute(sql`
       SELECT occupied.guest_name, occupied.start_time, occupied.end_time
       FROM (
@@ -239,6 +281,38 @@ async function lockAndAssertSpaAvailability(
       );
     }
   }
+}
+
+// "Voucher por prestación": un gift voucher puede nacer vinculado a una venta
+// anticipada de tratamiento (linked_treatment_sale_id) en vez de ser un monto
+// libre. Su estado lo dicta esa venta, no la acción manual de "Marcar como
+// utilizado" — agendar el turno lo reserva, completarlo lo consume. Solo
+// transiciona si el voucher sigue en el estado de origen esperado, así que
+// es un no-op seguro ante un reintento o si no hay voucher vinculado.
+async function syncLinkedGiftVoucherStatus(
+  tx: any,
+  treatmentSaleId: string,
+  toStatus: "reservado" | "utilizado",
+  reason: string,
+  performedBy: string | null,
+) {
+  const fromStatuses: GiftVoucherStatus[] = toStatus === "reservado" ? ["activo", "activo_facturado"] : ["reservado"];
+  const [voucher] = await tx.select().from(giftVouchers)
+    .where(and(
+      eq(giftVouchers.linkedTreatmentSaleId, treatmentSaleId),
+      inArray(giftVouchers.status, fromStatuses),
+    ))
+    .for("update");
+  if (!voucher) return;
+
+  await tx.update(giftVouchers)
+    .set(toStatus === "utilizado"
+      ? { status: toStatus, usedAt: new Date(), usedBy: performedBy }
+      : { status: toStatus })
+    .where(eq(giftVouchers.id, voucher.id));
+  await tx.insert(giftVoucherEvents).values({
+    voucherId: voucher.id, eventType: toStatus, fromStatus: voucher.status, toStatus, reason, performedBy,
+  });
 }
 
 export function registerSpaRoutes(app: Express) {
@@ -552,6 +626,7 @@ export function registerSpaRoutes(app: Express) {
           id: spaTreatmentResources.id,
           treatmentId: spaTreatmentResources.treatmentId,
           defaultCabinId: spaTreatmentResources.defaultCabinId,
+          resourceTreatmentId: spaTreatmentResources.resourceTreatmentId,
           durationMinutes: spaTreatmentResources.durationMinutes,
           sortOrder: spaTreatmentResources.sortOrder,
           cabinName: spaCabins.name,
@@ -561,7 +636,19 @@ export function registerSpaRoutes(app: Express) {
         .leftJoin(spaCabins, eq(spaCabins.id, spaTreatmentResources.defaultCabinId))
         .where(eq(spaTreatmentResources.treatmentId, req.params.id))
         .orderBy(spaTreatmentResources.sortOrder);
-      res.json(resources);
+
+      // Second, plain lookup rather than a Drizzle self-join alias — resources
+      // referencing a treatment are the rare case and this keeps the query simple.
+      const resourceTreatmentIds = [...new Set(resources.map((r) => r.resourceTreatmentId).filter(Boolean))] as string[];
+      const resourceTreatments = resourceTreatmentIds.length > 0
+        ? await db.select({ id: spaTreatments.id, name: spaTreatments.name }).from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+        : [];
+      const resourceTreatmentNameById = new Map(resourceTreatments.map((t) => [t.id, t.name]));
+
+      res.json(resources.map((r) => ({
+        ...r,
+        resourceTreatmentName: r.resourceTreatmentId ? resourceTreatmentNameById.get(r.resourceTreatmentId) ?? null : null,
+      })));
     } catch (error) {
       res.status(500).json({ error: "Error fetching circuit resources" });
     }
@@ -579,19 +666,44 @@ export function registerSpaRoutes(app: Express) {
         ? await db.select().from(spaCabins).where(inArray(spaCabins.id, cabinIds))
         : [];
       const cabinMap = new Map(cabins.map((cabin) => [cabin.id, cabin]));
+      // A circuit resource treatment must be a plain, active treatment — never
+      // another circuit (isCircuit already excludes this same treatment, since
+      // req.params.id is itself a circuit).
+      const resourceTreatmentIds = [...new Set(rawResources.map((row: any) => row?.resourceTreatmentId).filter(Boolean))] as string[];
+      const candidateTreatments = resourceTreatmentIds.length > 0
+        ? await db.select().from(spaTreatments).where(inArray(spaTreatments.id, resourceTreatmentIds))
+        : [];
+      const resourceTreatmentMap = new Map(candidateTreatments.map((treatment) => [treatment.id, treatment]));
 
       const normalized = rawResources.map((row: any, index: number) => {
-        const cabin = cabinMap.get(row?.defaultCabinId);
         const durationMinutes = Number(row?.durationMinutes);
-        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna o Hidromasaje)."), { statusCode: 400 });
-        }
         if (!Number.isInteger(durationMinutes) || durationMinutes < 15 || durationMinutes > 240) {
           throw Object.assign(new Error("La duración de cada recurso debe estar entre 15 y 240 minutos."), { statusCode: 400 });
+        }
+        if (row?.defaultCabinId && row?.resourceTreatmentId) {
+          throw Object.assign(new Error("Cada recurso es un gabinete o un tratamiento, no ambos."), { statusCode: 400 });
+        }
+        if (row?.resourceTreatmentId) {
+          const treatment = resourceTreatmentMap.get(row.resourceTreatmentId);
+          if (!treatment || treatment.isActive !== "true" || treatment.isCircuit) {
+            throw Object.assign(new Error("Seleccioná un tratamiento activo para este recurso."), { statusCode: 400 });
+          }
+          return {
+            treatmentId: req.params.id,
+            defaultCabinId: null,
+            resourceTreatmentId: treatment.id,
+            durationMinutes,
+            sortOrder: index,
+          };
+        }
+        const cabin = cabinMap.get(row?.defaultCabinId);
+        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna, Hidromasaje o un tratamiento)."), { statusCode: 400 });
         }
         return {
           treatmentId: req.params.id,
           defaultCabinId: cabin.id,
+          resourceTreatmentId: null,
           durationMinutes,
           sortOrder: index,
         };
@@ -737,7 +849,7 @@ export function registerSpaRoutes(app: Express) {
         const occupiedCabinIds = [...new Set([
           apt.cabinId,
           ...(apt.resourceReservations ?? []).map((resource) => resource.cabinId),
-        ])];
+        ].filter((id): id is string => !!id))];
         for (const cabinId of occupiedCabinIds) {
           const key = `${cabinId}_${apt.appointmentDate}`;
           if (!summaryMap.has(key)) {
@@ -768,6 +880,53 @@ export function registerSpaRoutes(app: Express) {
       res.json(appointment);
     } catch (error) {
       res.status(500).json({ error: "Error fetching appointment" });
+    }
+  });
+
+  // "Turnos vendidos": tratamientos ya vendidos (comprobante emitido, cobrados)
+  // que todavía no tienen — o no agotaron — sus turnos agendados.
+  app.get("/api/spa/treatment-sales", requireAuth, async (req, res) => {
+    try {
+      const onlyPending = req.query.pending === "true";
+      const rows = await db
+        .select({
+          id: spaTreatmentSales.id,
+          salesInvoiceId: spaTreatmentSales.salesInvoiceId,
+          treatmentId: spaTreatmentSales.treatmentId,
+          treatmentName: spaTreatments.name,
+          buyerName: spaTreatmentSales.buyerName,
+          quantityPurchased: spaTreatmentSales.quantityPurchased,
+          quantityScheduled: spaTreatmentSales.quantityScheduled,
+          quantityUsed: spaTreatmentSales.quantityUsed,
+          unitPriceFrozen: spaTreatmentSales.unitPriceFrozen,
+          status: spaTreatmentSales.status,
+          createdAt: spaTreatmentSales.createdAt,
+          invoiceTipoComprobante: salesInvoices.tipoComprobante,
+          invoicePuntoVenta: salesInvoices.puntoVenta,
+          invoiceNumero: salesInvoices.numero,
+          invoiceEstado: salesInvoices.estado,
+          // "Voucher por prestación": si esta venta se compró como regalo,
+          // mostrar a nombre de quién y con qué código, para que el
+          // recepcionista pueda identificarla cuando el beneficiario se
+          // presenta con el voucher (no necesariamente el mismo nombre
+          // que el comprador de la factura).
+          voucherCode: giftVouchers.voucherCode,
+          voucherBeneficiaryName: giftVouchers.beneficiaryName,
+        })
+        .from(spaTreatmentSales)
+        .leftJoin(spaTreatments, eq(spaTreatmentSales.treatmentId, spaTreatments.id))
+        .leftJoin(salesInvoices, eq(spaTreatmentSales.salesInvoiceId, salesInvoices.id))
+        .leftJoin(giftVouchers, eq(giftVouchers.linkedTreatmentSaleId, spaTreatmentSales.id))
+        .where(onlyPending
+          ? and(
+              sql`${spaTreatmentSales.quantityScheduled} < ${spaTreatmentSales.quantityPurchased}`,
+              sql`${spaTreatmentSales.status} != 'cancelado'`,
+            )
+          : undefined)
+        .orderBy(desc(spaTreatmentSales.createdAt));
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching spa treatment sales" });
     }
   });
 
@@ -805,7 +964,7 @@ export function registerSpaRoutes(app: Express) {
       if (!isValidSpaTime(startTime) || !isValidSpaTime(endTime) || startTime >= endTime) {
         return res.status(400).json({ error: "El horario del turno no es válido" });
       }
-      if (settlement !== undefined && !["room_charge", "voucher"].includes(settlement?.type)) {
+      if (settlement !== undefined && !["room_charge", "voucher", "already_sold"].includes(settlement?.type)) {
         return res.status(400).json({ error: "La modalidad de cobro no es válida" });
       }
       if (settlement?.type === "room_charge" && !settlement.reservationId) {
@@ -817,12 +976,42 @@ export function registerSpaRoutes(app: Express) {
       ) {
         return res.status(400).json({ error: "Seleccione una forma de pago válida para el voucher" });
       }
+      if (settlement?.type === "already_sold" && !settlement.soldTreatmentSaleId) {
+        return res.status(400).json({ error: "Falta la venta de origen del turno" });
+      }
 
       const voucherCashShift = settlement?.type === "voucher"
         ? await storage.getOrCreateActiveTurno("spa")
         : null;
 
       const appointment = await db.transaction(async (tx) => {
+        // "Turnos vendidos": reclama la unidad ANTES de crear nada más, atómico
+        // contra otro operador agendando la misma venta a la vez. La condición
+        // en el WHERE (no solo el valor leído antes) es lo que hace la carrera
+        // segura — dos requests concurrentes nunca reclaman la misma unidad.
+        let soldSale: { id: string; unitPriceFrozen: string } | null = null;
+        if (settlement?.type === "already_sold") {
+          const claimed = await tx.execute(sql`
+            UPDATE spa_treatment_sales
+            SET quantity_scheduled = quantity_scheduled + 1,
+                status = CASE
+                  WHEN quantity_scheduled + 1 >= quantity_purchased THEN 'programado'
+                  ELSE 'parcial'
+                END
+            WHERE id = ${settlement.soldTreatmentSaleId}
+              AND treatment_id = ${treatmentId}
+              AND quantity_scheduled < quantity_purchased
+              AND status != 'cancelado'
+            RETURNING id, unit_price_frozen AS "unitPriceFrozen"
+          `);
+          soldSale = claimed.rows[0] as any;
+          if (!soldSale) {
+            throw Object.assign(new Error(
+              "La venta ya no tiene unidades pendientes de agendar, o no corresponde a este tratamiento."
+            ), { statusCode: 409 });
+          }
+        }
+
         const [treatment] = await tx.select().from(spaTreatments).where(eq(spaTreatments.id, treatmentId));
         if (!treatment) {
           throw Object.assign(new Error("Tratamiento no encontrado"), { statusCode: 400 });
@@ -844,7 +1033,7 @@ export function registerSpaRoutes(app: Express) {
             cabinId: resource.cabinId,
             startTime: resource.startTime,
             endTime: resource.endTime,
-            label: resource.cabinName,
+            label: resource.label,
           })),
         ]);
 
@@ -864,10 +1053,22 @@ export function registerSpaRoutes(app: Express) {
           status: appointmentStatus,
           notes: notes || null,
           createdAt: new Date(),
+          soldTreatmentSaleId: soldSale?.id || null,
         }).returning();
 
+        if (soldSale) {
+          await syncLinkedGiftVoucherStatus(
+            tx, soldSale.id, "reservado",
+            `Turno agendado (${createdAppointment.id})`,
+            (req as any).user?.username || null,
+          );
+        }
+
         const fullName = guestLastName ? `${guestName} ${guestLastName}` : guestName;
-        const treatmentPrice = treatment.price || "0";
+        // La venta ya cobró al precio vigente el día que se facturó — el
+        // catálogo pudo cambiar de precio desde entonces, así que el turno
+        // se liquida al importe congelado en la venta, no al de hoy.
+        const treatmentPrice = soldSale ? soldSale.unitPriceFrozen : (treatment.price || "0");
         const [account] = await tx.insert(spaAccounts).values({
           appointmentId: createdAppointment.id,
           guestName: fullName,
@@ -915,6 +1116,7 @@ export function registerSpaRoutes(app: Express) {
           await tx.insert(spaAppointmentResources).values(normalizedResources.map((resource) => ({
             appointmentId: createdAppointment.id,
             cabinId: resource.cabinId,
+            resourceTreatmentId: resource.resourceTreatmentId,
             startTime: resource.startTime,
             endTime: resource.endTime,
             durationMinutes: resource.durationMinutes,
@@ -924,7 +1126,7 @@ export function registerSpaRoutes(app: Express) {
 
         let settlementPaymentId: string | null = null;
         let settlementCashMovementId: string | null = null;
-        if (settlement?.type === "room_charge" || settlement?.type === "voucher") {
+        if (settlement?.type === "room_charge" || settlement?.type === "voucher" || settlement?.type === "already_sold") {
           const settlementReservationId = settlement.type === "room_charge" ? String(settlement.reservationId) : null;
           if (settlementReservationId) {
             await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"reservation-finance:" + settlementReservationId}))`);
@@ -942,7 +1144,9 @@ export function registerSpaRoutes(app: Express) {
 
           const paymentMethod = settlement.type === "room_charge"
             ? "room_charge"
-            : String(settlement.paymentMethod);
+            : settlement.type === "already_sold"
+              ? "venta_previa"
+              : String(settlement.paymentMethod);
           const [payment] = await tx.insert(spaPayments).values({
             accountId: account.id,
             amount: treatmentPrice,
@@ -952,11 +1156,16 @@ export function registerSpaRoutes(app: Express) {
             reservationId: settlementReservationId,
             notes: settlement.type === "room_charge"
               ? "Transferido al folio de habitación al crear el turno"
-              : "Voucher SPA cobrado al crear el turno",
+              : settlement.type === "already_sold"
+                ? `Ya facturado y cobrado antes de agendar el turno (venta ${soldSale?.id})`
+                : "Voucher SPA cobrado al crear el turno",
             createdAt: new Date(),
           }).returning();
           settlementPaymentId = payment.id;
 
+          // "already_sold" no genera deuda nueva ni efectivo nuevo: el
+          // comprobante y el cobro ya existían antes de que este turno
+          // existiera (ver spa_treatment_sales) — solo cierra el folio SPA.
           if (settlement.type === "room_charge" && settlementReservationId) {
             await tx.insert(charges).values({
               reservationId: settlementReservationId,
@@ -987,7 +1196,11 @@ export function registerSpaRoutes(app: Express) {
             folioId: spaFolio.id,
             type: "payment",
             amount: treatmentPrice,
-            description: settlement.type === "room_charge" ? "SPA - Cargo a habitación" : "SPA - Voucher",
+            description: settlement.type === "room_charge"
+              ? "SPA - Cargo a habitación"
+              : settlement.type === "already_sold"
+                ? "SPA - Turno vendido (ya facturado)"
+                : "SPA - Voucher",
             sourceType: "spa_payment",
             sourceId: payment.id,
             paymentMethod,
@@ -1069,6 +1282,8 @@ export function registerSpaRoutes(app: Express) {
         const status = req.body.status ?? current.status;
         const enteringActiveStatus = (ACTIVE_SPA_STATUSES as readonly string[]).includes(status)
           && !(ACTIVE_SPA_STATUSES as readonly string[]).includes(current.status);
+        const enteringInProgress = status === "in_progress" && current.status !== "in_progress";
+        const enteringCompleted = status === "completed" && current.status !== "completed";
 
         if (scheduleChanged || enteringActiveStatus) {
           if (!isValidSpaDate(appointmentDate)) {
@@ -1095,6 +1310,7 @@ export function registerSpaRoutes(app: Express) {
               .select({
                 id: spaAppointmentResources.id,
                 cabinId: spaAppointmentResources.cabinId,
+                resourceTreatmentId: spaAppointmentResources.resourceTreatmentId,
                 startTime: spaAppointmentResources.startTime,
                 endTime: spaAppointmentResources.endTime,
                 durationMinutes: spaAppointmentResources.durationMinutes,
@@ -1104,14 +1320,22 @@ export function registerSpaRoutes(app: Express) {
               .from(spaAppointmentResources)
               .leftJoin(spaCabins, eq(spaCabins.id, spaAppointmentResources.cabinId))
               .where(eq(spaAppointmentResources.appointmentId, current.id));
-            normalizedResources = existingResources.map((resource) => ({
+            const existingResourceTreatmentIds = [...new Set(existingResources.map((r: any) => r.resourceTreatmentId).filter(Boolean))];
+            const existingResourceTreatments = existingResourceTreatmentIds.length > 0
+              ? await tx.select({ id: spaTreatments.id, name: spaTreatments.name }).from(spaTreatments).where(inArray(spaTreatments.id, existingResourceTreatmentIds))
+              : [];
+            const existingResourceTreatmentNameById = new Map(existingResourceTreatments.map((t: any) => [t.id, t.name]));
+            normalizedResources = existingResources.map((resource: any) => ({
               templateResourceId: resource.id,
               cabinId: resource.cabinId,
+              resourceTreatmentId: resource.resourceTreatmentId,
               startTime: resource.startTime,
               endTime: resource.endTime,
               durationMinutes: resource.durationMinutes,
               sortOrder: resource.sortOrder,
-              cabinName: resource.cabinName || "Recurso SPA",
+              label: resource.cabinName
+                || (resource.resourceTreatmentId ? existingResourceTreatmentNameById.get(resource.resourceTreatmentId) : null)
+                || "Recurso SPA",
             }));
           } else if (treatment.isCircuit) {
             normalizedResources = await normalizeSpaResourceBookings(tx, treatmentId, req.body.resourceReservations);
@@ -1124,7 +1348,7 @@ export function registerSpaRoutes(app: Express) {
                 cabinId: resource.cabinId,
                 startTime: resource.startTime,
                 endTime: resource.endTime,
-                label: resource.cabinName,
+                label: resource.label,
               })),
             ], current.id);
           }
@@ -1135,6 +1359,7 @@ export function registerSpaRoutes(app: Express) {
               await tx.insert(spaAppointmentResources).values(normalizedResources.map((resource) => ({
                 appointmentId: current.id,
                 cabinId: resource.cabinId,
+                resourceTreatmentId: resource.resourceTreatmentId,
                 startTime: resource.startTime,
                 endTime: resource.endTime,
                 durationMinutes: resource.durationMinutes,
@@ -1165,10 +1390,47 @@ export function registerSpaRoutes(app: Express) {
           .set(allowedUpdates)
           .where(eq(spaAppointments.id, current.id))
           .returning();
-        return updated;
+
+        // Cierra el círculo de "Turnos vendidos": si este turno viene de una
+        // venta anticipada, avisarle que ya se prestó. Mismo patrón atómico
+        // que el reclamo original (condición en el WHERE, no solo el valor
+        // leído antes) — evita contar dos veces ante un reintento.
+        if (enteringCompleted && current.soldTreatmentSaleId) {
+          await tx.execute(sql`
+            UPDATE spa_treatment_sales
+            SET quantity_used = quantity_used + 1,
+                status = CASE
+                  WHEN quantity_used + 1 >= quantity_purchased THEN 'utilizado'
+                  ELSE status
+                END
+            WHERE id = ${current.soldTreatmentSaleId}
+              AND quantity_used < quantity_purchased
+          `);
+          await syncLinkedGiftVoucherStatus(
+            tx, current.soldTreatmentSaleId, "utilizado",
+            `Turno completado (${current.id})`,
+            (req as any).user?.username || null,
+          );
+        }
+
+        return { ...updated, enteringInProgress };
       });
 
-      res.json(appointment);
+      // Al iniciar el turno se consume el insumo del tratamiento, sin
+      // esperar a que se cobre o se cierre la cuenta — deductStockFromSpaAccount
+      // es idempotente por cuenta, así que el cierre posterior no lo descuenta
+      // dos veces.
+      const { enteringInProgress, ...appointmentResponse } = appointment;
+      if (enteringInProgress) {
+        const account = await storage.getSpaAccountByAppointment(appointment.id);
+        if (account) {
+          storage.deductStockFromSpaAccount(account.id).catch((error: any) =>
+            console.warn("[SPA] Error deducting stock on iniciar:", error)
+          );
+        }
+      }
+
+      res.json(appointmentResponse);
     } catch (error: any) {
       res.status(error?.statusCode || 500).json({
         error: "Error updating appointment",
@@ -1374,6 +1636,17 @@ export function registerSpaRoutes(app: Express) {
       storage.deductStockFromSpaAccount(req.params.id).catch((err: any) =>
         console.warn("[SPA] Error deducting stock:", err)
       );
+
+      // Consumir cualquier voucher reservado contra esta cuenta — no debe
+      // bloquear el cierre por un problema de sincronización del voucher.
+      try {
+        const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", req.params.id);
+        for (const application of applications) {
+          await storage.consumeGiftVoucherApplication(application.id, (req as any).user?.username || "sistema");
+        }
+      } catch (e) {
+        console.error("[GiftVoucher] Error consumiendo voucher al cerrar cuenta SPA:", e);
+      }
 
       res.json(account);
     } catch (error) {
@@ -1692,10 +1965,25 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:id/payments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
     try {
-      const { amount, method, isAdvance, appointmentId, reservationId, notes } = req.body;
+      const { amount, method, isAdvance, appointmentId, reservationId, notes, voucherId } = req.body;
 
       if (!amount || !method) {
         return res.status(400).json({ error: "amount and method are required" });
+      }
+
+      // Igual que en reservas: se aplica el voucher ANTES de registrar el
+      // pago, para no dejar un pago "cubierto" por un voucher que en
+      // realidad no se pudo reservar (ya usado, vencido, etc.).
+      if (method === "gift_voucher") {
+        if (!voucherId) return res.status(400).json({ error: "voucherId es requerido para pagar con voucher de regalo" });
+        try {
+          await storage.applyGiftVoucher(
+            voucherId, "spa_account", req.params.id, parseFloat(String(amount)),
+            (req as any).user?.username || "sistema",
+          );
+        } catch (e: any) {
+          return res.status(400).json({ error: e?.message || "Error al aplicar el voucher de regalo" });
+        }
       }
 
       const payment = await storage.createSpaPayment({
@@ -1705,6 +1993,7 @@ export function registerSpaRoutes(app: Express) {
         isAdvance: isAdvance ? "true" : "false",
         appointmentId: appointmentId || null,
         reservationId: reservationId || null,
+        voucherId: method === "gift_voucher" ? voucherId : null,
         notes: notes || null,
         createdAt: new Date(),
       });
@@ -1760,6 +2049,22 @@ export function registerSpaRoutes(app: Express) {
         .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
         .where(eq(spaPayments.id, req.params.id))
         .returning();
+
+      if (pay.method === "gift_voucher" && pay.voucherId) {
+        try {
+          const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", pay.accountId);
+          const application = applications.find(a => a.voucherId === pay.voucherId);
+          if (application) {
+            await storage.releaseGiftVoucherApplication(
+              application.id, (req as any).user?.username || "sistema",
+              `Se anuló el pago: ${motivoAnulacion}`,
+            );
+          }
+        } catch (e) {
+          console.error("[GiftVoucher] Error liberando voucher al anular pago SPA:", e);
+        }
+      }
+
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1788,7 +2093,7 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:accountId/items", requireAuth, async (req, res) => {
     try {
-      const { description, quantity, unitPrice, itemType, notes } = req.body;
+      const { description, quantity, unitPrice, itemType, inventoryItemId, notes } = req.body;
 
       if (!description || !unitPrice) {
         return res.status(400).json({ error: "description and unitPrice are required" });
@@ -1804,9 +2109,19 @@ export function registerSpaRoutes(app: Express) {
         unitPrice,
         subtotal,
         itemType: itemType || "treatment",
+        inventoryItemId: inventoryItemId || null,
         notes: notes || null,
         createdAt: new Date(),
       });
+
+      // Un producto (a diferencia de un concepto como cochera) sale del
+      // depósito del SPA en el momento en que se vende, no cuando se inicia
+      // el turno o se cierra la cuenta.
+      if (inventoryItemId) {
+        storage.deductStockForSoldSpaProduct(inventoryItemId, qty, item.id).catch((err: any) =>
+          console.warn("[SPA] Error deducting stock for sold product:", err)
+        );
+      }
 
       // Motor financiero: escribir cargo al folio de la cuenta SPA
       storage.addFolioCharge(
@@ -2034,61 +2349,6 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  // ── Email: Enviar comprobante SPA por email ────────────────────────────────
-  app.post("/api/spa/accounts/:id/receipt-email", requireAuth, async (req, res) => {
-    try {
-      const { to } = req.body;
-      if (!to?.trim()) return res.status(400).json({ error: "El destinatario (to) es requerido" });
-
-      const account = await storage.getSpaAccount(req.params.id);
-      if (!account) return res.status(404).json({ error: "Cuenta no encontrada" });
-      const appointment = await storage.getSpaAppointment(account.appointmentId);
-
-      const treatment = appointment?.treatmentId
-        ? await storage.getSpaTreatment(appointment.treatmentId)
-        : null;
-
-      const pdfBuffer = await generateSpaAccountReceiptPdf({
-        accountId: account.id,
-        guestName: account.guestName,
-        appointmentDate: appointment?.appointmentDate ?? getArgentinaOperationalDate(),
-        startTime: appointment?.startTime ?? "",
-        treatmentName: treatment?.name ?? "Servicio SPA",
-        receiptType: account.receiptType,
-        closedAt: account.closedAt ? String(account.closedAt) : null,
-        items: account.items.map((i: any) => ({
-          description: i.description,
-          quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          subtotal: i.subtotal,
-        })),
-        payments: account.payments.map((p: any) => ({ method: p.method, amount: p.amount })),
-        total: account.items.reduce((s: number, i: any) => s + parseFloat(i.subtotal), 0),
-      });
-
-      const guestSlug = account.guestName.replace(/\s+/g, "_");
-      const subject = `Comprobante SPA — ${account.guestName}`;
-      const body = `Estimado/a,\n\nAdjunto encontrará el comprobante de su sesión de SPA en Maran Suites & Towers.\n\nGracias por elegirnos.\n\nMaran Suites & Towers\nSPA & Wellness — Paraná, Entre Ríos`;
-
-      const result = await sendEmailWithPdfAttachment({
-        to: to.trim(),
-        subject,
-        body,
-        attachmentFilename: `Recibo_SPA_${guestSlug}.pdf`,
-        attachmentBuffer: pdfBuffer,
-      });
-
-      if (!result.ok) {
-        return res.status(502).json({ error: result.error || "Error al enviar el email" });
-      }
-
-      res.json({ ok: true });
-    } catch (error: any) {
-      console.error("Error sending SPA receipt email:", error);
-      res.status(500).json({ error: "Error al enviar el email" });
-    }
-  });
-
   // Emit NC (Nota de Crédito) against a closed SPA account invoice
   app.post("/api/spa/accounts/:accountId/nc", requireAuth, async (req, res) => {
     try {
@@ -2133,6 +2393,7 @@ export function registerSpaRoutes(app: Express) {
         },
         items: ncItems,
         facturaOriginalId: originalInvoice.id,
+        comprobanteAsociado: buildComprobanteAsociado(originalInvoice),
         operador: (req as any).user?.fullName || (req as any).user?.username,
       });
 

@@ -45,7 +45,7 @@ function getConcepto(tipoComprobante: string): string {
   if (tipoComprobante.startsWith("NC")) return "Prov N.Credito A/M";
   if (tipoComprobante === "RESUMEN-BANCO") return "Prov. Resumen Banco";
   if (tipoComprobante === "LIQ-TARJETA") return "Prov.Liq.Tarjeta";
-  if (tipoComprobante === "FACT-A") return "Prov Fac/NDebito A/M";
+  if (tipoComprobante === "FACT-A" || tipoComprobante === "ND-A") return "Prov Fac/NDebito A/M";
   return "Prov Fac/Deb B/C/Rec";
 }
 
@@ -84,6 +84,7 @@ export async function generarAsiento(
   const retIibb = parseNum(invoice.retencionIibb);
   const retGanancias = parseNum(invoice.retencionGanancias);
   const retSuss = parseNum(invoice.retencionSuss);
+  const retMunicipal = parseNum(invoice.retencionMunicipal);
   const total = parseNum(invoice.montoTotal);
   const retentionsAreSuffered = purchaseInvoiceRetentionSide(invoice.tipoComprobante) === "debe";
 
@@ -91,7 +92,7 @@ export async function generarAsiento(
   const [
     acIva21, acIva105, acIva27,
     acPercIva, acPercIibb, acPercGanancias,
-    acRetIva, acRetIibb, acRetGanancias, acRetSuss,
+    acRetIva, acRetIibb, acRetGanancias, acRetSuss, acRetMunicipal,
     acImpInt, acLey25, acProv, acCaja,
     acCuentaContable,
   ] = await Promise.all([
@@ -105,6 +106,7 @@ export async function generarAsiento(
     getAccountId("1.1.4.01.08.01", executor),
     getAccountId("1.1.4.01.05", executor),
     getAccountId("1.1.4.01.10", executor),
+    getAccountId("1.1.4.01.11", executor),
     getAccountId("2.1.3.02.09", executor),
     getAccountId("1.1.4.01.15", executor),
     getAccountId("2.1.1.01", executor),
@@ -155,6 +157,7 @@ export async function generarAsiento(
     if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: retIibb * sign, haber: 0 });
     if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: retGanancias * sign, haber: 0 });
     if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: retSuss * sign, haber: 0 });
+    if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: retMunicipal * sign, haber: 0 });
   }
 
   // DEBE: impuestos internos y ley 25413
@@ -171,10 +174,21 @@ export async function generarAsiento(
       if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
       if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
       if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+      if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: 0, haber: retMunicipal * sign });
     }
   } else {
     // Cuenta corriente: haber = proveedores a pagar
     if (acProv) lines.push({ accountId: acProv, debe: 0, haber: total * sign });
+    // Comprobantes históricos con retenciones cargadas directamente conservan
+    // esos importes; sin estos créditos el asiento quedaría desbalanceado al
+    // registrarse la deuda neta. La pantalla nueva no ofrece esa carga.
+    if (!retentionsAreSuffered) {
+      if (retIva > 0 && acRetIva) lines.push({ accountId: acRetIva, debe: 0, haber: retIva * sign });
+      if (retIibb > 0 && acRetIibb) lines.push({ accountId: acRetIibb, debe: 0, haber: retIibb * sign });
+      if (retGanancias > 0 && acRetGanancias) lines.push({ accountId: acRetGanancias, debe: 0, haber: retGanancias * sign });
+      if (retSuss > 0 && acRetSuss) lines.push({ accountId: acRetSuss, debe: 0, haber: retSuss * sign });
+      if (retMunicipal > 0 && acRetMunicipal) lines.push({ accountId: acRetMunicipal, debe: 0, haber: retMunicipal * sign });
+    }
   }
 
   // Insert lines
@@ -192,11 +206,12 @@ export async function generarAsiento(
 // ─── Asiento de Orden de Pago ─────────────────────────────────────────────────
 
 export async function generarAsientoOP(
-  op: PaymentOrder & { supplier?: { razonSocial?: string } | null }
+  op: PaymentOrder & { supplier?: { razonSocial?: string } | null },
+  executor: AccountingExecutor = db,
 ): Promise<number> {
   const d = new Date(op.fecha);
   const periodo = `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-  const minuta = await nextMinuta(periodo);
+  const minuta = await nextMinuta(periodo, executor);
 
   const totalFact = parseNum(op.totalFacturas);
   const retIibb = parseNum(op.retencionIibb);
@@ -204,17 +219,18 @@ export async function generarAsientoOP(
   const retIva = parseNum(op.retencionIva);
   const depBancario = parseNum(op.depBancario);
   const efectivo = parseNum(op.efectivo);
+  const cheques = parseNum(op.cheques);
 
   const [acProv, acCaja, acBanco, acRetIibb, acRetGanancias, acRetIva] = await Promise.all([
-    getAccountId("2.1.1.01"),
-    getAccountId("1.1.1.01"),
-    getAccountId("1.1.1.02"),
-    getAccountId("1.1.4.01.08.01"),
-    getAccountId("1.1.4.01.05"),
-    getAccountId("1.1.4.01.04.01"),
+    getAccountId("2.1.1.01", executor),
+    getAccountId("1.1.1.01", executor),
+    getAccountId("1.1.1.02", executor),
+    getAccountId("1.1.4.01.08.01", executor),
+    getAccountId("1.1.4.01.05", executor),
+    getAccountId("1.1.4.01.04.01", executor),
   ]);
 
-  const entryRes = await db.execute(sql`
+  const entryRes = await executor.execute(sql`
     INSERT INTO accounting_entries (numero_minuta, fecha, periodo, concepto, tipo_origen, origen_id, origen_tipo)
     VALUES (${minuta}, ${op.fecha}, ${periodo}, 'Prov. Retenciones', 'orden_pago', ${op.id}, 'payment_order')
     RETURNING id
@@ -225,7 +241,7 @@ export async function generarAsientoOP(
 
   // DEBE: Proveedores a Pagar
   if (acProv && totalFact > 0) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acProv}, ${provNombre}, ${totalFact}, 0)
     `);
@@ -233,41 +249,53 @@ export async function generarAsientoOP(
 
   // HABER: Banco o Caja
   if (depBancario > 0 && acBanco) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${depBancario})
     `);
   }
   if (efectivo > 0 && acCaja) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acCaja}, ${provNombre}, 0, ${efectivo})
     `);
   }
-  // Si es transferencia y no hay depBancario ni efectivo, usar banco
-  if (depBancario === 0 && efectivo === 0 && acBanco) {
-    const totalAbonado = parseNum(op.totalAbonado);
-    await db.execute(sql`
+  if (cheques > 0 && acBanco) {
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
-      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${totalAbonado})
+      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${cheques})
+    `);
+  }
+  // Transferencia no tiene columna propia (queda implícita como lo que sobra
+  // del total abonado tras restar depBancario/efectivo/cheques) — antes esto
+  // solo se cubría cuando depBancario y efectivo daban 0 los dos, así que una
+  // combinación (ej. parte efectivo + parte transferencia) dejaba la porción
+  // de transferencia sin acreditar en ninguna cuenta y el asiento quedaba
+  // desbalanceado. Ahora el resto se acredita siempre, sea o no la única forma.
+  const totalAbonado = parseNum(op.totalAbonado);
+  const resto = Math.round((totalAbonado - depBancario - efectivo - cheques) * 100) / 100;
+  if (resto > 0.004 && acBanco) {
+    await executor.execute(sql`
+      INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
+      VALUES (${entryId}, ${acBanco}, ${provNombre}, 0, ${resto})
     `);
   }
 
   // HABER: Retenciones
   if (retIibb > 0 && acRetIibb) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetIibb}, ${provNombre}, 0, ${retIibb})
     `);
   }
   if (retGanancias > 0 && acRetGanancias) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetGanancias}, ${provNombre}, 0, ${retGanancias})
     `);
   }
   if (retIva > 0 && acRetIva) {
-    await db.execute(sql`
+    await executor.execute(sql`
       INSERT INTO accounting_entry_lines (entry_id, account_id, proveedor_nombre, debe, haber)
       VALUES (${entryId}, ${acRetIva}, ${provNombre}, 0, ${retIva})
     `);

@@ -36,12 +36,16 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { AccountMovement } from "@shared/schema";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
+import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
+import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { isOverdue } from "@/lib/account-aging";
 
 type GuestSummary = {
   id: string;
   name: string;
   balance: number;
   lastMovement: string | null;
+  daysOverdue: number | null;
 };
 
 type AccountData = {
@@ -172,9 +176,15 @@ export default function CcHuespedesPage() {
                 <p className={`font-bold text-sm ${g.balance > 0 ? "text-red-600" : "text-green-600"}`}>
                   ${g.balance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                 </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {g.balance > 0 ? "Pendiente" : "Al día"}
-                </p>
+                {isOverdue(g.daysOverdue) ? (
+                  <p className="text-[11px] font-medium text-red-600" title={`Deuda vencida desde hace ${g.daysOverdue} días`}>
+                    Vencida ({g.daysOverdue}d)
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    {g.balance > 0 ? "Pendiente" : "Al día"}
+                  </p>
+                )}
               </div>
             </div>
           ))}
@@ -246,8 +256,8 @@ export default function CcHuespedesPage() {
                     .map((m) => (
                       <TableRow key={m.id} data-testid={`row-movement-${m.id}`}>
                         <TableCell className="text-xs">{m.date}</TableCell>
-                        <TableCell className="text-xs">{m.description}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{m.reference || "—"}</TableCell>
+                        <TableCell className="text-xs">{cleanAccountMovementDescription(m.description, m.reservationCode)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">{m.reservationCode || m.reference || "—"}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {parseFloat(m.amount) > 0
@@ -262,15 +272,19 @@ export default function CcHuespedesPage() {
                             {parseFloat(m.amount) > 0 ? "Cargo" : "Pago"}
                           </p>
                           {parseFloat(m.amount) < 0 && (
-                            <a
-                              href={`/api/account-movements/${m.id}/receipt-pdf`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5"
-                              data-testid={`btn-receipt-${m.id}`}
-                            >
-                              <FileText className="h-3 w-3" /> Recibo PDF
-                            </a>
+                            <div className="flex items-center justify-end gap-1">
+                              {m.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
+                              <a
+                                href={`/api/account-movements/${m.id}/receipt-pdf`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline mt-0.5"
+                                data-testid={`btn-receipt-${m.id}`}
+                              >
+                                <FileText className="h-3 w-3" /> Recibo PDF
+                              </a>
+                              <CcVoidReceiptAction movement={m} entityLabel={viewingGuest?.name || ""} />
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>

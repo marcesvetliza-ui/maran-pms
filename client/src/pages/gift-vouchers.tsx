@@ -16,9 +16,10 @@ import {
   Clock,
   Filter,
   Printer,
-  Trash2,
+  Ban,
   Eye,
   MoreHorizontal,
+  Link as LinkIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,15 +64,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { GiftVoucher } from "@shared/schema";
+import type { GiftVoucher, GiftVoucherApplication, GiftVoucherEvent } from "@shared/schema";
 import { insertGiftVoucherSchema } from "@shared/schema";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Status = "activo" | "usado" | "vencido" | "cancelado";
+type Status = "activo" | "activo_facturado" | "reservado" | "utilizado" | "vencido" | "cancelado";
 type Area = "alojamiento" | "restaurant" | "spa" | "otro";
 type ValueType = "monetario" | "descriptivo";
 
@@ -83,10 +85,12 @@ const AREA_LABELS: Record<Area, string> = {
 };
 
 const STATUS_CONFIG: Record<Status, { label: string; color: string; icon: any }> = {
-  activo:    { label: "Activo",    color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",  icon: CheckCircle2 },
-  usado:     { label: "Usado",     color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",         icon: CheckCircle2 },
-  vencido:   { label: "Vencido",   color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Clock },
-  cancelado: { label: "Cancelado", color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",          icon: XCircle },
+  activo:            { label: "Activo",            color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",  icon: CheckCircle2 },
+  activo_facturado:  { label: "Activo Facturado",  color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400", icon: CheckCircle2 },
+  reservado:         { label: "Reservado",         color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",      icon: Clock },
+  utilizado:         { label: "Utilizado",         color: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",         icon: CheckCircle2 },
+  vencido:           { label: "Vencido",           color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400", icon: Clock },
+  cancelado:         { label: "Cancelado",         color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",          icon: XCircle },
 };
 
 const PAYMENT_METHODS = [
@@ -395,7 +399,7 @@ function MarkUsedDialog({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/gift-vouchers/${voucher!.id}/use`, { usedNotes: notes });
+      const res = await apiRequest("POST", `/api/gift-vouchers/${voucher!.id}/mark-used`, { usedNotes: notes });
       return res.json();
     },
     onSuccess: () => {
@@ -467,95 +471,134 @@ function printVoucher(v: GiftVoucher) {
     ? format(new Date(v.expiresAt + "T12:00:00"), "dd 'de' MMMM 'de' yyyy", { locale: es })
     : "Sin vencimiento";
 
+  const origin = window.location.origin;
+
   const html = `
     <!DOCTYPE html>
     <html lang="es">
     <head>
       <meta charset="UTF-8" />
       <title>Voucher ${v.voucherCode}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+          /* marca */
+          --maran-bordo:       #791127;   /* borde, nombre, cápsula, código   */
+          --maran-bordo-deep:  #4F0A19;   /* cierre del degradé               */
+          --maran-ocre:        #D26829;   /* filete superior, detalles        */
+          --maran-ocre-text:   #B8551C;   /* ocre legible sobre claro         */
+          --maran-ocre-soft:   #FBF0E8;   /* fondo cápsula de área            */
+
+          /* neutros */
+          --maran-tinta:       #241B1E;   /* texto principal, valores         */
+          --maran-gris:        #5C5153;   /* descripción, subtítulo           */
+          --maran-gris-soft:   #8C807C;   /* etiquetas, pie legal              */
+          --maran-linea:       #DED7D3;   /* divisores de la grilla           */
+          --maran-hueso:       #F7F5F3;   /* franja del código                */
+          --maran-blanco:      #FFFFFF;
+
+          /* tipografía */
+          --maran-font:        'Montserrat', system-ui, sans-serif;
+          --maran-font-mono:   'JetBrains Mono', ui-monospace, monospace;
+
+          /* bloque de valor */
+          --maran-valor-bg:    linear-gradient(135deg, #791127 0%, #4F0A19 100%);
+        }
+
         @page { size: A5 landscape; margin: 10mm; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #222; }
+        body { font-family: var(--maran-font); background: #fff; color: var(--maran-tinta); }
         .card {
-          border: 3px solid #1a1a2e;
+          border: 3px solid var(--maran-bordo);
           border-radius: 16px;
           padding: 24px 32px;
           max-width: 180mm;
           position: relative;
           overflow: hidden;
         }
+        .card::before {
+          content: "";
+          position: absolute;
+          top: 0; left: 0; right: 0;
+          height: 3px;
+          background: var(--maran-ocre);
+        }
         .watermark {
           position: absolute;
           top: 50%; left: 50%;
-          transform: translate(-50%,-50%) rotate(-20deg);
-          font-size: 96px;
-          opacity: 0.04;
-          font-weight: 900;
+          transform: translate(-50%,-50%);
+          width: 44mm;
+          height: auto;
+          opacity: 0.06;
           pointer-events: none;
-          white-space: nowrap;
         }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-        .hotel-name { font-size: 22px; font-weight: 800; color: #1a1a2e; line-height: 1.2; }
-        .hotel-sub { font-size: 11px; color: #666; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; position: relative; }
+        .hotel-logo { height: 84px; width: auto; display: block; }
         .gift-label {
-          background: #1a1a2e;
-          color: white;
+          background: var(--maran-bordo);
+          color: var(--maran-blanco);
           padding: 6px 14px;
           border-radius: 20px;
-          font-size: 13px;
+          font-size: 12px;
           font-weight: 600;
-          letter-spacing: 0.05em;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          white-space: nowrap;
         }
         .value-block {
           text-align: center;
           margin: 16px 0;
           padding: 14px;
-          background: linear-gradient(135deg, #1a1a2e 0%, #2d3561 100%);
+          background: var(--maran-valor-bg);
           border-radius: 12px;
-          color: white;
+          color: var(--maran-blanco);
+          position: relative;
         }
-        .value-num { font-size: 42px; font-weight: 900; }
-        .value-desc { font-size: 15px; opacity: 0.85; margin-top: 2px; }
+        .value-num { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+        .value-desc { font-size: 14px; font-weight: 500; opacity: 1; margin-top: 2px; }
+        .area-row { margin-bottom: 12px; position: relative; }
         .area-badge {
           display: inline-block;
-          background: #f0f4ff;
-          color: #2d3561;
+          background: var(--maran-ocre-soft);
+          color: var(--maran-ocre-text);
           padding: 3px 10px;
           border-radius: 8px;
-          font-size: 12px;
-          font-weight: 600;
-          margin-bottom: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
         }
-        .desc-text { font-size: 14px; color: #444; margin-bottom: 12px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; position: relative; }
         .info-item { font-size: 12px; }
-        .info-label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .info-value { font-weight: 600; color: #222; }
+        .info-label { color: var(--maran-gris-soft); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; }
+        .info-value { font-size: 13px; font-weight: 600; color: var(--maran-tinta); margin-top: 2px; }
         .code-block {
           margin-top: 18px;
           padding: 10px;
-          background: #f5f5f5;
+          background: var(--maran-hueso);
           border-radius: 8px;
           text-align: center;
-          font-family: monospace;
-          font-size: 18px;
-          font-weight: 800;
+          font-family: var(--maran-font-mono);
+          font-size: 17px;
+          font-weight: 700;
           letter-spacing: 0.12em;
-          color: #1a1a2e;
+          color: var(--maran-bordo);
+          position: relative;
         }
-        .footer { margin-top: 16px; font-size: 10px; color: #aaa; text-align: center; }
+        .footer { margin-top: 16px; font-size: 9.5px; font-weight: 500; color: var(--maran-gris-soft); text-align: center; position: relative; }
       </style>
     </head>
     <body>
       <div class="card">
-        <div class="watermark">REGALO</div>
+        <img class="watermark" src="${origin}/isologo-circulo.png" alt="" width="648" height="662" />
         <div class="header">
           <div>
-            <div class="hotel-name">Maran Suites &amp; Towers</div>
-            <div class="hotel-sub">Hotel Boutique · Buenos Aires</div>
+            <img class="hotel-logo" src="${origin}/logo-maran.png" alt="Maran Suites &amp; Towers" width="166" height="84" />
           </div>
-          <div class="gift-label">🎁 VOUCHER REGALO</div>
+          <div class="gift-label">Voucher regalo</div>
         </div>
 
         <div class="value-block">
@@ -566,9 +609,8 @@ function printVoucher(v: GiftVoucher) {
           ${v.valueType === "monetario" ? `<div class="value-desc">${v.description}</div>` : ""}
         </div>
 
-        <div>
+        <div class="area-row">
           <span class="area-badge">${(AREA_LABELS as any)[v.area] ?? v.area}</span>
-          <div class="desc-text"></div>
         </div>
 
         <div class="info-grid">
@@ -593,6 +635,24 @@ function printVoucher(v: GiftVoucher) {
         <div class="code-block">${v.voucherCode}</div>
         <div class="footer">Este voucher es personal e intransferible · Para canjearlo presentarlo en recepción</div>
       </div>
+      <script>
+        (function () {
+          function printWhenReady() {
+            var imgs = Array.prototype.slice.call(document.images);
+            Promise.all(imgs.map(function (img) {
+              if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+              return new Promise(function (resolve) {
+                img.addEventListener("load", resolve);
+                img.addEventListener("error", resolve);
+              });
+            })).then(function () {
+              setTimeout(function () { window.print(); }, 50);
+            });
+          }
+          if (document.readyState === "complete") printWhenReady();
+          else window.addEventListener("load", printWhenReady);
+        })();
+      </script>
     </body>
     </html>
   `;
@@ -601,7 +661,46 @@ function printVoucher(v: GiftVoucher) {
   if (!w) return;
   w.document.write(html);
   w.document.close();
-  w.onload = () => { w.print(); };
+}
+
+// ── Historial (aplicaciones + eventos de auditoría) ─────────────────────────────
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  emitido: "Emitido", facturado: "Facturado", reservado: "Reservado",
+  liberado: "Liberado", utilizado: "Utilizado", cancelado: "Cancelado",
+  reactivado: "Reactivado", vencido: "Vencido", editado: "Editado",
+};
+
+function VoucherHistory({ voucherId }: { voucherId: string }) {
+  const { data, isLoading } = useQuery<{ applications: GiftVoucherApplication[]; events: GiftVoucherEvent[] }>({
+    queryKey: ["/api/gift-vouchers", voucherId, "history"],
+    queryFn: async () => {
+      const res = await fetch(`/api/gift-vouchers/${voucherId}/history`, { credentials: "include" });
+      return res.json();
+    },
+  });
+
+  if (isLoading) return <p className="text-xs text-muted-foreground">Cargando historial...</p>;
+  const events = data?.events || [];
+  if (events.length === 0) return <p className="text-xs text-muted-foreground">Sin eventos registrados</p>;
+
+  return (
+    <div>
+      <p className="text-muted-foreground text-xs uppercase tracking-wide mb-2">Historial</p>
+      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+        {events.map((e) => (
+          <div key={e.id} className="text-xs flex items-start gap-2 border-l-2 border-muted pl-2">
+            <div className="flex-1">
+              <span className="font-medium">{EVENT_TYPE_LABELS[e.eventType] || e.eventType}</span>
+              {e.fieldChanged && <span className="text-muted-foreground"> — {e.fieldChanged}: "{e.oldValue ?? "—"}" → "{e.newValue ?? "—"}"</span>}
+              {e.reason && <span className="text-muted-foreground"> — {e.reason}</span>}
+              <div className="text-muted-foreground">{formatHotelDateTime(e.performedAt)}{e.performedBy ? ` · ${e.performedBy}` : ""}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ── Detail Dialog ──────────────────────────────────────────────────────────────
@@ -627,6 +726,13 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Área</p><p className="font-medium">{AREA_LABELS[voucher.area as Area] ?? voucher.area}</p></div>
             <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Tipo</p><p className="font-medium">{voucher.valueType === "monetario" ? "Monetario" : "Descriptivo"}</p></div>
             <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Descripción</p><p className="font-medium">{voucher.description}</p></div>
+            {voucher.linkedTreatmentSaleId && (
+              <div className="col-span-2 flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 rounded-md px-2 py-1.5">
+                <LinkIcon className="h-3.5 w-3.5 shrink-0" />
+                Vinculado a un turno vendido — su estado lo actualiza automáticamente
+                el circuito de Turnos Vendidos al agendar y completar el turno, no se marca a mano.
+              </div>
+            )}
             {voucher.valueAmount && (
               <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Valor</p><p className="font-medium text-green-600 font-mono">${fmtMoney(voucher.valueAmount)}</p></div>
             )}
@@ -645,7 +751,7 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
             {voucher.pricePaid && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Precio cobrado</p><p className="font-mono">${fmtMoney(voucher.pricePaid)}</p></div>}
             {voucher.paymentMethod && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Forma de pago</p><p className="capitalize">{voucher.paymentMethod}</p></div>}
           </div>
-          {voucher.status === "usado" && (
+          {voucher.status === "utilizado" && (
             <>
               <Separator />
               <div className="grid grid-cols-2 gap-3">
@@ -655,12 +761,24 @@ function DetailDialog({ voucher, onClose }: { voucher: GiftVoucher | null; onClo
               </div>
             </>
           )}
+          {voucher.status === "cancelado" && (
+            <>
+              <Separator />
+              <div className="grid grid-cols-2 gap-3">
+                {voucher.cancelledAt && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Cancelado el</p><p>{formatHotelDateTime(voucher.cancelledAt)}</p></div>}
+                {voucher.cancelledBy && <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Cancelado por</p><p>{voucher.cancelledBy}</p></div>}
+                {voucher.cancelReason && <div className="col-span-2"><p className="text-muted-foreground text-xs uppercase tracking-wide">Motivo</p><p>{voucher.cancelReason}</p></div>}
+              </div>
+            </>
+          )}
           {voucher.notes && (
             <>
               <Separator />
               <div><p className="text-muted-foreground text-xs uppercase tracking-wide">Notas internas</p><p>{voucher.notes}</p></div>
             </>
           )}
+          <Separator />
+          <VoucherHistory voucherId={voucher.id} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => printVoucher(voucher)} data-testid="button-print-detail">
@@ -685,6 +803,7 @@ export default function GiftVouchersPage() {
   const [selectedForUse, setSelectedForUse] = useState<GiftVoucher | null>(null);
   const [selectedForDetail, setSelectedForDetail] = useState<GiftVoucher | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GiftVoucher | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const { data: vouchers = [], isLoading } = useQuery<GiftVoucher[]>({
     queryKey: ["/api/gift-vouchers", statusFilter, areaFilter, search],
@@ -699,23 +818,30 @@ export default function GiftVouchersPage() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/gift-vouchers/${id}`);
+  const cancelMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const res = await apiRequest("POST", `/api/gift-vouchers/${id}/cancel`, { reason });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Error al cancelar el voucher");
+      }
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/gift-vouchers"] });
-      toast({ title: "Voucher eliminado" });
+      toast({ title: "Voucher cancelado" });
       setDeleteTarget(null);
+      setCancelReason("");
     },
-    onError: () => toast({ title: "Error al eliminar", variant: "destructive" }),
+    onError: (err: any) => toast({ title: err?.message || "Error al cancelar el voucher", variant: "destructive" }),
   });
 
   // Stats
-  const totalActivos = vouchers.filter((v) => v.status === "activo").length;
-  const totalUsados  = vouchers.filter((v) => v.status === "usado").length;
-  const totalValor   = vouchers
-    .filter((v) => v.status === "activo" && v.valueAmount)
+  const totalActivos    = vouchers.filter((v) => ["activo", "activo_facturado"].includes(v.status)).length;
+  const totalReservados = vouchers.filter((v) => v.status === "reservado").length;
+  const totalUtilizados = vouchers.filter((v) => v.status === "utilizado").length;
+  const totalValor      = vouchers
+    .filter((v) => ["activo", "activo_facturado", "reservado"].includes(v.status) && v.valueAmount)
     .reduce((acc, v) => acc + Number(v.valueAmount), 0);
 
   return (
@@ -738,7 +864,7 @@ export default function GiftVouchersPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Activos</p>
@@ -747,8 +873,14 @@ export default function GiftVouchersPage() {
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Canjeados</p>
-            <p className="text-2xl font-bold text-gray-500">{totalUsados}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Reservados</p>
+            <p className="text-2xl font-bold text-blue-600">{totalReservados}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Utilizados</p>
+            <p className="text-2xl font-bold text-gray-500">{totalUtilizados}</p>
           </CardContent>
         </Card>
         <Card>
@@ -779,7 +911,9 @@ export default function GiftVouchersPage() {
           <SelectContent>
             <SelectItem value="all">Todos los estados</SelectItem>
             <SelectItem value="activo">Activo</SelectItem>
-            <SelectItem value="usado">Usado</SelectItem>
+            <SelectItem value="activo_facturado">Activo Facturado</SelectItem>
+            <SelectItem value="reservado">Reservado</SelectItem>
+            <SelectItem value="utilizado">Utilizado</SelectItem>
             <SelectItem value="vencido">Vencido</SelectItem>
             <SelectItem value="cancelado">Cancelado</SelectItem>
           </SelectContent>
@@ -874,17 +1008,19 @@ export default function GiftVouchersPage() {
                             <DropdownMenuItem onClick={() => printVoucher(v)}>
                               <Printer className="h-4 w-4 mr-2" /> Imprimir voucher
                             </DropdownMenuItem>
-                            {v.status === "activo" && (
+                            {["activo", "activo_facturado"].includes(v.status) && !v.linkedTreatmentSaleId && (
                               <DropdownMenuItem onClick={() => setSelectedForUse(v)}>
                                 <CheckCircle2 className="h-4 w-4 mr-2 text-green-600" /> Marcar como usado
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => setDeleteTarget(v)}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" /> Eliminar
-                            </DropdownMenuItem>
+                            {!["utilizado", "cancelado"].includes(v.status) && (
+                              <DropdownMenuItem
+                                className="text-red-600"
+                                onClick={() => setDeleteTarget(v)}
+                              >
+                                <Ban className="h-4 w-4 mr-2" /> Cancelar voucher
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>
@@ -905,22 +1041,35 @@ export default function GiftVouchersPage() {
       <MarkUsedDialog voucher={selectedForUse} onClose={() => setSelectedForUse(null)} />
       <DetailDialog voucher={selectedForDetail} onClose={() => setSelectedForDetail(null)} />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) { setDeleteTarget(null); setCancelReason(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar voucher?</AlertDialogTitle>
+            <AlertDialogTitle>¿Cancelar voucher?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminará el voucher <strong>{deleteTarget?.voucherCode}</strong> permanentemente. Esta acción no se puede deshacer.
+              El voucher <strong>{deleteTarget?.voucherCode}</strong> queda cancelado, no se borra — sigue visible con su historial completo.
+              {" "}Se puede reactivar más adelante si hace falta.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="py-2">
+            <Label htmlFor="cancel-reason" className="text-sm">Motivo de la cancelación *</Label>
+            <Textarea
+              id="cancel-reason"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ej: el cliente pidió reembolso, error de carga..."
+              rows={2}
+              data-testid="input-cancel-reason"
+            />
+          </div>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel data-testid="button-cancel-delete">Volver</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700"
-              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={!cancelReason.trim() || cancelMutation.isPending}
+              onClick={() => deleteTarget && cancelMutation.mutate({ id: deleteTarget.id, reason: cancelReason.trim() })}
               data-testid="button-confirm-delete"
             >
-              Eliminar
+              Cancelar voucher
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

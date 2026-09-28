@@ -97,7 +97,15 @@ vi.mock("../auth", () => ({
 
 // Billing service — emitirFactura returns a fake NC invoice.
 const mockEmitirFactura = vi.fn().mockResolvedValue({ id: 99, tipo: "NCA" });
-vi.mock("../billing/invoiceService", () => ({ emitirFactura: mockEmitirFactura }));
+vi.mock("../billing/invoiceService", () => ({
+  emitirFactura: mockEmitirFactura,
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
+}));
 
 // PDF generators — not exercised by these routes.
 vi.mock("../eventPdfs", () => ({

@@ -66,7 +66,15 @@ vi.mock("../billing/billingConfig", () => ({
 }));
 
 // invoiceService — not used by the PDF route but imported by routes.ts.
-vi.mock("../billing/invoiceService", () => ({ emitirFactura: vi.fn() }));
+vi.mock("../billing/invoiceService", () => ({
+  emitirFactura: vi.fn(),
+  buildComprobanteAsociado: (doc: any) => ({
+    tipo: String(doc?.tipo_comprobante ?? doc?.tipoComprobante ?? ""),
+    puntoVenta: Number(doc?.punto_venta ?? doc?.puntoVenta ?? 0),
+    numero: Number(doc?.numero ?? 0),
+    fecha: String(doc?.fecha_emision ?? doc?.fechaEmision ?? "").replace(/-/g, ""),
+  }),
+}));
 
 // storage — getReservation / getCharges / getPayments are only used by the
 // voucher-habitacion branch (tipo === "cierre_habitacion"), which none of our

@@ -18,7 +18,7 @@ import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 import { loadReservationOperationalBalances } from "../reservation-operational-balances";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
-const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
+const RATES_WRITE_ROLES = ["admin", "manager", "jefe_recepcion"] as [string, ...string[]];
 const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE = 250;
 const ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES = 256 * 1024 * 1024;
@@ -497,8 +497,9 @@ export function registerRoomsRoutes(app: Express) {
         return res.status(404).json({ error: "Rate plan not found" });
       }
       res.json(ratePlan);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching rate plan" });
+    } catch (error: any) {
+      console.error("Error fetching rate plan", req.params.id, error);
+      res.status(500).json({ error: error?.message || "Error fetching rate plan" });
     }
   });
 
@@ -507,8 +508,9 @@ export function registerRoomsRoutes(app: Express) {
       const ratePlan = await storage.createRatePlan(req.body);
       await audit(req, "create", "rate-plans", `Nueva tarifa creada: ${req.body.name}`, { entityType: "rate_plan", entityId: ratePlan.id });
       res.status(201).json(ratePlan);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating rate plan" });
+    } catch (error: any) {
+      console.error("Error creating rate plan", req.body, error);
+      res.status(500).json({ error: error?.message || "Error creating rate plan" });
     }
   });
 
@@ -524,8 +526,9 @@ export function registerRoomsRoutes(app: Express) {
         { entityType: "rate_plan", entityId: req.params.id }
       );
       res.json(ratePlan);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating rate plan" });
+    } catch (error: any) {
+      console.error("Error updating rate plan", req.params.id, req.body, error);
+      res.status(500).json({ error: error?.message || "Error updating rate plan" });
     }
   });
 
@@ -536,8 +539,9 @@ export function registerRoomsRoutes(app: Express) {
         return res.status(404).json({ error: "Rate plan not found" });
       }
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting rate plan" });
+    } catch (error: any) {
+      console.error("Error deleting rate plan", req.params.id, error);
+      res.status(500).json({ error: error?.message || "Error deleting rate plan" });
     }
   });
 
