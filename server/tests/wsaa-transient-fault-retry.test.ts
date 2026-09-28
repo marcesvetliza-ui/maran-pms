@@ -9,7 +9,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalFetch = global.fetch;
 
@@ -51,6 +51,18 @@ afterEach(() => {
 });
 
 describe("getTokenAuth — reintento ante fault transitorio de WSAA", () => {
+  beforeEach(async () => {
+    // vi.resetModules() en el afterEach anterior limpia el registro de
+    // módulos (necesario para que wsaaClient no arrastre estado entre
+    // tests), así que app-env también se reimporta en limpio acá: un
+    // import estático arriba del archivo quedaría atado a la instancia
+    // original y no a la que ve el wsaaClient reimportado dinámicamente
+    // más abajo.
+    const { initAppEnv, resetAppEnvForTests } = await import("../app-env");
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+  });
+
   it("reintenta una vez con TRA nuevo ante 'algoritmo no soportado' y devuelve el token del segundo intento", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(fakeResponse({ ok: false, status: 500, body: FAULT_XML("ns1:cms.sign.invalid", "Firma inválida, algoritmo no soportado") }))

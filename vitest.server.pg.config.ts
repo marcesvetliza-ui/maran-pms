@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    setupFiles: ["./server/tests/setup.ts"],
     include: ["server/tests/**/*.pg.test.ts"],
     exclude: ["node_modules/**", ".cache/**", "dist/**"],
   },

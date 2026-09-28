@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 const originalFetch = global.fetch;
 
@@ -177,12 +178,23 @@ function expectRecoveredInvoice(body: any, invoiceId: number) {
 }
 
 runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito ARCA", () => {
+  // Este archivo mockea wsaaClient/wsfevClient por completo pero ejercita el
+  // camino real de invoiceService.ts (incluida su llamada directa a AFIP en
+  // getNextInvoiceNumberFromAfip con arcaAmbiente="homologacion"). El
+  // default global de test es APP_ENV=test (fail-closed), así que acá se
+  // simula production explícitamente — ver server/tests/setup.ts.
   beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     currentTestRole = "admin";
     mocks.getTokenAuth.mockReset();
     mocks.feCAESolicitar.mockReset();
     mocks.feCompConsultar.mockReset();
     mocks.getTokenAuth.mockResolvedValue({ token: "test-token", sign: "test-sign" });
+  });
+
+  afterEach(() => {
+    resetAppEnvForTests();
   });
 
   it("conserva el borrador fallido y lo encuentra en el reintento", async () => {
@@ -329,7 +341,18 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     if (pool) await startRecoveryRoutes();
   });
 
-  beforeEach(() => configureRecoveredArca());
+  // Mismo motivo que el describe anterior: getNextInvoiceNumberFromAfip no
+  // está mockeado y arcaAmbiente="homologacion" lo alcanza, así que se
+  // simula production explícitamente (default global: APP_ENV=test).
+  beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+    configureRecoveredArca();
+  });
+
+  afterEach(() => {
+    resetAppEnvForTests();
+  });
 
   it("serializa dos reanudaciones individuales y vincula una sola vez", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");

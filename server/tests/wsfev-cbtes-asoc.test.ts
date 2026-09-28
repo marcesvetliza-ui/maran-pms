@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { feCAESolicitar } from "../billing/wsfevClient";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 /**
  * Guards RG 4540/19 (in force since 2021-04-01): ARCA rejects every Nota de
@@ -12,9 +13,15 @@ import { feCAESolicitar } from "../billing/wsfevClient";
 
 const originalFetch = global.fetch;
 
+beforeEach(() => {
+  resetAppEnvForTests();
+  initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+});
+
 afterEach(() => {
   global.fetch = originalFetch;
   vi.restoreAllMocks();
+  resetAppEnvForTests();
 });
 
 function mockArcaSuccess() {

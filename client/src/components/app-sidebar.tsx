@@ -83,21 +83,26 @@ import type { SystemNotification } from "@shared/schema";
 //   events, reception, resp_deposito, resp_administracion, responsable_area,
 //   jefe_recepcion, comercial
 
-const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+// piloto_externo: agregado a pedido explícito del dueño del producto —
+// PMS-Recepción completo, Comercial (salvo Paquetes y Presupuestos) y
+// Servicios. Cada módulo agregado tiene su contraparte ya permitida en
+// server/pilot-external-role.ts (ALLOW_RULES), con los borrados físicos y
+// cierres/anulaciones de cada uno bloqueados explícitamente ahí.
+const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial","piloto_externo"];
+const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const CORE_RECEPCION    = ["admin","reception","responsable_area","jefe_recepcion","comercial"];
-const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","responsable_area","jefe_recepcion","comercial"];
-const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
+const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","responsable_area","jefe_recepcion","comercial","piloto_externo"];
+const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const REPORTES_RECEPCION_ROLES = [...HABITACIONES_ROLES, "spa"];
-const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const HUESPEDES_ROLES   = ["admin","events","reception","responsable_area","jefe_recepcion","comercial"];
+const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","responsable_area","jefe_recepcion","comercial","piloto_externo"];
+const HUESPEDES_ROLES   = ["admin","events","reception","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const PAQUETES_ROLES    = ["admin","spa","reception","responsable_area","jefe_recepcion","comercial"];
 const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","responsable_area","jefe_recepcion","comercial"];
+const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const RECETAS_ROLES     = ["admin","manager","ama_de_llaves","events","resp_deposito","responsable_area"];
-const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","responsable_area","jefe_recepcion","comercial"];
-const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa","responsable_area"];
-const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","responsable_area","jefe_recepcion","comercial","piloto_externo"];
+const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa","responsable_area","piloto_externo"];
+const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const HK_MODULE_ROLES   = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
 const MANT_MODULE_ROLES = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
 const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposito","resp_administracion","responsable_area"];
@@ -105,7 +110,7 @@ const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping
 const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","responsable_area","jefe_recepcion","comercial"];
 const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","responsable_area","jefe_recepcion"];
 const CC_ROLES          = ["admin","manager","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial","piloto_externo"];
 const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","responsable_area","jefe_recepcion","comercial"];
 const EMITIR_COMPROBANTE_ROLES = ["admin","manager","reception","restaurant","spa","events","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
 
@@ -120,8 +125,13 @@ const menuSections = [
     items: [
       { label: "Dashboard",      icon: LayoutDashboard, href: "/",                roles: DASHBOARD_ROLES },
       { label: "Planning",       icon: CalendarDays,    href: "/planning",        roles: PLANNING_ROLES },
-      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: CORE_RECEPCION },
-      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: CORE_RECEPCION },
+      // Reservas, Reserva rápida y (más abajo, en Comercial) Motor de
+      // Reservas/Canales OTAs/Grupos/Empresas/Agencias: piloto_externo se
+      // agrega inline en cada ítem, sin tocar CORE_RECEPCION — esa constante
+      // también la usa MARA Chatbot (módulo "Experiencia al Huésped"), que
+      // queda afuera a propósito (no fue parte de este pedido).
+      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: [...CORE_RECEPCION, "piloto_externo"] },
+      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: [...CORE_RECEPCION, "piloto_externo"] },
       { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
       { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
       { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
@@ -145,12 +155,12 @@ const menuSections = [
   {
     titulo: "Comercial",
     items: [
-      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: CORE_RECEPCION },
-      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: CORE_RECEPCION },
+      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: [...CORE_RECEPCION, "piloto_externo"] },
+      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: [...CORE_RECEPCION, "piloto_externo"] },
       { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              roles: CORE_RECEPCION },
-      { label: "Grupos",            icon: Users,             href: "/groups",               roles: CORE_RECEPCION },
-      { label: "Empresas",          icon: Building2,         href: "/companies",            roles: CORE_RECEPCION },
-      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: CORE_RECEPCION },
+      { label: "Grupos",            icon: Users,             href: "/groups",               roles: [...CORE_RECEPCION, "piloto_externo"] },
+      { label: "Empresas",          icon: Building2,         href: "/companies",            roles: [...CORE_RECEPCION, "piloto_externo"] },
+      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: [...CORE_RECEPCION, "piloto_externo"] },
       { label: "Paquetes",          icon: Package,           href: "/packages",             roles: PAQUETES_ROLES },
       { label: "Presupuestos",      icon: ClipboardList,     href: "/presupuestos",         roles: PRESUPUESTOS_ROLES },
     ],

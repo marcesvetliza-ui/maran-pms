@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 /**
  * Guards the fix for: crediting (Nota de Crédito) a reservation invoice that
@@ -78,13 +79,39 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     if (pool) await startBillingRoutes();
   });
 
+  // Este archivo mockea wsaaClient/wsfevClient pero ejercita el camino real
+  // de invoiceService.ts (incluida su llamada directa a AFIP en
+  // getNextInvoiceNumberFromAfip con arcaAmbiente="homologacion"), que no
+  // está mockeada. El default global de test es APP_ENV=test (fail-closed
+  // — ver server/tests/setup.ts), así que acá se simula production
+  // explícitamente y se mockea fetch, igual que en
+  // server/tests/invoice-recovery-draft.pg.test.ts.
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+    // Solo se intercepta la llamada real a AFIP (getNextInvoiceNumberFromAfip,
+    // sin mockear) — las llamadas de postNotaCredito al servidor local
+    // (baseUrl) siguen usando el fetch real.
+    global.fetch = vi.fn(async (url: any, init?: any) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      if (urlStr.includes("afip.gov.ar")) {
+        return new Response("<soap:Envelope><CbteNro>6</CbteNro></soap:Envelope>", { status: 200 });
+      }
+      return originalFetch(url, init);
+    }) as any;
     mocks.getTokenAuth.mockReset();
     mocks.feCAESolicitar.mockReset();
     mocks.feCompConsultar.mockReset();
     mocks.getTokenAuth.mockResolvedValue({ token: "test-token", sign: "test-sign" });
     mocks.feCompConsultar.mockResolvedValue({ cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") });
     mocks.feCAESolicitar.mockResolvedValue({ cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") });
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    resetAppEnvForTests();
   });
 
   it("acredita el saldo de cuenta corriente exactamente en el monto de la NC, y una segunda NC nunca lo pasa de cero", async () => {
