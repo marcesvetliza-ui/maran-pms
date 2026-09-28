@@ -236,12 +236,21 @@ export default function BillingPage() {
   const [filtroHasta, setFiltroHasta] = useState(today());
   const [filtroTipo, setFiltroTipo] = useState("");
   const [filtroArea, setFiltroArea] = useState("");
+  const [filtroCliente, setFiltroCliente] = useState("");
+
+  // Debounced: espera a que dejen de escribir para no pegarle a la API en cada tecla.
+  const [debouncedFiltroCliente, setDebouncedFiltroCliente] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedFiltroCliente(filtroCliente), 300);
+    return () => clearTimeout(id);
+  }, [filtroCliente]);
 
   const qp = new URLSearchParams({
     desde: filtroDesde,
     hasta: filtroHasta,
     ...(filtroTipo ? { tipo: filtroTipo } : {}),
     ...(filtroArea ? { area: filtroArea } : {}),
+    ...(debouncedFiltroCliente.trim() ? { cliente: debouncedFiltroCliente.trim() } : {}),
   }).toString();
 
   const { data: invoices = [], isLoading, refetch } = useQuery<any[]>({
@@ -372,6 +381,13 @@ export default function BillingPage() {
                   <SelectItem value="eventos">Eventos</SelectItem>
                 </SelectContent>
               </Select>
+              <Input
+                placeholder="Buscar por huésped o empresa..."
+                value={filtroCliente}
+                onChange={e => setFiltroCliente(e.target.value)}
+                className="w-56 text-sm h-8"
+                data-testid="input-filtro-cliente"
+              />
               <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8">
                 <RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualizar
               </Button>
