@@ -137,6 +137,7 @@ const menuSections = [
       },
       { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      roles: TARIFAS_ROLES },
       { label: "Huéspedes",      icon: User,            href: "/guests",          roles: HUESPEDES_ROLES },
+      { label: "Facturación",    icon: Receipt,         href: "/billing",         roles: CORE_RECEPCION },
     ],
   },
 
