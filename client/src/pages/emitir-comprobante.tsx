@@ -477,11 +477,14 @@ export function NotaCreditoDebitoSearch({ area, tipo, onClose }: { area: AreaId;
 
   const { data: invoices = [] } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", { area, cliente: search }],
-    queryFn: () =>
-      fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${search ? `&cliente=${encodeURIComponent(search)}` : ""}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${search ? `&cliente=${encodeURIComponent(search)}` : ""}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
   });
 
-  const candidatos = (invoices || [])
+  const candidatos = (Array.isArray(invoices) ? invoices : [])
     .filter((i: any) => i.estado !== "anulada" && i.tipo_comprobante === tipoFacturaEsperado)
     .map((i: any) => ({
       ...i,
