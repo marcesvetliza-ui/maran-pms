@@ -6,6 +6,7 @@ import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1880,9 +1881,8 @@ export default function AdministrationPage() {
                       )}
                     </FormLabel>
                     <FormControl>
-                      <Input
+                      <PasswordInput
                         {...field}
-                        type="password"
                         placeholder={editingUser ? "••••••••" : "Mínimo 6 caracteres"}
                         data-testid="input-user-password"
                       />
