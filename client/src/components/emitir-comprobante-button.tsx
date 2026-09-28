@@ -30,12 +30,15 @@ export function EmitirComprobanteButton({ area, variant = "outline", size = "sm"
   const { data: config } = useQuery<any>({ queryKey: ["/api/billing/config"] });
   const { data: invoices = [] } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", { area, cliente: ncSearch }],
-    queryFn: () =>
-      fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${ncSearch ? `&cliente=${encodeURIComponent(ncSearch)}` : ""}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: async () => {
+      const res = await fetch(`/api/billing/invoices?area=${encodeURIComponent(area)}${ncSearch ? `&cliente=${encodeURIComponent(ncSearch)}` : ""}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
     enabled: open,
   });
 
-  const invoicesActivas = (invoices || []).filter((i: any) => i.estado !== "anulada" && ["FA", "FB", "FT", "FM", "FMB"].includes(i.tipo_comprobante));
+  const invoicesActivas = (Array.isArray(invoices) ? invoices : []).filter((i: any) => i.estado !== "anulada" && ["FA", "FB", "FT", "FM", "FMB"].includes(i.tipo_comprobante));
 
   return (
     <>
