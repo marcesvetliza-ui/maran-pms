@@ -1,12 +1,50 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import { channexConnections, type FolioEntityType } from "@shared/schema";
 import { encryptChannexApiKey } from "./channex/credentials";
 
 const FOLIO_ENTITY_TYPES: readonly FolioEntityType[] =
   ["reservation", "restaurant_order", "spa_account", "group", "event", "company", "agency"];
+
+const FOLIO_CODE_PREFIXES: Record<FolioEntityType, string> = {
+  reservation: "RS",
+  restaurant_order: "OR",
+  spa_account: "SP",
+  group: "GR",
+  event: "EV",
+  company: "CO",
+  agency: "AG",
+};
+
+/**
+ * Seed each atomic folio counter from codes that could actually have been
+ * generated for that entity type. Legacy codes can contain dates or UUIDs;
+ * stripping every non-digit concatenates those numbers and can overflow an
+ * integer, aborting the whole migration before later sequences are created.
+ */
+export async function ensureFolioCodigoSequences(
+  execute: (query: SQL) => Promise<unknown> = async (query) => db.execute(query),
+): Promise<void> {
+  for (const entityType of FOLIO_ENTITY_TYPES) {
+    const seqName = `folio_seq_${entityType}`;
+    const validCodePattern = `^${FOLIO_CODE_PREFIXES[entityType]}-([0-9]{1,18})$`;
+    await execute(sql.raw(createSequenceWithoutRerunNotice(seqName)));
+    await execute(sql`
+      SELECT setval(
+        ${seqName},
+        GREATEST(
+          COALESCE((SELECT last_value FROM pg_sequences
+                    WHERE schemaname = current_schema() AND sequencename = ${seqName}), 0) + 1,
+          (SELECT COALESCE(MAX(SUBSTRING(codigo FROM ${validCodePattern})::bigint), 0)
+           FROM folios WHERE entity_type = ${entityType}) + 1
+        ),
+        false
+      )
+    `);
+  }
+}
 
 /**
  * Serializes catalog-check + DDL batches across concurrently starting app
@@ -4253,23 +4291,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // entity type makes the number atomic; the setval below is safe to rerun
   // every boot since GREATEST only ever advances it, seeded past both the
   // sequence's own progress and any legacy count-based codigo already on disk.
-  await withTimeout("folios.codigo_sequences", T, async () => {
-    for (const entityType of FOLIO_ENTITY_TYPES) {
-      const seqName = `folio_seq_${entityType}`;
-      await db.execute(sql.raw(createSequenceWithoutRerunNotice(seqName)));
-      await db.execute(sql`
-        SELECT setval(
-          ${seqName},
-          GREATEST(
-            COALESCE((SELECT last_value FROM pg_sequences WHERE sequencename = ${seqName}), 0) + 1,
-            (SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo, '\\D', '', 'g'), '')::integer), 0)
-             FROM folios WHERE entity_type = ${entityType}) + 1
-          ),
-          false
-        )
-      `);
-    }
-  });
+  await withTimeout("folios.codigo_sequences", T, () => ensureFolioCodigoSequences());
 
   // ── Plan de cuentas: cuentas de ingreso por área ──────────────────────────
   // accounting_accounts ya se usaba del lado de costos (cuenta_contable_id en
