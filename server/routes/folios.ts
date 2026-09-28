@@ -491,9 +491,19 @@ export function registerFolioRoutes(app: Express) {
   app.get("/api/folios/:entityType/:entityId/pdf", requireAuth, async (req, res) => {
     try {
       const { entityType, entityId } = req.params;
-      const folio = await storage.getFolioWithMovementsByEntity(
+      let folio = await storage.getFolioWithMovementsByEntity(
         entityType as FolioEntityType, entityId,
       );
+      // El folio recién se crea con el primer cargo o pago (getOrCreateFolio).
+      // Una reserva/evento/grupo sin ningún movimiento todavía no tiene fila
+      // en `folios`, así que "Imprimir Folio" daba 404 ("Folio no encontrado")
+      // aunque no hubiera nada mal — se crea vacío acá para poder imprimirlo.
+      if (!folio && ["reservation", "group", "event"].includes(entityType)) {
+        await storage.getOrCreateFolio(entityType as FolioEntityType, entityId);
+        folio = await storage.getFolioWithMovementsByEntity(
+          entityType as FolioEntityType, entityId,
+        );
+      }
       if (!folio) return res.status(404).json({ error: "Folio no encontrado" });
 
       // Try to build a readable entity label
