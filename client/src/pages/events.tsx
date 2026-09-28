@@ -1162,12 +1162,12 @@ export default function EventsPage() {
         <CardContent>
           <ScrollArea className="w-full">
             <div className="min-w-[900px]">
-              <Table>
+              <Table className="border-collapse border border-border">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[150px] sticky left-0 bg-background z-10">Salon</TableHead>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="w-[150px] sticky left-0 bg-muted z-10 border-r border-b border-border">Salon</TableHead>
                     {weekDays.map((day) => (
-                      <TableHead key={day.toISOString()} className="text-center min-w-[120px]">
+                      <TableHead key={day.toISOString()} className="text-center min-w-[120px] border-r border-b border-border">
                         <div className="flex flex-col">
                           <span className="text-xs text-muted-foreground">
                             {format(day, "EEE", { locale: es })}
@@ -1183,7 +1183,7 @@ export default function EventsPage() {
                 <TableBody>
                   {eventRooms.filter(r => r.isActive).map((room) => (
                     <TableRow key={room.id}>
-                      <TableCell className="font-medium sticky left-0 bg-background z-10">
+                      <TableCell className="font-medium sticky left-0 bg-background z-10 border-r border-b border-border">
                         <div className="flex flex-col">
                           <span>{room.name}</span>
                           <span className="text-xs text-muted-foreground">
@@ -1197,7 +1197,7 @@ export default function EventsPage() {
                         return (
                           <TableCell
                             key={day.toISOString()}
-                            className={`p-1 align-top min-h-[80px] ${isDayPast ? "" : "cursor-pointer hover-elevate"}`}
+                            className={`p-1 align-top min-h-[80px] border-r border-b border-border ${isDayPast ? "" : "cursor-pointer hover-elevate"}`}
                             onClick={() => !isDayPast && cellEvents.length === 0 && handleCellClick(room.id, day)}
                             data-testid={`cell-${room.id}-${format(day, "yyyy-MM-dd")}`}
                           >
