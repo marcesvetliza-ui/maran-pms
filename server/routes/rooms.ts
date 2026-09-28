@@ -18,7 +18,7 @@ import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 import { loadReservationOperationalBalances } from "../reservation-operational-balances";
 
 const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
-const RATES_WRITE_ROLES = ["admin", "manager"] as [string, ...string[]];
+const RATES_WRITE_ROLES = ["admin", "manager", "jefe_recepcion"] as [string, ...string[]];
 const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
 const ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE = 250;
 const ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES = 256 * 1024 * 1024;
