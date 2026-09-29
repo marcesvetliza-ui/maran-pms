@@ -4374,7 +4374,14 @@ function ReservationDetailDialog({
                         billingEntityType={target?.type}
                         billingEntityId={target?.id}
                         recipientProfile={associatedRecipient
-                          ? { type: associatedRecipient.type, id: associatedRecipient.id }
+                          ? {
+                              type: associatedRecipient.type,
+                              id: associatedRecipient.id,
+                              // El bloque de Apellido/Nombre del diálogo solo se completa con
+                              // estos dos campos — sin ellos queda en blanco aunque razonSocial
+                              // ya tenga el nombre del huésped.
+                              ...(associatedRecipient.type === "guest" ? { firstName: g?.firstName, lastName: g?.lastName } : {}),
+                            }
                           : g?.id
                             ? { type: "guest", id: g.id, firstName: g.firstName, lastName: g.lastName }
                             : undefined}
