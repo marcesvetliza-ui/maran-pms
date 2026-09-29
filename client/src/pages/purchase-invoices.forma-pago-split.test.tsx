@@ -145,6 +145,21 @@ describe("InvoiceDialog — pago parcial al cargar el comprobante", () => {
     ]);
   });
 
+  it("se pide al final del formulario, no cerca del encabezado (feedback del programador de Compras)", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await fillMinimo(user);
+
+    const tipoComprobante = screen.getByTestId("select-tipo-comprobante");
+    const observaciones = screen.getByTestId("input-observaciones");
+    const formaPago = screen.getByTestId("select-forma-pago-inmediata");
+
+    // DOCUMENT_POSITION_FOLLOWING: el elemento de la derecha aparece después
+    // del de la izquierda en el documento.
+    expect(tipoComprobante.compareDocumentPosition(formaPago) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(observaciones.compareDocumentPosition(formaPago) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("bloquea el envío si el monto a pagar ahora supera el total", async () => {
     const capture: { body: any } = { body: undefined };
     vi.stubGlobal("fetch", buildFetchMock(capture));
@@ -161,5 +176,43 @@ describe("InvoiceDialog — pago parcial al cargar el comprobante", () => {
 
     await user.click(screen.getByTestId("btn-submit-invoice"));
     expect(capture.body).toBeUndefined();
+  });
+});
+
+describe("InvoiceDialog — asistente clásico (pasos): forma de pago en el último paso", () => {
+  beforeEach(() => {
+    queryClient.clear();
+    vi.stubGlobal("fetch", buildFetchMock());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderWizard() {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <InvoiceDialog open onClose={vi.fn()} suppliers={SUPPLIERS as any} accounts={ACCOUNTS as any} embedded />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("no aparece en el paso 0 (Encabezado) — se pide junto a los artículos, en Inventario", async () => {
+    renderWizard();
+    expect(screen.getByTestId("select-tipo-comprobante")).toBeInTheDocument();
+    expect(screen.queryByTestId("select-forma-pago-inmediata")).not.toBeInTheDocument();
+  });
+
+  it("aparece en el último paso (Inventario), después de los artículos", async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    for (let i = 0; i < 4; i++) {
+      await user.click(screen.getByTestId("btn-next-step"));
+    }
+
+    const addItemButton = screen.getByTestId("btn-add-inv-item");
+    const formaPago = await screen.findByTestId("select-forma-pago-inmediata");
+    expect(addItemButton.compareDocumentPosition(formaPago) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

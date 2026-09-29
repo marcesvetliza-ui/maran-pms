@@ -180,14 +180,22 @@ export type PurchaseInventoryOption = {
   costPrice?: string | null;
 };
 
-export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index }: {
+export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index, excludeIds }: {
   items: PurchaseInventoryOption[];
   selectedId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (id: string) => void;
   index: number;
+  // IDs ya elegidos en otro renglón de este mismo comprobante — cargar el
+  // mismo artículo dos veces tiene sentido en Ventas, pero en Compras
+  // duplica el movimiento de stock en vez de sumar cantidad en un solo
+  // renglón.
+  excludeIds?: string[];
 }) {
+  const selectableItems = excludeIds?.length
+    ? items.filter(item => String(item.id) === selectedId || !excludeIds.includes(String(item.id)))
+    : items;
   const selected = items.find(item => String(item.id) === selectedId);
   return (
     <div>
@@ -205,7 +213,7 @@ export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange,
             <CommandList>
               <CommandEmpty>No se encontraron artículos</CommandEmpty>
               <CommandGroup>
-                {[...items].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
+                {[...selectableItems].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
                   <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => onSelect(String(item.id))} className="items-start gap-2 py-2">
                     <Check className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
                     <span className="min-w-0 flex-1">
@@ -452,6 +460,10 @@ export function InvoiceDialog({
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
   const [automaticNetos, setAutomaticNetos] = useState(true);
+  // Renglones donde se habilitó a mano una alícuota distinta a la
+  // configurada en el artículo — por defecto queda bloqueada en el valor
+  // del artículo para no incurrir en un error fiscal por descuido.
+  const [vatOverrideRows, setVatOverrideRows] = useState<Set<number>>(new Set());
 
   const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
@@ -651,6 +663,14 @@ export function InvoiceDialog({
   const total = useMemo(() => {
     return calculatePurchaseInvoiceTotal(form);
   }, [form]);
+
+  // El desglose "IVA desagregado por alícuota" solo aporta algo cuando hay
+  // más de una alícuota en juego — con una sola, repite exactamente lo que
+  // ya muestra esa misma línea de la tabla de Netos Gravados.
+  const alicuotasConMontoCount = [
+    form.montoIva21, form.montoIva105, form.montoIva27, form.montoIva5, form.montoIva25,
+  ].filter((m) => $n(m) > 0).length;
+  const showIvaDesagregado = alicuotasConMontoCount >= 2;
 
   // Se puede combinar más de una forma de pago real al cargar el comprobante
   // (ej. parte efectivo, parte transferencia), igual que en Ventas — antes
@@ -997,7 +1017,12 @@ export function InvoiceDialog({
                     <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
                       El pago se registra desde la cuenta corriente del proveedor.
                     </div>
-                  ) : formaPagoInmediataSection
+                  ) : (
+                    // La forma de pago se pide al final del formulario (justo
+                    // antes del resumen), no acá — es el último dato que
+                    // normalmente se define al cargar un comprobante.
+                    null
+                  )
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>
@@ -1162,7 +1187,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1186,19 +1211,33 @@ export function InvoiceDialog({
                         </div>
                       </div>
 
-                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
-                        <div>
-                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
-                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
-                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
-                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
-                              <SelectItem value="27">27%</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
+                        const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
+                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        return (
+                          <div>
+                            <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
+                              <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                                <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                                <SelectItem value="27">27%</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {locked && (
+                              <button
+                                type="button"
+                                className="text-xs text-muted-foreground underline mt-1"
+                                onClick={() => setVatOverrideRows(prev => new Set(prev).add(i))}
+                                data-testid={`btn-unlock-vat-${i}`}
+                              >
+                                Fijada por el artículo — ¿es distinta en este comprobante?
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
 
                       {/* Warehouse selector */}
@@ -1357,8 +1396,8 @@ export function InvoiceDialog({
                   </table>
                 </div>
 
-                {/* IVA desagregado — solo se muestra si hay importes */}
-                {($n(form.montoIva21) > 0 || $n(form.montoIva105) > 0 || $n(form.montoIva27) > 0 || $n(form.montoIva5) > 0 || $n(form.montoIva25) > 0) && (
+                {/* IVA desagregado — solo aporta con más de una alícuota */}
+                {showIvaDesagregado && (
                   <div className="rounded-md bg-blue-50 border border-blue-100 dark:bg-blue-950/20 dark:border-blue-900 px-3 py-2 space-y-1">
                     <p className="text-xs font-medium text-blue-700 dark:text-blue-400">IVA desagregado por alícuota</p>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
@@ -1416,6 +1455,11 @@ export function InvoiceDialog({
                   <Label>Observaciones</Label>
                   <Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} data-testid="input-observaciones" />
                 </div>
+              {/* La forma de pago va al final: es el último dato que
+                  normalmente se conoce al cargar un comprobante. */}
+              {isSupplierPayable && !isEditing && !form.tipoComprobante.startsWith("NC") && (
+                <div className="col-span-2">{formaPagoInmediataSection}</div>
+              )}
               {/* Total preview */}
               <Card className="border-primary/30 bg-primary/5">
                 <CardContent className="pt-4">
@@ -1481,7 +1525,11 @@ export function InvoiceDialog({
                     <div className="text-sm text-muted-foreground" data-testid="supplier-payment-notice">
                       El pago se registra desde la cuenta corriente del proveedor.
                     </div>
-                  ) : formaPagoInmediataSection
+                  ) : (
+                    // La forma de pago se pide en el último paso (Inventario),
+                    // no acá — ver el cierre del paso 4 más abajo.
+                    null
+                  )
                 ) : (
                   <div>
                     <Label>Condición de Pago</Label>
@@ -1699,8 +1747,8 @@ export function InvoiceDialog({
                   </table>
                 </div>
 
-                {/* IVA desagregado — solo se muestra si hay importes */}
-                {($n(form.montoIva21) > 0 || $n(form.montoIva105) > 0 || $n(form.montoIva27) > 0 || $n(form.montoIva5) > 0 || $n(form.montoIva25) > 0) && (
+                {/* IVA desagregado — solo aporta con más de una alícuota */}
+                {showIvaDesagregado && (
                   <div className="rounded-md bg-blue-50 border border-blue-100 dark:bg-blue-950/20 dark:border-blue-900 px-3 py-2 space-y-1">
                     <p className="text-xs font-medium text-blue-700 dark:text-blue-400">IVA desagregado por alícuota</p>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
@@ -1843,7 +1891,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} />
+                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1867,19 +1915,33 @@ export function InvoiceDialog({
                         </div>
                       </div>
 
-                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (
-                        <div>
-                          <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
-                          <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)}>
-                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
-                              <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
-                              <SelectItem value="27">27%</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
+                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
+                        const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
+                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        return (
+                          <div>
+                            <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
+                              <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="2.5">2,5%</SelectItem><SelectItem value="5">5%</SelectItem>
+                                <SelectItem value="10.5">10,5%</SelectItem><SelectItem value="21">21%</SelectItem>
+                                <SelectItem value="27">27%</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {locked && (
+                              <button
+                                type="button"
+                                className="text-xs text-muted-foreground underline mt-1"
+                                onClick={() => setVatOverrideRows(prev => new Set(prev).add(i))}
+                                data-testid={`btn-unlock-vat-${i}`}
+                              >
+                                Fijada por el artículo — ¿es distinta en este comprobante?
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <p className="text-sm text-right">Subtotal: <strong>${fmt((Number(row.quantity) || 0) * (Number(row.costPrice) || 0))}</strong></p>
 
                       {/* Warehouse selector */}
@@ -1912,6 +1974,16 @@ export function InvoiceDialog({
                 <p className="text-xs text-muted-foreground text-center py-2">
                   Sin artículos — el comprobante se registrará sin modificar el inventario.
                 </p>
+              )}
+
+              {/* La forma de pago se pide acá, al final, en vez de en el
+                  encabezado: es el último dato que normalmente se conoce al
+                  cargar un comprobante. */}
+              {isSupplierPayable && !isEditing && !form.tipoComprobante.startsWith("NC") && (
+                <>
+                  <Separator />
+                  {formaPagoInmediataSection}
+                </>
               )}
             </div>
           )}

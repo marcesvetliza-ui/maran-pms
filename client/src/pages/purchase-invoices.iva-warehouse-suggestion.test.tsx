@@ -10,10 +10,13 @@ import { queryClient } from "@/lib/queryClient";
  * filas de Artículos.
  *
  * Confirmado con el usuario: la alícuota se guarda en el artículo (no en la
- * categoría, que puede mezclar tasas) y solo precarga el renglón — sigue
- * siendo editable por si esa factura puntual trae otra alícuota. El
- * depósito por defecto es "Depósito General" (case-insensitive), y también
- * queda editable.
+ * categoría, que puede mezclar tasas) y precarga el renglón. Sigue siendo
+ * editable por si esa factura puntual trae otra alícuota, pero desde el
+ * feedback del programador de Compras (ver purchase-invoices.article-safeguards.test.tsx)
+ * queda bloqueada por defecto: hace falta un clic extra en "¿es distinta en
+ * este comprobante?" para habilitarla, así un cambio de alícuota queda
+ * excluido de ser accidental. El depósito por defecto es "Depósito General"
+ * (case-insensitive), y sigue quedando editable sin ninguna traba.
  */
 
 vi.mock("@/hooks/use-toast", () => ({
