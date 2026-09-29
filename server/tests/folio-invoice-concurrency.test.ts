@@ -4,12 +4,21 @@ import type { Server } from "node:http";
 
 const state = vi.hoisted(() => ({
   invoices: [] as any[],
+  groupLinks: [] as any[],
   charges: [] as any[],
   emitted: [] as any[],
   locked: false,
   waiters: [] as Array<() => void>,
   releaseCalls: 0,
 }));
+
+function sqlText(value: any): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(sqlText).join("");
+  if (Array.isArray(value?.queryChunks)) return value.queryChunks.map(sqlText).join("");
+  if (Array.isArray(value?.value)) return value.value.map(sqlText).join("");
+  return "";
+}
 
 async function acquireLock() {
   if (!state.locked) {
@@ -30,7 +39,11 @@ function releaseLock() {
 
 vi.mock("../db", () => ({
   db: {
-    execute: vi.fn(async () => ({ rows: state.invoices })),
+    execute: vi.fn(async (query: any) => ({
+      rows: sqlText(query).includes("FROM group_reservation_links")
+        ? state.groupLinks
+        : state.invoices,
+    })),
   },
   pool: {
     connect: vi.fn(async () => ({
@@ -170,6 +183,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
 
 beforeEach(() => {
   state.invoices = [];
+  state.groupLinks = [];
   state.charges = [
     { id: "charge-1", amount: "100.00", category: "otros", status: "active" },
   ];
