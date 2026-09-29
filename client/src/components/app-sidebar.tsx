@@ -78,36 +78,13 @@ import { Badge } from "@/components/ui/badge";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { SystemNotification } from "@shared/schema";
 
-// ─── Permisos por rol (según matriz aprobada) ────────────────────────────────
-// Roles disponibles: admin, manager, spa, maintenance, housekeeping, restaurant,
-//   events, reception, resp_deposito, resp_administracion, responsable_area,
-//   jefe_recepcion, comercial
-
-const DASHBOARD_ROLES   = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const PLANNING_ROLES    = ["admin","manager","ama_de_llaves","housekeeping","restaurant","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const CORE_RECEPCION    = ["admin","reception","responsable_area","jefe_recepcion","comercial"];
-const CHECKINOUT_ROLES  = ["admin","manager","ama_de_llaves","housekeeping","events","reception","responsable_area","jefe_recepcion","comercial"];
-const HABITACIONES_ROLES= ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
-const REPORTES_RECEPCION_ROLES = [...HABITACIONES_ROLES, "spa"];
-const TARIFAS_ROLES     = ["admin","manager","ama_de_llaves","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const HUESPEDES_ROLES   = ["admin","events","reception","responsable_area","jefe_recepcion","comercial"];
-const PAQUETES_ROLES    = ["admin","spa","reception","responsable_area","jefe_recepcion","comercial"];
-const PRESUPUESTOS_ROLES= ["admin","manager","ama_de_llaves","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const RESTAURANT_ROLES  = ["admin","manager","ama_de_llaves","restaurant","events","reception","resp_deposito","responsable_area","jefe_recepcion","comercial"];
-const RECETAS_ROLES     = ["admin","manager","ama_de_llaves","events","resp_deposito","responsable_area"];
-const SPA_ROLES         = ["admin","manager","ama_de_llaves","spa","reception","responsable_area","jefe_recepcion","comercial"];
-const SPA_CLIENTS_ROLES = ["admin","manager","ama_de_llaves","spa","responsable_area"];
-const EVENTOS_ROLES     = ["admin","manager","ama_de_llaves","spa","restaurant","events","reception","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const HK_MODULE_ROLES   = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
-const MANT_MODULE_ROLES = ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion","comercial"];
-const INVENTARIO_ROLES  = ["admin","manager","ama_de_llaves","spa","resp_deposito","resp_administracion","responsable_area"];
-const HOSPITALIDAD_ROLES= ["admin","manager","ama_de_llaves","spa","housekeeping","restaurant","events","reception","responsable_area","jefe_recepcion","comercial"];
-const RESENAS_ROLES     = ["admin","manager","ama_de_llaves","reception","responsable_area","jefe_recepcion","comercial"];
-const ADMIN_MOD_ROLES   = ["admin","manager","resp_deposito","resp_administracion","responsable_area","jefe_recepcion"];
-const CC_ROLES          = ["admin","manager","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const CAJA_ROLES        = ["admin","manager","restaurant","spa","events","reception","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const GERENCIA_ROLES    = ["admin","manager","ama_de_llaves","resp_administracion","responsable_area","jefe_recepcion","comercial"];
-const EMITIR_COMPROBANTE_ROLES = ["admin","manager","reception","restaurant","spa","events","resp_deposito","resp_administracion","responsable_area","jefe_recepcion","comercial"];
+// ─── Permisos por rol ─────────────────────────────────────────────────────────
+// Etapa 1 del ABM de usuarios: cada ítem declara su resourceKey (en vez de un
+// array de roles hardcodeado) y el conjunto de roles habilitados vive en la
+// tabla role_permissions (ver server/permissions.ts, catálogo inicial
+// INITIAL_ROLE_PERMISSIONS — reproduce exactamente lo que estos arrays tenían
+// antes, resourceKey por resourceKey). El componente consulta con
+// hasPermission(resourceKey) desde useAuth().
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MÓDULOS DEL SISTEMA — cada sección corresponde a un módulo vendible.
@@ -118,26 +95,26 @@ const menuSections = [
   {
     titulo: "PMS — Recepción",
     items: [
-      { label: "Dashboard",      icon: LayoutDashboard, href: "/",                roles: DASHBOARD_ROLES },
-      { label: "Planning",       icon: CalendarDays,    href: "/planning",        roles: PLANNING_ROLES },
-      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    roles: CORE_RECEPCION },
-      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", roles: CORE_RECEPCION },
-      { label: "Check in",       icon: LogIn,           href: "/check-in",        roles: CHECKINOUT_ROLES },
-      { label: "Check out",      icon: LogOut,          href: "/check-out",       roles: CHECKINOUT_ROLES },
-      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           roles: HABITACIONES_ROLES },
+      { label: "Dashboard",      icon: LayoutDashboard, href: "/",                resourceKey: "sidebar:/" },
+      { label: "Planning",       icon: CalendarDays,    href: "/planning",        resourceKey: "sidebar:/planning" },
+      { label: "Reservas",       icon: BookOpen,        href: "/reservations",    resourceKey: "sidebar:/reservations" },
+      { label: "Reserva rápida", icon: Zap,             href: "/new-reservation", resourceKey: "sidebar:/new-reservation" },
+      { label: "Check in",       icon: LogIn,           href: "/check-in",        resourceKey: "sidebar:/check-in" },
+      { label: "Check out",      icon: LogOut,          href: "/check-out",       resourceKey: "sidebar:/check-out" },
+      { label: "Habitaciones",   icon: BedDouble,       href: "/rooms",           resourceKey: "sidebar:/rooms" },
       {
         label: "Reportes",
         icon: FileBarChart2,
-        roles: REPORTES_RECEPCION_ROLES,
+        resourceKey: "sidebar:group/reportes-recepcion",
         subItems: [
-          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", roles: REPORTES_RECEPCION_ROLES },
-          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       roles: REPORTES_RECEPCION_ROLES },
-          { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        roles: ADMIN_MOD_ROLES },
+          { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", resourceKey: "sidebar:/rooms?tab=ocupadas" },
+          { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       resourceKey: "sidebar:/daily-report" },
+          { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        resourceKey: "sidebar:/admin/indec" },
         ],
       },
-      { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      roles: TARIFAS_ROLES },
-      { label: "Huéspedes",      icon: User,            href: "/guests",          roles: HUESPEDES_ROLES },
-      { label: "Facturación",    icon: Receipt,         href: "/billing",         roles: CORE_RECEPCION },
+      { label: "Tarifas",        icon: Tag,             href: "/rate-plans",      resourceKey: "sidebar:/rate-plans" },
+      { label: "Huéspedes",      icon: User,            href: "/guests",          resourceKey: "sidebar:/guests" },
+      { label: "Facturación",    icon: Receipt,         href: "/billing",         resourceKey: "sidebar:/billing" },
     ],
   },
 
@@ -145,14 +122,14 @@ const menuSections = [
   {
     titulo: "Comercial",
     items: [
-      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", roles: CORE_RECEPCION },
-      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         roles: CORE_RECEPCION },
-      { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              roles: CORE_RECEPCION },
-      { label: "Grupos",            icon: Users,             href: "/groups",               roles: CORE_RECEPCION },
-      { label: "Empresas",          icon: Building2,         href: "/companies",            roles: CORE_RECEPCION },
-      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             roles: CORE_RECEPCION },
-      { label: "Paquetes",          icon: Package,           href: "/packages",             roles: PAQUETES_ROLES },
-      { label: "Presupuestos",      icon: ClipboardList,     href: "/presupuestos",         roles: PRESUPUESTOS_ROLES },
+      { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", resourceKey: "sidebar:/admin/booking-engine" },
+      { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         resourceKey: "sidebar:/ota-channels" },
+      { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              resourceKey: "sidebar:/channex" },
+      { label: "Grupos",            icon: Users,             href: "/groups",               resourceKey: "sidebar:/groups" },
+      { label: "Empresas",          icon: Building2,         href: "/companies",            resourceKey: "sidebar:/companies" },
+      { label: "Agencias",          icon: Briefcase,         href: "/agencies",             resourceKey: "sidebar:/agencies" },
+      { label: "Paquetes",          icon: Package,           href: "/packages",             resourceKey: "sidebar:/packages" },
+      { label: "Presupuestos",      icon: ClipboardList,     href: "/presupuestos",         resourceKey: "sidebar:/presupuestos" },
     ],
   },
 
@@ -160,11 +137,11 @@ const menuSections = [
   {
     titulo: "Servicios",
     items: [
-      { label: "Restaurant",       icon: UtensilsCrossed, href: "/restaurant",         roles: RESTAURANT_ROLES },
-      { label: "Spa",              icon: Sparkles,        href: "/spa",                roles: SPA_ROLES },
-      { label: "Clientes Spa",     icon: Heart,           href: "/spa-clients",        roles: SPA_CLIENTS_ROLES },
-      { label: "Eventos",          icon: CalendarCheck,   href: "/events",             roles: EVENTOS_ROLES },
-      { label: "Vouchers Regalo",  icon: Gift,            href: "/gift-vouchers",      roles: SPA_ROLES },
+      { label: "Restaurant",       icon: UtensilsCrossed, href: "/restaurant",         resourceKey: "sidebar:/restaurant" },
+      { label: "Spa",              icon: Sparkles,        href: "/spa",                resourceKey: "sidebar:/spa" },
+      { label: "Clientes Spa",     icon: Heart,           href: "/spa-clients",        resourceKey: "sidebar:/spa-clients" },
+      { label: "Eventos",          icon: CalendarCheck,   href: "/events",             resourceKey: "sidebar:/events" },
+      { label: "Vouchers Regalo",  icon: Gift,            href: "/gift-vouchers",      resourceKey: "sidebar:/gift-vouchers" },
     ],
   },
 
@@ -172,11 +149,11 @@ const menuSections = [
   {
     titulo: "Operaciones",
     items: [
-      { label: "Housekeeping",  icon: Brush,   href: "/housekeeping", roles: HK_MODULE_ROLES },
-      { label: "Mantenimiento", icon: Wrench,  href: "/maintenance",  roles: MANT_MODULE_ROLES },
-      { label: "Inventario",    icon: Package, href: "/inventory",    roles: INVENTARIO_ROLES },
-      { label: "Recetas y Costos", icon: ChefHat, href: "/restaurant/recetas", roles: RECETAS_ROLES },
-      { label: "Emitir Comprobante", icon: Receipt, href: "/operaciones/emitir-comprobante", roles: EMITIR_COMPROBANTE_ROLES },
+      { label: "Housekeeping",  icon: Brush,   href: "/housekeeping", resourceKey: "sidebar:/housekeeping" },
+      { label: "Mantenimiento", icon: Wrench,  href: "/maintenance",  resourceKey: "sidebar:/maintenance" },
+      { label: "Inventario",    icon: Package, href: "/inventory",    resourceKey: "sidebar:/inventory" },
+      { label: "Recetas y Costos", icon: ChefHat, href: "/restaurant/recetas", resourceKey: "sidebar:/restaurant/recetas" },
+      { label: "Emitir Comprobante", icon: Receipt, href: "/operaciones/emitir-comprobante", resourceKey: "sidebar:/operaciones/emitir-comprobante" },
     ],
   },
 
@@ -184,9 +161,9 @@ const menuSections = [
   {
     titulo: "Experiencia al Huésped",
     items: [
-      { label: "Hospitalidad", icon: HandHeart, href: "/hospitality", roles: HOSPITALIDAD_ROLES },
-      { label: "MARA Chatbot", icon: Bot,       href: "/chatbot",     roles: CORE_RECEPCION },
-      { label: "Reseñas",      icon: Star,      href: "/reviews",     roles: RESENAS_ROLES },
+      { label: "Hospitalidad", icon: HandHeart, href: "/hospitality", resourceKey: "sidebar:/hospitality" },
+      { label: "MARA Chatbot", icon: Bot,       href: "/chatbot",     resourceKey: "sidebar:/chatbot" },
+      { label: "Reseñas",      icon: Star,      href: "/reviews",     resourceKey: "sidebar:/reviews" },
     ],
   },
 
@@ -194,12 +171,12 @@ const menuSections = [
   {
     titulo: "Administración",
     items: [
-      { label: "Administración",     icon: Calculator, href: "/admin",         roles: ADMIN_MOD_ROLES },
-      { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", roles: CC_ROLES },
-      { label: "Caja",               icon: Landmark,   href: "/cash-register", roles: CAJA_ROLES },
-      { label: "Plan de Cuentas",    icon: BookOpen,   href: "/admin/accounting-accounts", roles: ["admin","resp_administracion","responsable_area"] },
-      { label: "Centros de Costo",   icon: Tag,        href: "/admin/cost-centers", roles: ["admin","resp_administracion","responsable_area"] },
-      { label: "Revisión fiscal SPA", icon: FileWarning, href: "/admin/spa-fiscal-review", roles: ["admin","manager","resp_administracion","responsable_area"] },
+      { label: "Administración",     icon: Calculator, href: "/admin",         resourceKey: "sidebar:/admin" },
+      { label: "Cuentas Corrientes", icon: CreditCard, href: "/admin/cuentas", resourceKey: "sidebar:/admin/cuentas" },
+      { label: "Caja",               icon: Landmark,   href: "/cash-register", resourceKey: "sidebar:/cash-register" },
+      { label: "Plan de Cuentas",    icon: BookOpen,   href: "/admin/accounting-accounts", resourceKey: "sidebar:/admin/accounting-accounts" },
+      { label: "Centros de Costo",   icon: Tag,        href: "/admin/cost-centers", resourceKey: "sidebar:/admin/cost-centers" },
+      { label: "Revisión fiscal SPA", icon: FileWarning, href: "/admin/spa-fiscal-review", resourceKey: "sidebar:/admin/spa-fiscal-review" },
     ],
   },
 
@@ -207,9 +184,9 @@ const menuSections = [
   {
     titulo: "Gerencia & Revenue",
     items: [
-      { label: "Operaciones", icon: Activity,   href: "/operaciones", roles: GERENCIA_ROLES },
-      { label: "Ejecutivo",   icon: TrendingUp, href: "/executive",   roles: GERENCIA_ROLES },
-      { label: "Reportes",    icon: BarChart2,  href: "/reports",     roles: GERENCIA_ROLES },
+      { label: "Operaciones", icon: Activity,   href: "/operaciones", resourceKey: "sidebar:/operaciones" },
+      { label: "Ejecutivo",   icon: TrendingUp, href: "/executive",   resourceKey: "sidebar:/executive" },
+      { label: "Reportes",    icon: BarChart2,  href: "/reports",     resourceKey: "sidebar:/reports" },
     ],
   },
 
@@ -217,14 +194,14 @@ const menuSections = [
   {
     titulo: "Configuración",
     items: [
-      { label: "Configuración",          icon: Settings,      href: "/administration",      roles: ["admin"] },
-      { label: "Reparar tipos de habitación", icon: Wrench,   href: "/admin/room-types/integrity", roles: ["admin","manager"] },
-      { label: "Correo & Backup",        icon: Mail,          href: "/email-config",        roles: ["admin"] },
-      { label: "Países (ARCA)",          icon: Globe,         href: "/admin/countries",     roles: ["admin"] },
-      { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", roles: ["admin"] },
-      { label: "Puntos de Venta",        icon: Store,         href: "/pos-configs",         roles: ["admin","resp_administracion"] },
-      { label: "Seguridad de claves",    icon: KeyRound,      href: "/seguridad",           roles: ["admin"] },
-      { label: "Código fuente",          icon: Code2,         href: "/source-code",         roles: ["admin"], adminOnly: true, devOnly: true },
+      { label: "Configuración",          icon: Settings,      href: "/administration",      resourceKey: "sidebar:/administration" },
+      { label: "Reparar tipos de habitación", icon: Wrench,   href: "/admin/room-types/integrity", resourceKey: "sidebar:/admin/room-types/integrity" },
+      { label: "Correo & Backup",        icon: Mail,          href: "/email-config",        resourceKey: "sidebar:/email-config" },
+      { label: "Países (ARCA)",          icon: Globe,         href: "/admin/countries",     resourceKey: "sidebar:/admin/countries" },
+      { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", resourceKey: "sidebar:/config/presupuestos" },
+      { label: "Puntos de Venta",        icon: Store,         href: "/pos-configs",         resourceKey: "sidebar:/pos-configs" },
+      { label: "Seguridad de claves",    icon: KeyRound,      href: "/seguridad",           resourceKey: "sidebar:/seguridad" },
+      { label: "Código fuente",          icon: Code2,         href: "/source-code",         resourceKey: "sidebar:/source-code", adminOnly: true, devOnly: true },
     ],
   },
 ];
@@ -427,7 +404,7 @@ const SUB_COLLAPSED_KEY = "sidebar_collapsed_subgroups";
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {
@@ -468,13 +445,12 @@ export function AppSidebar() {
 
   // Auto-expand the section that contains the current active route (including sub-items)
   useEffect(() => {
-    const role = user?.role || "";
     for (const section of menuSections) {
       const hasActive = section.items.some(item => {
-        if ((item as any).roles && !(item as any).roles.includes(role)) return false;
+        if ((item as any).resourceKey && !hasPermission((item as any).resourceKey)) return false;
         if ("subItems" in item && (item as any).subItems) {
           return (item as any).subItems.some((sub: any) => {
-            if (!sub.roles.includes(role)) return false;
+            if (!hasPermission(sub.resourceKey)) return false;
             const subPath = sub.href.split("?")[0];
             return location === subPath || location.startsWith(subPath + "/");
           });
@@ -492,6 +468,7 @@ export function AppSidebar() {
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location, user?.role]);
 
   return (
@@ -512,10 +489,9 @@ export function AppSidebar() {
 
       <SidebarContent>
         {menuSections.map((section) => {
-          const role = user?.role || "";
           const visibleItems = section.items.filter(item => {
-            const itemRoles = (item as any).roles as string[] | undefined;
-            if (itemRoles && !itemRoles.includes(role)) return false;
+            const resourceKey = (item as any).resourceKey as string | undefined;
+            if (resourceKey && !hasPermission(resourceKey)) return false;
             if ((item as any).devOnly && !import.meta.env.DEV) return false;
             return true;
           });
@@ -551,7 +527,7 @@ export function AppSidebar() {
                         const subKey = `${section.titulo}:${item.label}`;
                         const isSubCollapsed = !!collapsedSubs[subKey];
                         const visibleSubItems = ((item as any).subItems as any[]).filter(
-                          (sub: any) => sub.roles.includes(role)
+                          (sub: any) => hasPermission(sub.resourceKey)
                         );
                         if (visibleSubItems.length === 0) return null;
                         const hasActiveSubItem = visibleSubItems.some((sub: any) => {

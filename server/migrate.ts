@@ -2,7 +2,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
 import { eq, isNotNull, sql, type SQL } from "drizzle-orm";
-import { channexConnections, type FolioEntityType } from "@shared/schema";
+import { channexConnections, rolePermissions, type FolioEntityType } from "@shared/schema";
 import { encryptChannexApiKey } from "./channex/credentials";
 
 const FOLIO_ENTITY_TYPES: readonly FolioEntityType[] =
@@ -4629,6 +4629,50 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("system_users.totp_backup_codes", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE system_users ADD COLUMN totp_backup_codes text`)))
   );
+
+  // ── ABM de usuarios, Etapa 1: permisos por rol como datos ────────────────
+  // Reemplaza los arrays de roles hardcodeados (sidebar, requireRole del
+  // servidor) por filas de esta tabla. Ver server/permissions.ts para el
+  // catálogo de resourceKey y el seed inicial — reproduce el comportamiento
+  // de hoy 1:1, salvo 3 correcciones puntuales de inconsistencias
+  // sidebar/ruta ya confirmadas con el usuario (ver comentarios en ese
+  // archivo).
+  await withTimeout("role_permissions (create)", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE role_permissions (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        role text NOT NULL,
+        resource_key text NOT NULL,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("role_permissions.role_resource_key_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "role_permissions_role_resource_key_idx",
+      "CREATE UNIQUE INDEX role_permissions_role_resource_key_idx ON role_permissions (role, resource_key)",
+    )))
+  );
+  // Seed inicial, una sola vez: si en el futuro se agregan resourceKey
+  // nuevos al catálogo de server/permissions.ts, esto NO debe volver a
+  // correr sobre una tabla ya poblada — a partir de la Etapa 2 el ABM deja
+  // editar estas filas a mano, y un re-seed masivo pisaría esos cambios.
+  // Un resourceKey nuevo necesita su propio paso de migración con
+  // ON CONFLICT DO NOTHING (ver ejemplos ya en este archivo).
+  await withTimeout("role_permissions (seed)", T, async () => {
+    const existing = await db.execute(sql`SELECT COUNT(*) FROM role_permissions`);
+    const count = parseInt((existing.rows[0] as any)?.count ?? "0");
+    if (count === 0) {
+      const { INITIAL_ROLE_PERMISSIONS } = await import("./permissions");
+      const rows = Object.entries(INITIAL_ROLE_PERMISSIONS).flatMap(([resourceKey, roles]) =>
+        roles.map((role) => ({ role, resourceKey }))
+      );
+      if (rows.length > 0) {
+        await db.insert(rolePermissions).values(rows);
+        logger.info(`role_permissions seeded with ${rows.length} filas iniciales.`);
+      }
+    }
+  });
 
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {

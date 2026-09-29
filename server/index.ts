@@ -202,6 +202,8 @@ app.use((req, res, next) => {
       await ensureSupplierExpenseSchema();
       const { ensureRoomPreventiveSchema } = await import("./maintenance/roomPreventiveSchema");
       await ensureRoomPreventiveSchema();
+      const { loadRolePermissionsCache } = await import("./permissions");
+      await loadRolePermissionsCache();
     } catch (err: any) {
       logger.error(
         "[startup] Cobros maestros y Cuenta Corriente deshabilitados por un esquema incompleto.",

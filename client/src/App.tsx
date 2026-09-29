@@ -101,6 +101,14 @@ interface AuthContextType {
   selectedPosNombre: string | null;
   setSelectedPos: (id: string, numero: number, nombre: string) => void;
   changePosMode: () => void;
+  // Etapa 1 del ABM de usuarios: reemplaza los arrays de roles hardcodeados
+  // del sidebar y de los guards de ruta — ver server/permissions.ts.
+  // permissionsReady distingue "todavía no llegó la respuesta" de
+  // "llegó y no tiene ese permiso" — sin esto, un guard de ruta podría
+  // rebotar a un usuario válido en el instante entre el login y que
+  // resuelva /api/permissions/mine.
+  hasPermission: (resourceKey: string) => boolean;
+  permissionsReady: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -111,6 +119,8 @@ const AuthContext = createContext<AuthContextType>({
   selectedPosNombre: null,
   setSelectedPos: () => {},
   changePosMode: () => {},
+  hasPermission: () => false,
+  permissionsReady: false,
 });
 
 export function useAuth() {
@@ -179,26 +189,20 @@ function getRoleHomePage(role: string): string {
   }
 }
 
-function AdminRoute({ component: Component }: { component: React.ComponentType }) {
-  const { user } = useAuth();
+// Reemplaza a los antiguos AdminRoute/RoleRoute (arrays de roles hardcodeados
+// por ruta) — ahora la misma tabla role_permissions que gatea el sidebar
+// también gatea estas rutas, con el mismo resourceKey (ver
+// server/permissions.ts). Antes AdminRoute usaba una lógica fija (admin o
+// manager) para dos rutas que en realidad necesitaban permisos distintos
+// entre sí — eso ya no puede pasar: cada ruta declara su propio resourceKey.
+function PermissionRoute({ component: Component, resourceKey }: { component: React.ComponentType; resourceKey: string }) {
+  const { user, hasPermission, permissionsReady } = useAuth();
   const [, navigate] = useLocation();
-  const allowed = user?.role === "admin" || user?.role === "manager";
+  const allowed = !!user && permissionsReady && hasPermission(resourceKey);
   useEffect(() => {
-    if (user && !allowed) {
-      navigate(getRoleHomePage(user.role));
-    }
-  }, [user, allowed, navigate]);
-  if (!user || !allowed) return null;
-  return <Component />;
-}
-
-function RoleRoute({ component: Component, roles }: { component: React.ComponentType; roles: string[] }) {
-  const { user } = useAuth();
-  const [, navigate] = useLocation();
-  const allowed = !!user && roles.includes(user.role);
-  useEffect(() => {
-    if (user && !allowed) navigate(getRoleHomePage(user.role));
-  }, [user, allowed, navigate]);
+    if (user && permissionsReady && !allowed) navigate(getRoleHomePage(user.role));
+  }, [user, permissionsReady, allowed, navigate]);
+  if (!permissionsReady) return <PageLoader />;
   if (!allowed) return null;
   return <Component />;
 }
@@ -211,7 +215,7 @@ function Router() {
         <Route path="/operaciones" component={OperacionesPage} />
         <Route path="/planning" component={PlanningPage} />
         <Route path="/rooms" component={RoomsPage} />
-        <Route path="/admin/room-types/integrity">{() => <AdminRoute component={RoomTypeIntegrityPage} />}</Route>
+        <Route path="/admin/room-types/integrity">{() => <PermissionRoute component={RoomTypeIntegrityPage} resourceKey="sidebar:/admin/room-types/integrity" />}</Route>
         <Route path="/reservations" component={ReservationsPage} />
         <Route path="/new-reservation" component={NewReservationPage} />
         <Route path="/guests" component={GuestsPage} />
@@ -231,14 +235,14 @@ function Router() {
         <Route path="/restaurant/recetas" component={RecetasCostosPage} />
         <Route path="/inventory" component={InventoryPage} />
         <Route path="/operaciones/emitir-comprobante">
-          {() => <RoleRoute component={EmitirComprobantePage} roles={["admin", "manager", "reception", "restaurant", "spa", "events", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"]} />}
+          {() => <PermissionRoute component={EmitirComprobantePage} resourceKey="sidebar:/operaciones/emitir-comprobante" />}
         </Route>
         <Route path="/spa" component={SpaPage} />
         <Route path="/spa-clients" component={SpaClientsPage} />
         <Route path="/gift-vouchers" component={GiftVouchersPage} />
         <Route path="/events" component={EventsPage} />
         <Route path="/maintenance" component={MaintenancePage} />
-        <Route path="/administration">{() => <AdminRoute component={AdministrationPage} />}</Route>
+        <Route path="/administration">{() => <PermissionRoute component={AdministrationPage} resourceKey="sidebar:/administration" />}</Route>
         <Route path="/packages" component={PackagesPage} />
         <Route path="/companies" component={CompaniesPage} />
         <Route path="/agencies" component={AgenciesPage} />
@@ -268,7 +272,7 @@ function Router() {
         <Route path="/admin/cost-centers" component={CostCentersAbmPage} />
         <Route path="/admin/indec" component={AdminIndecPage} />
         <Route path="/admin/spa-fiscal-review">
-          {() => <RoleRoute component={SpaFiscalReviewPage} roles={["admin", "manager", "resp_administracion"]} />}
+          {() => <PermissionRoute component={SpaFiscalReviewPage} resourceKey="sidebar:/admin/spa-fiscal-review" />}
         </Route>
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
@@ -452,6 +456,17 @@ function AuthenticatedApp() {
     checkAuth();
   }, [checkAuth]);
 
+  // Etapa 1 del ABM de usuarios: el conjunto de resourceKey habilitados
+  // para el rol de este usuario, servido por role_permissions (ver
+  // server/permissions.ts) en vez de los arrays de roles hardcodeados que
+  // tenía cada pantalla.
+  const { data: permissionsData, isSuccess: permissionsReady } = useQuery<{ role: string; resourceKeys: string[] }>({
+    queryKey: ["/api/permissions/mine"],
+    enabled: !!user,
+  });
+  const resourceKeySet = new Set(permissionsData?.resourceKeys ?? []);
+  const hasPermission = (resourceKey: string) => resourceKeySet.has(resourceKey);
+
   // Escuchar eventos de auth desde otros tabs del mismo navegador
   useEffect(() => {
     const ch = authChannel();
@@ -554,7 +569,10 @@ function AuthenticatedApp() {
     queryClient.clear();
   };
 
-  if (checking || posChecking) {
+  // user && !permissionsReady: recién logueado, todavía no llegó
+  // /api/permissions/mine — sin esto, el sidebar se armaría un instante con
+  // hasPermission() devolviendo false para todo (pantalla vacía).
+  if (checking || posChecking || (user && !permissionsReady)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
@@ -574,7 +592,7 @@ function AuthenticatedApp() {
   }
 
   return (
-    <AuthContext.Provider value={{ user, logout: handleLogout, selectedPosId, selectedPosNumero, selectedPosNombre, setSelectedPos, changePosMode }}>
+    <AuthContext.Provider value={{ user, logout: handleLogout, selectedPosId, selectedPosNumero, selectedPosNombre, setSelectedPos, changePosMode, hasPermission, permissionsReady }}>
       <AppLayout />
     </AuthContext.Provider>
   );

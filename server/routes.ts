@@ -10,6 +10,7 @@ import { insertGuestReviewSchema, reservationChangelog, reservations, guests, ho
 import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, hashPassword } from "./auth";
+import { permissionsForRole } from "./permissions";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { db } from "./db";
@@ -348,6 +349,13 @@ export async function registerRoutes(
     }
 
     requireAuth(req, res, next);
+  });
+
+  // Etapa 1 del ABM de usuarios: el sidebar (y, a futuro, los guards de ruta)
+  // consultan esto en vez de traer sus propios arrays de roles hardcodeados.
+  app.get("/api/permissions/mine", requireAuth, (req, res) => {
+    const role = (req.user as Express.User).role;
+    res.json({ role, resourceKeys: permissionsForRole(role) });
   });
 
   app.use("/api/system-users", requireRole(["admin"]));

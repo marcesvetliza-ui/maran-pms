@@ -2066,6 +2066,29 @@ export const insertSystemUserSchema = createInsertSchema(systemUsers).omit({ id:
 export type InsertSystemUser = z.infer<typeof insertSystemUserSchema>;
 export type SystemUser = typeof systemUsers.$inferSelect;
 
+// Etapa 1 del ABM de usuarios (permisos granulares): reemplaza los arrays de
+// roles hardcodeados en app-sidebar.tsx y en los distintos requireRole(...)
+// del servidor por filas de datos. resourceKey identifica cada superficie de
+// permiso tal como existía en el código (ej. "sidebar.core_recepcion",
+// "server.accounting_admin") — ver server/permissions.ts para el catálogo
+// completo y comentarios sobre qué reemplaza cada resourceKey. Deliberadamente
+// sin una tabla "roles" propia todavía: los 14 valores de SystemUserRole
+// siguen siendo la lista fija de roles; esta tabla solo mueve QUÉ puede ver
+// cada uno de código a datos. Migrar roles a datos (crear/editar roles) es la
+// Etapa 2.
+export const rolePermissions = pgTable("role_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  role: text("role").$type<SystemUserRole>().notNull(),
+  resourceKey: text("resource_key").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  roleResourceKeyUnique: uniqueIndex("role_permissions_role_resource_key_idx").on(table.role, table.resourceKey),
+}));
+
+export const insertRolePermissionSchema = createInsertSchema(rolePermissions).omit({ id: true, createdAt: true });
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
 // System Settings (Configuracion del Sistema)
 export const systemSettings = pgTable("system_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
