@@ -241,6 +241,15 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:reports:forecast": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
   "api:reports:export-pdf": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
   "api:reports:export-excel": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+
+  // server/routes.ts — GET /api/dashboard/breakfasts, lista de desayunos.
+  "api:dashboard:breakfasts": ["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"],
+
+  // server/routes.ts — 3 endpoints de alta/edición/baja de Facturas de Compra.
+  "api:purchase-invoices:write": ["admin", "manager", "resp_deposito", "resp_administracion"],
+
+  // server/routes.ts — POST /api/night-audit/run.
+  "api:night-audit:run": ["admin", "manager", "reception", "jefe_recepcion"],
 };
 
 /**
@@ -344,6 +353,9 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:forecast": { label: "Forecast", section: "API — Reportes" },
   "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
+  "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
+  "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
+  "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

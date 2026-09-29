@@ -9,8 +9,17 @@ import { assertFinancialSchemaReady } from "./migrate";
 import { insertGuestReviewSchema, reservationChangelog, reservations, guests, housekeepingTasks, rooms } from "@shared/schema";
 import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
-import { requireAuth, requireRole, hashPassword } from "./auth";
+import { requireAuth, requireRole, requirePermission, hashPassword } from "./auth";
 import { permissionsForRole } from "./permissions";
+
+// Etapa 3 del ABM de usuarios: resourceKey propios para los pocos endpoints
+// de este archivo cuyo requireRole([...]) no coincidía con ningún
+// resourceKey existente. Mismo array de roles que tenían antes (ver
+// API_RESOURCE_PERMISSIONS en server/permissions.ts) — el resto de los
+// requireRole(...) de este archivo queda sin migrar por ahora.
+const DASHBOARD_BREAKFASTS_RESOURCE_KEY = "api:dashboard:breakfasts";
+const PURCHASE_INVOICES_WRITE_RESOURCE_KEY = "api:purchase-invoices:write";
+const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { db } from "./db";
@@ -635,7 +644,7 @@ export async function registerRoutes(
   // Breakfast list for tomorrow: guests staying tonight, including today's pending arrivals.
   app.get(
     "/api/dashboard/breakfasts",
-    requireRole(["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"]),
+    requirePermission(DASHBOARD_BREAKFASTS_RESOURCE_KEY),
     async (req, res) => {
     try {
       const { getArgentinaToday } = await import("./db-storage");
@@ -3023,7 +3032,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/purchase-invoices", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
+  app.post("/api/purchase-invoices", requireAuth, requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       // Estos registros alimentan los informes por cuenta de gasto; el
       // emisor identifica su origen, pero nunca queda como acreedor ni se mueve
@@ -3369,7 +3378,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
+  app.patch("/api/purchase-invoices/:id", requireAuth, requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const existing = await db.execute(sql`
@@ -3522,7 +3531,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/purchase-invoices/:id", requireAuth, requireRole(["admin", "manager", "resp_deposito", "resp_administracion"]), async (req, res) => {
+  app.delete("/api/purchase-invoices/:id", requireAuth, requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const changed = await db.transaction(async (tx) => {
@@ -4018,7 +4027,7 @@ export async function registerRoutes(
   registerOperationalReportRoutes(app);
 
   // ==================== NIGHT AUDIT ====================
-  app.post("/api/night-audit/run", requireAuth, requireRole(["admin", "manager", "reception", "jefe_recepcion"]), async (req, res) => {
+  app.post("/api/night-audit/run", requireAuth, requirePermission(NIGHT_AUDIT_RUN_RESOURCE_KEY), async (req, res) => {
     try {
       const { runNightAudit, nightAuditAlreadyRan, resolveNightAuditDate } = await import("./night-audit");
       const { forceDate, force } = req.body;

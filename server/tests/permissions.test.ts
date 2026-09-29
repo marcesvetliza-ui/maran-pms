@@ -238,4 +238,16 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
     expect(API_RESOURCE_PERMISSIONS["api:reports:restaurant-cmv"].slice().sort()).toEqual([...FINANCE_ROLES, "restaurant"].sort());
     expect(API_RESOURCE_PERMISSIONS["api:reports:housekeeping-productivity"].slice().sort()).toEqual([...FINANCE_ROLES, "housekeeping"].sort());
   });
+
+  it("preserva los arrays de roles de los 5 endpoints sueltos migrados en server/routes.ts", () => {
+    expect(API_RESOURCE_PERMISSIONS["api:dashboard:breakfasts"].slice().sort()).toEqual(
+      ["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:purchase-invoices:write"].slice().sort()).toEqual(
+      ["admin", "manager", "resp_deposito", "resp_administracion"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:night-audit:run"].slice().sort()).toEqual(
+      ["admin", "manager", "reception", "jefe_recepcion"].sort(),
+    );
+  });
 });
