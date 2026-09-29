@@ -45,6 +45,8 @@ suite("PostgreSQL: voucher de regalo aplicado a una cuenta de SPA", () => {
         req.isAuthenticated = () => true;
         next();
       });
+      const { loadRolePermissionsCache } = await import("../permissions");
+      await loadRolePermissionsCache();
       const { registerSpaRoutes } = await import("../routes/spa");
       registerSpaRoutes(app);
       const http = await import("node:http");
@@ -104,6 +106,8 @@ suite("PostgreSQL: voucher de regalo aplicado a una cuenta de SPA", () => {
         req.isAuthenticated = () => true;
         next();
       });
+      const { loadRolePermissionsCache } = await import("../permissions");
+      await loadRolePermissionsCache();
       const { registerSpaRoutes } = await import("../routes/spa");
       registerSpaRoutes(app);
       const http = await import("node:http");

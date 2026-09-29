@@ -25,7 +25,7 @@ import {
   giftVoucherEvents,
   type GiftVoucherStatus,
 } from "@shared/schema";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
@@ -71,8 +71,10 @@ const ACTIVE_SPA_STATUSES = ["pending", "confirmed", "in_progress"] as const;
 const ALL_SPA_STATUSES = ["pending", "confirmed", "in_progress", "completed", "cancelled", "no_show"] as const;
 const SPA_OPEN_MINUTES = 8 * 60;
 const SPA_CLOSE_MINUTES = 22 * 60;
-const SPA_ACCESS_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"] as [string, ...string[]];
-const SPA_FISCAL_REVIEW_ROLES = ["admin", "manager", "resp_administracion"] as [string, ...string[]];
+// Etapa 3 del ABM de usuarios: mismos roles de antes, ahora como resourceKey
+// propios en role_permissions (ver API_RESOURCE_PERMISSIONS en server/permissions.ts).
+const SPA_WRITE_RESOURCE_KEY = "api:spa:write";
+const SPA_FISCAL_REVIEW_RESOURCE_KEY = "api:spa:fiscal-review";
 const SPA_DIRECT_PAYMENT_METHODS = ["cash", "debit_card", "credit_card", "transfer", "mercadopago"] as const;
 const INVOICE_TO_SPA_PAYMENT_METHOD: Record<string, string> = {
   efectivo: "cash",
@@ -316,7 +318,7 @@ async function syncLinkedGiftVoucherStatus(
 }
 
 export function registerSpaRoutes(app: Express) {
-  app.get("/api/admin/spa/fiscal-drafts", requireAuth, requireRole(SPA_FISCAL_REVIEW_ROLES), async (_req, res) => {
+  app.get("/api/admin/spa/fiscal-drafts", requireAuth, requirePermission(SPA_FISCAL_REVIEW_RESOURCE_KEY), async (_req, res) => {
     try {
       const result = await db.execute(sql`
         SELECT
@@ -355,7 +357,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/admin/spa/fiscal-drafts/:invoiceId/resolve", requireAuth, requireRole(SPA_FISCAL_REVIEW_ROLES), async (req, res) => {
+  app.post("/api/admin/spa/fiscal-drafts/:invoiceId/resolve", requireAuth, requirePermission(SPA_FISCAL_REVIEW_RESOURCE_KEY), async (req, res) => {
     const invoiceId = Number(req.params.invoiceId);
     const action = String(req.body?.action || "");
     const reason = String(req.body?.reason || "").trim();
@@ -930,7 +932,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/appointments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.post("/api/spa/appointments", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const {
         cabinId,
@@ -1599,7 +1601,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/close", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.post("/api/spa/accounts/:id/close", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const { chargedTo, receiptType, customerRazonSocial, customerCuit, customerDni, vatCondition, pvOverride } = req.body;
 
@@ -1654,7 +1656,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/link-invoice", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.post("/api/spa/accounts/:id/link-invoice", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const invoiceId = Number(req.body.invoiceId);
       if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
@@ -1869,7 +1871,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/resume-invoice", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.post("/api/spa/accounts/:id/resume-invoice", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const invoice = await withSpaInvoiceAuthorizationLock(req.params.id, async () => {
         const [account] = await db.select().from(spaAccounts).where(eq(spaAccounts.id, req.params.id));
@@ -1963,7 +1965,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/accounts/:id/payments", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.post("/api/spa/accounts/:id/payments", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const { amount, method, isAdvance, appointmentId, reservationId, notes, voucherId } = req.body;
 
@@ -2036,7 +2038,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/spa/payments/:id/anular", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.patch("/api/spa/payments/:id/anular", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const { motivoAnulacion } = req.body;
       if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
@@ -2071,7 +2073,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/payments/:id", requireAuth, requireRole(SPA_ACCESS_ROLES), async (req, res) => {
+  app.delete("/api/spa/payments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/spa/payments/${req.params.id} — usar PATCH /anular`);
     try {
       await storage.deleteSpaPayment(req.params.id);

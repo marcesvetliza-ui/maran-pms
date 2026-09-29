@@ -34,6 +34,7 @@ vi.mock("../migrate", () => ({
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
+  requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../db", () => ({
   db: { execute: vi.fn(), select: vi.fn(), update: vi.fn(), insert: vi.fn() },

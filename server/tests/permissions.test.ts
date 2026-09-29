@@ -38,6 +38,7 @@ const {
   INITIAL_ROLE_PERMISSIONS,
   RESOURCE_KEY_LABELS,
   ALL_SYSTEM_ROLES,
+  API_RESOURCE_PERMISSIONS,
 } = await import("../permissions");
 
 afterEach(() => {
@@ -171,5 +172,42 @@ describe("RESOURCE_KEY_LABELS / ALL_SYSTEM_ROLES — catálogo de la pantalla de
   it("ALL_SYSTEM_ROLES tiene los 14 roles del sistema, sin duplicados", () => {
     expect(ALL_SYSTEM_ROLES).toHaveLength(14);
     expect(new Set(ALL_SYSTEM_ROLES).size).toBe(14);
+  });
+});
+
+describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligados al sidebar)", () => {
+  it("tiene una etiqueta para cada resourceKey en RESOURCE_KEY_LABELS", () => {
+    for (const key of Object.keys(API_RESOURCE_PERMISSIONS)) {
+      expect(RESOURCE_KEY_LABELS[key], key).toBeDefined();
+    }
+  });
+
+  it("no pisa ningún resourceKey de INITIAL_ROLE_PERMISSIONS (namespaces distintos: api: vs sidebar:)", () => {
+    const initialKeys = new Set(Object.keys(INITIAL_ROLE_PERMISSIONS));
+    for (const key of Object.keys(API_RESOURCE_PERMISSIONS)) {
+      expect(initialKeys.has(key), key).toBe(false);
+      expect(key.startsWith("api:")).toBe(true);
+    }
+  });
+
+  it("cada entrada preserva un array de roles no vacío", () => {
+    for (const [key, roles] of Object.entries(API_RESOURCE_PERMISSIONS)) {
+      expect(roles.length, key).toBeGreaterThan(0);
+    }
+  });
+
+  it("preserva exactamente los arrays de roles que tenían los endpoints migrados en este lote", () => {
+    expect(API_RESOURCE_PERMISSIONS["api:channex:config"].slice().sort()).toEqual(
+      ["admin", "jefe_recepcion", "manager", "resp_administracion"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:billing:nc-reconciliation"].slice().sort()).toEqual(
+      ["admin", "jefe_recepcion", "manager", "resp_administracion"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:spa:write"].slice().sort()).toEqual(
+      ["admin", "ama_de_llaves", "comercial", "jefe_recepcion", "manager", "reception", "spa"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:spa:fiscal-review"].slice().sort()).toEqual(
+      ["admin", "manager", "resp_administracion"].sort(),
+    );
   });
 });

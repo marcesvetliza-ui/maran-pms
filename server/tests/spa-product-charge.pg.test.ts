@@ -22,6 +22,8 @@ let httpServer: http.Server | null = null;
 
 async function startServer() {
   const { registerSpaRoutes } = await import("../routes/spa");
+  const { loadRolePermissionsCache } = await import("../permissions");
+  await loadRolePermissionsCache();
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {

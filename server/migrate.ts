@@ -2,7 +2,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./db";
 import { logger } from "./logger";
 import { eq, isNotNull, sql, type SQL } from "drizzle-orm";
-import { channexConnections, rolePermissions, type FolioEntityType } from "@shared/schema";
+import { channexConnections, rolePermissions, resourcePermissionSeeds, type FolioEntityType, type SystemUserRole } from "@shared/schema";
 import { encryptChannexApiKey } from "./channex/credentials";
 
 const FOLIO_ENTITY_TYPES: readonly FolioEntityType[] =
@@ -4674,14 +4674,50 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
-  // Etapa 2 del ABM de usuarios: nuevo ítem de sidebar para administrar
-  // role_permissions. No es un reseed masivo (ver comentario del paso
-  // anterior) — un INSERT puntual con ON CONFLICT DO NOTHING, así una tabla
-  // ya editada por un admin no se pisa en reruns.
-  await withTimeout("role_permissions (seed sidebar:/admin/permisos)", T, async () => {
-    await db.insert(rolePermissions)
-      .values({ role: "admin", resourceKey: "sidebar:/admin/permisos" })
-      .onConflictDoNothing();
+  // Guardia real contra reruns para TODO resourceKey agregado después del
+  // seed masivo de arriba. runMigrations() corre en cada arranque del
+  // servidor (server/index.ts), así que un INSERT ... ON CONFLICT DO
+  // NOTHING desnudo en role_permissions NO alcanza como guardia: si un
+  // admin revoca un rol de un resourceKey puntual y después el servidor
+  // reinicia (cualquier deploy), esa fila volvería a insertarse sola y
+  // pisaría la revocación. resource_permission_seeds registra qué
+  // resourceKey ya recibió su siembra inicial — una vez sembrado, nunca más
+  // se vuelve a tocar acá, pase lo que pase después con esas filas.
+  await withTimeout("resource_permission_seeds (create)", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
+      CREATE TABLE resource_permission_seeds (
+        resource_key text PRIMARY KEY,
+        seeded_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+
+  async function seedResourcePermissionsOnce(catalog: Record<string, SystemUserRole[]>): Promise<void> {
+    for (const [resourceKey, roles] of Object.entries(catalog)) {
+      const already = await db.execute(sql`SELECT 1 FROM resource_permission_seeds WHERE resource_key = ${resourceKey}`);
+      if (already.rows.length > 0) continue;
+      if (roles.length > 0) {
+        await db.insert(rolePermissions)
+          .values(roles.map((role) => ({ role, resourceKey })))
+          .onConflictDoNothing();
+      }
+      await db.insert(resourcePermissionSeeds).values({ resourceKey }).onConflictDoNothing();
+    }
+  }
+
+  // Backfill: registra los ~52 resourceKey del seed masivo de Etapa 1 y el
+  // de "sidebar:/admin/permisos" (Etapa 2, sembrado antes con un INSERT
+  // puntual sin esta guardia) como ya sembrados, sin reinsertar nada — sus
+  // filas ya existen, onConflictDoNothing no hace nada. De acá en más
+  // quedan protegidos por la misma guardia que cualquier resourceKey nuevo
+  // de Etapa 3 (ver API_RESOURCE_PERMISSIONS en server/permissions.ts).
+  await withTimeout("resource_permission_seeds (backfill + nuevos resourceKey de Etapa 3)", T, async () => {
+    const { INITIAL_ROLE_PERMISSIONS, API_RESOURCE_PERMISSIONS } = await import("./permissions");
+    await seedResourcePermissionsOnce({
+      ...INITIAL_ROLE_PERMISSIONS,
+      "sidebar:/admin/permisos": ["admin"],
+      ...API_RESOURCE_PERMISSIONS,
+    });
   });
 
   const financialSchema = await verifyFinancialSchema();

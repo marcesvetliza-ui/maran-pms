@@ -174,6 +174,42 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 };
 
 /**
+ * Etapa 3 del ABM de usuarios: resourceKey propios (prefijo "api:", no
+ * ligados a ningún ítem del sidebar) para endpoints del servidor cuyo
+ * requireRole([...]) no coincidía exactamente con ningún resourceKey de
+ * INITIAL_ROLE_PERMISSIONS. Reusar un resourceKey del sidebar hubiera
+ * acoplado su acceso al de un ítem de menú no relacionado; en cambio cada
+ * uno de estos queda controlable de forma independiente desde la pantalla
+ * de administración de permisos. Cada entrada preserva EXACTAMENTE el
+ * array de roles que ese endpoint ya tenía — cero cambio de comportamiento
+ * al migrar — salvo que el comentario de la entrada diga lo contrario.
+ * Se siembra vía resource_permission_seeds (ver server/migrate.ts), igual
+ * que cualquier resourceKey agregado después del seed inicial.
+ */
+export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
+  // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
+  // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
+  "api:channex:config": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+
+  // server/billing/routes.ts — antes FINANCE_RECONCILIATION_ROLES, 3
+  // endpoints de conciliación de Notas de Crédito pendientes.
+  "api:billing:nc-reconciliation": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+
+  // server/routes/spa.ts (7 endpoints) + server/billing/routes.ts (1 chequeo
+  // inline dentro de POST /api/billing/invoices) — antes SPA_ACCESS_ROLES /
+  // SPA_INVOICE_ROLES, acciones de escritura sobre turnos/cuentas/pagos de Spa.
+  "api:spa:write": ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"],
+
+  // server/routes/spa.ts — antes SPA_FISCAL_REVIEW_ROLES, 2 endpoints de
+  // revisión de borradores fiscales de Spa. NOTA: el resourceKey del sidebar
+  // "sidebar:/admin/spa-fiscal-review" (misma pantalla) SÍ incluye
+  // "responsable_area" desde la corrección de Etapa 1 — este endpoint nunca
+  // tuvo esa corrección y se preserva tal cual está hoy; si se decide que
+  // debería alinearse, es un cambio de comportamiento aparte, no de esta migración.
+  "api:spa:fiscal-review": ["admin", "manager", "resp_administracion"],
+};
+
+/**
  * Etiquetas legibles para la pantalla de administración de permisos (Etapa 2).
  * Reproduce label + sección de menuSections (client/src/components/app-sidebar.tsx)
  * para cada resourceKey de INITIAL_ROLE_PERMISSIONS — se mantiene a mano en vez
@@ -245,6 +281,14 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   // INITIAL_ROLE_PERMISSIONS (registro histórico de lo sembrado una sola
   // vez); se siembra con su propio paso puntual en migrate.ts.
   "sidebar:/admin/permisos": { label: "Permisos por Rol", section: "Configuración" },
+
+  // Etapa 3 — resourceKey de API_RESOURCE_PERMISSIONS, agrupados en
+  // secciones "API — ..." propias para no mezclarse en la matriz con los
+  // permisos que controlan el sidebar.
+  "api:channex:config": { label: "Configurar conexiones y mapeos", section: "API — Channex" },
+  "api:billing:nc-reconciliation": { label: "Conciliar Notas de Crédito pendientes", section: "API — Facturación" },
+  "api:spa:write": { label: "Turnos, cuentas y pagos de Spa", section: "API — Spa" },
+  "api:spa:fiscal-review": { label: "Revisión de borradores fiscales de Spa", section: "API — Spa" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

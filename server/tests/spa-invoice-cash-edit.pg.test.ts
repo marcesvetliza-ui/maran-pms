@@ -89,6 +89,8 @@ suite("PostgreSQL real: edición de forma de pago de facturas de SPA", () => {
   beforeAll(async () => {
     const { registerSpaRoutes } = await import("../routes/spa");
     const { registerBillingRoutes } = await import("../billing/routes");
+    const { loadRolePermissionsCache } = await import("../permissions");
+    await loadRolePermissionsCache();
     const app = express();
     app.use(express.json());
     app.use((req: any, _res, next) => {

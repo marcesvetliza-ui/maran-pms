@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import {
   channexBookings,
   channexConnections,
@@ -17,8 +17,13 @@ import { encryptChannexApiKey } from "../channex/credentials";
 import { confirmBookings, importBooking, InvalidRevisionSelectionError, markForReview, recomputeMappedFlags, retryBooking, syncBookings, syncCatalog } from "../channex/sync";
 import { z } from "zod";
 
-/** Config de conexión y mapeo: solo quienes pueden decidir cómo se conecta el PMS a un canal real. */
-const CHANNEX_CONFIG_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
+/**
+ * Config de conexión y mapeo: solo quienes pueden decidir cómo se conecta
+ * el PMS a un canal real. Etapa 3 del ABM de usuarios: mismo array de roles
+ * que tenía antes, ahora como resourceKey propio en role_permissions (ver
+ * API_RESOURCE_PERMISSIONS en server/permissions.ts).
+ */
+const CHANNEX_CONFIG_RESOURCE_KEY = "api:channex:config";
 
 function actorName(req: any): string {
   return req.user?.username ?? req.user?.fullName ?? "sistema";
@@ -53,7 +58,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.post("/api/channex/connections", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.post("/api/channex/connections", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const parsed = insertChannexConnectionSchema.parse(req.body);
 
@@ -87,7 +92,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/connections/:id", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.patch("/api/channex/connections/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const parsed = insertChannexConnectionSchema.partial().parse(req.body);
       const { apiKey, ...fields } = parsed;
@@ -109,7 +114,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/channex/connections/:id", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.delete("/api/channex/connections/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const deleted = await db.delete(channexConnections).where(eq(channexConnections.id, req.params.id)).returning();
       if (deleted.length === 0) return res.status(404).json({ error: "Conexión no encontrada" });
@@ -121,7 +126,7 @@ export function registerChannexRoutes(app: Express) {
 
   // --- Mapeo de catálogo (config restringida) ---
 
-  app.post("/api/channex/connections/:id/sync-catalog", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.post("/api/channex/connections/:id/sync-catalog", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const summary = await syncCatalog(req.params.id);
       res.json(summary);
@@ -149,7 +154,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/room-type-mappings/:id", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.patch("/api/channex/room-type-mappings/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const { roomTypeId } = z.object({ roomTypeId: z.string().nullable() }).parse(req.body);
       const [updated] = await db
@@ -184,7 +189,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/rate-plan-mappings/:id", requireRole(CHANNEX_CONFIG_ROLES), async (req, res) => {
+  app.patch("/api/channex/rate-plan-mappings/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
     try {
       const { ratePlanId } = z.object({ ratePlanId: z.string().nullable() }).parse(req.body);
       const [updated] = await db

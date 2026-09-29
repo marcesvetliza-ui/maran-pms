@@ -82,6 +82,7 @@ vi.mock("../db-storage", () => ({
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
+  requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 vi.mock("../billing/billingConfig", () => ({ getBillingConfig: vi.fn(), updateBillingConfig: vi.fn() }));

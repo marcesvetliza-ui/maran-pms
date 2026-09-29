@@ -2089,6 +2089,19 @@ export const insertRolePermissionSchema = createInsertSchema(rolePermissions).om
 export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
 export type RolePermission = typeof rolePermissions.$inferSelect;
 
+// Registra qué resourceKey ya recibió su siembra inicial de roles (ver
+// server/migrate.ts, seedResourcePermissionsOnce). runMigrations() corre en
+// cada arranque del servidor, así que un INSERT ... ON CONFLICT DO NOTHING
+// desnudo en role_permissions NO alcanza como guardia: si un admin revoca un
+// rol y después el servidor reinicia (cualquier deploy), esa fila volvería a
+// insertarse y pisaría la revocación. Esta tabla es la guardia real: una vez
+// que un resourceKey aparece acá, nunca más se vuelve a sembrar, pase lo que
+// pase con las filas de role_permissions que un admin edite después.
+export const resourcePermissionSeeds = pgTable("resource_permission_seeds", {
+  resourceKey: text("resource_key").primaryKey(),
+  seededAt: timestamp("seeded_at").notNull().defaultNow(),
+});
+
 // System Settings (Configuracion del Sistema)
 export const systemSettings = pgTable("system_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

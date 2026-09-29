@@ -44,6 +44,10 @@ vi.mock("../auth", () => ({
     req.user = { id: "channex-sync-test", username: "channex-sync-test", role: "admin" };
     next();
   },
+  requirePermission: (_resourceKey: string) => (req: any, _res: any, next: () => void) => {
+    req.user = { id: "channex-sync-test", username: "channex-sync-test", role: "admin" };
+    next();
+  },
 }));
 
 vi.mock("../channex/client", async (importOriginal) => {
@@ -69,6 +73,8 @@ let httpServer: http.Server | null = null;
 
 async function startServer() {
   const { registerChannexRoutes } = await import("../routes/channex");
+  const { loadRolePermissionsCache } = await import("../permissions");
+  await loadRolePermissionsCache();
   const app = express();
   app.use(express.json());
   registerChannexRoutes(app);

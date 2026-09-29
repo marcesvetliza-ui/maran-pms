@@ -14,7 +14,8 @@ import { editEventInvoiceCashMethod } from "./eventInvoicePaymentEdit";
 import { editSpaInvoiceCashMethod } from "./spaInvoicePaymentEdit";
 import { editGroupInvoiceCashMethod } from "./groupInvoicePaymentEdit";
 import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionData, type NotaCreditoInfo, type InvoiceGuestData, type FacturaRetenciones } from "./invoicePdf";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requireRole, requirePermission } from "../auth";
+import { hasPermission } from "../permissions";
 import { normalizeToSpanishPaymentMethod } from "../payment-method";
 import { audit } from "../audit";
 import { storage, getArgentinaToday } from "../db-storage";
@@ -44,8 +45,10 @@ import {
   type ReservationCreditIntent,
 } from "./reservationCreditReconciliation";
 
-const FINANCE_RECONCILIATION_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
-const SPA_INVOICE_ROLES = ["admin", "manager", "ama_de_llaves", "spa", "reception", "jefe_recepcion", "comercial"];
+// Etapa 3 del ABM de usuarios: mismos roles de antes, ahora como resourceKey
+// propios en role_permissions (ver API_RESOURCE_PERMISSIONS en server/permissions.ts).
+const NC_RECONCILIATION_RESOURCE_KEY = "api:billing:nc-reconciliation";
+const SPA_WRITE_RESOURCE_KEY = "api:spa:write";
 const SPA_INVOICE_PAYMENT_METHODS = ["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"];
 
 // ── Cargar logo del hotel como Buffer (una sola vez, con caché) ───────────────
@@ -856,7 +859,7 @@ export function registerBillingRoutes(app: Express) {
   // Pending reservation NCs are intentionally visible outside date filters:
   // an authorized fiscal correction must be actionable until its Folio
   // adjustment has been committed.
-  app.get("/api/billing/credit-note-reconciliations/pending", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (_req, res) => {
+  app.get("/api/billing/credit-note-reconciliations/pending", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (_req, res) => {
     try {
       const rows = await db.execute(sql`
         SELECT
@@ -883,7 +886,7 @@ export function registerBillingRoutes(app: Express) {
   // Explicit recovery action for a pending reservation NC. It never creates a
   // new invoice: it resumes the persisted authorization number, then applies
   // the pending invoice/Folio transaction.
-  app.post("/api/billing/credit-notes/:id/reconcile", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (req, res) => {
+  app.post("/api/billing/credit-notes/:id/reconcile", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (req, res) => {
     try {
       const ncId = Number(req.params.id);
       if (!Number.isInteger(ncId) || ncId <= 0) {
@@ -962,7 +965,7 @@ export function registerBillingRoutes(app: Express) {
 
   // ── Purga de comprobantes no fiscales ────────────────────────────────────────
   // GET /api/billing/invoices/non-fiscal/count?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-  app.get("/api/billing/invoices/non-fiscal/count", requireRole(["admin", "administracion"]), async (req, res) => {
+  app.get("/api/billing/invoices/non-fiscal/count", requireRole(["admin", "resp_administracion"]), async (req, res) => {
     try {
       const { startDate, endDate } = req.query as Record<string, string>;
       if (!startDate || !endDate) {
@@ -982,7 +985,7 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // DELETE /api/billing/invoices/non-fiscal?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "administracion"]), async (req, res) => {
+  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "resp_administracion"]), async (req, res) => {
     try {
       const { startDate, endDate } = req.query as Record<string, string>;
       if (!startDate || !endDate) {
@@ -1252,7 +1255,7 @@ export function registerBillingRoutes(app: Express) {
       if (spaAccountId && !SPA_INVOICE_PAYMENT_METHODS.includes(String(cashFormaPago))) {
         return res.status(400).json({ error: "La forma de pago de la factura SPA no es válida" });
       }
-      if (spaAccountId && !SPA_INVOICE_ROLES.includes(String((req as any).user?.role || ""))) {
+      if (spaAccountId && !hasPermission(String((req as any).user?.role || ""), SPA_WRITE_RESOURCE_KEY)) {
         return res.status(403).json({ error: "No tenés permisos para facturar un folio SPA" });
       }
       let normalizedSourceChargeIds = Array.isArray(sourceChargeIds)
@@ -2856,7 +2859,7 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // POST /api/billing/invoices/:id/nota-credito
-  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, requireRole(FINANCE_RECONCILIATION_ROLES), async (req, res) => {
+  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (req, res) => {
     let creditLockClient: any = null;
     let creditLockKey: string | null = null;
     try {

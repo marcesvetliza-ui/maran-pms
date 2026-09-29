@@ -38,10 +38,12 @@ let baseUrl = "";
 let httpServer: http.Server | null = null;
 
 async function startServer() {
-  const [{ registerReservationsRoutes }, { registerBillingRoutes }] = await Promise.all([
+  const [{ registerReservationsRoutes }, { registerBillingRoutes }, { loadRolePermissionsCache }] = await Promise.all([
     import("../routes/reservations"),
     import("../billing/routes"),
+    import("../permissions"),
   ]);
+  await loadRolePermissionsCache();
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {

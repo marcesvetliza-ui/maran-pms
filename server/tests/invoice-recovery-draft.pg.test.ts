@@ -46,11 +46,13 @@ let httpServer: http.Server | null = null;
 let currentTestRole = "admin";
 
 async function startRecoveryRoutes() {
-  const [{ registerReservationsRoutes }, { registerGroupsRoutes }, { registerSpaRoutes }] = await Promise.all([
+  const [{ registerReservationsRoutes }, { registerGroupsRoutes }, { registerSpaRoutes }, { loadRolePermissionsCache }] = await Promise.all([
     import("../routes/reservations"),
     import("../routes/groups"),
     import("../routes/spa"),
+    import("../permissions"),
   ]);
+  await loadRolePermissionsCache();
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
