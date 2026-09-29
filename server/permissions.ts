@@ -215,6 +215,10 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   // server/routes/rooms.ts — antes RATES_WRITE_ROLES, 3 endpoints de
   // escritura de planes de tarifas.
   "api:rates:write": ["admin", "manager", "jefe_recepcion"],
+
+  // server/routes/inventory.ts — antes INVENTORY_WRITE_ROLES, 15 endpoints
+  // de escritura de categorías/artículos/depósitos/movimientos/conteos.
+  "api:inventory:write": ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"],
 };
 
 /**
@@ -299,6 +303,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:spa:fiscal-review": { label: "Revisión de borradores fiscales de Spa", section: "API — Spa" },
   "api:rooms:write": { label: "Alta y edición de habitaciones y tipos", section: "API — Habitaciones" },
   "api:rates:write": { label: "Alta y edición de planes de tarifas", section: "API — Habitaciones" },
+  "api:inventory:write": { label: "Categorías, artículos, depósitos y conteos", section: "API — Inventario" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

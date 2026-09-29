@@ -215,5 +215,8 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
     expect(API_RESOURCE_PERMISSIONS["api:rates:write"].slice().sort()).toEqual(
       ["admin", "manager", "jefe_recepcion"].sort(),
     );
+    expect(API_RESOURCE_PERMISSIONS["api:inventory:write"].slice().sort()).toEqual(
+      ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"].sort(),
+    );
   });
 });
