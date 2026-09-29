@@ -10,16 +10,20 @@ import { pipeline } from "node:stream/promises";
 import { Transform, type Writable } from "node:stream";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
-import { requireRole } from "../auth";
+import { requirePermission } from "../auth";
 import { db } from "../db";
 import { reservations, rooms as roomsTable, guests, guestPreferences, charges, payments, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
 import type { RoomTypeReferenceSource } from "@shared/schema";
 import { eq, inArray, and, or, ne, sql } from "drizzle-orm";
 import { loadReservationOperationalBalances } from "../reservation-operational-balances";
 
-const ROOMS_WRITE_ROLES = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"] as [string, ...string[]];
-const RATES_WRITE_ROLES = ["admin", "manager", "jefe_recepcion"] as [string, ...string[]];
-const ROOM_TYPE_ADMIN_ROLES = ["admin", "manager"] as [string, ...string[]];
+// Etapa 3 del ABM de usuarios: mismos roles de antes, ahora como resourceKey
+// en role_permissions. ROOM_TYPE_ADMIN_ROLES reutiliza el resourceKey del
+// sidebar (match exacto, misma pantalla); los otros dos son propios (ver
+// API_RESOURCE_PERMISSIONS en server/permissions.ts).
+const ROOMS_WRITE_RESOURCE_KEY = "api:rooms:write";
+const RATES_WRITE_RESOURCE_KEY = "api:rates:write";
+const ROOM_TYPE_ADMIN_RESOURCE_KEY = "sidebar:/admin/room-types/integrity";
 const ROOM_TYPE_REFERENCE_EXPORT_PAGE_SIZE = 250;
 const ROOM_TYPE_REFERENCE_EXPORT_MAX_CSV_BYTES = 256 * 1024 * 1024;
 const ROOM_TYPE_REFERENCE_EXPORT_MAX_ZIP_BYTES = 300 * 1024 * 1024;
@@ -141,7 +145,7 @@ export function registerRoomsRoutes(app: Express) {
   // Diagnostic endpoint for legacy rows created before room-type references
   // were protected. It intentionally exposes the source/count so an admin
   // can resolve each orphan without guessing which records are affected.
-  app.get("/api/room-types/integrity", requireRole(ROOM_TYPE_ADMIN_ROLES), async (_req, res) => {
+  app.get("/api/room-types/integrity", requirePermission(ROOM_TYPE_ADMIN_RESOURCE_KEY), async (_req, res) => {
     try {
       res.json({ orphanedReferences: await storage.getOrphanedRoomTypeReferences() });
     } catch (error) {
@@ -149,7 +153,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.get("/api/room-types/integrity/preview", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+  app.get("/api/room-types/integrity/preview", requirePermission(ROOM_TYPE_ADMIN_RESOURCE_KEY), async (req, res) => {
     const { roomTypeId, source, limit } = req.query;
     const requestedSource = typeof source === "string" ? source : "";
     if (
@@ -177,7 +181,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.get("/api/room-types/integrity/export", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+  app.get("/api/room-types/integrity/export", requirePermission(ROOM_TYPE_ADMIN_RESOURCE_KEY), async (req, res) => {
     const { roomTypeId, source, format } = req.query;
     const requestedSource = typeof source === "string" ? source : "";
     const requestedFormat = format === "csv" ? "csv" : "zip";
@@ -390,7 +394,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/room-types", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
+  app.post("/api/room-types", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const roomType = await storage.createRoomType(req.body);
       res.status(201).json(roomType);
@@ -399,7 +403,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/room-types/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
+  app.patch("/api/room-types/:id", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const roomType = await storage.updateRoomType(req.params.id, req.body);
       if (!roomType) {
@@ -411,7 +415,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/room-types/reassign-references", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+  app.post("/api/room-types/reassign-references", requirePermission(ROOM_TYPE_ADMIN_RESOURCE_KEY), async (req, res) => {
     const { fromRoomTypeId, toRoomTypeId } = req.body ?? {};
     if (typeof fromRoomTypeId !== "string" || typeof toRoomTypeId !== "string" || !fromRoomTypeId || !toRoomTypeId) {
       return res.status(400).json({ error: "fromRoomTypeId y toRoomTypeId son requeridos" });
@@ -444,7 +448,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/room-types/:id", requireRole(ROOM_TYPE_ADMIN_ROLES), async (req, res) => {
+  app.delete("/api/room-types/:id", requirePermission(ROOM_TYPE_ADMIN_RESOURCE_KEY), async (req, res) => {
     try {
       const result = await storage.deleteRoomType(req.params.id);
       if (result.references.length > 0) {
@@ -503,7 +507,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/rate-plans", requireRole(RATES_WRITE_ROLES), async (req, res) => {
+  app.post("/api/rate-plans", requirePermission(RATES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const ratePlan = await storage.createRatePlan(req.body);
       await audit(req, "create", "rate-plans", `Nueva tarifa creada: ${req.body.name}`, { entityType: "rate_plan", entityId: ratePlan.id });
@@ -514,7 +518,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/rate-plans/:id", requireRole(RATES_WRITE_ROLES), async (req, res) => {
+  app.patch("/api/rate-plans/:id", requirePermission(RATES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const existing = await storage.getRatePlan(req.params.id);
       const ratePlan = await storage.updateRatePlan(req.params.id, req.body);
@@ -532,7 +536,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/rate-plans/:id", requireRole(RATES_WRITE_ROLES), async (req, res) => {
+  app.delete("/api/rate-plans/:id", requirePermission(RATES_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const deleted = await storage.deleteRatePlan(req.params.id);
       if (!deleted) {
@@ -915,7 +919,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/rooms", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
+  app.post("/api/rooms", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const room = await storage.createRoom(req.body);
       res.status(201).json(room);
@@ -924,7 +928,7 @@ export function registerRoomsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), async (req, res) => {
+  app.patch("/api/rooms/:id", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const room = await storage.updateRoom(req.params.id, req.body);
       if (!room) {
@@ -938,7 +942,7 @@ export function registerRoomsRoutes(app: Express) {
 
   // Eliminar habitaciones está deshabilitado por política del sistema.
   // Usar PATCH con { isActive: false } para deshabilitar.
-  app.delete("/api/rooms/:id", requireRole(ROOMS_WRITE_ROLES), (_req, res) => {
+  app.delete("/api/rooms/:id", requirePermission(ROOMS_WRITE_RESOURCE_KEY), (_req, res) => {
     res.status(405).json({ error: "No está permitido eliminar habitaciones. Usá la opción Deshabilitar para ocultarla del sistema." });
   });
 }

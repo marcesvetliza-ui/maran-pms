@@ -209,5 +209,11 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
     expect(API_RESOURCE_PERMISSIONS["api:spa:fiscal-review"].slice().sort()).toEqual(
       ["admin", "manager", "resp_administracion"].sort(),
     );
+    expect(API_RESOURCE_PERMISSIONS["api:rooms:write"].slice().sort()).toEqual(
+      ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"].sort(),
+    );
+    expect(API_RESOURCE_PERMISSIONS["api:rates:write"].slice().sort()).toEqual(
+      ["admin", "manager", "jefe_recepcion"].sort(),
+    );
   });
 });

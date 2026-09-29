@@ -27,6 +27,8 @@ function startAppAs(role: string) {
 
 async function withApp(role: string, run: (baseUrl: string) => Promise<void>) {
   const { registerRoomsRoutes } = await import("../routes/rooms");
+  const { loadRolePermissionsCache } = await import("../permissions");
+  await loadRolePermissionsCache();
   const app = startAppAs(role);
   registerRoomsRoutes(app);
   const server = http.createServer(app);

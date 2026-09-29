@@ -207,6 +207,14 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   // tuvo esa corrección y se preserva tal cual está hoy; si se decide que
   // debería alinearse, es un cambio de comportamiento aparte, no de esta migración.
   "api:spa:fiscal-review": ["admin", "manager", "resp_administracion"],
+
+  // server/routes/rooms.ts — antes ROOMS_WRITE_ROLES, 5 endpoints de
+  // escritura de tipos de habitación y habitaciones concretas.
+  "api:rooms:write": ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"],
+
+  // server/routes/rooms.ts — antes RATES_WRITE_ROLES, 3 endpoints de
+  // escritura de planes de tarifas.
+  "api:rates:write": ["admin", "manager", "jefe_recepcion"],
 };
 
 /**
@@ -289,6 +297,8 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:billing:nc-reconciliation": { label: "Conciliar Notas de Crédito pendientes", section: "API — Facturación" },
   "api:spa:write": { label: "Turnos, cuentas y pagos de Spa", section: "API — Spa" },
   "api:spa:fiscal-review": { label: "Revisión de borradores fiscales de Spa", section: "API — Spa" },
+  "api:rooms:write": { label: "Alta y edición de habitaciones y tipos", section: "API — Habitaciones" },
+  "api:rates:write": { label: "Alta y edición de planes de tarifas", section: "API — Habitaciones" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

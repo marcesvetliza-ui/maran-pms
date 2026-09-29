@@ -22,6 +22,7 @@ vi.mock("../db-storage", () => ({
   getArgentinaToday: () => "2026-09-01",
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
+vi.mock("../permissions", () => ({ hasPermission: () => true }));
 vi.mock("../db", () => ({
   db: {
     select: vi.fn(),

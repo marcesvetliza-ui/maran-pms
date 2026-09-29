@@ -31,6 +31,8 @@ suite("PostgreSQL real: PATCH /api/rate-plans/:id devuelve el error real, no uno
   beforeAll(async () => {
     if (!pool) return;
     const { registerRoomsRoutes } = await import("../routes/rooms");
+    const { loadRolePermissionsCache } = await import("../permissions");
+    await loadRolePermissionsCache();
     const app = express();
     app.use(express.json());
     app.use((req: any, _res, next) => {

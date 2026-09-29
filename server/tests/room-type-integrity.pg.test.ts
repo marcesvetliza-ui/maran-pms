@@ -41,6 +41,8 @@ function createFixtureIds(): FixtureIds {
 
 async function startManagerApp() {
   const { registerRoomsRoutes } = await import("../routes/rooms");
+  const { loadRolePermissionsCache } = await import("../permissions");
+  await loadRolePermissionsCache();
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
