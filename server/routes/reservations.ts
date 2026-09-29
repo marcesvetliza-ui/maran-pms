@@ -79,6 +79,24 @@ function nightCount(checkIn: string, checkOut: string): number {
 }
 const normalizeDate = (date: string) => date;
 
+export function calculateGroupPersonalExtrasCap(input: {
+  config: unknown;
+  extras: unknown;
+  directPaid: unknown;
+  groupFunds: unknown;
+  groupLodging: unknown;
+}): number {
+  if (input.config !== "accommodation") return 0;
+  const asAmount = (value: unknown) => {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : 0;
+  };
+  const remaining = asAmount(input.extras)
+    - asAmount(input.directPaid)
+    - Math.max(0, asAmount(input.groupFunds) - asAmount(input.groupLodging));
+  return Math.round(Math.max(0, remaining) * 100) / 100;
+}
+
 export function registerReservationsRoutes(app: Express) {
   // ── PDF confirmation download ───────────────────────────────────────────────
   app.get("/api/reservations/:id/confirmation-pdf", requireAuth, handleConfirmationPdf);
@@ -1345,12 +1363,26 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Bulk close overdue reservations (checked_in with past checkout date, balance = 0)
-  app.post("/api/reservations/bulk-checkout-overdue", async (req, res) => {
+  app.post("/api/reservations/bulk-checkout-overdue", requireAuth, async (req, res) => {
     try {
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const force = req.body.force === true;
 
       if (force) {
+        const balanceSnapshot = await db.execute(sql`
+          SELECT COALESCE(SUM(GREATEST(
+            COALESCE(NULLIF(r.total_room_amount::numeric, 0),
+              COALESCE(r.final_rate_per_night::numeric, 0) * COALESCE(r.nights, 0))
+            + COALESCE((SELECT SUM(c.amount::numeric) FROM charges c
+                WHERE c.reservation_id = r.id AND c.status <> 'anulado'), 0)
+            - COALESCE((SELECT SUM(p.amount::numeric) FROM payments p
+                WHERE p.reservation_id = r.id AND p.status <> 'anulado'), 0),
+            0
+          )), 0) AS unresolved
+          FROM reservations r
+          WHERE r.status = 'checked_in' AND r.check_out_date <= ${today}
+        `);
+        const unresolvedBalance = Math.round(Number((balanceSnapshot.rows[0] as any)?.unresolved || 0) * 100) / 100;
         // Bulk SQL UPDATE — close all overdue checked_in regardless of balance
         const result = await db.execute(sql`
           UPDATE reservations
@@ -1371,10 +1403,10 @@ export function registerReservationsRoutes(app: Express) {
         `);
 
         await audit(req, "update", "reservations",
-          `Cierre masivo forzado de vencidas: ${closed} cerradas`,
-          {}
+          `Cierre masivo forzado de vencidas: ${closed} cerradas — saldo pendiente preservado $${unresolvedBalance.toFixed(2)}`,
+          { details: { unresolvedBalance, reason: String(req.body.reason || "").trim() || null } }
         );
-        return res.json({ closed, skipped: 0 });
+        return res.json({ closed, skipped: 0, unresolvedBalance });
       }
 
       // Non-force: only close zero-balance overdue reservations
@@ -1382,6 +1414,7 @@ export function registerReservationsRoutes(app: Express) {
       const overdue = overdueList.filter(r => r.checkOutDate <= today);
       let closed = 0;
       let skipped = 0;
+      let unresolvedBalance = 0;
       for (const r of overdue) {
         const chargesTotal = await storage.getChargesTotal(r.id);
         const paymentsTotal = await storage.getPaymentsTotal(r.id);
@@ -1392,6 +1425,7 @@ export function registerReservationsRoutes(app: Express) {
         const balance = roomTotal + chargesTotal - paymentsTotal;
         if (balance > 0.01) {
           skipped++;
+          unresolvedBalance += balance;
           continue;
         }
         await storage.updateReservation(r.id, { status: "checked_out" });
@@ -1400,10 +1434,10 @@ export function registerReservationsRoutes(app: Express) {
         closed++;
       }
       await audit(req, "update", "reservations",
-        `Cierre masivo de vencidas: ${closed} cerradas, ${skipped} con saldo pendiente`,
-        {}
+        `Cierre masivo de vencidas: ${closed} cerradas, ${skipped} con saldo pendiente — saldo $${unresolvedBalance.toFixed(2)}`,
+        { details: { unresolvedBalance: Math.round(unresolvedBalance * 100) / 100, reason: String(req.body.reason || "").trim() || null } }
       );
-      res.json({ closed, skipped });
+      res.json({ closed, skipped, unresolvedBalance: Math.round(unresolvedBalance * 100) / 100 });
     } catch (error) {
       console.error("bulk-checkout-overdue error:", error);
       res.status(500).json({ error: "Error en cierre masivo" });
@@ -1447,13 +1481,20 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Check-out endpoint
-  app.post("/api/reservations/:id/check-out", async (req, res) => {
+  app.post("/api/reservations/:id/check-out", requireAuth, async (req, res) => {
     const reservationLockClient = await pool.connect();
     try {
       await reservationLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [`reservation-finance:${req.params.id}`]);
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
+      }
+      const [groupLink] = await db.select().from(groupReservationLinks)
+        .where(eq(groupReservationLinks.reservationId, req.params.id));
+      const isGroupLinked = !!groupLink;
+      const groupDeparture = req.body?.groupDeparture === true;
+      if (groupDeparture && !isGroupLinked) {
+        return res.status(400).json({ error: "groupDeparture solo se permite para una reserva vinculada a un grupo" });
       }
 
       const checkoutableStatuses = ["checked_in", "confirmed", "pending"];
@@ -1483,18 +1524,16 @@ export function registerReservationsRoutes(app: Express) {
         : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
       const balance = roomTotal + chargesTotal - paymentsTotal;
 
-      if (!forceCheckout) {
-        if (balance > 0.01) {
-          return res.status(400).json({
-            error: "Saldo pendiente",
-            message: `La reserva tiene un saldo pendiente de $${balance.toFixed(2)}. Liquide antes de hacer check-out.`,
-            balance
-          });
-        }
+      if (balance > 0.01 && !(isGroupLinked && groupDeparture) && (isGroupLinked || !forceCheckout)) {
+        return res.status(400).json({
+          error: "Saldo pendiente",
+          message: `La reserva tiene un saldo pendiente de $${balance.toFixed(2)}. Liquide antes de hacer check-out.`,
+          balance
+        });
       }
 
       // Si se cierra con saldo pendiente y hay empresa/agencia/huésped vinculado, crear un cargo en CC
-      if (forceCheckout && balance > 0.01) {
+      if (forceCheckout && !isGroupLinked && balance > 0.01) {
         const guestNameCC = reservation.guest
           ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
           : "Huésped";
@@ -1570,7 +1609,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       // Los movimientos CC se crean al registrar el pago; al checkout solo creamos los que faltan (pagos registrados antes del fix)
-      const reservationPayments = await storage.getPayments(req.params.id);
+      const reservationPayments = isGroupLinked ? [] : await storage.getPayments(req.params.id);
       const ccPayments = reservationPayments.filter(p => p.method === "cuenta_corriente");
       if (ccPayments.length > 0) {
         const guest = reservation.guest;
@@ -1646,9 +1685,16 @@ export function registerReservationsRoutes(app: Express) {
       storage.createCheckoutCleaningTask(reservation.roomId).catch(e =>
         console.error("[checkout] createCheckoutCleaningTask error:", e)
       );
+      const groupDepartureReason = String(req.body.groupDepartureReason || req.body.reason || "").trim().slice(0, 500);
       await audit(req, "update", "reservations",
-        `Check-out: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
-        { entityType: "reservation", entityId: req.params.id }
+        isGroupLinked
+          ? `Check-out grupal${groupDeparture ? " autorizado" : ""}: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId} — saldo pendiente preservado $${Math.max(0, balance).toFixed(2)}${groupDepartureReason ? ` — Motivo: ${groupDepartureReason}` : ""}`
+          : `Check-out: ${reservation.reservationCode} — Hab. ${reservation.room?.roomNumber || reservation.roomId}`,
+        {
+          entityType: "reservation",
+          entityId: req.params.id,
+          ...(isGroupLinked ? { details: { unresolvedBalance: Math.max(0, balance), groupDeparture: groupDeparture && balance > 0.01, reason: groupDepartureReason || null } } : {}),
+        }
       );
       // Fire post-checkout email asynchronously (don't block response)
       const baseUrl = `${req.protocol}://${req.get("host")}`;
@@ -2668,6 +2714,9 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   app.post("/api/payments", requireAuth, async (req, res) => {
+    let groupPaymentLockClient: PoolClient | undefined;
+    let lockedReservationId: string | undefined;
+    let groupRowTransactionOpen = false;
     try {
       if (req.body.method === "cuenta_corriente") assertFinancialSchemaReady();
       // Prefactura emits the invoice before recording its payment. Persist the
@@ -2695,6 +2744,126 @@ export function registerReservationsRoutes(app: Express) {
       const reservationForPayment = req.body.reservationId
         ? await storage.getReservation(req.body.reservationId)
         : null;
+      let groupPersonalExtras = false;
+      if (reservationForPayment) {
+        const [groupLink] = await db.select().from(groupReservationLinks)
+          .where(eq(groupReservationLinks.reservationId, reservationForPayment.id));
+        const paymentPurpose = req.body.paymentPurpose;
+        if (groupLink) {
+          if (paymentPurpose !== "personal_extras") {
+            return res.status(409).json({
+              error: "Los pagos de alojamiento de una reserva grupal deben registrarse desde el cobro del grupo",
+              code: "GROUP_PAYMENT_REQUIRED",
+            });
+          }
+          if (!["efectivo", "cash", "tarjeta_debito", "debit_card", "tarjeta_credito", "credit_card", "transferencia", "transfer", "mercadopago"].includes(String(req.body.method || ""))) {
+            return res.status(409).json({
+              error: "Los extras personales de una reserva grupal requieren un medio de pago directo",
+              code: "GROUP_PERSONAL_EXTRAS_CASH_ONLY",
+            });
+          }
+          groupPersonalExtras = true;
+          lockedReservationId = reservationForPayment.id;
+          groupPaymentLockClient = await pool.connect();
+          await groupPaymentLockClient.query(
+            "SELECT pg_advisory_lock(hashtext($1))",
+            [`reservation-finance:${lockedReservationId}`],
+          );
+          await groupPaymentLockClient.query("BEGIN");
+          groupRowTransactionOpen = true;
+          await groupPaymentLockClient.query(
+            "SELECT id FROM groups WHERE id = $1 FOR UPDATE",
+            [groupLink.groupId],
+          );
+          const outstandingExtras = await db.execute(sql`
+            WITH linked AS (
+              SELECT l.group_id, r.id AS reservation_id
+              FROM group_reservation_links l
+              JOIN reservations r ON r.id = l.reservation_id
+              WHERE r.id = ${lockedReservationId}
+            ),
+            facts AS (
+              SELECT linked.group_id,
+                COALESCE((SELECT master_folio_config FROM groups WHERE id = linked.group_id), 'accommodation') AS config,
+                COALESCE((SELECT SUM(c.amount::numeric)
+                  FROM charges c
+                  WHERE c.reservation_id = linked.reservation_id
+                    AND c.status <> 'anulado'
+                    AND (
+                      c.amount::numeric < 0
+                      OR COALESCE(c.category, '') NOT IN (
+                        'room', 'payment', 'adjustment', 'transfer_in', 'transfer_out'
+                      )
+                    )), 0) AS extras,
+                COALESCE((SELECT SUM(p.amount::numeric)
+                  FROM payments p
+                  LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
+                    AND gp.group_id = linked.group_id
+                  WHERE p.reservation_id = linked.reservation_id
+                    AND p.status <> 'anulado'
+                    AND (
+                      p.group_payment_id IS NULL
+                      OR (
+                        gp.id IS NOT NULL
+                        AND gp.destination IS DISTINCT FROM 'master_folio'
+                        AND gp.distribution IS DISTINCT FROM 'master_folio'
+                      )
+                    )), 0) AS direct_paid,
+                COALESCE((SELECT SUM(gp.amount::numeric)
+                  FROM group_payments gp
+                  WHERE gp.group_id = linked.group_id
+                    AND (gp.destination = 'master_folio' OR gp.distribution = 'master_folio')), 0) AS group_funds,
+                COALESCE((SELECT SUM(r2.total_room_amount::numeric)
+                  FROM group_reservation_links l2
+                  JOIN reservations r2 ON r2.id = l2.reservation_id
+                  WHERE l2.group_id = linked.group_id
+                    AND r2.status <> 'cancelled'), 0) AS group_lodging
+              FROM linked
+            )
+            SELECT config, extras, direct_paid, group_funds, group_lodging FROM facts
+          `);
+          const capRow = outstandingExtras.rows[0] as any;
+          const cap = calculateGroupPersonalExtrasCap({
+            config: capRow?.config,
+            extras: capRow?.extras,
+            directPaid: capRow?.direct_paid,
+            groupFunds: capRow?.group_funds,
+            groupLodging: capRow?.group_lodging,
+          });
+          const requestedAmount = Number(req.body.amount);
+          if (capRow?.config !== "accommodation") {
+            return res.status(409).json({
+              error: "Los extras de esta reserva se facturan al grupo según su configuración",
+              code: "GROUP_PERSONAL_EXTRAS_DISABLED",
+              cap: 0,
+            });
+          }
+          const masterFundingAboveLodging = Math.max(
+            0,
+            Number(capRow?.group_funds || 0) - Number(capRow?.group_lodging || 0),
+          );
+          if (masterFundingAboveLodging > 0.009) {
+            return res.status(409).json({
+              error: "No se puede atribuir el excedente del Folio Maestro a esta habitación; concilie el saldo grupal antes de cobrar extras personales",
+              code: "GROUP_PERSONAL_EXTRAS_FUNDING_UNCERTAIN",
+              cap: 0,
+            });
+          }
+          if (!Number.isFinite(requestedAmount) || requestedAmount <= 0 || requestedAmount > cap + 0.009) {
+            return res.status(409).json({
+              error: "El pago de extras supera el saldo de extras personales verificado",
+              code: "GROUP_PERSONAL_EXTRAS_CAP",
+              cap,
+            });
+          }
+        } else if (paymentPurpose === "personal_extras") {
+          return res.status(400).json({ error: "personal_extras solo se permite en reservas vinculadas a un grupo" });
+        }
+        delete req.body.paymentPurpose;
+      }
+      if (groupPersonalExtras) {
+        req.body.notes = `[personal_extras] ${String(req.body.notes || "").trim()}`.trim();
+      }
       const billingTarget = req.body.billingTarget || "guest";
       const effectiveCompanyId = billingTarget === "company"
         ? (reservationForPayment?.companyId || req.body.companyId || null)
@@ -2773,14 +2942,14 @@ export function registerReservationsRoutes(app: Express) {
       }
       const payment = await storage.createReservationPaymentWithLedger({
         payment: req.body,
-        sourceLabel: cashLabel,
+        sourceLabel: groupPersonalExtras ? `[personal_extras] ${cashLabel}` : cashLabel,
         registeredBy: (req as any).user?.username,
         receiptType: req.body.receiptType,
         accountSettlement,
       });
 
       await audit(req, "create", "payments",
-        `Pago registrado: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
+        `${groupPersonalExtras ? "Pago de extras personales" : "Pago registrado"}: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
         { entityType: "payment", entityId: payment.id }
       );
       res.status(201).json(payment);
@@ -2788,6 +2957,19 @@ export function registerReservationsRoutes(app: Express) {
       res.status((error as { statusCode?: number })?.statusCode || 500).json({
         error: (error as Error)?.message || "Error creating payment",
       });
+    } finally {
+      if (groupPaymentLockClient && lockedReservationId) {
+        if (groupRowTransactionOpen) {
+          await groupPaymentLockClient.query("COMMIT").catch(async () =>
+            groupPaymentLockClient!.query("ROLLBACK").catch(() => undefined),
+          );
+        }
+        await groupPaymentLockClient.query(
+          "SELECT pg_advisory_unlock(hashtext($1))",
+          [`reservation-finance:${lockedReservationId}`],
+        ).catch(() => undefined);
+        groupPaymentLockClient.release();
+      }
     }
   });
 

@@ -325,3 +325,52 @@ describe("Factura T group invoice HTTP eligibility", () => {
     });
   });
 });
+
+describe("group-funded reservation invoice guard", () => {
+  beforeEach(() => {
+    state.rows = [];
+    state.dbRows = null;
+    mockGetGroup.mockReset();
+    mockAssertGroupInvoiceAllocation.mockReset();
+    mockEmitirFactura.mockReset();
+    mockEmitirFactura.mockResolvedValue({
+      id: 501,
+      tipoComprobante: "FB",
+      numero: 1,
+      montoTotal: "100.00",
+      modoFicticio: true,
+    });
+  });
+
+  it("rejects new reservation cash collections for linked groups before ARCA despite client group/source IDs", async () => {
+    // The authoritative query resolves the reservation-group link. Funding
+    // amounts and client-provided source/group IDs must not determine whether
+    // an additional room-level collection is allowed.
+    state.dbRows = [[{ id: "group-link-1" }]];
+
+    await withServer(async (baseUrl) => {
+      const result = await postInvoice(baseUrl, {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Huésped", condicionIva: "Consumidor Final" },
+        items: [{
+          descripcion: "Alojamiento",
+          cantidad: 1,
+          precioUnitario: 100,
+          alicuotaIva: "21",
+          subtotalNeto: 100,
+          subtotal: 100,
+        }],
+        reservaId: "reservation-1",
+        groupId: "client-controlled-other-group",
+        cashFormaPago: "efectivo",
+        cashFormaPagoDetalle: [{ method: "efectivo", amount: 100 }],
+        sourceChargeIds: ["unallocated-or-fabricated-source"],
+        sourceChargeAmounts: { "unallocated-or-fabricated-source": 100 },
+      });
+
+      expect(result.status).toBe(409);
+      expect(result.body).toMatchObject({ code: "GROUP_RESERVATION_DIRECT_SETTLEMENT_BLOCKED" });
+      expect(mockEmitirFactura).not.toHaveBeenCalled();
+    });
+  });
+});
