@@ -10,7 +10,7 @@ import { insertGuestReviewSchema, reservationChangelog, reservations, guests, ho
 import { payments, spaPayments, eventPayments, cashMovements, cashShifts } from "@shared/schema";
 import { stayNotes, hospitalityAlerts, guestPreferences } from "@shared/schema";
 import { requireAuth, requireRole, requirePermission, hashPassword } from "./auth";
-import { permissionsForRole } from "./permissions";
+import { permissionsForRole, hasPermission } from "./permissions";
 
 // Etapa 3 del ABM de usuarios: resourceKey propios para los pocos endpoints
 // de este archivo cuyo requireRole([...]) no coincidía con ningún
@@ -726,7 +726,7 @@ export async function registerRoutes(
   });
 
   // System Users — only admins can manage users
-  app.get("/api/admin/users", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/users", requirePermission("api:admin:users"), async (req, res) => {
     try {
       const users = await storage.getSystemUsers();
       // Never expose password hashes
@@ -736,7 +736,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/users/:id", requirePermission("api:admin:users"), async (req, res) => {
     try {
       const user = await storage.getSystemUser(req.params.id);
       if (!user) return res.status(404).json({ error: "User not found" });
@@ -747,7 +747,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/users", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/users", requirePermission("api:admin:users"), async (req, res) => {
     try {
       const { password, ...rest } = req.body;
       if (!password || password.length < 6) {
@@ -771,7 +771,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
+  app.patch("/api/admin/users/:id", requirePermission("api:admin:users"), async (req, res) => {
     try {
       const { password, ...rest } = req.body;
       // Prevent demoting the last admin
@@ -797,7 +797,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/users/:id", requireRole(["admin"]), async (req, res) => {
+  app.delete("/api/admin/users/:id", requirePermission("api:admin:users"), async (req, res) => {
     try {
       const targetUser = await storage.getSystemUser(req.params.id);
       if (targetUser?.role === "admin") {
@@ -814,7 +814,7 @@ export async function registerRoutes(
   });
 
   // ── Security: intentos fallidos y desbloqueo ────────────────────────
-  app.get("/api/admin/security/failed-logins", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/security/failed-logins", requirePermission("api:admin:security"), async (req, res) => {
     try {
       const { failedLoginAttempts } = await import("@shared/schema");
       const limit = Math.min(parseInt(req.query.limit as string) || 200, 500);
@@ -827,7 +827,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/security/locked-users", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/security/locked-users", requirePermission("api:admin:security"), async (req, res) => {
     try {
       const locked = await db.select({
         id: systemUsers.id,
@@ -844,7 +844,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/security/unlock-user/:id", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/security/unlock-user/:id", requirePermission("api:admin:security"), async (req, res) => {
     try {
       const [updated] = await db.update(systemUsers).set({
         lockedAt: null,
@@ -920,7 +920,7 @@ export async function registerRoutes(
   });
 
   // Audit Logs
-  app.get("/api/admin/audit-logs", requireRole(["admin", "manager"]), async (req, res) => {
+  app.get("/api/admin/audit-logs", requirePermission("api:admin:audit-logs"), async (req, res) => {
     try {
       const module = req.query.module as string | undefined;
       const userId = req.query.userId as string | undefined;
@@ -953,7 +953,7 @@ export async function registerRoutes(
   });
 
   // Reconciliación de pagos CC sin movimiento en Cuenta Corriente
-  app.post("/api/admin/reconcile-cc-payments", requireRole(["admin", "manager"]), async (req, res) => {
+  app.post("/api/admin/reconcile-cc-payments", requirePermission("api:admin:reconcile-cc-payments"), async (req, res) => {
     try {
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       // Obtener todos los pagos con método cuenta_corriente
@@ -1181,7 +1181,7 @@ export async function registerRoutes(
   }
 
   app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
-    if ((req.user as any)?.role !== "admin") {
+    if (!hasPermission(String((req.user as any)?.role || ""), "api:admin:chatbot-secret")) {
       return res.status(403).json({ error: "Admin access required" });
     }
     const secret = await getChatbotWebhookSecret();
@@ -1908,7 +1908,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/cash/configs/:area", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
+  app.patch("/api/cash/configs/:area", requireAuth, requirePermission("api:cash:configs-write"), async (req, res) => {
     try {
       const updated = await storage.updateCashConfig(req.params.area, req.body);
       if (!updated) return res.status(404).json({ error: "Config not found" });
@@ -2018,7 +2018,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/cash/orphaned-payment-links", requireRole(["admin", "manager"]), async (_req, res) => {
+  app.get("/api/admin/cash/orphaned-payment-links", requirePermission("api:cash:payment-links-audit"), async (_req, res) => {
     try {
       res.json(await storage.getOrphanedCashPaymentLinks());
     } catch (error: any) {
@@ -2026,7 +2026,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/cash/duplicate-payment-links", requireRole(["admin", "manager"]), async (_req, res) => {
+  app.get("/api/admin/cash/duplicate-payment-links", requirePermission("api:cash:payment-links-audit"), async (_req, res) => {
     try {
       res.json(await storage.getDuplicateCashPaymentLinks());
     } catch (error: any) {
@@ -2039,7 +2039,7 @@ export async function registerRoutes(
   // reutiliza PATCH /api/cash/movements/:id/anular: esa ruta reversa el pago
   // real de la reserva, y acá el pago es válido; lo único a corregir es que
   // quedó anotado dos veces en la caja.
-  app.patch("/api/admin/cash/movements/:id/resolve-duplicate-link", requireRole(["admin", "manager"]), async (req, res) => {
+  app.patch("/api/admin/cash/movements/:id/resolve-duplicate-link", requirePermission("api:cash:payment-links-audit"), async (req, res) => {
     try {
       const { motivo } = req.body;
       if (!motivo?.trim()) return res.status(400).json({ error: "Motivo requerido" });
@@ -2056,7 +2056,7 @@ export async function registerRoutes(
   // Historical reservation payments that were committed before their cash
   // movement. This is deliberately restricted to a financial supervisor:
   // repairing a closed shift changes its historical report.
-  app.get("/api/cash/reservation-payments/missing-movements", requireRole(["admin", "manager"]), async (_req, res) => {
+  app.get("/api/cash/reservation-payments/missing-movements", requirePermission("api:cash:repair-movements"), async (_req, res) => {
     try {
       const result = await db.execute(sql`
         SELECT
@@ -2143,7 +2143,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/cash/reservation-payments/:paymentId/repair-movement", requireRole(["admin", "manager"]), async (req, res) => {
+  app.post("/api/cash/reservation-payments/:paymentId/repair-movement", requirePermission("api:cash:repair-movements"), async (req, res) => {
     const paymentId = req.params.paymentId;
     const requestedShiftId = typeof req.body?.shiftId === "string" ? req.body.shiftId : undefined;
     try {
@@ -2333,7 +2333,7 @@ export async function registerRoutes(
       // forceAdmin solo lo pueden usar admin/manager
       if (forceAdmin) {
         const user = req.user as any;
-        if (!user || !["admin", "manager"].includes(user.role)) {
+        if (!user || !hasPermission(String(user.role || ""), "api:cash:force-anular")) {
           return res.status(403).json({ error: "Solo administradores pueden forzar anulación en turnos cerrados" });
         }
       }
@@ -2422,7 +2422,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/init-rooms-7-12", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/init-rooms-7-12", requirePermission("api:admin:setup-utilities"), async (req, res) => {
     try {
       const { sql } = await import("drizzle-orm");
       const existing = await db.execute(sql`SELECT id FROM rooms WHERE floor >= 7 LIMIT 1`);
@@ -2455,7 +2455,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/init-cash-configs", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/init-cash-configs", requirePermission("api:admin:setup-utilities"), async (req, res) => {
     try {
       const { sql } = await import("drizzle-orm");
       const existing = await db.execute(sql`SELECT id FROM cash_register_configs LIMIT 1`);
@@ -2497,7 +2497,7 @@ export async function registerRoutes(
   // ── PHANTOM GUEST CLEANUP ───────────────────────────────────────────────────
   // Find guests where first_name === last_name (created erroneously by group assignment)
   // that have no real contact data and only group reservations.
-  app.get("/api/admin/guests/phantom", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/guests/phantom", requirePermission("api:admin:guests-cleanup"), async (req, res) => {
     try {
       const result = await db.execute(sql`
         SELECT g.id, g.first_name, g.last_name, g.email, g.phone,
@@ -2518,7 +2518,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/guests/cleanup-phantom", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/guests/cleanup-phantom", requirePermission("api:admin:guests-cleanup"), async (req, res) => {
     try {
       // Rename phantom guests to "Por confirmar" so they're recognizable but don't flood the list
       const result = await db.execute(sql`
@@ -2540,7 +2540,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/clean-data", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/clean-data", requirePermission("api:admin:clean-data"), async (req, res) => {
     try {
       const { sql } = await import("drizzle-orm");
       await db.execute(sql`DELETE FROM cash_movements`);
@@ -2584,7 +2584,7 @@ export async function registerRoutes(
   });
 
   // ── BACKUP ────────────────────────────────────────────────────────────────
-  app.get("/api/admin/backup/download", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/backup/download", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { generateBackupSql, logManualDownload } = await import("./backup");
       const buf = await generateBackupSql();
@@ -2599,7 +2599,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/backup/logs", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/backup/logs", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { backupLogs } = await import("@shared/schema");
       const { desc } = await import("drizzle-orm");
@@ -2615,7 +2615,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/backup/send-now", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/backup/send-now", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Falta el email de destino" });
@@ -2627,7 +2627,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/backup/config", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/backup/config", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { systemSettings } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
@@ -2641,7 +2641,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/admin/backup/config", requireRole(["admin"]), async (req, res) => {
+  app.put("/api/admin/backup/config", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { enabled, email } = req.body;
       const { systemSettings } = await import("@shared/schema");
@@ -2659,7 +2659,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/backup/restore-test", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/backup/restore-test", requirePermission("api:admin:backup"), async (req, res) => {
     try {
       const { runRestoreTest } = await import("./backup");
       const result = await runRestoreTest();
@@ -2670,7 +2670,7 @@ export async function registerRoutes(
   });
 
   // ── SECURITY / CREDENTIALS ─────────────────────────────────────────────────
-  app.get("/api/admin/security/status", requireRole(["admin"]), async (req, res) => {
+  app.get("/api/admin/security/status", requirePermission("api:admin:security"), async (req, res) => {
     try {
       const rotationRows = await db.select().from(systemSettings)
         .where(sql`key LIKE 'credential_rotated_%'`);
@@ -2759,7 +2759,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/security/rotate-session", requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/security/rotate-session", requirePermission("api:admin:security"), async (req, res) => {
     try {
       const { randomBytes } = await import("crypto");
       const newSecret = randomBytes(48).toString("hex");
@@ -3557,7 +3557,7 @@ export async function registerRoutes(
   // Endpoint temporal de limpieza — solo admin
   app.delete("/api/admin/purchase-invoices/truncate-all", requireAuth, async (req, res) => {
     try {
-      if ((req.user as any)?.role !== "admin") {
+      if (!hasPermission(String((req.user as any)?.role || ""), "api:admin:purchase-invoices-truncate")) {
         return res.status(403).json({ error: "Solo administradores" });
       }
       // Borrar en orden para respetar foreign keys
@@ -3617,15 +3617,14 @@ export async function registerRoutes(
   });
 
   // Accounting accounts (plan de cuentas)
-  // Roles habilitados para administrar el plan de cuentas y los centros de costo
-  // (mismo criterio que el ítem "Plan de Cuentas"/"Centros de Costo" del sidebar).
-  const ACCOUNTING_ADMIN_ROLES = ["admin", "resp_administracion"];
+  // Etapa 3 del ABM de usuarios: mismos roles de antes, ahora como
+  // resourceKey propio "api:accounting-accounts:write" en role_permissions.
   // Por defecto solo devuelve las cuentas activas (para selects en formularios).
   // ?all=1 devuelve también las inactivas (para la pantalla de administración del plan de cuentas).
   app.get("/api/accounting-accounts", requireAuth, async (req, res) => {
     try {
       const includeInactive = req.query.all === "1" || req.query.all === "true";
-      if (includeInactive && !ACCOUNTING_ADMIN_ROLES.includes((req.user as Express.User).role)) {
+      if (includeInactive && !hasPermission((req.user as Express.User).role, "api:accounting-accounts:write")) {
         return res.status(403).json({ error: "No autorizado para esta acción" });
       }
       const result = includeInactive
@@ -3637,7 +3636,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/accounting-accounts", requireRole(ACCOUNTING_ADMIN_ROLES), async (req, res) => {
+  app.post("/api/accounting-accounts", requirePermission("api:accounting-accounts:write"), async (req, res) => {
     try {
       const { codigo, nombre, tipo, nivel } = req.body;
       if (!codigo || !nombre || !tipo) {
@@ -3660,7 +3659,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/accounting-accounts/:id", requireRole(ACCOUNTING_ADMIN_ROLES), async (req, res) => {
+  app.patch("/api/accounting-accounts/:id", requirePermission("api:accounting-accounts:write"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { codigo, nombre, tipo, nivel, activo } = req.body;
@@ -3986,7 +3985,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/incidents/:id", requireRole(["admin"]), async (req, res) => {
+  app.delete("/api/incidents/:id", requirePermission("api:incidents:delete"), async (req, res) => {
     try {
       await db.delete(systemIncidents).where(eq(systemIncidents.id, req.params.id));
       res.json({ success: true });

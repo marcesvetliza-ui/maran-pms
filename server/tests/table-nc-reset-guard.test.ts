@@ -94,6 +94,11 @@ vi.mock("../db-storage", () => ({ storage: mockStorage }));
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
+// reset-nc usa hasPermission("api:events:reset-nc") inline — solo "admin"
+// lo tiene hoy, igual que el chequeo de rol que reemplazó.
+vi.mock("../permissions", () => ({
+  hasPermission: (role: string, _resourceKey: string) => role === "admin",
+}));
 
 // Billing service — emitirFactura returns a fake NC invoice.
 const mockEmitirFactura = vi.fn().mockResolvedValue({ id: 99, tipo: "NCA" });

@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
@@ -630,7 +630,7 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/account-movements/:id/void", requireRole(["admin", "manager"]), async (req, res) => {
+  app.post("/api/account-movements/:id/void", requirePermission("api:account-movements:void"), async (req, res) => {
     try {
       assertFinancialSchemaReady();
       const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";

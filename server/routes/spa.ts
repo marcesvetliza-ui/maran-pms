@@ -26,6 +26,7 @@ import {
   type GiftVoucherStatus,
 } from "@shared/schema";
 import { requireAuth, requirePermission } from "../auth";
+import { hasPermission } from "../permissions";
 import { eq, desc, inArray, and, sql } from "drizzle-orm";
 import { folioMovements } from "@shared/schema";
 import { generateConfirmacionTurnoSpaPdf, generateSpaAccountReceiptPdf } from "../spaPdfs";
@@ -2437,7 +2438,7 @@ export function registerSpaRoutes(app: Express) {
   app.patch("/api/spa/accounts/:accountId/reset-nc", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      if (!user || user.role !== "admin") {
+      if (!user || !hasPermission(String(user.role || ""), "api:spa:reset-nc")) {
         return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC" });
       }
       const account = await storage.getSpaAccount(req.params.accountId);

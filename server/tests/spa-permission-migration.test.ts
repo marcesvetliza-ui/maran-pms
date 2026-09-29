@@ -3,10 +3,11 @@ import * as http from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Etapa 3 del ABM de usuarios: dos resourceKeys propios en server/routes/spa.ts
- * — "api:spa:write" (antes SPA_ACCESS_ROLES, escritura de turnos/cuentas/pagos)
- * y "api:spa:fiscal-review" (antes SPA_FISCAL_REVIEW_ROLES, revisión de
- * borradores fiscales) — mismos arrays de roles de antes.
+ * Etapa 3 del ABM de usuarios: resourceKeys propios en server/routes/spa.ts
+ * — "api:spa:write" (antes SPA_ACCESS_ROLES, escritura de turnos/cuentas/pagos),
+ * "api:spa:fiscal-review" (antes SPA_FISCAL_REVIEW_ROLES, revisión de
+ * borradores fiscales) y "api:spa:reset-nc" (antes un chequeo inline
+ * `role !== "admin"`, ahora vía hasPermission) — mismos arrays de roles de antes.
  */
 
 vi.mock("../db", () => ({
@@ -85,6 +86,15 @@ describe("spa routes — migradas a requirePermission", () => {
     it("rechaza con 403 a un rol sin el permiso", async () => {
       app = await startApp("reception");
       const response = await fetch(`${app.baseUrl}/api/admin/spa/fiscal-drafts`);
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("api:spa:reset-nc", () => {
+    it("rechaza con 403 a un rol sin el permiso, antes de tocar la cuenta", async () => {
+      permissionsState.granted = new Set(["admin:api:spa:reset-nc"]);
+      app = await startApp("manager");
+      const response = await fetch(`${app.baseUrl}/api/spa/accounts/acc-1/reset-nc`, { method: "PATCH" });
       expect(response.status).toBe(403);
     });
   });

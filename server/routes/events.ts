@@ -3,6 +3,7 @@ import { storage } from "../db-storage";
 import { db } from "../db";
 import { eventPayments, salesInvoices, accountMovements } from "@shared/schema";
 import { requireAuth } from "../auth";
+import { hasPermission } from "../permissions";
 import { eq, and } from "drizzle-orm";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf, generateTablesResumenPdf, generateTableReceiptPdf } from "../eventPdfs";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
@@ -986,7 +987,7 @@ export function registerEventsRoutes(app: Express) {
   app.patch("/api/events/:eventId/reset-nc", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      if (!user || user.role !== "admin") {
+      if (!user || !hasPermission(String(user.role || ""), "api:events:reset-nc")) {
         return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC" });
       }
       const event = await storage.getEvent(req.params.eventId);
@@ -1099,7 +1100,7 @@ export function registerEventsRoutes(app: Express) {
   app.patch("/api/events/:eventId/tables/:tableId/reset-nc", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      if (!user || user.role !== "admin") {
+      if (!user || !hasPermission(String(user.role || ""), "api:events:reset-nc")) {
         return res.status(403).json({ error: "Solo un administrador puede restablecer el estado de NC de una mesa" });
       }
       const table = await storage.getEventTable(req.params.tableId);

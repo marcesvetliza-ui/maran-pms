@@ -250,6 +250,38 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   // server/routes.ts — POST /api/night-audit/run.
   "api:night-audit:run": ["admin", "manager", "reception", "jefe_recepcion"],
+
+  // ── Bucket A del relevamiento: sitios cuyo array de roles coincidía EXACTO
+  // con algún resourceKey del sidebar, pero por una página no relacionada
+  // (ej. "GET /api/admin/users" coincidía con ["admin"] solo porque
+  // sidebar:/administration también es admin-only, no porque sean la misma
+  // pantalla). Reusar esas claves hubiera acoplado su acceso al de un ítem
+  // de menú sin relación real; cada uno recibe su propio resourceKey, igual
+  // que los "ambiguos" de más arriba. Los que SÍ eran la misma pantalla
+  // (Centros de Costo, Países ARCA POST/PATCH/DELETE, integridad de tipos
+  // de habitación) ya reusan su resourceKey del sidebar desde antes.
+  "api:admin:users": ["admin"],
+  "api:admin:security": ["admin"],
+  "api:admin:backup": ["admin"],
+  "api:admin:setup-utilities": ["admin"],
+  "api:admin:guests-cleanup": ["admin"],
+  "api:admin:clean-data": ["admin"],
+  "api:incidents:delete": ["admin"],
+  "api:admin:chatbot-secret": ["admin"],
+  "api:admin:purchase-invoices-truncate": ["admin"],
+  "api:spa:reset-nc": ["admin"],
+  "api:events:reset-nc": ["admin"],
+
+  "api:admin:countries-list": ["admin", "manager"],
+  "api:account-movements:void": ["admin", "manager"],
+  "api:admin:audit-logs": ["admin", "manager"],
+  "api:admin:reconcile-cc-payments": ["admin", "manager"],
+  "api:cash:configs-write": ["admin", "manager"],
+  "api:cash:payment-links-audit": ["admin", "manager"],
+  "api:cash:repair-movements": ["admin", "manager"],
+  "api:cash:force-anular": ["admin", "manager"],
+
+  "api:accounting-accounts:write": ["admin", "resp_administracion"],
 };
 
 /**
@@ -356,6 +388,29 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
   "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
   "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },
+
+  "api:admin:users": { label: "Alta, edición y baja de usuarios del sistema", section: "API — Administración" },
+  "api:admin:security": { label: "Seguridad: intentos fallidos, bloqueos, rotar sesión", section: "API — Administración" },
+  "api:admin:backup": { label: "Backup: descarga, logs, config, restaurar", section: "API — Administración" },
+  "api:admin:setup-utilities": { label: "Utilidades de inicialización (habitaciones, cajas)", section: "API — Administración" },
+  "api:admin:guests-cleanup": { label: "Huéspedes fantasma: detectar y limpiar", section: "API — Administración" },
+  "api:admin:clean-data": { label: "Limpiar datos del sistema", section: "API — Administración" },
+  "api:incidents:delete": { label: "Eliminar incidentes", section: "API — Administración" },
+  "api:admin:chatbot-secret": { label: "Ver el secreto del webhook del chatbot", section: "API — Administración" },
+  "api:admin:purchase-invoices-truncate": { label: "Vaciar todas las Facturas de Compra", section: "API — Administración" },
+  "api:spa:reset-nc": { label: "Restablecer estado de NC de una cuenta de Spa", section: "API — Spa" },
+  "api:events:reset-nc": { label: "Restablecer estado de NC de un evento o mesa", section: "API — Operaciones" },
+
+  "api:admin:countries-list": { label: "Ver el listado completo de Países (ARCA)", section: "API — Administración" },
+  "api:account-movements:void": { label: "Anular movimientos de cuenta corriente", section: "API — Administración" },
+  "api:admin:audit-logs": { label: "Ver el registro de auditoría", section: "API — Administración" },
+  "api:admin:reconcile-cc-payments": { label: "Reconciliar pagos de Cuenta Corriente", section: "API — Administración" },
+  "api:cash:configs-write": { label: "Editar configuración de Caja por área", section: "API — Administración" },
+  "api:cash:payment-links-audit": { label: "Auditoría de vínculos de pago huérfanos/duplicados", section: "API — Administración" },
+  "api:cash:repair-movements": { label: "Reparar movimientos de Caja faltantes", section: "API — Administración" },
+  "api:cash:force-anular": { label: "Forzar anulación de movimientos en turnos cerrados", section: "API — Administración" },
+
+  "api:accounting-accounts:write": { label: "Alta, edición y listado completo de Plan de Cuentas", section: "API — Administración" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

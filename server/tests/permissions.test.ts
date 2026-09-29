@@ -250,4 +250,36 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       ["admin", "manager", "reception", "jefe_recepcion"].sort(),
     );
   });
+
+  it("preserva los arrays de roles del Bucket A (matches exactos con un resourceKey de otra pantalla, migrados con clave propia)", () => {
+    const adminOnlyKeys = [
+      "api:admin:users", "api:admin:security", "api:admin:backup",
+      "api:admin:setup-utilities", "api:admin:guests-cleanup", "api:admin:clean-data",
+      "api:incidents:delete", "api:admin:chatbot-secret", "api:admin:purchase-invoices-truncate",
+      "api:spa:reset-nc", "api:events:reset-nc",
+    ];
+    for (const key of adminOnlyKeys) {
+      expect(API_RESOURCE_PERMISSIONS[key], key).toEqual(["admin"]);
+    }
+    const adminManagerKeys = [
+      "api:admin:countries-list", "api:account-movements:void", "api:admin:audit-logs",
+      "api:admin:reconcile-cc-payments", "api:cash:configs-write", "api:cash:payment-links-audit",
+      "api:cash:repair-movements", "api:cash:force-anular",
+    ];
+    for (const key of adminManagerKeys) {
+      expect(API_RESOURCE_PERMISSIONS[key].slice().sort(), key).toEqual(["admin", "manager"].sort());
+    }
+    expect(API_RESOURCE_PERMISSIONS["api:accounting-accounts:write"].slice().sort()).toEqual(
+      ["admin", "resp_administracion"].sort(),
+    );
+  });
+
+  it("todo resourceKey de API_RESOURCE_PERMISSIONS tiene una etiqueta con label y section no vacíos", () => {
+    for (const key of Object.keys(API_RESOURCE_PERMISSIONS)) {
+      const meta = RESOURCE_KEY_LABELS[key];
+      expect(meta, key).toBeDefined();
+      expect(meta.label.length, key).toBeGreaterThan(0);
+      expect(meta.section.length, key).toBeGreaterThan(0);
+    }
+  });
 });

@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * Etapa 3 del ABM de usuarios: POST/PATCH/DELETE de Países (ARCA) pasan de
  * requireRole(["admin"]) a requirePermission("sidebar:/admin/countries") —
  * mismo resourceKey que el ítem del sidebar, mismo rol único ["admin"]. El
- * GET de listado completo queda con requireRole(["admin","manager"]) tal
- * cual estaba: no tiene un resourceKey exacto (el sidebar solo deja pasar a
- * "admin"), así que migrarlo sería un cambio de comportamiento real.
+ * GET de listado completo (antes requireRole(["admin","manager"])) pasa a
+ * su propio resourceKey "api:admin:countries-list" — no reusa el del
+ * sidebar porque ese es admin-only y le hubiera sacado acceso a manager.
  */
 
 vi.mock("../db", () => ({
@@ -57,17 +57,26 @@ describe("countries routes — POST/PATCH/DELETE migradas a requirePermission", 
   let app: { baseUrl: string; close: () => Promise<void> };
 
   beforeEach(() => {
-    permissionsState.granted = new Set(["admin:sidebar:/admin/countries"]);
+    permissionsState.granted = new Set([
+      "admin:sidebar:/admin/countries",
+      "manager:api:admin:countries-list",
+    ]);
   });
 
   afterEach(async () => {
     await app?.close();
   });
 
-  it("GET /api/admin/countries sigue permitiendo manager (sin migrar, requireRole intacto)", async () => {
+  it("GET /api/admin/countries permite a manager (tiene api:admin:countries-list)", async () => {
     app = await startApp("manager");
     const response = await fetch(`${app.baseUrl}/api/admin/countries`);
     expect(response.status).toBe(200);
+  });
+
+  it("GET /api/admin/countries rechaza con 403 a un rol sin el permiso", async () => {
+    app = await startApp("reception");
+    const response = await fetch(`${app.baseUrl}/api/admin/countries`);
+    expect(response.status).toBe(403);
   });
 
   it("POST rechaza con 403 a manager (ya no alcanza con requireRole, ahora exige el permiso admin-only)", async () => {

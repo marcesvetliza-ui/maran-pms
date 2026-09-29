@@ -2,12 +2,13 @@ import type { Express } from "express";
 import { db } from "../db";
 import { countries, insertCountrySchema } from "../../shared/schema";
 import { eq, asc } from "drizzle-orm";
-import { requireAuth, requireRole, requirePermission } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 
 // Etapa 3 del ABM de usuarios: mismo resourceKey que "Países (ARCA)" en el
-// sidebar (admin-only). El GET de abajo queda con requireRole(["admin",
-// "manager"]) — mismo array de hoy — porque ese permiso no tiene un
-// resourceKey exacto (el sidebar solo deja pasar a "admin"); no se toca acá.
+// sidebar (admin-only) para POST/PATCH/DELETE. El GET de listado completo
+// (admin+manager) no tenía un resourceKey exacto — reusar el del sidebar
+// (admin-only) le hubiera sacado acceso a manager, así que recibe su propio
+// resourceKey "api:admin:countries-list" en vez de acoplarse a esa pantalla.
 const COUNTRIES_ADMIN_RESOURCE_KEY = "sidebar:/admin/countries";
 
 export function registerCountriesRoutes(app: Express) {
@@ -26,7 +27,7 @@ export function registerCountriesRoutes(app: Express) {
   });
 
   // GET /api/admin/countries — lista completa para ABM
-  app.get("/api/admin/countries", requireAuth, requireRole(["admin", "manager"]), async (_req, res) => {
+  app.get("/api/admin/countries", requireAuth, requirePermission("api:admin:countries-list"), async (_req, res) => {
     try {
       const list = await db
         .select()

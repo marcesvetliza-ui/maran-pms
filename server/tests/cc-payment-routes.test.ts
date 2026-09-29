@@ -27,6 +27,13 @@ vi.mock("../auth", () => ({
     if (!roles.includes(mockedRole)) return res.status(403).json({ error: "forbidden" });
     next();
   },
+  // Único uso en guests.ts: POST /api/account-movements/:id/void, antes
+  // requireRole(["admin", "manager"]) — mismo array, ahora vía resourceKey.
+  requirePermission: (_resourceKey: string) => (req: any, res: any, next: () => void) => {
+    req.user = { role: mockedRole, fullName: "Test Admin" };
+    if (!["admin", "manager"].includes(mockedRole)) return res.status(403).json({ error: "forbidden" });
+    next();
+  },
 }));
 vi.mock("../db", () => ({
   db: { execute: vi.fn().mockResolvedValue({ rows: [] }) },
