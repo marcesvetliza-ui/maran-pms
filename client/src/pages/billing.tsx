@@ -865,7 +865,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       if (!response.ok) throw new Error("No se pudo buscar en Huéspedes");
       return response.json();
     },
-    enabled: open && requireLinkedRecipient && entitySearch.trim().length >= 2,
+    // El buscador ofrece huésped en las tres formas de este diálogo (label dice
+    // "Buscar empresa, agencia o huésped"), no solo en Centro de Comprobantes.
+    enabled: open && entitySearch.trim().length >= 2,
   });
 
   // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
@@ -918,10 +920,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         const name = (e.razonSocial || e.nombreFantasia || "").toLowerCase();
         const cuitVal = (e.cuilCuit || "").replace(/-/g, "");
         return name.includes(entitySearch.toLowerCase()) || cuitVal.includes(entitySearch.replace(/-/g, ""));
-      }).slice(0, 8).concat(requireLinkedRecipient ? guestMatches.filter((g: any) => g.active !== false).map((g: any) => ({
+      }).slice(0, 8).concat(guestMatches.filter((g: any) => g.active !== false).map((g: any) => ({
         ...g, _type: "Huésped", razonSocial: `${g.firstName || ""} ${g.lastName || ""}`.trim(),
         condicionIva: g.vatCondition, domicilio: g.direccion, dni: g.documentNumber,
-      })) : [])
+      })))
     : [];
 
   const dialogOperationKey = JSON.stringify({
@@ -1319,9 +1321,13 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       // Persist only changes the operator explicitly confirmed. This keeps the
       // reservation's guest/company/agency profile aligned with the receipt.
       if (saveRecipientOnEmitRef.current && recipientProfile) {
+        // Usar la ficha realmente elegida (selectedEntityInfo), no la de apertura
+        // del diálogo (recipientProfile): si el operador buscó y cambió a otra
+        // empresa/agencia/huésped, hay que guardar en ESA ficha, no en la original.
+        const target = selectedEntityInfo || { type: recipientProfile.type, id: recipientProfile.id };
         try {
-          if (recipientProfile.type === "guest") {
-            await apiRequest("PATCH", `/api/guests/${recipientProfile.id}`, {
+          if (target.type === "guest") {
+            await apiRequest("PATCH", `/api/guests/${target.id}`, {
               firstName: guestFirstName.trim(),
               lastName: guestLastName.trim(),
               documentNumber: dni.trim(),
@@ -1331,7 +1337,6 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
             });
             queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
           } else {
-            const target = selectedEntityInfo || { type: recipientProfile.type, id: recipientProfile.id };
             const endpoint = target.type === "company"
               ? `/api/companies/${target.id}`
               : `/api/agencies/${target.id}`;
@@ -2175,7 +2180,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">{isFA ? "Razón Social *" : "Nombre / Razón Social *"}</Label>
-              {recipientProfile?.type === "guest" ? (
+              {/* El split Apellido/Nombre es solo para el modo huésped (reservations.tsx/spa.tsx).
+                  Si el operador busca y elige otra ficha (empresa/agencia), selectedEntityInfo deja
+                  de ser "guest" y hay que volver al campo único — si no, éste queda escondido y en
+                  blanco aunque razonSocial ya tenga los datos de la ficha recién elegida. */}
+              {recipientProfile?.type === "guest" && (selectedEntityInfo?.type ?? "guest") === "guest" ? (
                 <div className="grid grid-cols-2 gap-2">
                   <Input value={guestLastName} onChange={e => { const value = e.target.value; setGuestLastName(value); setRazonSocial(`${value} ${guestFirstName}`.trim()); }} placeholder="Apellido" data-testid="input-guest-last-name" />
                   <Input value={guestFirstName} onChange={e => { const value = e.target.value; setGuestFirstName(value); setRazonSocial(`${guestLastName} ${value}`.trim()); }} placeholder="Nombre" data-testid="input-guest-first-name" />

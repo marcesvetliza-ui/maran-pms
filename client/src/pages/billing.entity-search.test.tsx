@@ -124,3 +124,56 @@ describe("Centro de Comprobantes — receptor vinculado", () => {
     expect(screen.getByTestId("input-razon-social")).toHaveAttribute("readonly");
   });
 });
+
+describe("EmitirFacturaDialog — anticipo de reserva a nombre del huésped", () => {
+  beforeEach(() => {
+    queryClient.clear();
+    vi.stubGlobal("fetch", buildFetchMock());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const GUEST_RECIPIENT_PROFILE = { type: "guest" as const, id: "g-1", firstName: "MARIA", lastName: "PEREZ" };
+
+  it("precompleta Apellido/Nombre del huésped al abrir (no queda en blanco)", async () => {
+    renderDialog({
+      billingEntityType: "guest",
+      billingEntityId: "g-1",
+      recipientProfile: GUEST_RECIPIENT_PROFILE,
+      initialValues: { razonSocial: "PEREZ MARIA", dni: "12345678" },
+    });
+    expect(await screen.findByTestId("input-guest-last-name")).toHaveValue("PEREZ");
+    expect(screen.getByTestId("input-guest-first-name")).toHaveValue("MARIA");
+  });
+
+  it("el buscador de huésped funciona sin requireLinkedRecipient", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      billingEntityType: "guest",
+      billingEntityId: "g-1",
+      recipientProfile: GUEST_RECIPIENT_PROFILE,
+      initialValues: { razonSocial: "PEREZ MARIA", dni: "12345678" },
+    });
+    await user.type(screen.getByTestId("input-entity-search"), "maria");
+    expect(await screen.findByText("MARIA PEREZ")).toBeInTheDocument();
+  });
+
+  it("al elegir una empresa del buscador, se cambia al campo único de Razón Social con sus datos (no queda en el split de huésped en blanco)", async () => {
+    const user = userEvent.setup();
+    renderDialog({
+      billingEntityType: "guest",
+      billingEntityId: "g-1",
+      recipientProfile: GUEST_RECIPIENT_PROFILE,
+      initialValues: { razonSocial: "PEREZ MARIA", dni: "12345678" },
+    });
+    // Arranca en modo huésped (split Apellido/Nombre).
+    expect(await screen.findByTestId("input-guest-last-name")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("input-entity-search"), "Empresa RI");
+    await user.click(await screen.findByText("Empresa RI SA"));
+
+    // Cambia al campo único, con los datos de la empresa recién elegida.
+    expect(await screen.findByTestId("input-razon-social")).toHaveValue("Empresa RI SA");
+    expect(screen.queryByTestId("input-guest-last-name")).not.toBeInTheDocument();
+    expect(screen.getByTestId("select-condicion-iva")).toHaveTextContent("Responsable Inscripto");
+  });
+});
