@@ -3256,10 +3256,12 @@ export function registerBillingRoutes(app: Express) {
       // Non-reservation NCs are informative-only in Caja: emitting a NC never
       // moves cash by itself (any real refund is its own separate movement,
       // e.g. payment_void below) — it just needs to be visible for control.
-      if (!original.reserva_id && !original.group_id) {
+      // Group NCs have no área of their own (grupos are billed by punto de
+      // venta, not área) — same pos_configs lookup as the ND site below.
+      if (!original.reserva_id) {
         try {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
-          const pvArea = (pvRow.rows[0] as any)?.area || "restaurant";
+          const pvArea = (pvRow.rows[0] as any)?.area || (original.group_id ? "recepcion" : "restaurant");
           const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
           if (totalNC > 0) {
             const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;

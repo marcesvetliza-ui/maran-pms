@@ -57,13 +57,13 @@ vi.mock("../billing/invoiceService", () => ({
     );
     return {
       id: 90,
-      tipo_comprobante: data.tipoComprobante ?? "NCB",
-      punto_venta: data.puntoVentaOverride ?? 1,
+      tipoComprobante: data.tipoComprobante ?? "NCB",
+      puntoVenta: data.puntoVentaOverride ?? 1,
       numero: 15,
       estado: "emitida",
-      monto_total: amount.toFixed(2),
-      source_charge_amounts: JSON.stringify(sourceChargeAmounts),
-      reconciliation_status: "pendiente",
+      montoTotal: amount.toFixed(2),
+      sourceChargeAmounts: JSON.stringify(sourceChargeAmounts),
+      reconciliationStatus: "pendiente",
     };
   }),
 }));
@@ -734,6 +734,15 @@ describe("group-payment credit notes", () => {
     expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
       expect.objectContaining(compositionSources[1]),
     ]);
+    // Un grupo no tiene área propia (se factura por punto de venta), así
+    // que la NC cae en "recepcion" como el resto de los comprobantes de
+    // grupo — informativa, sigue sin mover plata por sí misma.
+    const { storage } = await import("../db-storage");
+    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
+    expect(storage.registerCashMovement).toHaveBeenCalledWith(
+      "recepcion", "nota_credito", "90", expect.stringContaining("NCB-00000015"),
+      "nc", "30.00", "informational", expect.anything(), expect.anything(),
+    );
   });
 
   it("keeps a legacy linked group invoice and its credit note in the same group history", async () => {
@@ -864,5 +873,11 @@ describe("group debit notes", () => {
         destination: "Grupo",
       }),
     ]);
+    const { storage } = await import("../db-storage");
+    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
+    expect(storage.registerCashMovement).toHaveBeenCalledWith(
+      "recepcion", "nota_debito", "90", expect.stringContaining("NDB-00000015"),
+      "nd", "12.34", "informational", expect.anything(), expect.anything(),
+    );
   });
 });
