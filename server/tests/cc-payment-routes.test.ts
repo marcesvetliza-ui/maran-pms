@@ -114,6 +114,28 @@ describe("Cuenta Corriente payment routes", () => {
     }
   });
 
+  it("allows a payment that exceeds the selected allocations, leaving the surplus unapplied", async () => {
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/companies/entity-1/account/payment", {
+        amount: "150.00",
+        payments: [{ method: "transferencia", amount: "150.00" }],
+        // Cancels the full $100 cargo and leaves $50 as an unallocated
+        // advance (saldo a favor) — this is what previously required a
+        // second, separate zero-allocation payment.
+        allocations: [{ cargoId: "cargo-1", amount: "100.00" }],
+      });
+
+      expect(result.status).toBe(200);
+      expect(mockStorage.createPaymentWithAllocations).toHaveBeenCalledTimes(1);
+      const [, , data, allocations] = mockStorage.createPaymentWithAllocations.mock.calls[0];
+      expect(data.amount).toBe("-150.00");
+      expect(allocations).toEqual([{ cargoId: "cargo-1", amount: "100.00" }]);
+    } finally {
+      app.close();
+    }
+  });
+
   it("rejects a forged allocation total that exceeds the persisted payment", async () => {
     const app = await startApp();
     try {

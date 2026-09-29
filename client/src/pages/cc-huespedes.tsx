@@ -216,12 +216,15 @@ export default function CcHuespedesPage() {
                 ${Math.abs(accountData?.balance || 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {(accountData?.balance || 0) > 0 ? "Saldo pendiente de cobro" : "Sin deuda pendiente"}
+                {(accountData?.balance || 0) > 0
+                  ? "Saldo pendiente de cobro"
+                  : (accountData?.balance || 0) < 0
+                    ? "Saldo a favor"
+                    : "Sin deuda pendiente"}
               </p>
             </div>
             <Button
               onClick={() => setRegisterPaymentOpen(true)}
-              disabled={(accountData?.balance || 0) <= 0}
               data-testid="button-register-guest-payment"
             >
               <Plus className="h-4 w-4 mr-2" />

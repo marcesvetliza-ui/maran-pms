@@ -8360,8 +8360,11 @@ export class DatabaseStorage implements IStorage {
       if (normalizedAllocations.some((allocation) => !allocation.cargoId || !Number.isFinite(allocation.amount) || allocation.amount <= 0)) {
         throw validationError("Hay una asignación con datos inválidos");
       }
-      if (normalizedAllocations.length > 0 && Math.abs(allocationsTotal - paymentAmount) > 0.01) {
-        throw validationError("El total aplicado debe coincidir con los comprobantes seleccionados");
+      // El pago puede superar lo asignado a comprobantes: el excedente queda
+      // como saldo a favor (pago a cuenta sin cargo asociado). Lo que nunca
+      // puede pasar es asignar más de lo que efectivamente se está pagando.
+      if (normalizedAllocations.length > 0 && allocationsTotal - paymentAmount > 0.01) {
+        throw validationError("El total aplicado a comprobantes no puede superar el monto pagado");
       }
 
       if (normalizedAllocations.length > 0) {

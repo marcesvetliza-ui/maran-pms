@@ -129,7 +129,11 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
       return null;
     })
     .filter((message): message is string => Boolean(message));
-  const allocationTotalMatchesPayment = !hasSelectedCharges || Math.abs(allocationsTotal - totalApplied) < 0.01;
+  // El total aplicado puede superar lo asignado a comprobantes: el excedente
+  // queda como saldo a favor. Lo que no puede pasar es que falte plata para
+  // cubrir lo seleccionado.
+  const allocationCoveredByPayment = !hasSelectedCharges || totalApplied - allocationsTotal > -0.01;
+  const unallocatedSurplus = hasSelectedCharges ? Math.max(0, totalApplied - allocationsTotal) : 0;
 
   // Payment row helpers
   const addPaymentRow = () => {
@@ -174,8 +178,8 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   const registerPaymentMutation = useMutation({
     mutationFn: async () => {
       if (selectedChargeErrors.length > 0) throw new Error(selectedChargeErrors[0]);
-      if (hasSelectedCharges && !allocationTotalMatchesPayment) {
-        throw new Error("El total aplicado debe coincidir con el total de los comprobantes seleccionados.");
+      if (hasSelectedCharges && !allocationCoveredByPayment) {
+        throw new Error("El total aplicado no alcanza para cubrir los comprobantes seleccionados.");
       }
 
       const allocations = Object.entries(selected)
@@ -237,7 +241,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
 
   const canSubmit = totalPaymentMethods > 0
     && selectedChargeErrors.length === 0
-    && allocationTotalMatchesPayment
+    && allocationCoveredByPayment
     && !registerPaymentMutation.isPending;
 
   return (
@@ -247,6 +251,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
           <DialogTitle>Registrar pago recibido</DialogTitle>
           <DialogDescription>
             {entityLabel} — Saldo actual: ${fmtMoney(Math.abs(balance))}
+            {balance < 0 ? " a favor" : ""}
           </DialogDescription>
         </DialogHeader>
 
@@ -288,9 +293,14 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                {selectedChargeErrors.map((message) => (
                  <p key={message} className="text-xs text-destructive mt-1">{message}</p>
                ))}
-               {hasSelectedCharges && selectedChargeErrors.length === 0 && !allocationTotalMatchesPayment && (
+               {hasSelectedCharges && selectedChargeErrors.length === 0 && !allocationCoveredByPayment && (
                  <p className="text-xs text-destructive mt-1">
                    Total de comprobantes: ${fmtMoney(allocationsTotal)} · Total aplicado: ${fmtMoney(totalApplied)}
+                 </p>
+               )}
+               {hasSelectedCharges && selectedChargeErrors.length === 0 && unallocatedSurplus > 0.009 && (
+                 <p className="text-xs text-muted-foreground mt-1">
+                   El excedente de ${fmtMoney(unallocatedSurplus)} quedará como saldo a favor.
                  </p>
                )}
             </div>

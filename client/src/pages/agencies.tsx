@@ -744,7 +744,11 @@ export default function AgenciesPage() {
                 ${fmtMoney(Math.abs(accountData?.balance || 0))}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {(accountData?.balance || 0) > 0 ? "Saldo pendiente de cobro" : "Sin deuda pendiente"}
+                {(accountData?.balance || 0) > 0
+                  ? "Saldo pendiente de cobro"
+                  : (accountData?.balance || 0) < 0
+                    ? "Saldo a favor"
+                    : "Sin deuda pendiente"}
               </p>
               {parseFloat(viewingAccountAgency?.commissionRate || "0") > 0 && (
                 <p className="text-xs text-muted-foreground mt-1" data-testid="text-agency-commission-rate">
@@ -754,7 +758,6 @@ export default function AgenciesPage() {
             </div>
             <Button
               onClick={() => setRegisterPaymentOpen(true)}
-              disabled={(accountData?.balance || 0) <= 0}
               data-testid="button-register-cc-payment"
             >
               <Plus className="h-4 w-4 mr-2" />

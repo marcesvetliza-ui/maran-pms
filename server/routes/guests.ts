@@ -173,8 +173,10 @@ async function prepareAccountPayment(
       allocations.push({ cargoId, amount: amount.toFixed(2) });
     }
 
-    if (Math.abs(allocationsTotal - accountingAmount) > PAYMENT_TOLERANCE) {
-      throw new AccountPaymentValidationError("El total aplicado debe coincidir con los comprobantes seleccionados");
+    // El pago puede superar lo asignado a comprobantes: el excedente queda
+    // como saldo a favor. Lo que no puede pasar es asignar más de lo pagado.
+    if (allocationsTotal - accountingAmount > PAYMENT_TOLERANCE) {
+      throw new AccountPaymentValidationError("El total aplicado a comprobantes no puede superar el monto pagado");
     }
   }
 
