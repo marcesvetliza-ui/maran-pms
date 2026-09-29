@@ -1184,6 +1184,42 @@ export function registerBillingRoutes(app: Express) {
       const paymentId = rawPaymentId === undefined || rawPaymentId === null ? "" : String(rawPaymentId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
+      if (reservationId && !paymentId) {
+        const directSettlementMethods = new Set([
+          "efectivo", "cash", "tarjeta", "tarjeta_debito", "tarjeta_credito",
+          "debito", "transferencia", "mercadopago", "cheque", "echeq",
+          "cuenta_corriente",
+        ]);
+        const settlementMethods = normalizedCashFormaPagoDetalle?.map((entry) => entry.method)
+          ?? (cashFormaPago ? [String(cashFormaPago)] : []);
+        const includesDirectSettlement = isReservationCcSettlement
+          || settlementMethods.some((method) => directSettlementMethods.has(String(method).toLowerCase()));
+        const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
+        const authoritativeAdvanceRequest = creditOperationId
+          ? [
+              ...(Array.isArray(creditReapplications) ? creditReapplications : []),
+              ...(Array.isArray(ordinaryAdvanceApplications) ? ordinaryAdvanceApplications : []),
+            ]
+          : [];
+        const appliedPriorMoney = authoritativeAdvanceRequest.reduce((sum: number, row: any) => {
+          const amount = Number(row?.amount);
+          return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+        }, 0);
+        const newSettlement = Math.max(0, invoiceTotal - appliedPriorMoney);
+        if (includesDirectSettlement && newSettlement > 0.009) {
+          const linkedGroup = await db.execute(sql`
+            SELECT 1 FROM group_reservation_links
+            WHERE reservation_id = ${reservationId}
+            LIMIT 1
+          `);
+          if (linkedGroup.rows.length > 0) {
+            return res.status(409).json({
+              error: "No se permite una nueva cobranza directa de una reserva grupal. Registre el cobro desde el Folio Maestro/grupal; los extras personales se registran por separado.",
+              code: "GROUP_RESERVATION_DIRECT_SETTLEMENT_BLOCKED",
+            });
+          }
+        }
+      }
       let existingCcPayment = false;
       let existingPaymentAmount: number | null = null;
       const allowedGroupIntentEndpoints = new Set([

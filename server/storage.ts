@@ -833,7 +833,7 @@ export interface IStorage {
   createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert>;
   acknowledgeHospitalityAlert(id: string, acknowledgedBy: string): Promise<HospitalityAlert | undefined>;
   bulkCheckIn(groupId: string): Promise<{ processed: number; skipped: number; skippedRooms: string[] }>;
-  bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }>;
+  bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; unresolvedBalance: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }>;
   closeGroupReservations(groupId: string, reservationIds: string[], operator: string): Promise<{ processed: number; checkedIn: number; confirmed: number }>;
   getExecutiveStats(from: string, to: string): Promise<any>;
   getReportOccupancy(from: string, to: string): Promise<any[]>;

@@ -47,6 +47,17 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
     await testPool.query(`INSERT INTO group_reservation_links (id, group_id, reservation_id) VALUES ($1, $2, $3)`,
       [`pgco-link-${ids.suffix}`, ids.groupId, ids.reservationId]);
 
+    await testPool.query("UPDATE groups SET notes = $2 WHERE id = $1", [ids.groupId, "Llegan en combi"]);
+    await testPool.query("UPDATE reservations SET notes = $2 WHERE id = $1", [ids.reservationId, "Cama extra"]);
+    const linkedRoom = await storage.getReservation(ids.reservationId);
+    expect(linkedRoom).toMatchObject({ groupNotes: "Llegan en combi", notes: "Cama extra" });
+    const linkedRooms = await storage.getReservationsForCheckOut();
+    expect(linkedRooms.find((room) => room.id === ids.reservationId))
+      .toMatchObject({ groupNotes: "Llegan en combi", notes: "Cama extra" });
+    await testPool.query("UPDATE groups SET notes = $2 WHERE id = $1", [ids.groupId, "Llegan a las 18 hs"]);
+    expect(await storage.getReservation(ids.reservationId))
+      .toMatchObject({ groupNotes: "Llegan a las 18 hs", notes: "Cama extra" });
+
     for (const amount of ["60000.00", "30000.00", "270000.00"]) {
       const paymentId = `pgco-parent-${amount}-${ids.suffix}`;
       await testPool.query(`INSERT INTO group_payments (id, group_id, amount, method, date, distribution, destination)
@@ -64,7 +75,7 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
     expect((await testPool.query("SELECT status FROM groups WHERE id = $1", [ids.groupId])).rows[0].status).toBe("finished");
   });
 
-  it("keeps an unpaid checked-in room pending", async () => {
+  it("checks out an unpaid room without inventing a personal or CC settlement", async () => {
     if (!testPool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
     const groupId = `pg-checkout-unpaid-group-${suffix}`;
@@ -82,9 +93,10 @@ runIfDatabaseIsConfigured("group bulk checkout operational ledger", () => {
         [`pgco-u-link-${suffix}`, groupId, reservationId]);
 
       const result = await storage.bulkCheckOut(groupId);
-      expect(result).toMatchObject({ processed: 0, skipped: 1 });
-      expect(result.pendingBalance[0]?.balance).toBe(1);
-      expect((await testPool.query("SELECT status FROM reservations WHERE id = $1", [reservationId])).rows[0].status).toBe("checked_in");
+      expect(result).toMatchObject({ processed: 1, skipped: 0, unresolvedBalance: 1 });
+      expect((await testPool.query("SELECT status FROM reservations WHERE id = $1", [reservationId])).rows[0].status).toBe("checked_out");
+      expect((await testPool.query("SELECT status FROM rooms WHERE id = $1", [ids.roomId])).rows[0].status).toBe("dirty");
+      expect((await testPool.query("SELECT COUNT(*)::int AS count FROM payments WHERE reservation_id = $1", [reservationId])).rows[0].count).toBe(0);
     } finally {
       await testPool.query("DELETE FROM group_reservation_links WHERE reservation_id = $1", [reservationId]);
       await testPool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);

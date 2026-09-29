@@ -988,10 +988,15 @@ export function registerGroupsRoutes(app: Express) {
     try {
       const result = await storage.bulkCheckOut(req.params.groupId);
       await audit(req, "update", "groups",
-        `Check-out grupal: ${result.processed} habitaciones procesadas`,
+        `Check-out grupal: ${result.processed} habitaciones procesadas — saldo grupal pendiente $${result.unresolvedBalance.toFixed(2)}`,
         { entityType: "group", entityId: req.params.groupId }
       );
-      res.json({ success: result.processed, failed: result.skipped, errors: result.pendingBalance.map((p: any) => `Hab. ${p.room}: saldo pendiente $${p.balance.toFixed(2)}`) });
+      res.json({
+        success: result.processed,
+        failed: result.skipped,
+        errors: [],
+        unresolvedBalance: result.unresolvedBalance,
+      });
     } catch (error: any) {
       console.error("[group-check-out-all]", error);
       res.status(error?.statusCode || 500).json({

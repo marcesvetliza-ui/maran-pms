@@ -29,6 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -146,6 +147,8 @@ export default function CheckOutPage() {
   const [bulkClosing, setBulkClosing] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [prefacturaOpen, setPrefacturaOpen] = useState(false);
+  const [groupCheckoutOpen, setGroupCheckoutOpen] = useState(false);
+  const [groupCheckoutReason, setGroupCheckoutReason] = useState("");
 
   // ── no-show state ──
   const [selectedNoShow, setSelectedNoShow] = useState<any>(null);
@@ -208,6 +211,37 @@ export default function CheckOutPage() {
     },
   });
 
+  const groupCheckoutMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      const body: { groupDeparture: true; reason?: string } = { groupDeparture: true };
+      if (reason.trim()) body.reason = reason.trim();
+      const response = await apiRequest("POST", `/api/reservations/${id}/check-out`, body);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error?.error || error?.message || "No se pudo registrar el check-out grupal.");
+      }
+      return response.json().catch(() => ({}));
+    },
+    onSuccess: () => {
+      const groupId = (selectedReservation as any)?.groupId;
+      if (groupId) queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
+      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      setGroupCheckoutOpen(false);
+      setSelectedReservation(null);
+      setGroupCheckoutReason("");
+      toast({ title: "Check-out grupal registrado", description: "La salida se registró sin cobro. Los saldos permanecen en el grupo." });
+    },
+    onError: (error: any) => {
+      toast({ title: "No se pudo cerrar la reserva grupal", description: String(error?.message || error), variant: "destructive" });
+    },
+  });
+
   // ── checkout helpers ──
   const overdueReservations = reservations?.filter((res) => res.checkOutDate < today) ?? [];
   const filteredReservations = reservations?.filter((res) => {
@@ -221,7 +255,12 @@ export default function CheckOutPage() {
 
   const startCheckout = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);
-    setPrefacturaOpen(true);
+    if ((reservation as any).groupId || (reservation as any).isGroup) {
+      setGroupCheckoutReason("");
+      setGroupCheckoutOpen(true);
+    } else {
+      setPrefacturaOpen(true);
+    }
   };
 
   // ── no-show handlers ──
@@ -353,6 +392,11 @@ export default function CheckOutPage() {
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-1">
+                          {((reservation as any).groupId || (reservation as any).isGroup) && (
+                            <Badge variant="outline" className="border-violet-300 text-violet-700 dark:border-violet-700 dark:text-violet-300" data-testid={`badge-group-${reservation.id}`}>
+                              Grupo{(reservation as any).groupCode ? ` · ${(reservation as any).groupCode}` : ""}
+                            </Badge>
+                          )}
                           {reservation.status === "checked_in" ? (
                             <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400">Alojado</Badge>
                           ) : (
@@ -416,7 +460,9 @@ export default function CheckOutPage() {
                           data-testid={`button-checkout-${reservation.id}`}
                         >
                           <LogOut className="mr-2 h-4 w-4" />
-                          Realizar Check-out
+                          {((reservation as any).groupId || (reservation as any).isGroup)
+                            ? "Check-out grupal sin cobro"
+                            : "Realizar Check-out"}
                         </Button>
                       </div>
                     </CardContent>
@@ -575,6 +621,63 @@ export default function CheckOutPage() {
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={groupCheckoutOpen}
+        onOpenChange={(open) => {
+          setGroupCheckoutOpen(open);
+          if (!open) {
+            setSelectedReservation(null);
+            setGroupCheckoutReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogDescription>
+              Confirme la salida operativa de esta habitación. Este proceso no abre Prefactura ni registra pagos o facturas.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedReservation && (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-md border bg-muted/40 p-3 space-y-1">
+                <p><span className="font-medium">Reserva:</span> {selectedReservation.id}</p>
+                <p><span className="font-medium">Grupo:</span> {(selectedReservation as any).groupCode || (selectedReservation as any).groupName || (selectedReservation as any).groupId || "ID no informado"}</p>
+                {(selectedReservation as any).outstandingBalance != null || (selectedReservation as any).balance != null
+                  ? <p><span className="font-medium">Saldo provisional:</span> ${fmtMoney(String((selectedReservation as any).outstandingBalance ?? (selectedReservation as any).balance))}</p>
+                  : <p className="font-medium">Saldo: Consultar folio grupal</p>}
+                <p className="text-xs text-muted-foreground">
+                  El saldo definitivo permanece en el folio grupal.
+                </p>
+              </div>
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                Los extras personales no se cobrarán ni se modificarán con esta salida. Deben revisarse por separado en el folio personal.
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="group-checkout-reason" className="font-medium">Motivo (opcional)</label>
+                <Textarea
+                  id="group-checkout-reason"
+                  value={groupCheckoutReason}
+                  onChange={(event) => setGroupCheckoutReason(event.target.value)}
+                  placeholder="Motivo de la salida grupal sin cobro"
+                  data-testid="input-group-checkout-reason"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGroupCheckoutOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => selectedReservation && groupCheckoutMutation.mutate({ id: selectedReservation.id, reason: groupCheckoutReason })}
+              disabled={!selectedReservation || groupCheckoutMutation.isPending}
+              data-testid="button-confirm-group-checkout-no-charge"
+            >
+              {groupCheckoutMutation.isPending ? "Registrando..." : "Confirmar salida sin cobro"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

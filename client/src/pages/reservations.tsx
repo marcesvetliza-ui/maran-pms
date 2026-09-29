@@ -122,6 +122,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
+import { GroupRoomObservations } from "@/components/group-room-observations";
 
 const roomNumberCollator = new Intl.Collator("es-AR", {
   numeric: true,
@@ -2263,7 +2264,15 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   cuenta_corriente: "Cuenta Corriente",
 };
 
-function ReservationDetailDialog({
+const GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS = new Set([
+  "efectivo",
+  "tarjeta_debito",
+  "tarjeta_credito",
+  "transferencia",
+  "mercadopago",
+]);
+
+export function ReservationDetailDialog({
   reservation,
   open,
   onOpenChange,
@@ -2281,6 +2290,7 @@ function ReservationDetailDialog({
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
+  const isGroupReservation = Boolean((reservation as any).groupId || (reservation as any).isGroup);
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
   const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
@@ -2307,6 +2317,8 @@ function ReservationDetailDialog({
 
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
+  const [groupDepartureConfirmOpen, setGroupDepartureConfirmOpen] = useState(false);
+  const [groupDepartureReason, setGroupDepartureReason] = useState("");
   const [showUninvoicedWarning, setShowUninvoicedWarning] = useState(false);
   const [uninvoicedWarningAction, setUninvoicedWarningAction] = useState<"facturar" | "checkout" | null>(null);
 
@@ -2332,9 +2344,42 @@ function ReservationDetailDialog({
   }, [open, reservation.id]);
 
   const openCheckoutWizard = () => {
+    if ((reservation as any).groupId || (reservation as any).isGroup) {
+      setGroupDepartureReason("");
+      setGroupDepartureConfirmOpen(true);
+      return;
+    }
     setShowFacturarMode("checkout");
     setShowFacturar(true);
   };
+
+  const groupDepartureMutation = useMutation({
+    mutationFn: async () => {
+      const body: { groupDeparture: true; reason?: string } = { groupDeparture: true };
+      if (groupDepartureReason.trim()) body.reason = groupDepartureReason.trim();
+      const response = await apiRequest("POST", `/api/reservations/${reservation.id}/check-out`, body);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error?.error || error?.message || "No se pudo registrar la salida grupal.");
+      }
+      return response.json().catch(() => ({}));
+    },
+    onSuccess: () => {
+      const groupId = (reservation as any).groupId;
+      if (groupId) queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      setGroupDepartureConfirmOpen(false);
+      onOpenChange(false);
+      toast({ title: "Check-out grupal registrado", description: "Sin cobro; los saldos permanecen en el grupo." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error al cerrar la reserva grupal", description: String(error?.message || error), variant: "destructive" });
+    },
+  });
 
   const openFacturarSolo = () => {
     setShowFacturar(true);
@@ -2565,6 +2610,22 @@ function ReservationDetailDialog({
 
   const safeCharges = Array.isArray(charges) ? charges : [];
   const safePayments = Array.isArray(payments) ? payments : [];
+  const activePersonalExtraCharges = safeCharges.filter((charge: any) =>
+    charge.category !== "room" &&
+    charge.category !== "payment" &&
+    charge.category !== "adjustment" &&
+    charge.status !== "anulado" &&
+    !isReservationCreditNoteAdjustment(charge)
+  );
+  const recordedPersonalExtrasPayments = safePayments.filter((payment: any) =>
+    payment.status !== "anulado" &&
+    (payment.paymentPurpose === "personal_extras" || String(payment.notes || "").includes("[personal_extras]"))
+  );
+  const groupPersonalExtrasBalance = Math.max(
+    0,
+    activePersonalExtraCharges.reduce((sum: number, charge: any) => sum + Number(charge.amount || 0), 0) -
+      recordedPersonalExtrasPayments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0),
+  );
 
   // Derive the invoice ID linked to the payment currently being voided.
   // Used to check whether an active NC already exists before showing the checkbox.
@@ -2699,7 +2760,28 @@ function ReservationDetailDialog({
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; billingTarget?: string; reservationId: string; date: string }) => {
+    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; billingTarget?: string; reservationId: string; date: string; paymentPurpose?: "personal_extras" }) => {
+      if (isGroupReservation) {
+        if (paymentData.paymentPurpose !== "personal_extras") {
+          throw new Error("En una reserva grupal solo se pueden registrar pagos de extras personales desde este folio.");
+        }
+        if (!GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS.has(paymentData.method) || paymentData.billingTarget && paymentData.billingTarget !== "guest") {
+          throw new Error("Los extras personales requieren un medio de pago directo al huésped; Cuenta Corriente no está disponible aquí.");
+        }
+        if (Number(paymentData.amount) > groupPersonalExtrasBalance + 0.009) {
+          throw new Error("El importe supera el saldo estimado de extras personales. Actualice el folio y verifique el saldo.");
+        }
+        return apiRequest("POST", "/api/payments", {
+          amount: paymentData.amount,
+          method: paymentData.method,
+          reference: paymentData.reference,
+          notes: paymentData.notes,
+          reservationId: paymentData.reservationId,
+          date: paymentData.date,
+          billingTarget: "guest",
+          paymentPurpose: "personal_extras",
+        });
+      }
       return apiRequest("POST", "/api/payments", paymentData);
     },
     onSuccess: () => {
@@ -2869,14 +2951,28 @@ function ReservationDetailDialog({
     if (!newPayment.amount) return;
     addPaymentMutation.mutate({
       ...newPayment,
+      ...(isGroupReservation ? { paymentPurpose: "personal_extras" as const, billingTarget: "guest" } : {}),
       reservationId: reservation.id,
       date: getLocalToday(),
-    });
+    } as any);
   };
 
   const handleAddMultiPayment = async () => {
     const validRows = paymentRows.filter(r => r.amount && parseFloat(r.amount) > 0);
     if (validRows.length === 0) return;
+
+    if (isGroupReservation) {
+      const invalidMethod = validRows.find((row) => !GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS.has(row.method));
+      if (invalidMethod) {
+        toast({ title: "Medio de pago no disponible", description: "Los extras personales de una reserva grupal requieren un medio de pago directo.", variant: "destructive" });
+        return;
+      }
+      const requestedAmount = validRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      if (requestedAmount > groupPersonalExtrasBalance + 0.009) {
+        toast({ title: "Importe superior a extras pendientes", description: `El máximo disponible estimado es $${fmtMoney(String(groupPersonalExtrasBalance))}.`, variant: "destructive" });
+        return;
+      }
+    }
 
     // Bug C fix: prevent advances to a company/agency not associated with this reservation
     const invalidCompany = validRows.find(
@@ -2918,9 +3014,10 @@ function ReservationDetailDialog({
           method: row.method as PaymentMethod,
           reference: row.reference || undefined,
           notes: undefined,
-          billingTarget: row.billingTarget as "guest" | "company",
+          billingTarget: (isGroupReservation ? "guest" : row.billingTarget) as "guest" | "company",
           reservationId: reservation.id,
           date: getLocalToday(),
+          ...(isGroupReservation ? { paymentPurpose: "personal_extras" as const } : {}),
           ...(row.companyId ? { companyId: row.companyId } : {}),
           ...(row.agencyId ? { agencyId: row.agencyId } : {}),
         } as any);
@@ -3206,10 +3303,12 @@ function ReservationDetailDialog({
               </div>
             </div>
 
-            {reservation.notes && (
+            {(reservation.notes || reservation.groupNotes) && (
               <div className="p-3 border rounded-lg">
-                <p className="text-sm text-muted-foreground mb-1">Notas</p>
-                <p className="text-sm">{reservation.notes}</p>
+                <p className="text-sm text-muted-foreground mb-1">Observaciones</p>
+                <div className="text-sm">
+                  <GroupRoomObservations groupNotes={reservation.groupNotes} roomNotes={reservation.notes} />
+                </div>
               </div>
             )}
 
@@ -3975,24 +4074,37 @@ function ReservationDetailDialog({
 
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Pagos / Anticipos</h4>
+                <h4 className="font-semibold">{isGroupReservation ? "Cobro de extras personales" : "Pagos / Anticipos"}</h4>
                 {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => {
                   if (!showAddPayment) {
-                    const amt = balance > 0 ? fmtMoney(balance) : "";
+                    const amt = isGroupReservation
+                      ? (groupPersonalExtrasBalance > 0 ? groupPersonalExtrasBalance.toFixed(2) : "")
+                      : (balance > 0 ? fmtMoney(balance) : "");
                     setNewPayment({ ...newPayment, amount: amt });
                     setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
                   setShowAddPayment(!showAddPayment);
-                }} data-testid="button-add-payment">
+                }} data-testid="button-add-payment" disabled={isGroupReservation && groupPersonalExtrasBalance <= 0.009}>
                   <Plus className="h-4 w-4 mr-1" />
-                  Registrar Pago
+                  {isGroupReservation ? "Cobrar extras personales" : "Registrar Pago"}
                 </Button>
                 )}
               </div>
 
+              {isGroupReservation && (
+                <div className="mx-3 mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-testid="group-personal-extras-warning">
+                  Esta reserva pertenece a un grupo. Aquí solo se cobran extras personales pendientes (estimado: ${fmtMoney(String(groupPersonalExtrasBalance))}); no se aceptan pagos de alojamiento, Cuenta Corriente ni pagos a empresa/agencia. El saldo grupal de alojamiento se gestiona en el folio del grupo.
+                </div>
+              )}
+
               {showAddPayment && (
                 <div className="p-3 border-b bg-muted/30 space-y-2">
+                  {isGroupReservation && (
+                    <p className="text-xs text-muted-foreground">
+                      El servidor verificará nuevamente el saldo de extras personales antes de registrar el pago.
+                    </p>
+                  )}
                   {paymentRows.map((row, index) => (
                     <div key={index} className="space-y-1">
                       <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
@@ -4001,6 +4113,9 @@ function ReservationDetailDialog({
                           <Input
                             type="number"
                             placeholder="Monto"
+                            max={isGroupReservation ? groupPersonalExtrasBalance : undefined}
+                            min="0"
+                            step="0.01"
                             value={row.amount}
                             onChange={(e) => {
                               const updated = [...paymentRows];
@@ -4028,7 +4143,7 @@ function ReservationDetailDialog({
                             <SelectItem value="tarjeta_credito">Crédito</SelectItem>
                             <SelectItem value="transferencia">Transferencia</SelectItem>
                             <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                            <SelectItem value="cuenta_corriente">Cta. Cte.</SelectItem>
+                            {!isGroupReservation && <SelectItem value="cuenta_corriente">Cta. Cte.</SelectItem>}
                           </SelectContent>
                         </Select>
                         <div className="flex gap-1 items-center">
@@ -4043,23 +4158,27 @@ function ReservationDetailDialog({
                             className="flex-1"
                             data-testid={`input-payment-reference-${index}`}
                           />
-                          <Select
-                            value={row.billingTarget}
-                            onValueChange={(value) => {
-                              const updated = [...paymentRows];
-                              updated[index].billingTarget = value;
-                              setPaymentRows(updated);
-                            }}
-                          >
-                            <SelectTrigger className="w-[90px]" data-testid={`select-billing-target-${index}`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="guest">Huésped</SelectItem>
-                              <SelectItem value="company">Empresa</SelectItem>
-                              <SelectItem value="agency">Agencia</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          {isGroupReservation
+                            ? <span className="text-xs rounded-md border px-2 py-2 text-muted-foreground">Huésped</span>
+                            : (
+                              <Select
+                                value={row.billingTarget}
+                                onValueChange={(value) => {
+                                  const updated = [...paymentRows];
+                                  updated[index].billingTarget = value;
+                                  setPaymentRows(updated);
+                                }}
+                              >
+                                <SelectTrigger className="w-[90px]" data-testid={`select-billing-target-${index}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="guest">Huésped</SelectItem>
+                                  <SelectItem value="company">Empresa</SelectItem>
+                                  <SelectItem value="agency">Agencia</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
                         </div>
                         {/* Aviso CC huésped individual */}
                         {row.method === "cuenta_corriente" && row.billingTarget === "guest" && (
@@ -4159,20 +4278,27 @@ function ReservationDetailDialog({
                     </div>
                   ))}
                   <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs"
-                      onClick={() => setPaymentRows([...paymentRows, { amount: "", method: "efectivo", reference: "", billingTarget: "guest" }])}
-                      data-testid="button-add-payment-row"
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Agregar método
-                    </Button>
+                    {!isGroupReservation && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs"
+                        onClick={() => setPaymentRows([...paymentRows, { amount: "", method: "efectivo", reference: "", billingTarget: "guest" }])}
+                        data-testid="button-add-payment-row"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Agregar método
+                      </Button>
+                    )}
                     <span>
                       Total: ${fmtMoney(paymentRows.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0))}
                     </span>
                   </div>
+                  {isGroupReservation && paymentRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0) > groupPersonalExtrasBalance + 0.009 && (
+                    <p className="text-xs text-destructive" role="alert">
+                      El total supera el saldo estimado de extras personales (${fmtMoney(String(groupPersonalExtrasBalance))}).
+                    </p>
+                  )}
                   <div className="flex justify-end gap-2 mt-2">
                     <Button size="sm" variant="ghost" onClick={() => { setShowAddPayment(false); setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]); }}>
                       Cancelar
@@ -4180,7 +4306,14 @@ function ReservationDetailDialog({
                     <Button 
                       size="sm" 
                       onClick={handleAddMultiPayment} 
-                      disabled={addPaymentMutation.isPending || paymentRows.every(r => !r.amount)}
+                      disabled={
+                        addPaymentMutation.isPending ||
+                        paymentRows.every(r => !r.amount) ||
+                        (isGroupReservation && (
+                          paymentRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0) > groupPersonalExtrasBalance + 0.009 ||
+                          paymentRows.some(row => Number(row.amount) > 0 && !GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS.has(row.method))
+                        ))
+                      }
                       data-testid="button-confirm-payment"
                     >
                       Confirmar
@@ -4210,6 +4343,11 @@ function ReservationDetailDialog({
                   <div key={payment.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""} ${linkFailed && !isAnulado ? "bg-orange-50/50 dark:bg-orange-950/10" : ""}`} data-testid={`payment-row-${payment.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant="outline" className="text-xs">{paymentMethodLabels[payment.method]}</Badge>
+                      {isGroupReservation && String((payment as any).notes || "").includes("[personal_extras]") && (
+                        <Badge variant="secondary" className="text-xs" data-testid={`badge-personal-extras-payment-${payment.id}`}>
+                          Extras personales
+                        </Badge>
+                      )}
                       {isAnulado && <Badge variant="destructive" className="text-xs">ANULADO</Badge>}
                       {linkFailed && !isAnulado && (
                         <Badge variant="outline" className="text-xs text-orange-700 border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-600">
@@ -5315,6 +5453,47 @@ function ReservationDetailDialog({
         <NotaCreditoDialog invoiceId={ncForInvoiceId} onClose={() => setNcForInvoiceId(null)} />
       )}
 
+      <Dialog
+        open={groupDepartureConfirmOpen}
+        onOpenChange={(open) => {
+          setGroupDepartureConfirmOpen(open);
+          if (!open) setGroupDepartureReason("");
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogDescription>
+              Reserva {reservation.id} · Grupo {(reservation as any).groupCode || (reservation as any).groupName || (reservation as any).groupId || "sin ID"}.
+              Se cerrará la habitación sin abrir Prefactura, registrar pagos ni cargar saldo a Cuenta Corriente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              Los saldos de alojamiento quedan en el grupo. Los extras personales no se cobran ni se modifican; deben revisarse por separado en el folio personal.
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="reservation-group-checkout-reason" className="font-medium">Motivo (opcional)</label>
+              <Textarea
+                id="reservation-group-checkout-reason"
+                value={groupDepartureReason}
+                onChange={(event) => setGroupDepartureReason(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGroupDepartureConfirmOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => groupDepartureMutation.mutate()}
+              disabled={groupDepartureMutation.isPending}
+              data-testid="button-confirm-reservation-group-departure"
+            >
+              {groupDepartureMutation.isPending ? "Registrando..." : "Confirmar salida sin cobro"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Prefactura / Facturar Saldo / Check-out desde folio */}
       <PrefacturaDialog
         open={showFacturar}
@@ -5525,6 +5704,8 @@ export default function ReservationsPage() {
   const [pendingCheckInId, setPendingCheckInId] = useState<string | null>(null);
   const [listCheckoutWarningResId, setListCheckoutWarningResId] = useState<string | null>(null);
   const [listCheckoutWarningCount, setListCheckoutWarningCount] = useState(0);
+  const [listGroupCheckoutReservation, setListGroupCheckoutReservation] = useState<ReservationWithDetails | null>(null);
+  const [listGroupCheckoutReason, setListGroupCheckoutReason] = useState("");
 
   const { data: webPendingReservations = [], refetch: refetchWeb } = useQuery<any[]>({
     queryKey: ["/api/admin/booking-engine/reservations"],
@@ -5691,6 +5872,30 @@ export default function ReservationsPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Estado actualizado", description: "El estado de la reserva ha sido actualizado." });
+    },
+  });
+
+  const listGroupDepartureMutation = useMutation({
+    mutationFn: async () => {
+      if (!listGroupCheckoutReservation) throw new Error("No se seleccionó una reserva grupal.");
+      const body: { groupDeparture: true; reason?: string } = { groupDeparture: true };
+      if (listGroupCheckoutReason.trim()) body.reason = listGroupCheckoutReason.trim();
+      return apiRequest("POST", `/api/reservations/${listGroupCheckoutReservation.id}/check-out`, body);
+    },
+    onSuccess: () => {
+      const groupId = (listGroupCheckoutReservation as any)?.groupId;
+      if (groupId) queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      setListGroupCheckoutReservation(null);
+      setListGroupCheckoutReason("");
+      toast({ title: "Check-out grupal registrado", description: "Sin cobro; los saldos permanecen en el grupo." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error al cerrar la reserva grupal", description: String(error?.message || error), variant: "destructive" });
     },
   });
 
@@ -6429,6 +6634,11 @@ export default function ReservationsPage() {
                           {reservation.status === "checked_in" && (
                             <DropdownMenuItem
                               onClick={async () => {
+                                if ((reservation as any).groupId || (reservation as any).isGroup) {
+                                  setListGroupCheckoutReason("");
+                                  setListGroupCheckoutReservation(reservation);
+                                  return;
+                                }
                                 try {
                                   const [paymentsRes, invoicesRes] = await Promise.all([
                                     fetch(`/api/reservations/${reservation.id}/payments?includeAnulados=true`, { credentials: "include" }),
@@ -6706,6 +6916,49 @@ export default function ReservationsPage() {
       </Dialog>
 
       {/* Warning: anticipos sin factura (checkout desde lista) */}
+      <Dialog
+        open={!!listGroupCheckoutReservation}
+        onOpenChange={(open) => {
+          if (!open) {
+            setListGroupCheckoutReservation(null);
+            setListGroupCheckoutReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogDescription>
+              Reserva {listGroupCheckoutReservation?.id} · Grupo {(listGroupCheckoutReservation as any)?.groupCode || (listGroupCheckoutReservation as any)?.groupName || (listGroupCheckoutReservation as any)?.groupId || "sin ID"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>Se registrará la salida sin Prefactura, pagos, facturas ni Cuenta Corriente. El saldo de alojamiento permanecerá en el folio grupal.</p>
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              Los extras personales no se cobran ni modifican aquí; revíselos por separado en el folio personal.
+            </p>
+            <div className="space-y-2">
+              <label htmlFor="list-group-checkout-reason" className="font-medium">Motivo (opcional)</label>
+              <Textarea
+                id="list-group-checkout-reason"
+                value={listGroupCheckoutReason}
+                onChange={(event) => setListGroupCheckoutReason(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setListGroupCheckoutReservation(null)}>Cancelar</Button>
+            <Button
+              onClick={() => listGroupDepartureMutation.mutate()}
+              disabled={listGroupDepartureMutation.isPending}
+              data-testid="button-list-group-checkout"
+            >
+              {listGroupDepartureMutation.isPending ? "Registrando..." : "Confirmar salida sin cobro"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!listCheckoutWarningResId} onOpenChange={(open) => { if (!open) setListCheckoutWarningResId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

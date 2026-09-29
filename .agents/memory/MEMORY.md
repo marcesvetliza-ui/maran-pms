@@ -75,3 +75,5 @@
 - [Bulk financial repair safety](bulk-financial-repair-safety.md) — never expose mutating historical reconciliation as a one-click action; require preview, batch identity, and exact reversal.
 - [Inventory-neutral group edits](inventory-neutral-group-edits.md) — guest-only placeholder edits must remain possible despite pre-existing inventory shortages; only demand-changing fields trigger inventory guards.
 - [Direct CC receipt voiding](direct-cc-receipt-voiding.md) — void only direct CC receipts; preserve identity/audit and reverse accounting exactly once without touching linked collection flows.
+- [Group personal extras funding](group-personal-extras-funding.md) — never prorate unallocated master receipts to room extras; uncertain excess requires reconciliation before personal collection.
+- [Group notes in room observations](group-notes-observations.md) — display current group notes alongside each room's own notes; never copy them into editable reservation notes.
