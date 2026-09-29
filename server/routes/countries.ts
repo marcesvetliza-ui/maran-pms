@@ -2,7 +2,13 @@ import type { Express } from "express";
 import { db } from "../db";
 import { countries, insertCountrySchema } from "../../shared/schema";
 import { eq, asc } from "drizzle-orm";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requireRole, requirePermission } from "../auth";
+
+// Etapa 3 del ABM de usuarios: mismo resourceKey que "Países (ARCA)" en el
+// sidebar (admin-only). El GET de abajo queda con requireRole(["admin",
+// "manager"]) — mismo array de hoy — porque ese permiso no tiene un
+// resourceKey exacto (el sidebar solo deja pasar a "admin"); no se toca acá.
+const COUNTRIES_ADMIN_RESOURCE_KEY = "sidebar:/admin/countries";
 
 export function registerCountriesRoutes(app: Express) {
   // GET /api/countries — lista activa (pública, para selects)
@@ -33,7 +39,7 @@ export function registerCountriesRoutes(app: Express) {
   });
 
   // POST /api/admin/countries
-  app.post("/api/admin/countries", requireAuth, requireRole(["admin"]), async (req, res) => {
+  app.post("/api/admin/countries", requireAuth, requirePermission(COUNTRIES_ADMIN_RESOURCE_KEY), async (req, res) => {
     try {
       const parsed = insertCountrySchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.message });
@@ -46,7 +52,7 @@ export function registerCountriesRoutes(app: Express) {
   });
 
   // PATCH /api/admin/countries/:id
-  app.patch("/api/admin/countries/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  app.patch("/api/admin/countries/:id", requireAuth, requirePermission(COUNTRIES_ADMIN_RESOURCE_KEY), async (req, res) => {
     try {
       const { id } = req.params;
       const { name, afipCode, isActive, displayOrder } = req.body;
@@ -65,7 +71,7 @@ export function registerCountriesRoutes(app: Express) {
   });
 
   // DELETE /api/admin/countries/:id
-  app.delete("/api/admin/countries/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  app.delete("/api/admin/countries/:id", requireAuth, requirePermission(COUNTRIES_ADMIN_RESOURCE_KEY), async (req, res) => {
     try {
       const { id } = req.params;
       await db.delete(countries).where(eq(countries.id, id));

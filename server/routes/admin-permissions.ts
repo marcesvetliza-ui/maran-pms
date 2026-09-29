@@ -18,6 +18,13 @@ const KNOWN_ROLES = new Set<string>(ALL_SYSTEM_ROLES);
  * La mutación en sí (grantPermission/revokePermission, con recarga del caché
  * en memoria) ya existía desde la Etapa 1 — acá solo se agrega la capa HTTP,
  * validación de entrada y auditoría.
+ *
+ * A propósito siguen con requireRole(["admin"]) hardcodeado en vez de
+ * requirePermission("sidebar:/admin/permisos") (Etapa 3): si usaran su
+ * propio resourceKey, un admin que se destilde a sí mismo por error en esta
+ * misma pantalla se quedaría sin forma de revertirlo — ni por acá ni por la
+ * UI, que dependen de este mismo endpoint. Este único módulo queda afuera
+ * de la migración de Etapa 3 por esa razón.
  */
 export function registerAdminPermissionsRoutes(app: Express) {
   app.get("/api/admin/role-permissions", requireRole(["admin"]), async (_req, res) => {
