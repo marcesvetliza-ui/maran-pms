@@ -38,6 +38,7 @@ const SpaPage = lazy(() => import("@/pages/spa"));
 const EventsPage = lazy(() => import("@/pages/events"));
 const MaintenancePage = lazy(() => import("@/pages/maintenance"));
 const AdministrationPage = lazy(() => import("@/pages/administration"));
+const AdminPermisosPage = lazy(() => import("@/pages/admin-permisos"));
 const PackagesPage = lazy(() => import("@/pages/packages"));
 const CompaniesPage = lazy(() => import("@/pages/companies"));
 const AgenciesPage = lazy(() => import("@/pages/agencies"));
@@ -243,6 +244,7 @@ function Router() {
         <Route path="/events" component={EventsPage} />
         <Route path="/maintenance" component={MaintenancePage} />
         <Route path="/administration">{() => <PermissionRoute component={AdministrationPage} resourceKey="sidebar:/administration" />}</Route>
+        <Route path="/admin/permisos">{() => <PermissionRoute component={AdminPermisosPage} resourceKey="sidebar:/admin/permisos" />}</Route>
         <Route path="/packages" component={PackagesPage} />
         <Route path="/companies" component={CompaniesPage} />
         <Route path="/agencies" component={AgenciesPage} />

@@ -54,6 +54,7 @@ import {
   CreditCard,
   FileWarning,
   Receipt,
+  ShieldCheck,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -201,6 +202,7 @@ const menuSections = [
       { label: "Conf. Presupuestos",     icon: ClipboardList, href: "/config/presupuestos", resourceKey: "sidebar:/config/presupuestos" },
       { label: "Puntos de Venta",        icon: Store,         href: "/pos-configs",         resourceKey: "sidebar:/pos-configs" },
       { label: "Seguridad de claves",    icon: KeyRound,      href: "/seguridad",           resourceKey: "sidebar:/seguridad" },
+      { label: "Permisos por Rol",       icon: ShieldCheck,   href: "/admin/permisos",      resourceKey: "sidebar:/admin/permisos" },
       { label: "Código fuente",          icon: Code2,         href: "/source-code",         resourceKey: "sidebar:/source-code", adminOnly: true, devOnly: true },
     ],
   },

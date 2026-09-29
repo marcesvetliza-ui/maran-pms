@@ -173,6 +173,87 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "sidebar:/source-code": ["admin"],
 };
 
+/**
+ * Etiquetas legibles para la pantalla de administración de permisos (Etapa 2).
+ * Reproduce label + sección de menuSections (client/src/components/app-sidebar.tsx)
+ * para cada resourceKey de INITIAL_ROLE_PERMISSIONS — se mantiene a mano en vez
+ * de importar el array del cliente para no acoplar este módulo del servidor a
+ * componentes/íconos de React; un test cruza las claves de ambos objetos para
+ * detectar faltantes.
+ */
+export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: string }> = {
+  "sidebar:/": { label: "Dashboard", section: "PMS — Recepción" },
+  "sidebar:/planning": { label: "Planning", section: "PMS — Recepción" },
+  "sidebar:/reservations": { label: "Reservas", section: "PMS — Recepción" },
+  "sidebar:/new-reservation": { label: "Reserva rápida", section: "PMS — Recepción" },
+  "sidebar:/check-in": { label: "Check in", section: "PMS — Recepción" },
+  "sidebar:/check-out": { label: "Check out", section: "PMS — Recepción" },
+  "sidebar:/rooms": { label: "Habitaciones", section: "PMS — Recepción" },
+  "sidebar:group/reportes-recepcion": { label: "Reportes", section: "PMS — Recepción" },
+  "sidebar:/rooms?tab=ocupadas": { label: "Hab. Ocupadas", section: "PMS — Recepción" },
+  "sidebar:/daily-report": { label: "Planilla Diaria", section: "PMS — Recepción" },
+  "sidebar:/admin/indec": { label: "Reporte INDEC", section: "PMS — Recepción" },
+  "sidebar:/rate-plans": { label: "Tarifas", section: "PMS — Recepción" },
+  "sidebar:/guests": { label: "Huéspedes", section: "PMS — Recepción" },
+  "sidebar:/billing": { label: "Facturación", section: "PMS — Recepción" },
+
+  "sidebar:/admin/booking-engine": { label: "Motor de Reservas", section: "Comercial" },
+  "sidebar:/ota-channels": { label: "Canales OTAs", section: "Comercial" },
+  "sidebar:/channex": { label: "Channex (prueba)", section: "Comercial" },
+  "sidebar:/groups": { label: "Grupos", section: "Comercial" },
+  "sidebar:/companies": { label: "Empresas", section: "Comercial" },
+  "sidebar:/agencies": { label: "Agencias", section: "Comercial" },
+  "sidebar:/packages": { label: "Paquetes", section: "Comercial" },
+  "sidebar:/presupuestos": { label: "Presupuestos", section: "Comercial" },
+
+  "sidebar:/restaurant": { label: "Restaurant", section: "Servicios" },
+  "sidebar:/spa": { label: "Spa", section: "Servicios" },
+  "sidebar:/spa-clients": { label: "Clientes Spa", section: "Servicios" },
+  "sidebar:/events": { label: "Eventos", section: "Servicios" },
+  "sidebar:/gift-vouchers": { label: "Vouchers Regalo", section: "Servicios" },
+
+  "sidebar:/housekeeping": { label: "Housekeeping", section: "Operaciones" },
+  "sidebar:/maintenance": { label: "Mantenimiento", section: "Operaciones" },
+  "sidebar:/inventory": { label: "Inventario", section: "Operaciones" },
+  "sidebar:/restaurant/recetas": { label: "Recetas y Costos", section: "Operaciones" },
+  "sidebar:/operaciones/emitir-comprobante": { label: "Emitir Comprobante", section: "Operaciones" },
+
+  "sidebar:/hospitality": { label: "Hospitalidad", section: "Experiencia al Huésped" },
+  "sidebar:/chatbot": { label: "MARA Chatbot", section: "Experiencia al Huésped" },
+  "sidebar:/reviews": { label: "Reseñas", section: "Experiencia al Huésped" },
+
+  "sidebar:/admin": { label: "Administración", section: "Administración" },
+  "sidebar:/admin/cuentas": { label: "Cuentas Corrientes", section: "Administración" },
+  "sidebar:/cash-register": { label: "Caja", section: "Administración" },
+  "sidebar:/admin/accounting-accounts": { label: "Plan de Cuentas", section: "Administración" },
+  "sidebar:/admin/cost-centers": { label: "Centros de Costo", section: "Administración" },
+  "sidebar:/admin/spa-fiscal-review": { label: "Revisión fiscal SPA", section: "Administración" },
+
+  "sidebar:/operaciones": { label: "Operaciones", section: "Gerencia & Revenue" },
+  "sidebar:/executive": { label: "Ejecutivo", section: "Gerencia & Revenue" },
+  "sidebar:/reports": { label: "Reportes", section: "Gerencia & Revenue" },
+
+  "sidebar:/administration": { label: "Configuración", section: "Configuración" },
+  "sidebar:/admin/room-types/integrity": { label: "Reparar tipos de habitación", section: "Configuración" },
+  "sidebar:/email-config": { label: "Correo & Backup", section: "Configuración" },
+  "sidebar:/admin/countries": { label: "Países (ARCA)", section: "Configuración" },
+  "sidebar:/config/presupuestos": { label: "Conf. Presupuestos", section: "Configuración" },
+  "sidebar:/pos-configs": { label: "Puntos de Venta", section: "Configuración" },
+  "sidebar:/seguridad": { label: "Seguridad de claves", section: "Configuración" },
+  "sidebar:/source-code": { label: "Código fuente", section: "Configuración" },
+  // Agregado en Etapa 2, después del seed inicial — no forma parte de
+  // INITIAL_ROLE_PERMISSIONS (registro histórico de lo sembrado una sola
+  // vez); se siembra con su propio paso puntual en migrate.ts.
+  "sidebar:/admin/permisos": { label: "Permisos por Rol", section: "Configuración" },
+};
+
+/** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */
+export const ALL_SYSTEM_ROLES: SystemUserRole[] = [
+  "admin", "manager", "ama_de_llaves", "reception", "housekeeping", "maintenance",
+  "restaurant", "spa", "events", "resp_deposito", "resp_administracion",
+  "responsable_area", "jefe_recepcion", "comercial",
+];
+
 let cache: Map<SystemUserRole, Set<string>> | null = null;
 
 /**

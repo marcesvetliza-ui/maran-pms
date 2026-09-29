@@ -53,6 +53,7 @@ import { buildManualCashMovement } from "./cash-manual-movement";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { registerPosConfigsRoutes } from "./routes/pos-configs";
 import { registerCostCentersRoutes, isValidCentroCosto } from "./routes/cost-centers";
+import { registerAdminPermissionsRoutes } from "./routes/admin-permissions";
 import { registerGiftVouchersRoutes } from "./routes/gift-vouchers";
 import {
   calculatePurchaseInvoiceTotal,
@@ -3992,6 +3993,7 @@ export async function registerRoutes(
   registerCountriesRoutes(app);
   registerPosConfigsRoutes(app);
   registerCostCentersRoutes(app);
+  registerAdminPermissionsRoutes(app);
   registerGiftVouchersRoutes(app);
   registerGuestsRoutes(app);
   registerReservationsRoutes(app);

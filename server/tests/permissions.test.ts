@@ -36,6 +36,8 @@ const {
   grantPermission,
   revokePermission,
   INITIAL_ROLE_PERMISSIONS,
+  RESOURCE_KEY_LABELS,
+  ALL_SYSTEM_ROLES,
 } = await import("../permissions");
 
 afterEach(() => {
@@ -141,5 +143,33 @@ describe("INITIAL_ROLE_PERMISSIONS — catálogo inicial del sidebar", () => {
     const allRoles = new Set(Object.values(INITIAL_ROLE_PERMISSIONS).flat());
     expect(allRoles.has("gobernanta" as any)).toBe(false);
     expect(allRoles.has("administracion" as any)).toBe(false);
+  });
+});
+
+describe("RESOURCE_KEY_LABELS / ALL_SYSTEM_ROLES — catálogo de la pantalla de Etapa 2", () => {
+  it("tiene una etiqueta para cada resourceKey del seed inicial (los 52 de Etapa 1)", () => {
+    for (const key of Object.keys(INITIAL_ROLE_PERMISSIONS)) {
+      expect(RESOURCE_KEY_LABELS[key], key).toBeDefined();
+    }
+  });
+
+  it("incluye el resourceKey de la propia pantalla de permisos (sembrado aparte, fuera del seed masivo)", () => {
+    expect(RESOURCE_KEY_LABELS["sidebar:/admin/permisos"]).toEqual({
+      label: "Permisos por Rol",
+      section: "Configuración",
+    });
+    expect(INITIAL_ROLE_PERMISSIONS["sidebar:/admin/permisos"]).toBeUndefined();
+  });
+
+  it("cada etiqueta tiene label y section no vacíos", () => {
+    for (const [key, meta] of Object.entries(RESOURCE_KEY_LABELS)) {
+      expect(meta.label.length, key).toBeGreaterThan(0);
+      expect(meta.section.length, key).toBeGreaterThan(0);
+    }
+  });
+
+  it("ALL_SYSTEM_ROLES tiene los 14 roles del sistema, sin duplicados", () => {
+    expect(ALL_SYSTEM_ROLES).toHaveLength(14);
+    expect(new Set(ALL_SYSTEM_ROLES).size).toBe(14);
   });
 });

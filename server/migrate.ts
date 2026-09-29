@@ -4674,6 +4674,16 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   });
 
+  // Etapa 2 del ABM de usuarios: nuevo ítem de sidebar para administrar
+  // role_permissions. No es un reseed masivo (ver comentario del paso
+  // anterior) — un INSERT puntual con ON CONFLICT DO NOTHING, así una tabla
+  // ya editada por un admin no se pisa en reruns.
+  await withTimeout("role_permissions (seed sidebar:/admin/permisos)", T, async () => {
+    await db.insert(rolePermissions)
+      .values({ role: "admin", resourceKey: "sidebar:/admin/permisos" })
+      .onConflictDoNothing();
+  });
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
