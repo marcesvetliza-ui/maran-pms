@@ -12,6 +12,7 @@ const { apiRequestMock } = vi.hoisted(() => ({
 }));
 
 let pendingFiscalCollections: any[] = [];
+let groupFixtureForTest: any;
 
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>("@/lib/queryClient");
@@ -121,6 +122,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
     vi.clearAllMocks();
     queryClient.clear();
     pendingFiscalCollections = [];
+    groupFixtureForTest = GROUP_FIXTURE;
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -129,7 +131,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
       if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(INVOICE_SNAPSHOT_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/pending-fiscal-collections`)) return jsonResponse(pendingFiscalCollections);
       if (url.endsWith(`/api/groups/${GROUP_ID}/direct-invoices`)) return jsonResponse([]);
-      if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(GROUP_FIXTURE);
+      if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(groupFixtureForTest);
       if (url.endsWith("/api/bed-types")) return jsonResponse([]);
       if (url.endsWith("/api/billing/config")) return jsonResponse({});
       if (url.endsWith("/api/companies")) return jsonResponse([{
@@ -266,6 +268,22 @@ describe("Pago Grupal dialog entry-point modes", () => {
     expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByTestId("input-group-payment-amount-0")).toHaveDisplayValue("");
     expect(screen.getByTestId("input-group-entity-search")).toHaveValue("");
+  });
+
+  it("keeps a master-folio settlement entry point visible after all rooms checked out", async () => {
+    const user = userEvent.setup();
+    groupFixtureForTest = {
+      ...GROUP_FIXTURE,
+      status: "finished",
+      reservations: GROUP_FIXTURE.reservations.map((reservation) => ({ ...reservation, status: "checked_out" })),
+    };
+    renderPage();
+    await screen.findByTestId("text-group-name");
+
+    const settleButton = await screen.findByTestId("button-settle-master-after-checkout");
+    await user.click(settleButton);
+    expect(screen.getByTestId("button-group-advance-breakdown-none")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("input-group-payment-amount-0")).toHaveValue(125.5);
   });
 
   it("updates receipt concepts when manually switching destinations repeatedly", async () => {

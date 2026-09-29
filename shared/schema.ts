@@ -473,6 +473,7 @@ export type ReservationWithDetails = Reservation & {
   groupId?: string;
   groupName?: string;
   groupCode?: string;
+  groupNotes?: string | null;
   isGroup?: boolean;
   contactName?: string;
   contactPhone?: string;

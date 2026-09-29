@@ -888,7 +888,7 @@ export class DatabaseStorage implements IStorage {
     ]);
     const [roomType] = room ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)) : [undefined];
     const groupLink = groupLinkResult[0];
-    const [groupRow] = groupLink ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode }).from(groups).where(eq(groups.id, groupLink.groupId)) : [undefined];
+    const [groupRow] = groupLink ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes }).from(groups).where(eq(groups.id, groupLink.groupId)) : [undefined];
     return {
       ...reservation,
       guest: guest!,
@@ -901,6 +901,7 @@ export class DatabaseStorage implements IStorage {
       groupId: groupRow?.id,
       groupName: groupRow?.name,
       groupCode: groupRow?.groupCode,
+      groupNotes: groupRow?.notes,
     } as any;
   }
 
@@ -930,7 +931,7 @@ export class DatabaseStorage implements IStorage {
     // Build group map: reservationId → {groupId, groupName, groupCode}
     const groupLinkMap = new Map<string, string>((groupLinkList as any[]).map((l: any) => [l.reservationId, l.groupId]));
     const groupIds = [...new Set((groupLinkList as any[]).map((l: any) => l.groupId))];
-    const groupList = groupIds.length ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode }).from(groups).where(inArray(groups.id, groupIds)) : [];
+    const groupList = groupIds.length ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes }).from(groups).where(inArray(groups.id, groupIds)) : [];
     const groupMap = new Map(groupList.map((g: any) => [g.id, g]));
 
     const guestMap = new Map(guestList.map((g: any) => [g.id, g]));
@@ -967,6 +968,7 @@ export class DatabaseStorage implements IStorage {
         groupId: group?.id,
         groupName: group?.name,
         groupCode: group?.groupCode,
+        groupNotes: group?.notes,
       };
     });
   }
@@ -7550,7 +7552,7 @@ export class DatabaseStorage implements IStorage {
     return { processed, skipped, skippedRooms };
   }
 
-  async bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
+  async bulkCheckOut(groupId: string): Promise<{ processed: number; skipped: number; unresolvedBalance: number; pendingBalance: Array<{ room: string; guestName: string; balance: number }> }> {
     return db.transaction(async (tx) => {
       // Same group-row lock used by recordGroupPayment. Once acquired, the
       // operational snapshot below cannot race a new collection.
@@ -7611,21 +7613,6 @@ export class DatabaseStorage implements IStorage {
 
       if (!reservation || reservation.status !== "checked_in") continue;
 
-      const [room] = await tx.select().from(rooms)
-        .where(eq(rooms.id, reservation.roomId));
-
-      if (Math.round(operationalBalance * 100) > 0) {
-        skipped++;
-        const [guest] = await tx.select().from(guests)
-          .where(eq(guests.id, reservation.guestId));
-        pendingBalance.push({
-          room: room?.roomNumber || reservation.roomId,
-          guestName: guest ? `${guest.lastName} ${guest.firstName}` : "Sin nombre",
-          balance: operationalBalance,
-        });
-        continue;
-      }
-
       await tx.update(reservations)
         .set({ status: "checked_out" })
         .where(eq(reservations.id, reservation.id));
@@ -7664,7 +7651,12 @@ export class DatabaseStorage implements IStorage {
       await tx.update(groups).set({ status: "finished" as any }).where(eq(groups.id, groupId));
     }
 
-    return { processed, skipped, pendingBalance };
+    return {
+      processed,
+      skipped,
+      unresolvedBalance: Math.max(0, operationalBalance),
+      pendingBalance,
+    };
     });
   }
 

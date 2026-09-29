@@ -25,6 +25,7 @@ import { getLocalToday, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { formatDateReadable } from "@/lib/planning-utils";
 import type { ReservationWithDetails, ReservationStatus } from "@shared/schema";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
+import { GroupRoomObservations } from "@/components/group-room-observations";
 
 function getStatusBadge(status: ReservationStatus) {
   const config: Record<ReservationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -343,6 +344,11 @@ export function ReservationDetailModal({
               <div className="space-y-1">
                 <Label className="text-xs">Observaciones</Label>
                 <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} data-testid="input-edit-notes" />
+                {reservation.groupNotes && (
+                  <p className="text-xs text-muted-foreground whitespace-pre-wrap" data-testid="planning-edit-group-notes">
+                    Nota del grupo (se edita desde el grupo): {reservation.groupNotes}
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>Cancelar</Button>
@@ -438,10 +444,10 @@ export function ReservationDetailModal({
                   </div>
                 );
               })()}
-              {reservation.notes && (
+               {(reservation.notes || reservation.groupNotes) && (
                 <div className="text-sm bg-muted/30 rounded-md p-3">
-                  <div className="text-muted-foreground mb-1">Notas:</div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{reservation.notes}</div>
+                   <div className="text-muted-foreground mb-1">Observaciones:</div>
+                   <GroupRoomObservations groupNotes={reservation.groupNotes} roomNotes={reservation.notes} />
                 </div>
               )}
               {activePrefs.length > 0 && (

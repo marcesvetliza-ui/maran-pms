@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { GroupRoomObservations } from "@/components/group-room-observations";
 import { getBedConfigLabel } from "@/lib/planning-utils";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -1391,7 +1392,12 @@ export default function GroupDetailPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       setShowCheckOutConfirm(false);
       if (data.success > 0 && data.failed === 0) {
         toast({ title: `Check-out grupal exitoso`, description: `${data.success} habitaciones procesadas` });
@@ -1709,6 +1715,12 @@ export default function GroupDetailPage() {
 
   const printRoomingList = () => {
     if (!group) return;
+    const escapeNote = (value: string) => value.replace(/[&<>"']/g, (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char);
+    const roomObservations = (notes: string | null | undefined) => [
+      group.notes ? `<div><strong>Grupo:</strong> ${escapeNote(group.notes)}</div>` : "",
+      notes ? `<div><strong>Habitación:</strong> ${escapeNote(notes)}</div>` : "",
+    ].join("");
     const sortedReservations = [...group.reservations]
       .filter(r => r.status !== "cancelled")
       .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""));
@@ -1727,7 +1739,7 @@ export default function GroupDetailPage() {
         <td class="c-doc${isLastRowOfGroup ? '' : ' no-border'}">${res.guest?.documentNumber ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}` : "-"}</td>
         <td class="c-date${isLastRowOfGroup ? '' : ' no-border'}">${fmtDate(res.checkInDate)}</td>
         <td class="c-date${isLastRowOfGroup ? '' : ' no-border'}">${fmtDate(res.checkOutDate)}${lateCheckout ? `<br/><span class="badge-late">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : ""}</td>
-        <td class="c-notes${isLastRowOfGroup ? '' : ' no-border'}">${res.notes || ""}</td>
+        <td class="c-notes${isLastRowOfGroup ? '' : ' no-border'}">${roomObservations(res.notes)}</td>
       </tr>`;
       const companionRows = companions.map((c: any, cIdx: number) => `
       <tr class="companion-row${idx % 2 === 1 ? ' alt' : ''}${cIdx === companions.length - 1 ? ' last-companion' : ''}">
@@ -1834,7 +1846,7 @@ export default function GroupDetailPage() {
   ${group.notes ? `
   <div class="notes-box">
     <p class="info-label" style="margin:0 0 6px 0;">Notas de la estadía</p>
-    <p style="margin:0;white-space:pre-wrap;">${group.notes}</p>
+    <p style="margin:0;white-space:pre-wrap;">${escapeNote(group.notes)}</p>
   </div>
   ` : ""}
   <table>
@@ -2069,6 +2081,29 @@ export default function GroupDetailPage() {
             <DollarSign className="mr-2 h-4 w-4" />
             Pago Grupal
           </Button>
+
+          {group.reservations.length > 0 &&
+            group.reservations.every((reservation) => reservation.status === "checked_out" || reservation.status === "cancelled") &&
+            masterFolio && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await refreshGroupBillingState();
+                  const balance = Number(masterFolio?.masterBalance || 0);
+                  openGroupPaymentDialog({
+                    destino: "master",
+                    invoiceDistribution: "none",
+                    rows: [{ method: "cash", amount: balance > 0 ? balance.toFixed(2) : "", reference: "" }],
+                    prefillReceptor: true,
+                  });
+                }}
+                disabled={groupPaymentMutation.isPending || (Number(masterFolio?.masterBalance || 0) <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01)}
+                data-testid="button-settle-master-after-checkout"
+              >
+                <CreditCard className="mr-2 h-4 w-4" />
+                {masterFolio.config === "none" ? "Cobrar saldo grupal pendiente" : "Liquidar folio maestro"}
+              </Button>
+            )}
           
           <Button
             variant="outline"
@@ -2586,7 +2621,7 @@ export default function GroupDetailPage() {
                       <span className="text-xs text-muted-foreground">El organizador paga todo. Los extras de cada hab. también van al Folio Maestro.</span>
                     )}
                     {masterFolio.config === "none" && (
-                      <span className="text-xs text-muted-foreground">Sin folio maestro. Cada habitación paga su propia cuenta al hacer check-out.</span>
+                      <span className="text-xs text-muted-foreground">Cada habitación lleva su cuenta. Si todas salieron con deuda, el saldo pendiente puede conciliarse y cobrarse desde el grupo sin reabrir habitaciones.</span>
                     )}
                   </div>
                 </CardContent>
@@ -3694,7 +3729,7 @@ export default function GroupDetailPage() {
                     <TableHead>Check-in</TableHead>
                     <TableHead>Check-out</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Notas</TableHead>
+                    <TableHead>Observaciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -3731,8 +3766,9 @@ export default function GroupDetailPage() {
                              res.status === "checked_out" ? "Salió" : res.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[120px] truncate">
-                          {res.notes || "-"}
+                        <TableCell className="text-sm text-muted-foreground max-w-[240px] whitespace-pre-wrap break-words">
+                          <GroupRoomObservations groupNotes={group.notes} roomNotes={res.notes} />
+                          {!group.notes && !res.notes && "-"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -3810,10 +3846,11 @@ export default function GroupDetailPage() {
                   Se realizará el check-out de <strong>{group.reservations.filter(r => r.status === "checked_in").length}</strong> habitación(es) en casa.
                 </p>
                 <div className="rounded-md bg-muted p-3 text-sm space-y-1">
-                  <p className="font-medium text-foreground">Importante:</p>
-                  <p>Las habitaciones con saldo pendiente no serán procesadas.</p>
-                  <p>Las habitaciones procesadas irán a estado de limpieza.</p>
-                  <p>Si hay habitaciones con saldo, registre un pago grupal primero.</p>
+                  <p className="font-medium text-foreground">Cierre operativo sin cobro:</p>
+                  <p>Las habitaciones seleccionadas se cerrarán aunque tengan saldos pendientes.</p>
+                  <p>No se registrarán pagos, cargos a Cuenta Corriente ni facturas.</p>
+                  <p>Los saldos pendientes permanecerán en el folio del grupo para su gestión posterior.</p>
+                  <p>Las habitaciones ocupadas pasarán a estado de limpieza.</p>
                 </div>
               </div>
             </AlertDialogDescription>
@@ -3826,7 +3863,7 @@ export default function GroupDetailPage() {
               data-testid="button-confirm-check-out-all"
             >
               <LogOut className="mr-2 h-4 w-4" />
-              {checkOutAllMutation.isPending ? "Procesando..." : "Sí, realizar check-out"}
+              {checkOutAllMutation.isPending ? "Procesando..." : "Sí, cerrar sin cobro"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3871,8 +3908,14 @@ export default function GroupDetailPage() {
             const rowsTotal = groupPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
             const retentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
             const cajaToday = calculateGroupCajaToday(groupPaymentRows);
-            const groupHasCheckIn = group.reservations.some((r: any) => r.status === "checked_in");
-            const masterAvailable = !!masterFolio && masterFolio.config !== "none" && groupHasCheckIn;
+            // The master folio remains collectible after every room has checked out.
+            const masterAvailable = !!masterFolio && (
+              masterFolio.config !== "none" ||
+              (group.reservations.length > 0 &&
+                group.reservations.every((reservation: any) =>
+                  reservation.status === "checked_out" || reservation.status === "cancelled") &&
+                Number(masterFolio.masterBalance || 0) > 0.01)
+            );
             const isMaster = groupPaymentDestino === "master";
             const priorBalance = isMaster ? (masterFolio?.masterBalance ?? 0) : (folio?.totals.balance ?? 0);
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";

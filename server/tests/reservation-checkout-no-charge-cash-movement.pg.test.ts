@@ -89,6 +89,11 @@ async function startApp() {
   const { registerReservationsRoutes } = await import("../routes/reservations");
   const app = express();
   app.use(express.json());
+  app.use((req: any, _res, next) => {
+    req.isAuthenticated = () => true;
+    req.user = { id: "pg-checkout-test", username: "pg-checkout-test" };
+    next();
+  });
   registerReservationsRoutes(app);
 
   httpServer = await new Promise<http.Server>((resolve) => {
