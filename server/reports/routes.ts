@@ -1,14 +1,34 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
-const FINANCE_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"] as [string, ...string[]];
-const SPA_REPORT_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion", "spa"] as [string, ...string[]];
-const EVENTS_REPORT_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion", "events"] as [string, ...string[]];
+// Etapa 3 del ABM de usuarios: cada informe tiene su propio resourceKey
+// (prefijo "api:reports:") en vez de un array de roles hardcodeado — así se
+// puede habilitar/deshabilitar cada informe de forma independiente desde la
+// pantalla de administración de permisos, aunque hoy varios compartan el
+// mismo conjunto de roles. Cada uno preserva EXACTAMENTE el array que tenía
+// antes (ver API_RESOURCE_PERMISSIONS en server/permissions.ts).
+const REPORT_ESTADO_RESULTADOS_KEY = "api:reports:estado-resultados";
+const REPORT_KPIS_KEY = "api:reports:kpis";
+const REPORT_OCUPACION_KEY = "api:reports:ocupacion";
+const REPORT_INGRESOS_KEY = "api:reports:ingresos";
+const REPORT_COSTOS_KEY = "api:reports:costos";
+const REPORT_PROVEEDORES_KEY = "api:reports:proveedores";
+const REPORT_COMPARATIVO_KEY = "api:reports:comparativo";
+const REPORT_SPA_KEY = "api:reports:spa";
+const REPORT_SPA_POR_PROFESIONAL_KEY = "api:reports:spa-por-profesional";
+const REPORT_EVENTS_KEY = "api:reports:events";
+const REPORT_MAINTENANCE_KEY = "api:reports:maintenance";
+const REPORT_INVENTORY_KEY = "api:reports:inventory";
+const REPORT_RESTAURANT_CMV_KEY = "api:reports:restaurant-cmv";
+const REPORT_HOUSEKEEPING_PRODUCTIVITY_KEY = "api:reports:housekeeping-productivity";
+const REPORT_FORECAST_KEY = "api:reports:forecast";
+const REPORT_EXPORT_PDF_KEY = "api:reports:export-pdf";
+const REPORT_EXPORT_EXCEL_KEY = "api:reports:export-excel";
 
 const TOTAL_ROOMS = 66;
 
@@ -171,7 +191,7 @@ async function gastosAdminCash(desde: string, hasta: string): Promise<number> {
 export function registerReportsRoutes(app: Express) {
 
   // ── Estado de Resultados ──────────────────────────────────────────────────
-  app.get("/api/reports/estado-resultados", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/estado-resultados", requirePermission(REPORT_ESTADO_RESULTADOS_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -257,7 +277,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── KPIs Hoteleros ────────────────────────────────────────────────────────
-  app.get("/api/reports/kpis", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/kpis", requirePermission(REPORT_KPIS_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta, dias } = periodoToRange(periodo);
@@ -381,7 +401,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Análisis de Ocupación ─────────────────────────────────────────────────
-  app.get("/api/reports/ocupacion", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/ocupacion", requirePermission(REPORT_OCUPACION_KEY), async (req, res) => {
     try {
       const desde = (req.query.desde as string) || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
       const hasta = (req.query.hasta as string) || new Date().toISOString().split("T")[0];
@@ -479,7 +499,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Ingresos por Área ─────────────────────────────────────────────────────
-  app.get("/api/reports/ingresos", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/ingresos", requirePermission(REPORT_INGRESOS_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -590,7 +610,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Costos por Departamento ───────────────────────────────────────────────
-  app.get("/api/reports/costos", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/costos", requirePermission(REPORT_COSTOS_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -674,7 +694,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Ranking de Proveedores ────────────────────────────────────────────────
-  app.get("/api/reports/proveedores", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/proveedores", requirePermission(REPORT_PROVEEDORES_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const top = parseInt(req.query.top as string) || 10;
@@ -741,7 +761,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Comparativo Mensual ───────────────────────────────────────────────────
-  app.get("/api/reports/comparativo", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/comparativo", requirePermission(REPORT_COMPARATIVO_KEY), async (req, res) => {
     try {
       const año = parseInt((req.query.año || req.query.anio || req.query.year) as string) || new Date().getFullYear();
       const mesesNombre = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
@@ -808,7 +828,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Spa ────────────────────────────────────────────────────────
-  app.get("/api/reports/spa", requireRole(SPA_REPORT_ROLES), async (req, res) => {
+  app.get("/api/reports/spa", requirePermission(REPORT_SPA_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -894,7 +914,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte SPA: Producción por Profesional (con filtros) ─────────────────
-  app.get("/api/reports/spa/por-profesional", requireRole(SPA_REPORT_ROLES), async (req, res) => {
+  app.get("/api/reports/spa/por-profesional", requirePermission(REPORT_SPA_POR_PROFESIONAL_KEY), async (req, res) => {
     try {
       const today = new Date();
       const firstOfMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
@@ -997,7 +1017,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Eventos ────────────────────────────────────────────────────
-  app.get("/api/reports/events", requireRole(EVENTS_REPORT_ROLES), async (req, res) => {
+  app.get("/api/reports/events", requirePermission(REPORT_EVENTS_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -1068,7 +1088,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Mantenimiento ──────────────────────────────────────────────
-  app.get("/api/reports/maintenance", requireRole(FINANCE_ROLES.concat(["maintenance"]) as [string, ...string[]]), async (req, res) => {
+  app.get("/api/reports/maintenance", requirePermission(REPORT_MAINTENANCE_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -1125,7 +1145,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Inventario General ─────────────────────────────────────────
-  app.get("/api/reports/inventory", requireRole(FINANCE_ROLES.concat(["resp_deposito"]) as [string, ...string[]]), async (req, res) => {
+  app.get("/api/reports/inventory", requirePermission(REPORT_INVENTORY_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -1186,7 +1206,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Costo de Comida (CMV) - Restaurant ─────────────────────────
-  app.get("/api/reports/restaurant-cmv", requireRole(FINANCE_ROLES.concat(["restaurant"]) as [string, ...string[]]), async (req, res) => {
+  app.get("/api/reports/restaurant-cmv", requirePermission(REPORT_RESTAURANT_CMV_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -1256,7 +1276,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Productividad de Camareras - Housekeeping ──────────────────
-  app.get("/api/reports/housekeeping-productivity", requireRole(FINANCE_ROLES.concat(["housekeeping"]) as [string, ...string[]]), async (req, res) => {
+  app.get("/api/reports/housekeeping-productivity", requirePermission(REPORT_HOUSEKEEPING_PRODUCTIVITY_KEY), async (req, res) => {
     try {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
@@ -1299,7 +1319,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Reporte de Pronóstico / Pickup y Cancelaciones - Hotelería ────────────
-  app.get("/api/reports/forecast", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/forecast", requirePermission(REPORT_FORECAST_KEY), async (req, res) => {
     try {
       const dias = parseInt((req.query.dias as string) || "30");
       const hoy = new Date().toISOString().slice(0, 10);
@@ -1348,7 +1368,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── PDF Export (generic) ──────────────────────────────────────────────────
-  app.get("/api/reports/export-pdf/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/export-pdf/:tipo", requirePermission(REPORT_EXPORT_PDF_KEY), async (req, res) => {
     try {
       const tipo = req.params.tipo;
       const queryStr = new URLSearchParams(req.query as any).toString();
@@ -1421,7 +1441,7 @@ export function registerReportsRoutes(app: Express) {
   });
 
   // ── Excel Export ──────────────────────────────────────────────────────────
-  app.get("/api/reports/export-excel/:tipo", requireRole(FINANCE_ROLES), async (req, res) => {
+  app.get("/api/reports/export-excel/:tipo", requirePermission(REPORT_EXPORT_EXCEL_KEY), async (req, res) => {
     try {
       const tipo = req.params.tipo;
       const queryStr = new URLSearchParams(req.query as any).toString();

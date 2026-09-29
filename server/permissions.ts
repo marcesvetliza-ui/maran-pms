@@ -219,6 +219,28 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   // server/routes/inventory.ts — antes INVENTORY_WRITE_ROLES, 15 endpoints
   // de escritura de categorías/artículos/depósitos/movimientos/conteos.
   "api:inventory:write": ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"],
+
+  // server/reports/routes.ts — un resourceKey por informe (antes FINANCE_ROLES
+  // y variantes .concat(...) con un rol de área agregado), para poder
+  // habilitar/deshabilitar cada informe de forma independiente aunque hoy
+  // varios compartan el mismo conjunto de roles.
+  "api:reports:estado-resultados": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:kpis": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:ocupacion": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:ingresos": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:costos": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:proveedores": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:comparativo": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:spa": ["admin", "manager", "resp_administracion", "jefe_recepcion", "spa"],
+  "api:reports:spa-por-profesional": ["admin", "manager", "resp_administracion", "jefe_recepcion", "spa"],
+  "api:reports:events": ["admin", "manager", "resp_administracion", "jefe_recepcion", "events"],
+  "api:reports:maintenance": ["admin", "manager", "resp_administracion", "jefe_recepcion", "maintenance"],
+  "api:reports:inventory": ["admin", "manager", "resp_administracion", "jefe_recepcion", "resp_deposito"],
+  "api:reports:restaurant-cmv": ["admin", "manager", "resp_administracion", "jefe_recepcion", "restaurant"],
+  "api:reports:housekeeping-productivity": ["admin", "manager", "resp_administracion", "jefe_recepcion", "housekeeping"],
+  "api:reports:forecast": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:export-pdf": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:reports:export-excel": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
 };
 
 /**
@@ -304,6 +326,24 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:rooms:write": { label: "Alta y edición de habitaciones y tipos", section: "API — Habitaciones" },
   "api:rates:write": { label: "Alta y edición de planes de tarifas", section: "API — Habitaciones" },
   "api:inventory:write": { label: "Categorías, artículos, depósitos y conteos", section: "API — Inventario" },
+
+  "api:reports:estado-resultados": { label: "Estado de Resultados", section: "API — Reportes" },
+  "api:reports:kpis": { label: "KPIs", section: "API — Reportes" },
+  "api:reports:ocupacion": { label: "Ocupación", section: "API — Reportes" },
+  "api:reports:ingresos": { label: "Ingresos", section: "API — Reportes" },
+  "api:reports:costos": { label: "Costos", section: "API — Reportes" },
+  "api:reports:proveedores": { label: "Proveedores", section: "API — Reportes" },
+  "api:reports:comparativo": { label: "Comparativo", section: "API — Reportes" },
+  "api:reports:spa": { label: "Informe de Spa", section: "API — Reportes" },
+  "api:reports:spa-por-profesional": { label: "Informe de Spa por profesional", section: "API — Reportes" },
+  "api:reports:events": { label: "Informe de Eventos", section: "API — Reportes" },
+  "api:reports:maintenance": { label: "Informe de Mantenimiento", section: "API — Reportes" },
+  "api:reports:inventory": { label: "Informe de Inventario", section: "API — Reportes" },
+  "api:reports:restaurant-cmv": { label: "CMV de Restaurant", section: "API — Reportes" },
+  "api:reports:housekeeping-productivity": { label: "Productividad de Housekeeping", section: "API — Reportes" },
+  "api:reports:forecast": { label: "Forecast", section: "API — Reportes" },
+  "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
+  "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

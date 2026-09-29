@@ -219,4 +219,23 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"].sort(),
     );
   });
+
+  it("preserva los arrays de roles de los 17 informes migrados", () => {
+    const FINANCE_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
+    const plainFinanceKeys = [
+      "api:reports:estado-resultados", "api:reports:kpis", "api:reports:ocupacion",
+      "api:reports:ingresos", "api:reports:costos", "api:reports:proveedores",
+      "api:reports:comparativo", "api:reports:forecast", "api:reports:export-pdf", "api:reports:export-excel",
+    ];
+    for (const key of plainFinanceKeys) {
+      expect(API_RESOURCE_PERMISSIONS[key].slice().sort(), key).toEqual(FINANCE_ROLES.slice().sort());
+    }
+    expect(API_RESOURCE_PERMISSIONS["api:reports:spa"].slice().sort()).toEqual([...FINANCE_ROLES, "spa"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:spa-por-profesional"].slice().sort()).toEqual([...FINANCE_ROLES, "spa"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:events"].slice().sort()).toEqual([...FINANCE_ROLES, "events"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:maintenance"].slice().sort()).toEqual([...FINANCE_ROLES, "maintenance"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:inventory"].slice().sort()).toEqual([...FINANCE_ROLES, "resp_deposito"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:restaurant-cmv"].slice().sort()).toEqual([...FINANCE_ROLES, "restaurant"].sort());
+    expect(API_RESOURCE_PERMISSIONS["api:reports:housekeeping-productivity"].slice().sort()).toEqual([...FINANCE_ROLES, "housekeeping"].sort());
+  });
 });
