@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
   requireRole: (_roles: string[]) => (_req: any, _res: any, next: () => void) => next(),
+  requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 

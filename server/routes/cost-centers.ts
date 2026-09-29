@@ -2,10 +2,13 @@ import type { Express } from "express";
 import { db } from "../db";
 import { and, eq } from "drizzle-orm";
 import { costCenters } from "@shared/schema";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
+import { hasPermission } from "../permissions";
 
-// Mismo criterio de roles que el ítem "Centros de Costo" del sidebar.
-const COST_CENTER_ADMIN_ROLES = ["admin", "resp_administracion"];
+// Etapa 3 del ABM de usuarios: mismo resourceKey que el ítem "Centros de
+// Costo" del sidebar (server/permissions.ts) — antes era un array de roles
+// duplicado a mano acá, ahora es la misma fuente de verdad.
+const COST_CENTERS_RESOURCE_KEY = "sidebar:/admin/cost-centers";
 
 // Usado por los handlers de Facturas de Compra (server/routes.ts) para evitar que se
 // guarde un centro de costo que no exista o que esté inactivo en la lista gestionada.
@@ -26,7 +29,7 @@ export function registerCostCentersRoutes(app: Express) {
   app.get("/api/cost-centers", requireAuth, async (req, res) => {
     try {
       const includeInactive = req.query.all === "1" || req.query.all === "true";
-      if (includeInactive && !COST_CENTER_ADMIN_ROLES.includes((req.user as Express.User).role)) {
+      if (includeInactive && !hasPermission((req.user as Express.User).role, COST_CENTERS_RESOURCE_KEY)) {
         return res.status(403).json({ error: "No autorizado para esta acción" });
       }
       const rows = await db.select().from(costCenters).orderBy(costCenters.nombre);
@@ -36,7 +39,7 @@ export function registerCostCentersRoutes(app: Express) {
     }
   });
 
-  app.post("/api/cost-centers", requireRole(COST_CENTER_ADMIN_ROLES), async (req, res) => {
+  app.post("/api/cost-centers", requirePermission(COST_CENTERS_RESOURCE_KEY), async (req, res) => {
     try {
       const nombre = (req.body?.nombre || "").trim();
       if (!nombre) return res.status(400).json({ error: "El nombre es requerido" });
@@ -50,7 +53,7 @@ export function registerCostCentersRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/cost-centers/:id", requireRole(COST_CENTER_ADMIN_ROLES), async (req, res) => {
+  app.patch("/api/cost-centers/:id", requirePermission(COST_CENTERS_RESOURCE_KEY), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { nombre, activo } = req.body;

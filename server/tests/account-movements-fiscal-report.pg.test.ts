@@ -10,6 +10,7 @@ vi.mock("../auth", () => ({
     req.user = { id: "fiscal-report-test", username: "tester-admin", role: "admin" };
     next();
   },
+  requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;

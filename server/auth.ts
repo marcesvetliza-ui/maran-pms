@@ -8,6 +8,7 @@ import { db, pool } from "./db";
 import { systemUsers, failedLoginAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { Express, Request, Response, NextFunction } from "express";
+import { hasPermission } from "./permissions";
 
 const SALT_ROUNDS = 10;
 const TEMP_LOCK_THRESHOLD  = 5;   // intentos → bloqueo 1 hora
@@ -280,6 +281,26 @@ export function requireRole(roles: string[]) {
     }
     const userRole = (req.user as Express.User).role;
     if (!roles.includes(userRole)) {
+      return res.status(403).json({ message: "No autorizado para esta acción" });
+    }
+    next();
+  };
+}
+
+/**
+ * Etapa 3 del ABM de usuarios: equivalente a requireRole, pero consulta
+ * role_permissions (vía hasPermission, server/permissions.ts) en vez de un
+ * array de roles hardcodeado en el propio route handler. Se usa para migrar
+ * endpoints uno por uno reutilizando el mismo resourceKey que ya controla la
+ * visibilidad de ese módulo en el sidebar — sin duplicar la lista de roles.
+ */
+export function requirePermission(resourceKey: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.isAuthenticated() || isPending2FA(req)) {
+      return res.status(401).json({ message: "No autenticado" });
+    }
+    const userRole = (req.user as Express.User).role;
+    if (!hasPermission(userRole, resourceKey)) {
       return res.status(403).json({ message: "No autorizado para esta acción" });
     }
     next();
