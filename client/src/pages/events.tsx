@@ -352,8 +352,10 @@ export default function EventsPage() {
   const [isEmailReceiptOpen, setIsEmailReceiptOpen] = useState(false);
   const [emailReceiptAddress, setEmailReceiptAddress] = useState("");
   const { toast } = useToast();
-  const { user: currentUser } = useAuth();
-  const isAdmin = currentUser?.role === "admin";
+  const { hasPermission } = useAuth();
+  // Etapa 3 del ABM de usuarios: mismo resourceKey que ya gatea
+  // PATCH /api/events/:eventId/reset-nc y .../tables/:tableId/reset-nc en el servidor.
+  const isAdmin = hasPermission("api:events:reset-nc");
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));

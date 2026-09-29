@@ -1458,9 +1458,12 @@ function MobileRoomCard({
 // ===================== HOUSEKEEPING MAIN =====================
 
 export default function Housekeeping() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { toast } = useToast();
-  const isSupervisor = ["admin", "manager", "ama_de_llaves", "gobernanta", "responsable_area"].includes(user?.role ?? "");
+  // Etapa 3 del ABM de usuarios: mismo resourceKey server-side. Se aprovechó
+  // para sacar "gobernanta" del array — no es un rol real del sistema
+  // (SystemUserRole no lo incluye), quedó de una versión anterior.
+  const isSupervisor = hasPermission("api:housekeeping:supervisor-view");
   const isMucama = user?.role === "housekeeping";
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");

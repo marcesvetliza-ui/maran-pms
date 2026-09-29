@@ -35,8 +35,6 @@ import type {
   ChannexRatePlanMapping,
 } from "@shared/schema";
 
-const CHANNEX_CONFIG_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
-
 const STATUS_LABELS: Record<ChannexBookingStatus, string> = {
   new: "Nuevas",
   needs_review: "Requieren revisión",
@@ -65,8 +63,10 @@ function fmtDate(value: string | null) {
 
 export default function ChannexPage() {
   const { toast } = useToast();
-  const { user } = useAuth();
-  const canConfigure = Boolean(user?.role && CHANNEX_CONFIG_ROLES.includes(user.role));
+  const { hasPermission } = useAuth();
+  // Etapa 3 del ABM de usuarios: mismo resourceKey que ya gatea los endpoints
+  // de configuración de Channex en el servidor.
+  const canConfigure = hasPermission("api:channex:config");
 
   const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<ChannexBookingStatus | "all">("all");

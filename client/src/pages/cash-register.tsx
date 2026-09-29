@@ -622,8 +622,9 @@ ${anulSection}
 }
 
 function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: CashConfig; shiftRefreshToken: number }) {
-  const { user } = useAuth();
-  const isAdmin = ["admin", "manager", "jefe_recepcion", "resp_administracion"].includes(user?.role ?? "");
+  const { user, hasPermission } = useAuth();
+  // Etapa 3 del ABM de usuarios: mismo resourceKey server-side.
+  const isAdmin = hasPermission("api:cash:area-admin");
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
   const [closeShiftDialog, setCloseShiftDialog] = useState(false);
@@ -3106,7 +3107,7 @@ function DuplicatePaymentLinksTab() {
 }
 
 export default function CashRegister() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
     queryKey: ["/api/cash/configs"],
     queryFn: async () => {
@@ -3118,10 +3119,14 @@ export default function CashRegister() {
 
   const allActiveConfigs = configs?.filter((c) => c.isActive) || [];
 
-  // Roles with full global visibility (all areas + historial + resumen)
-  const GLOBAL_ROLES = ["admin", "manager", "resp_administracion", "jefe_recepcion"];
-  const isAdminOrManager = GLOBAL_ROLES.includes(user?.role ?? "");
-  const canRepairReservationPayments = ["admin", "manager"].includes(user?.role ?? "");
+  // Etapa 3 del ABM de usuarios: resourceKey propio, no coincide con
+  // api:night-audit:run server-side a propósito (se decidió mantener el
+  // comportamiento actual del cliente para esta pestaña).
+  const isAdminOrManager = hasPermission("api:cash:global-view");
+  // Etapa 3: mismos resourceKeys que ya usan sus endpoints server-side,
+  // uno por pestaña para poder habilitarlas de forma independiente.
+  const canSeePaymentRecoveryTab = hasPermission("api:cash:repair-movements");
+  const canSeeDuplicateLinksTab = hasPermission("api:cash:payment-links-audit");
   // Any authenticated user who reaches this page can at least see global tabs (historial/resumen/night-audit)
   const canSeeGlobalTabs = true;
 
@@ -3269,13 +3274,13 @@ export default function CashRegister() {
                 Night Audit
               </TabsTrigger>
             )}
-            {canRepairReservationPayments && (
+            {canSeePaymentRecoveryTab && (
               <TabsTrigger value="payment-recovery" data-testid="tab-payment-recovery">
                 <RefreshCw className="h-4 w-4 mr-1" />
                 Recuperar cobros
               </TabsTrigger>
             )}
-            {canRepairReservationPayments && (
+            {canSeeDuplicateLinksTab && (
               <TabsTrigger value="duplicate-links" data-testid="tab-duplicate-links">
                 <Copy className="h-4 w-4 mr-1" />
                 Vínculos duplicados
@@ -3311,12 +3316,12 @@ export default function CashRegister() {
               <NightAuditTab />
             </TabsContent>
           )}
-          {canRepairReservationPayments && (
+          {canSeePaymentRecoveryTab && (
             <TabsContent value="payment-recovery">
               <MissingReservationPaymentsTab />
             </TabsContent>
           )}
-          {canRepairReservationPayments && (
+          {canSeeDuplicateLinksTab && (
             <TabsContent value="duplicate-links">
               <DuplicatePaymentLinksTab />
             </TabsContent>

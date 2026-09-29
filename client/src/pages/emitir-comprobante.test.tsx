@@ -14,8 +14,20 @@ import { queryClient } from "@/lib/queryClient";
  */
 
 let mockRole = "admin";
+// Mismos roles que api:emitir-comprobante:* en server/permissions.ts.
+const AREA_RESOURCE_ROLES: Record<string, string[]> = {
+  "api:emitir-comprobante:recepcion": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "reception", "jefe_recepcion"],
+  "api:emitir-comprobante:restaurant": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "restaurant"],
+  "api:emitir-comprobante:spa": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "spa"],
+  "api:emitir-comprobante:events": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "events"],
+  "api:emitir-comprobante:compras": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "resp_deposito"],
+  "api:emitir-comprobante:inventario": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "resp_deposito"],
+};
 vi.mock("@/App", () => ({
-  useAuth: () => ({ user: { id: "user-1", username: "tester", role: mockRole } }),
+  useAuth: () => ({
+    user: { id: "user-1", username: "tester", role: mockRole },
+    hasPermission: (key: string) => (AREA_RESOURCE_ROLES[key] ?? []).includes(mockRole),
+  }),
 }));
 
 function renderPage() {

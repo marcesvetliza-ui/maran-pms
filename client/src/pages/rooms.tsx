@@ -81,11 +81,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
-import type { RoomWithType, RoomType, InsertRoom, RoomStatus, BedConfig, ChargeType, SystemUserRole } from "@shared/schema";
+import type { RoomWithType, RoomType, InsertRoom, RoomStatus, BedConfig, ChargeType } from "@shared/schema";
 import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
 
 // Roles que pueden crear/editar habitaciones y gestionar cargos
-const ROOM_ADMIN_ROLES: SystemUserRole[] = ["admin", "manager", "ama_de_llaves", "resp_deposito", "resp_administracion", "jefe_recepcion", "comercial"];
+// Etapa 3 del ABM de usuarios: mismo array de roles de antes, ahora vía
+// hasPermission("api:rooms:write") — el mismo resourceKey que ya gatea
+// POST/PATCH/DELETE de habitaciones y tipos en el servidor.
 
 function RoomStatusBadge({ status }: { status: RoomStatus }) {
   const statusConfig: Record<string, { label: string; className: string }> = {
@@ -840,8 +842,8 @@ function OcupadasView() {
 
 export default function RoomsPage() {
   const { toast } = useToast();
-  const { user } = useAuth();
-  const canManage = ROOM_ADMIN_ROLES.includes((user?.role ?? "") as SystemUserRole);
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("api:rooms:write");
   const [activeTab, setActiveTab] = useState<"inventario" | "ocupadas">(() => {
     // Leer ?tab=ocupadas desde la URL para que el sidebar "Hab. Ocupadas" abra directo en ese tab
     try {

@@ -282,6 +282,25 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:cash:force-anular": ["admin", "manager"],
 
   "api:accounting-accounts:write": ["admin", "resp_administracion"],
+
+  // ── Checks de rol sueltos del cliente, migrados a hasPermission() ──────────
+  // Cada uno preserva EXACTAMENTE el array que tenía el chequeo hardcodeado
+  // que reemplaza (ver comentarios en el archivo del cliente correspondiente).
+  "api:housekeeping:supervisor-view": ["admin", "manager", "ama_de_llaves", "responsable_area"],
+  "api:restaurant:edit-layout": ["admin", "manager", "responsable_area"],
+  "api:cash:area-admin": ["admin", "manager", "jefe_recepcion", "resp_administracion"],
+  "api:cash:global-view": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+
+  // Emitir Comprobante: qué áreas ve cada rol dentro de la pantalla (antes
+  // AREAS[].roles en el propio archivo del cliente). ROLES_VEN_TODO =
+  // admin/manager/responsable_area/resp_administracion/comercial, más el rol
+  // propio de cada área.
+  "api:emitir-comprobante:recepcion": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "reception", "jefe_recepcion"],
+  "api:emitir-comprobante:restaurant": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "restaurant"],
+  "api:emitir-comprobante:spa": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "spa"],
+  "api:emitir-comprobante:events": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "events"],
+  "api:emitir-comprobante:compras": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "resp_deposito"],
+  "api:emitir-comprobante:inventario": ["admin", "manager", "responsable_area", "resp_administracion", "comercial", "resp_deposito"],
 };
 
 /**
@@ -411,6 +430,18 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:cash:force-anular": { label: "Forzar anulación de movimientos en turnos cerrados", section: "API — Administración" },
 
   "api:accounting-accounts:write": { label: "Alta, edición y listado completo de Plan de Cuentas", section: "API — Administración" },
+
+  "api:housekeeping:supervisor-view": { label: "Vista de supervisor en Housekeeping", section: "API — Operaciones" },
+  "api:restaurant:edit-layout": { label: "Editar el layout de mesas de Restaurant", section: "API — Operaciones" },
+  "api:cash:area-admin": { label: "Administración de Caja por área (movimientos manuales, anular ajenos)", section: "API — Administración" },
+  "api:cash:global-view": { label: "Ver todas las áreas de Caja + historial + resumen + Night Audit", section: "API — Administración" },
+
+  "api:emitir-comprobante:recepcion": { label: "Emitir Comprobante — área Recepción", section: "API — Operaciones" },
+  "api:emitir-comprobante:restaurant": { label: "Emitir Comprobante — área Restaurant", section: "API — Operaciones" },
+  "api:emitir-comprobante:spa": { label: "Emitir Comprobante — área Spa", section: "API — Operaciones" },
+  "api:emitir-comprobante:events": { label: "Emitir Comprobante — área Eventos", section: "API — Operaciones" },
+  "api:emitir-comprobante:compras": { label: "Emitir Comprobante — área Compras", section: "API — Operaciones" },
+  "api:emitir-comprobante:inventario": { label: "Emitir Comprobante — área Inventario", section: "API — Operaciones" },
 };
 
 /** Los 14 roles del sistema (SystemUserRole), en el orden en que se muestran en la matriz. */

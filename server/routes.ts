@@ -371,7 +371,7 @@ export async function registerRoutes(
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));
 
-  app.get("/api/source/files", requireAuth, async (_req, res) => {
+  app.get("/api/source/files", requireAuth, requirePermission("sidebar:/source-code"), async (_req, res) => {
     if (process.env.NODE_ENV === "production") {
       return res.status(404).json({ error: "Not found" });
     }
@@ -402,7 +402,7 @@ export async function registerRoutes(
     res.json(results.sort());
   });
 
-  app.get("/api/source/file", requireAuth, async (req, res) => {
+  app.get("/api/source/file", requireAuth, requirePermission("sidebar:/source-code"), async (req, res) => {
     const fs = await import("fs");
     const filePath = req.query.path as string;
     if (!filePath || filePath.includes("..") || filePath.startsWith("/")) {

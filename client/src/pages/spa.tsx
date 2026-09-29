@@ -593,8 +593,10 @@ export default function SpaPage() {
   const [appliedFilters, setAppliedFilters] = useState({ desde: defaultDesde, hasta: defaultHasta, treatmentId: "", professionalId: "", estado: "" });
 
   const { toast } = useToast();
-  const { user: currentUser } = useAuth();
-  const isAdmin = currentUser?.role === "admin";
+  const { hasPermission } = useAuth();
+  // Etapa 3 del ABM de usuarios: mismo resourceKey que ya gatea
+  // PATCH /api/spa/accounts/:accountId/reset-nc en el servidor.
+  const isAdmin = hasPermission("api:spa:reset-nc");
 
   const { data: cabins = [], isLoading: cabinsLoading } = useQuery<SpaCabin[]>({
     queryKey: ["/api/spa/cabins"],

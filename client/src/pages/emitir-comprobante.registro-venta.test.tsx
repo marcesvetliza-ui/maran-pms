@@ -16,7 +16,7 @@ import { queryClient } from "@/lib/queryClient";
 const { apiRequestMock } = vi.hoisted(() => ({ apiRequestMock: vi.fn() }));
 
 vi.mock("@/App", () => ({
-  useAuth: () => ({ user: { id: "user-1", username: "tester", role: "admin" } }),
+  useAuth: () => ({ user: { id: "user-1", username: "tester", role: "admin" }, hasPermission: () => true }),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({

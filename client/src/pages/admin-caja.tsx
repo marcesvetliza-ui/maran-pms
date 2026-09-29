@@ -774,7 +774,9 @@ export function AdminCajaConfigPage() {
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
-  const canPurge = user?.role === "admin" || user?.role === "administracion";
+  // "administracion" no es un rol real del sistema (SystemUserRole no lo
+  // incluye); es el mismo typo ya corregido server-side a resp_administracion.
+  const canPurge = user?.role === "admin" || user?.role === "resp_administracion";
 
   // Sync when config loads
   useState(() => {

@@ -690,8 +690,9 @@ function AdvanceDialog({
 }
 
 export default function RestaurantPage() {
-  const { user, selectedPosNumero, selectedPosNombre } = useAuth();
-  const canEditLayout = ["admin", "manager", "responsable_area"].includes(user?.role || "");
+  const { hasPermission, selectedPosNumero, selectedPosNombre } = useAuth();
+  // Etapa 3 del ABM de usuarios: mismo resourceKey server-side.
+  const canEditLayout = hasPermission("api:restaurant:edit-layout");
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("floor");
   const [selectedArea, setSelectedArea] = useState<string>("all");

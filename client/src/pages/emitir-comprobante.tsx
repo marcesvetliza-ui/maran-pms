@@ -30,17 +30,25 @@ const NC_ND_TIPOS = new Set(["NCA", "NCB", "NCM", "NCMB", "NDA", "NDB", "NDM", "
 
 type AreaId = "recepcion" | "restaurant" | "spa" | "events" | "compras" | "inventario";
 
-// Roles que ven todos los comprobantes de todas las áreas, sin restricción.
-const ROLES_VEN_TODO = ["admin", "manager", "responsable_area", "resp_administracion", "comercial"];
-
-const AREAS: { id: AreaId; label: string; roles: string[] }[] = [
-  { id: "recepcion", label: "Alojamiento", roles: [...ROLES_VEN_TODO, "reception", "jefe_recepcion"] },
-  { id: "restaurant", label: "Restaurant", roles: [...ROLES_VEN_TODO, "restaurant"] },
-  { id: "spa", label: "Spa", roles: [...ROLES_VEN_TODO, "spa"] },
-  { id: "events", label: "Eventos", roles: [...ROLES_VEN_TODO, "events"] },
-  { id: "compras", label: "Compras", roles: [...ROLES_VEN_TODO, "resp_deposito"] },
-  { id: "inventario", label: "Inventario", roles: [...ROLES_VEN_TODO, "resp_deposito"] },
+const AREAS: { id: AreaId; label: string }[] = [
+  { id: "recepcion", label: "Alojamiento" },
+  { id: "restaurant", label: "Restaurant" },
+  { id: "spa", label: "Spa" },
+  { id: "events", label: "Eventos" },
+  { id: "compras", label: "Compras" },
+  { id: "inventario", label: "Inventario" },
 ];
+
+// Etapa 3 del ABM de usuarios: un resourceKey por área, mismos roles
+// server-side (ver api:emitir-comprobante:* en server/permissions.ts).
+const AREA_RESOURCE_KEY: Record<AreaId, string> = {
+  recepcion: "api:emitir-comprobante:recepcion",
+  restaurant: "api:emitir-comprobante:restaurant",
+  spa: "api:emitir-comprobante:spa",
+  events: "api:emitir-comprobante:events",
+  compras: "api:emitir-comprobante:compras",
+  inventario: "api:emitir-comprobante:inventario",
+};
 
 // ── Operaciones y tipos ──────────────────────────────────────────────────────
 
@@ -217,8 +225,7 @@ function tiposParaSeleccion(operacion: Operacion, area: AreaId | ""): { value: s
 }
 
 export default function EmitirComprobantePage() {
-  const { user } = useAuth();
-  const role = user?.role || "";
+  const { hasPermission } = useAuth();
 
   // Mismas queries que ya usan EmitirComprobanteButton (config de venta) y
   // PurchaseInvoicesPage (proveedores/cuentas contables para compra) — no se
@@ -240,8 +247,8 @@ export default function EmitirComprobantePage() {
   })), [rawAccounts]);
 
   const areasPermitidas = useMemo(
-    () => AREAS.filter((a) => a.roles.includes(role)),
-    [role],
+    () => AREAS.filter((a) => hasPermission(AREA_RESOURCE_KEY[a.id])),
+    [hasPermission],
   );
 
   const [area, setArea] = useState<AreaId | "">(areasPermitidas.length === 1 ? areasPermitidas[0].id : "");

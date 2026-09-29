@@ -255,7 +255,7 @@ function Router() {
         <Route path="/cash-register" component={CashRegisterPage} />
         <Route path="/admin" component={AdminPage} />
         <Route path="/pos-configs" component={PosConfigsPage} />
-        <Route path="/source-code" component={SourceCodePage} />
+        <Route path="/source-code">{() => <PermissionRoute component={SourceCodePage} resourceKey="sidebar:/source-code" />}</Route>
         <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
         <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
         <Route path="/admin/consultas" component={AdminConsultasPage} />

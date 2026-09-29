@@ -32,7 +32,7 @@ vi.mock("@/hooks/use-toast", () => ({
 }));
 
 vi.mock("@/App", () => ({
-  useAuth: () => ({ user: { id: "user-1", username: "admin", role: "admin" } }),
+  useAuth: () => ({ user: { id: "user-1", username: "admin", role: "admin" }, hasPermission: () => true }),
 }));
 
 // Radix's real DropdownMenu fights the Dialog it opens over focus restoration
