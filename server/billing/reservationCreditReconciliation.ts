@@ -179,10 +179,13 @@ export function prepareReservationCreditIntent(
       FOR UPDATE
     `);
     const sourceIds = [...new Set(locked.flatMap(invoiceIdsForPayment))];
+    // Un JS array interpolado directo en `sql` no se serializa como literal de
+    // array de Postgres (falla con "malformed array literal"/"cannot cast type
+    // record" según el tamaño) — hay que unirlo como lista IN(...).
     const sources = sourceIds.length
       ? await tx.execute(sql`
           SELECT id, reserva_id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
-          FROM sales_invoices WHERE id = ANY(${sourceIds}::int[]) ORDER BY id FOR UPDATE
+          FROM sales_invoices WHERE id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)}) ORDER BY id FOR UPDATE
         `)
       : { rows: [] };
 
@@ -278,7 +281,7 @@ export async function reconcileReservationCreditInvoice(invoiceId: number): Prom
       const sourceRows = sourceIds.length
         ? await tx.execute(sql`
             SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
-            FROM sales_invoices WHERE id = ANY(${sourceIds}::int[]) ORDER BY id FOR UPDATE
+            FROM sales_invoices WHERE id IN (${sql.join(sourceIds.map((id) => sql`${id}`), sql`, `)}) ORDER BY id FOR UPDATE
           `)
         : { rows: [] };
       for (let index = 0; index < allocations.length; index++) {

@@ -2611,7 +2611,7 @@ export function registerReservationsRoutes(app: Express) {
             SELECT DISTINCT ON (payment_id)
               payment_id, id, tipo_comprobante, punto_venta, numero, cae, monto_total, estado
             FROM sales_invoices
-            WHERE payment_id = ANY(${paymentIds}::varchar[])
+            WHERE payment_id IN (${sql.join(paymentIds.map((id) => sql`${id}`), sql`, `)})
               AND estado IN ('emitida', 'autorizacion_pendiente')
             ORDER BY payment_id, created_at DESC, id DESC
           `);
@@ -3257,7 +3257,7 @@ export function registerReservationsRoutes(app: Express) {
       const invoiceResult = await db.execute(sql`
         SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
         FROM sales_invoices
-        WHERE id = ANY(${invoiceIds}::int[])
+        WHERE id IN (${sql.join(invoiceIds.map((id) => sql`${id}`), sql`, `)})
       `);
       const available = getAvailableReservationAdvancePayments(
         [payment],

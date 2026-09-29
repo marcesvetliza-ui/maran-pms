@@ -974,7 +974,7 @@ export function registerBillingRoutes(app: Express) {
       const result = await db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM sales_invoices
-        WHERE tipo_comprobante = ANY(${NON_FISCAL_TIPOS}::text[])
+        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
           AND fecha_emision >= ${startDate}
           AND fecha_emision <= ${endDate}
       `);
@@ -993,7 +993,7 @@ export function registerBillingRoutes(app: Express) {
       }
       const result = await db.execute(sql`
         DELETE FROM sales_invoices
-        WHERE tipo_comprobante = ANY(${NON_FISCAL_TIPOS}::text[])
+        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
           AND fecha_emision >= ${startDate}
           AND fecha_emision <= ${endDate}
         RETURNING id
