@@ -498,8 +498,14 @@ describe("reservation credit notes from Administración", () => {
       tipoComprobante: "FB",
       sourceChargeAmounts: { accommodation: 43000 },
     });
+    // Informativa en Caja de Recepción para control — sigue sin mover plata
+    // por sí misma, solo ajusta el Folio (verificado arriba).
     const { storage } = await import("../db-storage");
-    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
+    expect(storage.registerCashMovement).toHaveBeenCalledWith(
+      "recepcion", "nota_credito", "90", expect.stringContaining("NCB-00000015"),
+      "nc", "43000.00", "informational", expect.anything(),
+    );
   });
 
   it("emits only the selected charge and preserves receiver, point of sale, and payment method", async () => {
@@ -542,8 +548,13 @@ describe("reservation credit notes from Administración", () => {
     expect(state.emittedCalls[0].items).toEqual([
       expect.objectContaining({ descripcion: "Cena", precioUnitario: 50, subtotal: 50 }),
     ]);
+    // Informativa en Caja de Recepción para control — sigue sin mover plata.
     const { storage } = await import("../db-storage");
-    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
+    expect(storage.registerCashMovement).toHaveBeenCalledWith(
+      "recepcion", "nota_credito", expect.any(String), expect.any(String),
+      "nc", "50.00", "informational", expect.anything(),
+    );
   });
 
   it("uses only the residual of a charge on a second partial NC", async () => {

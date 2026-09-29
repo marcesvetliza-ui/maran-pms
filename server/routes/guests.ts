@@ -86,7 +86,16 @@ type PreparedAccountPayment = {
   allocations: { cargoId: string; amount: string }[];
   paymentMethod: string | null;
   paymentDetails: { method: string; amount: number }[];
+  area: string;
 };
+
+// Un recibo de Cuenta Corriente es el momento en que efectivamente se cobra
+// (si seguía en CC era porque no se había cobrado todavía) — por eso, a
+// diferencia de un cargo, necesita un área/turno real de Caja.
+const CC_RECEIPT_CASH_AREAS = new Set(["recepcion", "restaurant", "spa", "events"]);
+// "compensacion" es un ajuste contable, no plata que entra — se registra
+// como informativo, igual que las retenciones, no como cobro real.
+const CC_RECEIPT_NON_CASH_METHODS = new Set(["compensacion"]);
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   transferencia: "Transferencia",
@@ -180,13 +189,57 @@ async function prepareAccountPayment(
     }
   }
 
+  const area = String(body.area ?? "").trim();
+  if (!CC_RECEIPT_CASH_AREAS.has(area)) {
+    throw new AccountPaymentValidationError("Elegí el área de Caja donde se registra este cobro");
+  }
+
   return {
     accountingAmount,
     retentions: retentions.length > 0 ? retentions : null,
     allocations,
     paymentMethod: paymentDetails.length === 1 ? paymentDetails[0].method : "varios",
     paymentDetails,
+    area,
   };
+}
+
+/**
+ * Refleja en Caja lo que un recibo de Cuenta Corriente efectivamente cobra.
+ * Best-effort y fuera de la transacción del recibo (mismo patrón que ya usan
+ * las Notas de Crédito/Débito): un problema acá no debe hacer fallar un
+ * recibo que ya quedó registrado correctamente en la cuenta corriente.
+ */
+async function registerCcReceiptCashMovements(
+  area: string,
+  entityLabel: string,
+  movementId: string,
+  paymentDetails: { method: string; amount: number }[],
+  retentions: { concepto: string; monto: number }[] | null,
+  registeredBy: string | null,
+): Promise<void> {
+  try {
+    for (const line of paymentDetails) {
+      const isCash = !CC_RECEIPT_NON_CASH_METHODS.has(line.method);
+      await storage.registerCashMovement(
+        area, "recibo_cta_cte", movementId,
+        `Recibo CC — ${entityLabel}${PAYMENT_METHOD_LABELS[line.method] ? ` (${PAYMENT_METHOD_LABELS[line.method]})` : ""}`,
+        line.method, line.amount.toFixed(2), isCash ? "income" : "informational",
+        registeredBy || undefined,
+      );
+    }
+    for (const retention of retentions ?? []) {
+      const slug = retention.concepto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "_");
+      await storage.registerCashMovement(
+        area, "recibo_cta_cte", movementId,
+        `Recibo CC — ${entityLabel} (Retención ${retention.concepto})`,
+        `retencion_${slug}`, retention.monto.toFixed(2), "informational",
+        registeredBy || undefined,
+      );
+    }
+  } catch (error) {
+    console.error("[cc-receipt] No se pudo reflejar el recibo en Caja:", error);
+  }
 }
 
 export function registerGuestsRoutes(app: Express) {
@@ -404,6 +457,7 @@ export function registerGuestsRoutes(app: Express) {
       if (!guest) return res.status(404).json({ error: "Huésped no encontrado" });
       const { description, reference, date } = req.body;
       const payment = await prepareAccountPayment("guest", req.params.id, req.body);
+      const guestLabel = (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`;
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "guest",
         req.params.id,
@@ -415,9 +469,12 @@ export function registerGuestsRoutes(app: Express) {
           paymentMethod: payment.paymentMethod,
           retentions: payment.retentions,
           createdBy: req.body.createdBy || null,
-          guestName: (guest as any).tipoPersona === "juridica" ? guest.firstName : `${guest.firstName} ${guest.lastName}`,
+          guestName: guestLabel,
         },
         payment.allocations
+      );
+      await registerCcReceiptCashMovements(
+        payment.area, guestLabel, movement.id, payment.paymentDetails, payment.retentions, req.body.createdBy,
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
@@ -549,6 +606,7 @@ export function registerGuestsRoutes(app: Express) {
       }
       const { description, reference, date } = req.body;
       const payment = await prepareAccountPayment("company", req.params.id, req.body);
+      const companyLabel = company.nombreFantasia || company.razonSocial;
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "company",
         req.params.id,
@@ -562,6 +620,9 @@ export function registerGuestsRoutes(app: Express) {
           createdBy: req.body.createdBy || null,
         },
         payment.allocations
+      );
+      await registerCcReceiptCashMovements(
+        payment.area, companyLabel, movement.id, payment.paymentDetails, payment.retentions, req.body.createdBy,
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {
@@ -584,6 +645,7 @@ export function registerGuestsRoutes(app: Express) {
       }
       const { description, reference, date } = req.body;
       const payment = await prepareAccountPayment("agency", req.params.id, req.body);
+      const agencyLabel = agency.nombreFantasia || agency.razonSocial;
       const { movement, allocations: createdAllocations } = await storage.createPaymentWithAllocations(
         "agency",
         req.params.id,
@@ -597,6 +659,9 @@ export function registerGuestsRoutes(app: Express) {
           createdBy: req.body.createdBy || null,
         },
         payment.allocations
+      );
+      await registerCcReceiptCashMovements(
+        payment.area, agencyLabel, movement.id, payment.paymentDetails, payment.retentions, req.body.createdBy,
       );
       res.json({ ...movement, allocations: createdAllocations });
     } catch (error) {

@@ -15,6 +15,16 @@ import type { AccountMovement, AccountEntityType } from "@shared/schema";
 
 const RETENTION_CONCEPTS = ["IIBB", "Ganancias", "IVA", "SUSS", "TISHPYS", "Otras"];
 
+// Mismos valores que usan los turnos reales de Caja (server/cashArea.ts) —
+// el recibo cobra plata ahora mismo y por eso necesita un área/turno real,
+// igual que cualquier otro cobro del sistema.
+const CASH_AREAS = [
+  { value: "recepcion", label: "Recepción" },
+  { value: "restaurant", label: "Restaurant" },
+  { value: "spa", label: "Spa" },
+  { value: "events", label: "Eventos" },
+];
+
 const PAYMENT_METHODS = [
   { value: "transferencia", label: "Transferencia" },
   { value: "echeq",         label: "eCheq" },
@@ -62,6 +72,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   const [paymentDate, setPaymentDate] = useState(getArgentinaToday());
   const [paymentDescription, setPaymentDescription] = useState("Pago recibido");
   const [paymentReference, setPaymentReference] = useState("");
+  const [cashArea, setCashArea] = useState("");
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { id: newRowId(), method: "transferencia", methodOther: "", amount: "" },
   ]);
@@ -86,6 +97,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
       setPaymentDate(getArgentinaToday());
       setPaymentDescription("Pago recibido");
       setPaymentReference("");
+      setCashArea("");
       setPaymentRows([{ id: newRowId(), method: "transferencia", methodOther: "", amount: "" }]);
       setSelected({});
       setRetentions([]);
@@ -181,6 +193,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
       if (hasSelectedCharges && !allocationCoveredByPayment) {
         throw new Error("El total aplicado no alcanza para cubrir los comprobantes seleccionados.");
       }
+      if (!cashArea) throw new Error("Elegí el área de Caja donde se registra este cobro.");
 
       const allocations = Object.entries(selected)
         .filter(([, amount]) => parseMoneyInput(amount) > 0)
@@ -211,6 +224,9 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
         date: paymentDate,
         allocations,
         retentions: validRetentions.length > 0 ? validRetentions : null,
+        // Estaba en cuenta corriente porque no se había cobrado — este recibo
+        // es el momento del cobro, así que necesita un área/turno de Caja real.
+        area: cashArea,
       });
 
       if (!res.ok) {
@@ -240,6 +256,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
   });
 
   const canSubmit = totalPaymentMethods > 0
+    && !!cashArea
     && selectedChargeErrors.length === 0
     && allocationCoveredByPayment
     && !registerPaymentMutation.isPending;
@@ -433,7 +450,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
             </div>
           )}
 
-          {/* Fecha, descripción, referencia */}
+          {/* Fecha, área de Caja, referencia */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Fecha</Label>
@@ -445,6 +462,20 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
               />
             </div>
             <div>
+              <Label>Área de Caja *</Label>
+              <Select value={cashArea} onValueChange={setCashArea}>
+                <SelectTrigger data-testid="select-cc-payment-area">
+                  <SelectValue placeholder="Elegir área..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {CASH_AREAS.map((a) => (
+                    <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">Dónde se registra este cobro en Caja.</p>
+            </div>
+            <div className="col-span-2">
               <Label>Referencia (opcional)</Label>
               <Input
                 value={paymentReference}

@@ -234,6 +234,9 @@ async function reconcileReservationCreditNote(
   const ncPoint = Number(invoiceValue(nc, "punto_venta", "puntoVenta"));
   const ncNumber = Number(invoiceValue(nc, "numero", "numero"));
 
+  const originalTipoComprobante = String(invoiceValue(original, "tipo_comprobante", "tipoComprobante"));
+  const originalNroFacReal = `${originalTipoComprobante}-${String(invoiceValue(original, "numero", "numero")).padStart(8, "0")}`;
+
   await db.transaction(async (tx) => {
     await tx.execute(sql`
       UPDATE sales_invoices
@@ -305,8 +308,6 @@ async function reconcileReservationCreditNote(
     // invoice. Credit it back by the NC total, capped at what this cargo
     // still has un-reversed, so repeated partial NCs on the same invoice
     // never push the account past zero.
-    const originalTipoComprobante = String(invoiceValue(original, "tipo_comprobante", "tipoComprobante"));
-    const originalNroFacReal = `${originalTipoComprobante}-${String(invoiceValue(original, "numero", "numero")).padStart(8, "0")}`;
     const ccCargoResult = await tx.execute(sql`
       SELECT id, entity_type, entity_id, amount
       FROM account_movements
@@ -359,6 +360,21 @@ async function reconcileReservationCreditNote(
       WHERE id = ${ncId}
     `);
   });
+
+  // Informativo en Caja de Recepción para control — una NC de reserva sigue
+  // sin mover plata por sí misma (solo ajusta el Folio, arriba).
+  try {
+    if (ncTotal > 0) {
+      const nroNC = `${ncType}-${String(ncNumber).padStart(8, "0")}`;
+      await storage.registerCashMovement(
+        "recepcion", "nota_credito", String(ncId),
+        `${nroNC} s/${originalNroFacReal}`,
+        "nc", String(ncTotal.toFixed(2)), "informational", operator,
+      );
+    }
+  } catch (cashErr) {
+    console.error("[NC reserva] Error registrando movimiento de caja:", cashErr);
+  }
 
   return {
     ...nc,
@@ -3237,6 +3253,9 @@ export function registerBillingRoutes(app: Express) {
 
       // A reservation NC changes the fiscal amount and Folio balance only. It
       // must not create a cash outflow while its payments remain active.
+      // Non-reservation NCs are informative-only in Caja: emitting a NC never
+      // moves cash by itself (any real refund is its own separate movement,
+      // e.g. payment_void below) — it just needs to be visible for control.
       if (!original.reserva_id && !original.group_id) {
         try {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
@@ -3248,7 +3267,7 @@ export function registerBillingRoutes(app: Express) {
             await storage.registerCashMovement(
               pvArea, "nota_credito", String(nc.id),
               `${nroNC} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
-              "nc", String(totalNC.toFixed(2)), "outcome",
+              "nc", String(totalNC.toFixed(2)), "informational",
               user?.fullName || user?.username, nc.tipoComprobante
             );
           }
@@ -3568,6 +3587,23 @@ export function registerBillingRoutes(app: Express) {
                 WHERE id = ${Number(nd.id)}
               `);
             });
+            // Informativo en Caja de Recepción para control — igual que la NC
+            // que revierte, esta ND de reserva solo ajusta el Folio, no cobra.
+            try {
+              if (debitAmount > 0) {
+                const nroND = `${nd.tipo_comprobante ?? nd.tipoComprobante}-${String(nd.numero).padStart(8, "0")}`;
+                const nroOriginal = `${sourceInvoice.tipo_comprobante}-${String(sourceInvoice.numero).padStart(8, "0")}`;
+                const reqUser = (req as any).user;
+                await storage.registerCashMovement(
+                  "recepcion", "nota_debito", String(nd.id),
+                  `${nroND} s/${nroOriginal}`,
+                  "nd", String(debitAmount.toFixed(2)), "informational",
+                  reqUser?.fullName || reqUser?.username,
+                );
+              }
+            } catch (cashErr) {
+              console.error("[ND reserva] Error registrando movimiento de caja:", cashErr);
+            }
             return {
               ...nd,
               reconciliation_status: "conciliada",
@@ -3789,7 +3825,9 @@ export function registerBillingRoutes(app: Express) {
         sourceChargeAmounts: groupDebitSourceId ? { [groupDebitSourceId]: montoParsed } : undefined,
       } as any);
 
-      // Register cash movement (income) in the corresponding area
+      // Register the ND in Caja as informative-only: emitting a ND increases
+      // what's owed, it never collects cash by itself (that's a separate,
+      // later cobro/recibo) — informational still keeps it visible for control.
       try {
         const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nd.puntoVenta} AND activo = true LIMIT 1`);
         const pvArea = (pvRow.rows[0] as any)?.area || "recepcion";
@@ -3803,7 +3841,7 @@ export function registerBillingRoutes(app: Express) {
             `${nroND} s/${nroOriginal}${motivo ? ` — ${motivo}` : ""}`,
             "nd",
             String(totalND.toFixed(2)),
-            "income",
+            "informational",
             user?.fullName || user?.username,
             nd.tipoComprobante
           );

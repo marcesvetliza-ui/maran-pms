@@ -183,12 +183,23 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   tarjeta_debito: "Débito",
   transferencia: "Transferencia",
   no_fiscal: "Sin cargo",
+  nc: "Nota de Crédito",
+  nd: "Nota de Débito",
+  compensacion: "Compensación",
+  echeq: "eCheq",
+  cheque: "Cheque",
+  retencion_iibb: "Retención IIBB",
+  retencion_ganancias: "Retención Ganancias",
+  retencion_iva: "Retención IVA",
 };
 
-const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal"]);
+const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal", "nc", "nd", "compensacion"]);
 
 const AREA_COLORS: Record<string, string> = {
+  // Los turnos reales se guardan con area="recepcion" (español) — "reception"
+  // queda como alias por compatibilidad con datos/código legado.
   reception: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  recepcion: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   restaurant: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   spa: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
   events: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
@@ -196,6 +207,7 @@ const AREA_COLORS: Record<string, string> = {
 
 const AREA_LABEL_MAP: Record<string, string> = {
   reception: "Recepción",
+  recepcion: "Recepción",
   restaurant: "Restaurante",
   spa: "SPA",
   events: "Eventos",
@@ -1878,7 +1890,10 @@ function HistorialTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas</SelectItem>
-                  <SelectItem value="reception">Recepción</SelectItem>
+                  {/* Los turnos reales de recepción se guardan con area="recepcion"
+                      (español) — "reception" nunca hacía match y este filtro
+                      quedaba siempre vacío para Recepción. */}
+                  <SelectItem value="recepcion">Recepción</SelectItem>
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="events">Eventos</SelectItem>

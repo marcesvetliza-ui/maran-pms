@@ -17,6 +17,7 @@ const mockStorage = {
   getPendingCharges: vi.fn().mockResolvedValue([pendingCharge]),
   createPaymentWithAllocations: vi.fn(),
   voidDirectAccountPayment: vi.fn(),
+  registerCashMovement: vi.fn().mockResolvedValue({ id: "cash-movement-1" }),
 };
 
 vi.mock("../db-storage", () => ({ storage: mockStorage }));
@@ -81,6 +82,7 @@ describe("Cuenta Corriente payment routes", () => {
       reversal: { id: "reversal-1", amount: "100.00" },
       releasedAllocations: 1,
     });
+    mockStorage.registerCashMovement.mockResolvedValue({ id: "cash-movement-1" });
   });
 
   it.each([
@@ -98,6 +100,7 @@ describe("Cuenta Corriente payment routes", () => {
         ],
         retentions: [{ concepto: "IIBB", monto: "10.00" }],
         allocations: [{ cargoId: "cargo-1", amount: "100.00" }],
+        area: "recepcion",
       });
 
       expect(result.status).toBe(200);
@@ -109,6 +112,14 @@ describe("Cuenta Corriente payment routes", () => {
       expect(data.description).toContain("Efectivo: $50.00");
       expect(allocations).toEqual([{ cargoId: "cargo-1", amount: "100.00" }]);
       expect(Math.abs(Number(data.amount))).toBe(Number(allocations[0].amount));
+
+      // El cobro real (efectivo/transferencia) refleja un movimiento real de
+      // Caja; la retención, uno informativo — ninguno se pierde.
+      expect(mockStorage.registerCashMovement).toHaveBeenCalledTimes(3);
+      const cashCalls = mockStorage.registerCashMovement.mock.calls;
+      expect(cashCalls.filter(([, , , , , , movementType]) => movementType === "income")).toHaveLength(2);
+      expect(cashCalls.filter(([, , , , , , movementType]) => movementType === "informational")).toHaveLength(1);
+      expect(cashCalls.every(([area]) => area === "recepcion")).toBe(true);
     } finally {
       app.close();
     }
@@ -124,6 +135,7 @@ describe("Cuenta Corriente payment routes", () => {
         // advance (saldo a favor) — this is what previously required a
         // second, separate zero-allocation payment.
         allocations: [{ cargoId: "cargo-1", amount: "100.00" }],
+        area: "recepcion",
       });
 
       expect(result.status).toBe(200);
@@ -131,6 +143,43 @@ describe("Cuenta Corriente payment routes", () => {
       const [, , data, allocations] = mockStorage.createPaymentWithAllocations.mock.calls[0];
       expect(data.amount).toBe("-150.00");
       expect(allocations).toEqual([{ cargoId: "cargo-1", amount: "100.00" }]);
+    } finally {
+      app.close();
+    }
+  });
+
+  it("rejects a receipt with no área de Caja", async () => {
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/companies/entity-1/account/payment", {
+        amount: "100.00",
+        payments: [{ method: "efectivo", amount: "100.00" }],
+        allocations: [{ cargoId: "cargo-1", amount: "100.00" }],
+      });
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/área de caja/i);
+      expect(mockStorage.createPaymentWithAllocations).not.toHaveBeenCalled();
+    } finally {
+      app.close();
+    }
+  });
+
+  it("la compensación queda informativa en Caja, no como cobro real", async () => {
+    const app = await startApp();
+    try {
+      const result = await postPayment(app.baseUrl, "/api/companies/entity-1/account/payment", {
+        amount: "100.00",
+        payments: [{ method: "compensacion", amount: "100.00" }],
+        allocations: [{ cargoId: "cargo-1", amount: "100.00" }],
+        area: "restaurant",
+      });
+      expect(result.status).toBe(200);
+      expect(mockStorage.registerCashMovement).toHaveBeenCalledTimes(1);
+      const [area, sourceType, , , method, , movementType] = mockStorage.registerCashMovement.mock.calls[0];
+      expect(area).toBe("restaurant");
+      expect(sourceType).toBe("recibo_cta_cte");
+      expect(method).toBe("compensacion");
+      expect(movementType).toBe("informational");
     } finally {
       app.close();
     }

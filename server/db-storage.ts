@@ -8,6 +8,7 @@ import {
   projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
 import { visibleGuestCondition } from "./guest-visibility";
+import { normalizeCashShiftArea } from "./cashArea";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -7875,10 +7876,11 @@ export class DatabaseStorage implements IStorage {
           totals[method] += amt;
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;
-        } else if (method.startsWith("retencion_")) {
-          // Retención practicada por quien nos paga: no hay bucket propio en
-          // cash_closing_summaries, pero igual debe contar como liquidación
-          // no monetaria para que el cierre de turno no la deje afuera.
+        } else if (method.startsWith("retencion_") || method === "compensacion") {
+          // Retención practicada por quien nos paga, o compensación contable
+          // (recibos de Cuenta Corriente): no hay bucket propio en
+          // cash_closing_summaries, pero igual deben contar como liquidación
+          // no monetaria para que el cierre de turno no las deje afuera.
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;
         }
@@ -8205,6 +8207,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
+    // Distintos llamadores todavía pasan vocabularios de área distintos
+    // ("reception", "eventos") para el mismo turno real — normalizar acá,
+    // en el único punto de entrada, evita crear un turno "fantasma" que
+    // nunca se ve junto al resto de los movimientos de esa área.
+    area = normalizeCashShiftArea(area);
     const turno = await this.getOrCreateActiveTurno(area);
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
@@ -8537,6 +8544,14 @@ export class DatabaseStorage implements IStorage {
       if (updated.rows.length !== 1) {
         throw Object.assign(new Error("El recibo fue anulado por otra operación"), { statusCode: 409 });
       }
+      // Anular también lo que este recibo reflejó en Caja (real o
+      // informativo) — mismo patrón "anulado in place" que ya usan las
+      // ediciones de forma de pago, en vez de un contraasiento.
+      await tx.execute(sql`
+        UPDATE cash_movements
+        SET anulado = true, motivo_anulacion = ${reason}, anulado_por = ${voidedBy}, anulado_at = NOW()
+        WHERE source_type = 'recibo_cta_cte' AND source_id = ${movementId} AND anulado = false
+      `);
       return {
         original: mapMovement(updated.rows[0]),
         reversal: mapMovement(reversal),

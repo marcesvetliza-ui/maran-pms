@@ -3138,6 +3138,20 @@ export function registerReservationsRoutes(app: Express) {
                 WHERE id = ${invoice.id}
               `);
               notaCreditoGenerada = true;
+              // Informativo en Caja de Recepción para control — solo ajusta
+              // el estado fiscal de la factura, no mueve plata por sí misma
+              // (el reverso real de lo cobrado ya se registró arriba, como
+              // "payment_void").
+              try {
+                const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+                const nroOriginal = `${invoice.tipo_comprobante}-${String(invoice.numero).padStart(8, "0")}`;
+                await storage.registerCashMovement(
+                  "recepcion", "nota_credito", String(nc.id),
+                  `${nroNC} s/${nroOriginal} — anulación de pago`,
+                  "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
+                  user?.fullName || user?.username,
+                );
+              } catch (cashErr) { console.error("[anular-pago] nota-credito caja:", cashErr); }
             }
           } catch (e) { console.error("[anular-pago] nota-credito:", e); }
         }

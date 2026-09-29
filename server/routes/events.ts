@@ -940,6 +940,19 @@ export function registerEventsRoutes(app: Express) {
 
       await storage.updateEvent(req.params.eventId, { ncId: nc.id } as any);
 
+      // Informativo en Caja de Eventos para control — emitir la NC no cobra
+      // ni devuelve plata por sí misma.
+      try {
+        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+        const nroOriginal = `${originalInvoice.tipoComprobante}-${String(originalInvoice.numero).padStart(8, "0")}`;
+        await storage.registerCashMovement(
+          "events", "nota_credito", String(nc.id),
+          `${nroNC} s/${nroOriginal} — ${event.name}`,
+          "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
+          (req as any).user?.fullName || (req as any).user?.username,
+        );
+      } catch (cashErr) { console.error("[NC evento] Error registrando movimiento de caja:", cashErr); }
+
       // Write void folio_movements for each payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).
       // El movimiento "payment" original se guarda en positivo (suma a
@@ -1061,6 +1074,19 @@ export function registerEventsRoutes(app: Express) {
 
       // Persist NC id on the table record
       await storage.updateEventTable(req.params.tableId, { ncId: nc.id } as any);
+
+      // Informativo en Caja de Eventos para control — emitir la NC no cobra
+      // ni devuelve plata por sí misma.
+      try {
+        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+        const nroOriginal = `${originalInvoice.tipoComprobante}-${String(originalInvoice.numero).padStart(8, "0")}`;
+        await storage.registerCashMovement(
+          "events", "nota_credito", String(nc.id),
+          `${nroNC} s/${nroOriginal} — Mesa ${table.tableNumber}`,
+          "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
+          (req as any).user?.fullName || (req as any).user?.username,
+        );
+      } catch (cashErr) { console.error("[NC mesa evento] Error registrando movimiento de caja:", cashErr); }
 
       // Write void folio_movements for each table payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).

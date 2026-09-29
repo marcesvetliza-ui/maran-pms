@@ -2402,6 +2402,19 @@ export function registerSpaRoutes(app: Express) {
 
       await storage.updateSpaAccount(req.params.accountId, { ncId: nc.id } as any);
 
+      // Informativo en Caja de Spa para control — emitir la NC no cobra ni
+      // devuelve plata por sí misma.
+      try {
+        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
+        const nroOriginal = `${originalInvoice.tipoComprobante}-${String(originalInvoice.numero).padStart(8, "0")}`;
+        await storage.registerCashMovement(
+          "spa", "nota_credito", String(nc.id),
+          `${nroNC} s/${nroOriginal} — ${account.guestName}`,
+          "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
+          (req as any).user?.fullName || (req as any).user?.username,
+        );
+      } catch (cashErr) { console.error("[NC spa] Error registrando movimiento de caja:", cashErr); }
+
       // Write void folio_movements for each payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).
       try {
