@@ -14,7 +14,7 @@
  * emitir comprobante ni registrar un pago.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -215,6 +215,7 @@ describe("PrefacturaDialog — check-out de reserva sin nada para facturar (tari
     const submit = await screen.findByTestId("button-registrar-emitir");
     await waitFor(() => expect(submit).toBeEnabled());
     expect(screen.queryByRole("button", { name: /dar check-out/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Cargos de la habitación/ }));
     expect(screen.getByText("Recargo de cuotas")).toBeInTheDocument();
   });
 
@@ -257,6 +258,7 @@ describe("PrefacturaDialog — check-out de reserva sin nada para facturar (tari
     }]));
     renderDialog();
 
+    fireEvent.click(screen.getByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText("RECAR CUOTAS");
     await waitFor(() => expect(screen.getByTestId("folio-operational-balance")).toHaveTextContent("$77.000,00"));
     expect(screen.getByText("Importe a facturar").parentElement).toHaveTextContent("$77.000,00");

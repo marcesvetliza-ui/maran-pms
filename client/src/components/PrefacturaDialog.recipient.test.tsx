@@ -134,6 +134,7 @@ describe("PrefacturaDialog recipient selection", () => {
       </Wrapper>,
     );
 
+    await user.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 101/);
     const receiverSelect = await screen.findByTestId("select-billing-target");
     // A reservation linked to a company starts pre-billed to that company,
@@ -190,6 +191,7 @@ describe("PrefacturaDialog recipient selection", () => {
       </Wrapper>,
     );
 
+    await user.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 101/);
     // This reservation has a linked company, so it opens pre-billed to that
     // company (see the other test in this file) — switch to the guest
@@ -202,6 +204,9 @@ describe("PrefacturaDialog recipient selection", () => {
 
     await user.click(screen.getByTestId("select-sale-condition"));
     await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    expect(screen.getByText("Cargo a cuenta corriente")).toBeInTheDocument();
+    expect(screen.getByText("Cobro de caja").parentElement).toHaveTextContent("No corresponde");
+    expect(screen.queryByTestId("summary-payments-registered")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("button-registrar-emitir"));
 
     await waitFor(() => {
@@ -241,6 +246,7 @@ describe("PrefacturaDialog recipient selection", () => {
       </Wrapper>,
     );
 
+    await user.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 101/);
     await user.click(screen.getByTestId("select-billing-target"));
     await user.click(await screen.findByRole("option", { name: /Empresa/ }));
@@ -288,6 +294,7 @@ describe("PrefacturaDialog recipient selection", () => {
       </Wrapper>,
     );
 
+    await user.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 101/);
     await user.click(screen.getByTestId("select-billing-target"));
     await user.click(await screen.findByRole("option", { name: /Empresa/ }));
@@ -351,6 +358,7 @@ describe("PrefacturaDialog recipient selection", () => {
       </Wrapper>,
     );
 
+    await user.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 101/);
     const chargeCheckbox = screen.getAllByRole("checkbox").find((checkbox) =>
       checkbox.closest("tr")?.textContent?.includes("Cargo adicional"),
