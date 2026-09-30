@@ -20,8 +20,9 @@ description: New unified dialog component replacing both the checkout wizard (st
 - A partial collection must emit a partial invoice: both document items and `sourceChargeAmounts` are projected to the amount actually covered (including prior advances), never to the full selected charge.
 - Fiscal recipient rules are shared by UI and server: Responsable Inscripto/Monotributo use A with a valid CUIT; Exento/Consumidor Final use B; T is only for a foreign guest with accommodation selected.
 - `cuenta_corriente` is a sale condition, not a substitute label for a fiscal document or cash payment method. It requires an associated company/agency and creates the account charge without a reception cash payment.
+- Payment inputs can be prefilled before confirmation. In summaries call these amounts prepared/draft, never already registered; for `cuenta_corriente`, hide draft cash totals and show the entity-account charge instead.
 
-**Why:** The folio can be open in multiple terminals and can contain advances, partial charges, or linked entities. Treating the selected charge total as an automatic invoice total creates irreconcilable folio balances and duplicate exposure.
+**Why:** The folio can be open in multiple terminals and can contain advances, partial charges, or linked entities. Treating the selected charge total as an automatic invoice total creates irreconcilable folio balances and duplicate exposure. A prefilled row is not evidence of money collected, especially when switching to a non-cash sale condition.
 
 **How to apply:** When changing Prefactura's amounts, calculate one deterministic per-source allocation and send that same allocation to the invoice API. Keep the API validation aligned with the selector rules; never rely on the client alone.
 

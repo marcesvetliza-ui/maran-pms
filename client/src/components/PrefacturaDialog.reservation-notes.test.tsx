@@ -8,7 +8,7 @@
  * this only adds the missing render.
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
@@ -39,13 +39,13 @@ const FAKE_FOLIO = {
   checkOutDate: "2026-09-20",
   nights: 4,
   roomRate: "0.00",
-  roomTotal: 0,
-  charges: [],
-  totalCharges: 0,
+  roomTotal: 100,
+  charges: [{ id: "parking", description: "Cochera", amount: "50.00", category: "parking" }],
+  totalCharges: 50,
   payments: [],
   totalPayments: 0,
-  grandTotal: 0,
-  balance: 0,
+  grandTotal: 150,
+  balance: 150,
 };
 
 function buildFetchMock() {
@@ -111,10 +111,40 @@ describe("PrefacturaDialog — Notas de la reserva", () => {
     expect(screen.queryByTestId("prefactura-reservation-notes")).not.toBeInTheDocument();
   });
 
-  it("no muestra las notas en modo billing (solo aplica al check-out)", async () => {
-    renderDialog({ mode: "billing", reservation: baseReservation({ notes: "Nota que no debería verse acá" }) });
+  it("también muestra las notas en modo billing", async () => {
+    renderDialog({ mode: "billing", reservation: baseReservation({ notes: "Nota visible para facturación" }) });
 
-    await screen.findByTestId("button-registrar-emitir");
-    expect(screen.queryByTestId("prefactura-reservation-notes")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("prefactura-reservation-notes")).toHaveTextContent("Nota visible para facturación");
+  });
+
+  it.each(["checkout", "billing"] as const)("mantiene resumen dinámico y cargos inicialmente cerrados en modo %s", async (mode) => {
+    renderDialog({ mode });
+
+    const chargesButton = await screen.findByRole("button", { name: /Cargos de la habitación/ });
+    expect(chargesButton).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByTestId("text-importe-a-facturar")).toHaveTextContent("150,00");
+    if (mode === "checkout") {
+      const checkoutOption = screen.getByText("Hacer check-out al confirmar");
+      const submit = screen.getByTestId("button-registrar-emitir");
+      expect(checkoutOption.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+
+    fireEvent.click(chargesButton);
+    expect(chargesButton).toHaveAttribute("aria-expanded", "true");
+    const chargePanel = screen.getByRole("table").parentElement?.parentElement;
+    expect(chargePanel).toBeTruthy();
+    const checkboxes = within(chargePanel as HTMLElement).getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]).toBeChecked();
+    fireEvent.click(checkboxes[0]);
+    expect(await screen.findByTestId("text-importe-a-facturar")).toHaveTextContent("50,00");
+
+    const paymentAmount = screen.getByTestId("input-payment-amount-0");
+    fireEvent.change(paymentAmount, { target: { value: "20" } });
+    expect(screen.getByTestId("new-charge-required")).toHaveTextContent("50,00");
+    expect(screen.getByTestId("folio-operational-balance")).toHaveTextContent("150,00");
+    expect(screen.getAllByTestId("text-importe-a-facturar")).toHaveLength(1);
+    expect(screen.getByTestId("summary-payments-registered")).toHaveTextContent("20,00");
+    expect(screen.getByTestId("summary-payment-remaining")).toHaveTextContent("30,00");
   });
 });
