@@ -263,7 +263,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] sm:max-w-2xl lg:max-w-4xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Registrar pago recibido</DialogTitle>
           <DialogDescription>
@@ -272,12 +272,15 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-2">
+        {/* En pantallas anchas, comprobantes a la izquierda y cobro a la
+            derecha aprovechan el ancho disponible en vez de apilar todo en
+            una sola columna angosta con mucho scroll vertical. */}
+        <div className="grid gap-4 py-2 lg:grid-cols-2 lg:items-start">
           {/* Comprobantes a cancelar */}
           {pendingCharges.length > 0 && (
             <div>
               <Label>Comprobantes a cancelar</Label>
-              <div className="border rounded-md mt-1 divide-y max-h-56 overflow-y-auto">
+              <div className="border rounded-md mt-1 divide-y max-h-56 lg:max-h-[26rem] overflow-y-auto">
                 {pendingCharges.map((charge) => {
                   const isChecked = charge.id in selected;
                   return (
@@ -294,7 +297,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                       <Input
                          type="text"
                          inputMode="decimal"
-                        className="w-28"
+                        className="w-28 shrink-0"
                         disabled={!isChecked}
                         value={selected[charge.id] ?? ""}
                         onChange={(e) => updateChargeAmount(charge.id, e.target.value)}
@@ -323,169 +326,173 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
             </div>
           )}
 
-          {/* Formas de pago — múltiples rows */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Label>Formas de pago</Label>
-              <Button type="button" variant="ghost" size="sm" onClick={addPaymentRow} data-testid="button-add-payment-row">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Agregar método
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {paymentRows.map((row, idx) => (
-                <div key={row.id} className="flex items-end gap-2" data-testid={`row-payment-${idx}`}>
-                  <div className="w-32 shrink-0">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
-                    <Input
-                       type="text"
-                       inputMode="decimal"
-                       placeholder="0,00"
-                      value={row.amount}
-                      onChange={(e) => updatePaymentRow(idx, "amount", e.target.value)}
-                      data-testid={`input-payment-amount-${idx}`}
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground mb-1 block">Método</Label>
-                    <Select value={row.method} onValueChange={(v) => updatePaymentRow(idx, "method", v)}>
-                      <SelectTrigger data-testid={`select-payment-method-${idx}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAYMENT_METHODS.map((m) => (
-                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {row.method === "otro" && (
-                    <div className="flex-1">
-                      <Label className="text-xs text-muted-foreground mb-1 block">Especificar</Label>
+          <div className="space-y-4">
+            {/* Formas de pago — múltiples rows */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>Formas de pago</Label>
+                <Button type="button" variant="ghost" size="sm" onClick={addPaymentRow} data-testid="button-add-payment-row">
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar método
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {paymentRows.map((row, idx) => (
+                  <div key={row.id} className="flex flex-wrap items-end gap-2" data-testid={`row-payment-${idx}`}>
+                    <div className="w-32 shrink-0">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Monto</Label>
                       <Input
-                        placeholder="Ej: débito, criptos..."
-                        value={row.methodOther}
-                        onChange={(e) => updatePaymentRow(idx, "methodOther", e.target.value)}
-                        data-testid={`input-payment-method-other-${idx}`}
+                         type="text"
+                         inputMode="decimal"
+                         placeholder="0,00"
+                        value={row.amount}
+                        onChange={(e) => updatePaymentRow(idx, "amount", e.target.value)}
+                        data-testid={`input-payment-amount-${idx}`}
                       />
                     </div>
-                  )}
-                  {paymentRows.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => removePaymentRow(idx)} data-testid={`button-remove-payment-${idx}`}>
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Retenciones */}
-          <div>
-            <div className="flex items-center justify-between">
-              <Label>Retenciones (opcional)</Label>
-              <Button type="button" variant="ghost" size="sm" onClick={addRetention} data-testid="button-add-retention">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Agregar
-              </Button>
-            </div>
-            {retentions.length > 0 && (
-              <div className="space-y-2 mt-1">
-                {retentions.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2" data-testid={`row-retention-${i}`}>
-                    <Select value={r.concepto} onValueChange={(v) => updateRetention(i, "concepto", v)}>
-                      <SelectTrigger className="w-40" data-testid={`select-retention-concepto-${i}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {RETENTION_CONCEPTS.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                       type="text"
-                       inputMode="decimal"
-                      placeholder="Monto"
-                      value={r.monto}
-                      onChange={(e) => updateRetention(i, "monto", e.target.value)}
-                      data-testid={`input-retention-monto-${i}`}
-                    />
-                    <Button type="button" variant="ghost" size="icon" onClick={() => removeRetention(i)} data-testid={`button-remove-retention-${i}`}>
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
-                    </Button>
+                    <div className="flex-1 min-w-[140px]">
+                      <Label className="text-xs text-muted-foreground mb-1 block">Método</Label>
+                      <Select value={row.method} onValueChange={(v) => updatePaymentRow(idx, "method", v)}>
+                        <SelectTrigger data-testid={`select-payment-method-${idx}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_METHODS.map((m) => (
+                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {row.method === "otro" && (
+                      <div className="flex-1 min-w-[140px]">
+                        <Label className="text-xs text-muted-foreground mb-1 block">Especificar</Label>
+                        <Input
+                          placeholder="Ej: débito, criptos..."
+                          value={row.methodOther}
+                          onChange={(e) => updatePaymentRow(idx, "methodOther", e.target.value)}
+                          data-testid={`input-payment-method-other-${idx}`}
+                        />
+                      </div>
+                    )}
+                    {paymentRows.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removePaymentRow(idx)} data-testid={`button-remove-payment-${idx}`}>
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Retenciones */}
+            <div>
+              <div className="flex items-center justify-between">
+                <Label>Retenciones (opcional)</Label>
+                <Button type="button" variant="ghost" size="sm" onClick={addRetention} data-testid="button-add-retention">
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar
+                </Button>
+              </div>
+              {retentions.length > 0 && (
+                <div className="space-y-2 mt-1">
+                  {retentions.map((r, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-2" data-testid={`row-retention-${i}`}>
+                      <Select value={r.concepto} onValueChange={(v) => updateRetention(i, "concepto", v)}>
+                        <SelectTrigger className="w-40" data-testid={`select-retention-concepto-${i}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {RETENTION_CONCEPTS.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                         type="text"
+                         inputMode="decimal"
+                        className="flex-1 min-w-[100px]"
+                        placeholder="Monto"
+                        value={r.monto}
+                        onChange={(e) => updateRetention(i, "monto", e.target.value)}
+                        data-testid={`input-retention-monto-${i}`}
+                      />
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removeRetention(i)} data-testid={`button-remove-retention-${i}`}>
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Resumen de totales */}
+             {(totalPaymentMethods > 0 || retentionsTotal > 0) && (
+              <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
+                 {paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).map((row) => (
+                  <div key={row.id} className="flex justify-between">
+                    <span className="text-muted-foreground">
+                      {PAYMENT_METHODS.find(m => m.value === row.method)?.label || row.methodOther || row.method}
+                    </span>
+                     <span className="tabular-nums">${fmtMoney(parseMoneyInput(row.amount))}</span>
+                  </div>
+                ))}
+                 {(paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).length > 1 || retentionsTotal > 0) && (
+                  <div className="flex justify-between border-t pt-1">
+                     <span className="text-muted-foreground font-medium">Medios de pago</span>
+                     <span className="font-semibold tabular-nums">${fmtMoney(totalPaymentMethods)}</span>
+                  </div>
+                )}
+                {retentionsTotal > 0 && (
+                  <>
+                    <div className="flex justify-between border-t pt-1">
+                      <span className="text-muted-foreground">Retenciones</span>
+                       <span className="tabular-nums">+${fmtMoney(retentionsTotal)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-1">
+                       <span className="text-muted-foreground font-medium">Total aplicado a la deuda</span>
+                       <span className="font-semibold tabular-nums">${fmtMoney(totalApplied)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
+        </div>
 
-          {/* Resumen de totales */}
-           {(totalPaymentMethods > 0 || retentionsTotal > 0) && (
-            <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
-               {paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).map((row) => (
-                <div key={row.id} className="flex justify-between">
-                  <span className="text-muted-foreground">
-                    {PAYMENT_METHODS.find(m => m.value === row.method)?.label || row.methodOther || row.method}
-                  </span>
-                   <span className="tabular-nums">${fmtMoney(parseMoneyInput(row.amount))}</span>
-                </div>
-              ))}
-               {(paymentRows.filter((row) => parseMoneyInput(row.amount) > 0).length > 1 || retentionsTotal > 0) && (
-                <div className="flex justify-between border-t pt-1">
-                   <span className="text-muted-foreground font-medium">Medios de pago</span>
-                   <span className="font-semibold tabular-nums">${fmtMoney(totalPaymentMethods)}</span>
-                </div>
-              )}
-              {retentionsTotal > 0 && (
-                <>
-                  <div className="flex justify-between border-t pt-1">
-                    <span className="text-muted-foreground">Retenciones</span>
-                     <span className="tabular-nums">+${fmtMoney(retentionsTotal)}</span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1">
-                     <span className="text-muted-foreground font-medium">Total aplicado a la deuda</span>
-                     <span className="font-semibold tabular-nums">${fmtMoney(totalApplied)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Fecha, área de Caja, referencia */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Fecha</Label>
-              <Input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate(e.target.value)}
-                data-testid="input-cc-payment-date"
-              />
-            </div>
-            <div>
-              <Label>Área de Caja *</Label>
-              <Select value={cashArea} onValueChange={setCashArea}>
-                <SelectTrigger data-testid="select-cc-payment-area">
-                  <SelectValue placeholder="Elegir área..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {CASH_AREAS.map((a) => (
-                    <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">Dónde se registra este cobro en Caja.</p>
-            </div>
-            <div className="col-span-2">
-              <Label>Referencia (opcional)</Label>
-              <Input
-                value={paymentReference}
-                onChange={(e) => setPaymentReference(e.target.value)}
-                placeholder="Nro. transferencia, cheque, etc."
-                data-testid="input-cc-payment-reference"
-              />
-            </div>
+        {/* Fecha, área de Caja, referencia, descripción — franja completa,
+            en 4 columnas cuando hay ancho para no apilarlas. */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-2">
+          <div>
+            <Label>Fecha</Label>
+            <Input
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              data-testid="input-cc-payment-date"
+            />
           </div>
           <div>
+            <Label>Área de Caja *</Label>
+            <Select value={cashArea} onValueChange={setCashArea}>
+              <SelectTrigger data-testid="select-cc-payment-area">
+                <SelectValue placeholder="Elegir área..." />
+              </SelectTrigger>
+              <SelectContent>
+                {CASH_AREAS.map((a) => (
+                  <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">Dónde se registra este cobro en Caja.</p>
+          </div>
+          <div className="col-span-2">
+            <Label>Referencia (opcional)</Label>
+            <Input
+              value={paymentReference}
+              onChange={(e) => setPaymentReference(e.target.value)}
+              placeholder="Nro. transferencia, cheque, etc."
+              data-testid="input-cc-payment-reference"
+            />
+          </div>
+          <div className="col-span-2 sm:col-span-4">
             <Label>Descripción</Label>
             <Input
               value={paymentDescription}
