@@ -964,10 +964,10 @@ export function ReservationFormDialog({
       numberOfGuests: Number(formData.numberOfGuests),
       baseRatePerNight: String(formData.baseRatePerNight || "0"),
       finalRatePerNight: String(formData.finalRatePerNight || "0"),
-      // El voucher se descuenta una sola vez del total, no por noche (ver
-      // discountType/discountValue arriba, que son un concepto distinto:
-      // tarifa negociada por noche).
-      totalRoomAmount: String(Math.max(0, parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount).toFixed(2)),
+      // La tarifa ya viene en su valor final tal como la cargó recepción —
+      // con voucher, esa tarifa arranca en $0 (ver switch "Tiene voucher")
+      // y es la persona la que decide qué cobrar, sin resta automática.
+      totalRoomAmount: String(parseFloat(formData.totalRoomAmount || "0").toFixed(2)),
       discountValue: String(formData.discountValue || "0"),
       voucherId: hasVoucher ? (selectedVoucher?.id || null) : null,
       voucherCode: hasVoucher ? (selectedVoucher?.voucherCode || null) : null,
@@ -1001,10 +1001,12 @@ export function ReservationFormDialog({
       .map((r: any) => r.roomId)
   );
 
-  // Se consume completo, no se conserva remanente: el voucher nunca descuenta
-  // más de lo que vale la reserva.
+  // Se consume completo: el valor del voucher monetario, sin relacionarlo
+  // con la tarifa (que ahora la define recepción a mano, ya en $0, tras
+  // tildar "Tiene voucher"). Es lo que se debita del saldo del voucher, no
+  // un descuento que se le resta a la tarifa.
   const voucherAppliedAmount = (hasVoucher && selectedVoucher && selectedVoucher.valueType === "monetario")
-    ? Math.min(parseFloat(selectedVoucher.valueAmount || "0"), parseFloat(formData.totalRoomAmount || "0"))
+    ? parseFloat(selectedVoucher.valueAmount || "0")
     : 0;
 
   const availableRooms = isUpgrade
@@ -1298,7 +1300,23 @@ export function ReservationFormDialog({
                     checked={hasVoucher}
                     onCheckedChange={(checked) => {
                       setHasVoucher(checked);
-                      if (!checked) {
+                      if (checked) {
+                        // La tarifa que traía el plan tarifario o el paquete ya no
+                        // corresponde una vez que hay un voucher de por medio — se
+                        // vacía a $0 y pasa a modo manual para que recepción cargue
+                        // lo que realmente corresponda cobrar (0 si el voucher cubre
+                        // toda la estadía, o un parcial si no la cubre entera).
+                        const hadPackage = !!selectedPackageId;
+                        if (hadPackage) setSelectedPackageId("");
+                        setFormData(prev => ({
+                          ...prev,
+                          ratePlanId: "__special__",
+                          baseRatePerNight: "0",
+                          finalRatePerNight: "0",
+                          totalRoomAmount: "0",
+                          notes: hadPackage ? (prev.notes?.replace(/\[Paquete:[^\]]*\]\s*/g, "").trim() || "") : prev.notes,
+                        }));
+                      } else {
                         setSelectedVoucher(null);
                         setFormData(prev => ({ ...prev, voucherCode: "", voucherNotes: "" }));
                       }
@@ -1851,19 +1869,19 @@ export function ReservationFormDialog({
                   <p className="text-lg font-semibold">${fmtMoney(formData.finalRatePerNight)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-muted-foreground">{voucherAppliedAmount > 0 ? "Subtotal Alojamiento" : "Total Alojamiento"}</p>
+                  <p className="text-sm text-muted-foreground">Total Alojamiento</p>
                   <p className="text-lg font-semibold">${fmtMoney(formData.totalRoomAmount)}</p>
                 </div>
               </div>
               {voucherAppliedAmount > 0 && (
                 <div className="flex justify-between items-center text-sm text-amber-700 dark:text-amber-400">
                   <span className="flex items-center gap-1"><Gift className="h-3.5 w-3.5" />Voucher aplicado ({selectedVoucher!.voucherCode})</span>
-                  <span className="font-medium">-${fmtMoney(voucherAppliedAmount)}</span>
+                  <span className="font-medium">cubre hasta ${fmtMoney(voucherAppliedAmount)}</span>
                 </div>
               )}
               {pendingCharges.length > 0 && (() => {
                 const chargesTotal = pendingCharges.reduce((sum, c) => sum + parseFloat(c.amount) * c.quantity, 0);
-                const roomTotal = parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount;
+                const roomTotal = parseFloat(formData.totalRoomAmount || "0");
                 const grandTotal = fmtMoney(roomTotal + chargesTotal);
                 return (
                   <div className="border-t pt-2 flex justify-between items-center">
@@ -1874,7 +1892,7 @@ export function ReservationFormDialog({
               })()}
               {pendingCharges.length === 0 && (
                 <div className="border-t pt-2 flex justify-end">
-                  <p className="text-2xl font-bold text-primary">${fmtMoney(parseFloat(formData.totalRoomAmount || "0") - voucherAppliedAmount)}</p>
+                  <p className="text-2xl font-bold text-primary">${fmtMoney(parseFloat(formData.totalRoomAmount || "0"))}</p>
                 </div>
               )}
             </div>
