@@ -447,7 +447,7 @@ function AdvanceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5" />
@@ -2591,7 +2591,7 @@ export default function RestaurantPage() {
       </div>
 
       <Dialog open={isBreakfastDialogOpen} onOpenChange={setIsBreakfastDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader className="sr-only">
             <DialogTitle>Desayunos de mañana</DialogTitle>
             <DialogDescription>Listado de habitaciones con desayuno incluido</DialogDescription>
@@ -3982,7 +3982,7 @@ export default function RestaurantPage() {
 
       {/* Clientes Dialog */}
       <Dialog open={clientDialogOpen} onOpenChange={(o) => { setClientDialogOpen(o); if (!o) { setClientEditingId(null); setClientCreatedForReservation(null); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
           <DialogHeader className="shrink-0">
             <DialogTitle>{clientEditingId ? "Editar Cliente" : "Nuevo Cliente"}</DialogTitle>
           </DialogHeader>
@@ -4522,7 +4522,7 @@ export default function RestaurantPage() {
           setIsSplitMode(false);
         }
       }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] flex flex-col">
           <DialogHeader>
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -5409,7 +5409,7 @@ export default function RestaurantPage() {
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto flex flex-col">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
@@ -7026,7 +7026,7 @@ export default function RestaurantPage() {
 
       {/* Emitir Comprobante Dialog */}
       <Dialog open={isEmitirComprobanteOpen} onOpenChange={(open) => { if (!open) setIsEmitirComprobanteOpen(false); }}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
@@ -7320,7 +7320,7 @@ export default function RestaurantPage() {
 
       {/* Reservation Dialog */}
       <Dialog open={isReservationDialogOpen} onOpenChange={setIsReservationDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
           <DialogHeader className="shrink-0">
             <DialogTitle>Nueva Reserva</DialogTitle>
           </DialogHeader>

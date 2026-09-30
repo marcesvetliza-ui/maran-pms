@@ -1480,7 +1480,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
       </Dialog>
 
       <Dialog open={closeShiftDialog} onOpenChange={(open) => { if (!open) { setCloseShiftDialog(false); resetCloseDialog(); } }}>
-        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] flex flex-col">
           <DialogHeader className="shrink-0">
             <DialogTitle>
               Cerrar Turno — {config.areaLabel}
@@ -1710,7 +1710,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
       </Dialog>
 
       <Dialog open={!!closingSummaryData} onOpenChange={() => setClosingSummaryData(null)}>
-        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Resumen de Cierre</DialogTitle>
           </DialogHeader>
@@ -2449,7 +2449,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Moon className="h-4 w-4 text-indigo-600" />

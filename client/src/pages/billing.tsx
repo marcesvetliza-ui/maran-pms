@@ -724,7 +724,7 @@ function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {children}
       </DialogContent>
@@ -2850,7 +2850,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4"><DialogTitle>Emitir {tipoNCLabel}</DialogTitle></DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-3">
           <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">

@@ -530,7 +530,7 @@ function PreventiveTab() {
 
       {/* Dialog Nueva/Editar tarea */}
       <Dialog open={isFormOpen} onOpenChange={o => { if (!o) { setIsFormOpen(false); setEditingTask(null); resetForm(); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5" />
@@ -1497,7 +1497,7 @@ export default function MaintenancePage() {
       </Tabs>
 
       <Dialog open={isNewOrderDialogOpen} onOpenChange={setIsNewOrderDialogOpen}>
-        <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
+        <DialogContent className="max-w-2xl w-[95vw] flex flex-col max-h-[90vh]">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle>Nueva Orden de Trabajo</DialogTitle>
             <DialogDescription>Complete los datos para crear una nueva orden de trabajo</DialogDescription>

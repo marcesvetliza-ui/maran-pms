@@ -327,7 +327,7 @@ function AddBlockDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Agregar Bloque de Habitaciones</DialogTitle>
           <DialogDescription>
@@ -3425,7 +3425,7 @@ export default function GroupDetailPage() {
 
       {/* Group Invoice Dialog */}
       <Dialog open={showInvoiceDialog} onOpenChange={setShowInvoiceDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto print:max-w-none print:max-h-none print:overflow-visible">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto print:max-w-none print:max-h-none print:overflow-visible">
           <DialogHeader className="print:mb-4">
             <DialogTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
@@ -3676,7 +3676,7 @@ export default function GroupDetailPage() {
 
       {/* Rooming List Dialog */}
       <Dialog open={showRoomingListDialog} onOpenChange={setShowRoomingListDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users2 className="h-5 w-5" />
@@ -3885,7 +3885,7 @@ export default function GroupDetailPage() {
           resetGroupPaymentDialogFields();
         }
       }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <DollarSign className="h-5 w-5" />
@@ -5110,7 +5110,7 @@ export default function GroupDetailPage() {
 
       {/* ─── Dialog: Pago desde Folio Grupal ─── */}
       <Dialog open={showFolioPaymentDialog} onOpenChange={setShowFolioPaymentDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CreditCard className="h-5 w-5" />

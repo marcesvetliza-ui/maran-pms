@@ -840,7 +840,7 @@ export default function AgenciesPage() {
       </Sheet>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingAgency(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingAgency ? "Editar Agencia" : "Nueva Agencia"}</DialogTitle>
             <DialogDescription>

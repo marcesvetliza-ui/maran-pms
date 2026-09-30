@@ -2622,7 +2622,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
       {/* Modal: % por Profesional */}
       <Dialog open={showProdDialog} onOpenChange={setShowProdDialog}>
-        <DialogContent className="max-w-4xl flex flex-col max-h-[90vh]">
+        <DialogContent className="max-w-6xl w-[95vw] flex flex-col max-h-[90vh]">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <BarChart2 className="h-5 w-5 text-primary" />
@@ -4223,7 +4223,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
       <Dialog open={isTreatmentDialogOpen} onOpenChange={(open) => { if (!open) { setIsTreatmentDialogOpen(false); setEditingTreatment(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTreatment ? "Editar Servicio SPA" : "Nuevo Servicio SPA"}</DialogTitle>
           </DialogHeader>

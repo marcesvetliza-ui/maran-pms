@@ -902,7 +902,7 @@ export default function RecetasCostosPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
+        <DialogContent className="max-w-4xl w-[95vw] flex flex-col max-h-[90vh]">
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <ChefHat className="h-5 w-5" />
@@ -1826,7 +1826,7 @@ export default function RecetasCostosPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh]">
+        <DialogContent className="max-w-4xl w-[95vw] flex flex-col max-h-[90vh]">
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <FlaskConical className="h-5 w-5 text-violet-500" />
