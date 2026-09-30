@@ -500,6 +500,7 @@ export function PrefacturaDialog({
 
   // Step 1: which items to include & descriptions
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [chargesOpen, setChargesOpen] = useState(false);
   const [itemDescriptions, setItemDescriptions] = useState<Record<string, string>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -651,6 +652,7 @@ export function PrefacturaDialog({
       setPaymentRegistered(false);
       setSubmitError(null);
       setSelectedIds(new Set());
+      setChargesOpen(false);
       setItemDescriptions({});
       setEditingId(null);
       setEditingValue("");
@@ -1598,7 +1600,7 @@ export function PrefacturaDialog({
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) handleClose(); }}>
-      <DialogContent className="max-w-3xl max-h-[92dvh] flex flex-col overflow-hidden p-0 gap-0">
+      <DialogContent className="w-[calc(100vw-24px)] max-w-[1200px] max-h-[94dvh] flex flex-col overflow-hidden p-0 gap-0 sm:w-[calc(100vw-48px)]">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
             {step < 3 && <><FileText className="h-5 w-5" />Prefactura</>}
@@ -1613,12 +1615,12 @@ export function PrefacturaDialog({
 
 
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 sm:px-7">
           {/* ── Prefactura (cargos + cobro en una sola pantalla) ──────────── */}
           {step < 3 && (
           <div className="space-y-4">
-            {/* Notas de la reserva — visibles al hacer el check-out (ej. quién abona) */}
-            {mode === "checkout" && reservationData?.notes && (
+            {/* Reservation notes stay visible in both checkout and billing entry points. */}
+            {reservationData?.notes && (
               <div className="text-sm bg-muted/30 rounded-md p-3" data-testid="prefactura-reservation-notes">
                 <div className="text-muted-foreground mb-1">Notas de la reserva:</div>
                 <div style={{ whiteSpace: "pre-wrap" }}>{reservationData.notes}</div>
@@ -1663,9 +1665,163 @@ export function PrefacturaDialog({
               </div>
             )}
 
+            <section className="rounded-lg border bg-card/50 px-4 py-3" aria-label="Identidad y comprobante">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identidad y comprobante</h2>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <Label className="mb-1 block text-[11px] text-muted-foreground">Facturar a</Label>
+                  <Select value={billingTarget} onValueChange={(value) => handleBillingTargetChange(value as any)} disabled={billingTargetLocked}>
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-billing-target" title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {allowedBillingTargets.includes("guest") && <SelectItem value="guest"><span className="flex items-center gap-2"><User className="h-3.5 w-3.5" />Huésped</span></SelectItem>}
+                      {allowedBillingTargets.includes("company") && <SelectItem value="company"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Empresa</span></SelectItem>}
+                      {allowedBillingTargets.includes("agency") && <SelectItem value="agency"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Agencia</span></SelectItem>}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {billingTarget === "company" && (
+                  <div>
+                    <Label className="mb-1 block text-[11px] text-muted-foreground">Empresa</Label>
+                    {billingTargetLocked ? <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" /> : (
+                      <Select value={billingEntityId} onValueChange={(value) => handleEntitySelect(value, "company")}>
+                        <SelectTrigger className="h-8 text-sm" data-testid="select-billing-company"><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
+                        <SelectContent>{companies.filter((company: any) => company.id).map((company: any) => <SelectItem key={company.id} value={String(company.id)}>{company.razonSocial || company.nombreFantasia}</SelectItem>)}</SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+                {billingTarget === "agency" && (
+                  <div>
+                    <Label className="mb-1 block text-[11px] text-muted-foreground">Agencia</Label>
+                    {billingTargetLocked ? <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" /> : (
+                      <Select value={billingEntityId} onValueChange={(value) => handleEntitySelect(value, "agency")}>
+                        <SelectTrigger className="h-8 text-sm" data-testid="select-billing-agency"><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
+                        <SelectContent>{agencies.filter((agency: any) => agency.id).map((agency: any) => <SelectItem key={agency.id} value={String(agency.id)}>{agency.razonSocial || agency.nombreFantasia}</SelectItem>)}</SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+                <div><Label className="mb-1 block text-[11px] text-muted-foreground">Razón social / Nombre</Label><Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" /></div>
+                <div><Label className="mb-1 block text-[11px] text-muted-foreground">{documentType || (cuit ? "CUIT" : "Documento")}</Label><Input value={cleanIdentifier(cuit) || cleanIdentifier(dni)} readOnly placeholder="Sin identificación registrada" className="h-8 text-sm bg-muted" /></div>
+                <div><Label className="mb-1 block text-[11px] text-muted-foreground">Condición IVA</Label><Input value={condicionIva} readOnly className="h-8 text-sm bg-muted" /></div>
+                <div><Label className="mb-1 block text-[11px] text-muted-foreground">Nacionalidad</Label><Input value={nationality || nationalityCode || "No registrada"} readOnly className="h-8 text-sm bg-muted" /></div>
+                <div className="lg:col-span-2"><Label className="mb-1 block text-[11px] text-muted-foreground">Domicilio</Label><Input value={domicilio || "No registrado"} readOnly className="h-8 text-sm bg-muted" /></div>
+                <div>
+                  <Label className="mb-1 block text-[11px] text-muted-foreground">Tipo de comprobante</Label>
+                  <Select value={tipo} onValueChange={setTipo}><SelectTrigger className="h-8 text-sm" data-testid="select-receipt-type"><SelectValue /></SelectTrigger><SelectContent>{filteredTipoOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
+                  {facturaANeedsCuit && <p className="mt-1 text-xs text-amber-700">Factura A requiere CUIT válido de 11 dígitos y condición fiscal compatible.</p>}
+                </div>
+                <div>
+                  <Label className="mb-1 block text-[11px] text-muted-foreground">Punto de venta</Label>
+                  <Select value={puntoVenta} onValueChange={setPuntoVenta}><SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger><SelectContent>{posOptions.map((pos: any) => <SelectItem key={pos.id} value={String(pos.numero)}>PV {String(pos.numero).padStart(4, "0")} {pos.nombre ? `— ${pos.nombre}` : ""}</SelectItem>)}</SelectContent></Select>
+                </div>
+                <div>
+                  <Label className="mb-1 block text-[11px] text-muted-foreground">Condición de venta</Label>
+                  <Select value={saleCondition} onValueChange={(value) => { setSubmitError(null); setSaleCondition(value as SaleCondition); }}>
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem><SelectItem value="cuenta_corriente" disabled={!billingEntityId}>{SALE_CONDITION_LABELS.cuenta_corriente}</SelectItem></SelectContent>
+                  </Select>
+                  {saleCondition === "cuenta_corriente" && <p className="mt-1 text-xs text-muted-foreground">Se registra como cargo a la cuenta de la entidad; no genera cobro de caja.</p>}
+                </div>
+              </div>
+              {isFiscalTipo && ambiente === "ficticio" && <p className="mt-2 flex items-center gap-1 text-xs text-yellow-700"><AlertTriangle className="h-3 w-3" />Modo ficticio — CAE simulado</p>}
+              {!isFiscalTipo && <p className="mt-2 text-xs text-muted-foreground">Comprobante interno, sin CAE</p>}
+            </section>
+
+            {/* Live financial summary; the charge table below can remain collapsed. */}
+            {folio && (
+              <section className="overflow-hidden rounded-lg border bg-card" aria-label="Resumen de cuenta">
+                <div className="grid grid-cols-2 divide-x divide-y sm:grid-cols-5 sm:divide-y-0">
+                  <div className="px-3 py-2.5 sm:px-4">
+                    <div className="text-[10px] text-muted-foreground">Saldo total del folio</div>
+                    <div className="font-semibold" data-testid="folio-operational-balance">${fmtMoney(operationalBalance)}</div>
+                  </div>
+                  <div className="px-3 py-2.5 sm:px-4">
+                    <div className="text-[10px] text-muted-foreground">Importe a facturar</div>
+                    <div className="font-semibold text-primary" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
+                    {tipo === "FT" && <div className="text-[10px]" data-testid="text-factura-t-reintegro-note">Reintegro turismo — importe sin IVA</div>}
+                  </div>
+                  <div className="px-3 py-2.5 sm:px-4">
+                    <div className="text-[10px] text-muted-foreground">Crédito liberado</div>
+                    <div className="font-semibold text-amber-700">${fmtMoney(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0)}</div>
+                  </div>
+                  <div className="px-3 py-2.5 sm:px-4">
+                    <div className="text-[10px] text-muted-foreground">Crédito aplicado</div>
+                    <div className="font-semibold text-green-700">${fmtMoney(appliedCreditForSelection)}</div>
+                  </div>
+                  <div className="px-3 py-2.5 sm:px-4">
+                    {saleCondition === "cuenta_corriente" ? (
+                      <>
+                        <div className="text-[10px] text-muted-foreground">Cobro de caja</div>
+                        <div className="font-semibold text-muted-foreground">No corresponde</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[10px] text-muted-foreground">Cobro preparado · resta</div>
+                        <div className="font-semibold">
+                          <span className="text-green-700" data-testid="summary-payments-registered">${fmtMoney(totalPayments)}</span>
+                          <span className="px-1 text-muted-foreground">·</span>
+                          <span className={saldoRestante > 0.01 ? "text-red-600" : "text-green-700"} data-testid="summary-payment-remaining">${fmtMoney(Math.max(0, saldoRestante))}</span>
+                        </div>
+                        {saldoRestante < -0.01 && <div className="text-[10px] text-amber-700">Sobrepago ${fmtMoney(Math.abs(saldoRestante))}</div>}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+                      {saleCondition === "cuenta_corriente" ? "Cargo a cuenta corriente" : "Nuevo cobro requerido"}
+                    </div>
+                    <div className="text-xl font-bold text-amber-800" data-testid="new-charge-required">${fmtMoney(selectedBalance)}</div>
+                    {saleCondition === "cuenta_corriente" && <div className="text-xs text-muted-foreground">No es dinero de caja: se registra en la cuenta de la entidad.</div>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="apply-released-credit"
+                      checked={applyReleasedCredit}
+                      disabled={(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0) <= 0.01}
+                      onCheckedChange={(checked) => setApplyReleasedCredit(checked === true)}
+                    />
+                    <Label htmlFor="apply-released-credit" className="cursor-pointer text-xs">
+                      Aplicar crédito a esta selección (reduce el nuevo cobro, no lo facturado)
+                    </Label>
+                  </div>
+                </div>
+                {(folio.payments || []).length > 0 && (
+                  <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+                    <button type="button" className="font-medium text-primary" onClick={() => setShowCreditDetail(current => !current)} aria-expanded={showCreditDetail}>
+                      {showCreditDetail ? "Ocultar detalle del crédito" : "Ver detalle del crédito"}
+                    </button>
+                    {showCreditDetail && <p className="mt-2">Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} · anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}. El crédito reduce el nuevo cobro, no el importe fiscal a facturar.</p>}
+                  </div>
+                )}
+                {mode === "checkout" && operationalBalance > 0.01 && allBillableItems.length === 0 && (
+                  <div className="mx-4 mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="alert">
+                    El folio tiene ${fmtMoney(operationalBalance)} pendientes, pero no hay cargos disponibles para facturar. Revisá los cobros y comprobantes de la reserva; no se puede finalizar la salida con este saldo.
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Charges are secondary detail: eligible items remain selected by the existing initialization. */}
+            <section className="overflow-hidden rounded-lg border">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 bg-muted/30 px-4 py-3 text-left"
+                onClick={() => setChargesOpen((value) => !value)}
+                aria-expanded={chargesOpen}
+                aria-controls="prefactura-charges-panel"
+              >
+                <span>
+                  <span className="block text-sm font-semibold">Cargos de la habitación</span>
+                  <span className="block text-xs text-muted-foreground">{selectedIds.size} cargos seleccionados · revisá o desmarcá los que no correspondan</span>
+                </span>
+                <span className="text-sm text-primary">{chargesOpen ? "Ocultar cargos" : "Revisar cargos"}</span>
+              </button>
+              {chargesOpen && <div id="prefactura-charges-panel" className="border-t p-3">
             {/* Agregar cargo sin salir del check-out */}
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Cargos de la habitación</Label>
+            <div className="flex items-center justify-end">
               {!showAddCharge && (
                 <Button
                   type="button"
@@ -1853,78 +2009,6 @@ export function PrefacturaDialog({
                     )}
                   </TableBody>
                 </Table>
-                {/* Totals row */}
-                 <div className="border-t bg-muted/30 px-4 py-3 flex flex-wrap gap-6 justify-end text-sm">
-                   <div className="text-right">
-                     <div className="text-muted-foreground text-xs">Saldo total del folio</div>
-                     <div className="font-semibold" data-testid="folio-operational-balance">${fmtMoney(operationalBalance)}</div>
-                   </div>
-                   <div className="text-right rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 dark:border-blue-800 dark:bg-blue-950/20">
-                      <div className="font-medium text-xs text-blue-700 dark:text-blue-300">Importe a facturar</div>
-                     <div className="font-bold text-lg text-blue-800 dark:text-blue-200" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
-                     {tipo === "FT" && (
-                       <div className="text-[11px] text-blue-700/80 dark:text-blue-300/80" data-testid="text-factura-t-reintegro-note">
-                         Ya sin el 21% de IVA — reintegro turismo (Decreto 1043/2016)
-                       </div>
-                     )}
-                  </div>
-                  <div className="text-right">
-                     <div className="text-muted-foreground text-xs">Crédito liberado disponible en la reserva</div>
-                     <div className="font-medium text-amber-700 dark:text-amber-400">${fmtMoney(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0)}</div>
-                    </div>
-                    <div className="text-right">
-                     <div className="text-muted-foreground text-xs">Crédito aplicado</div>
-                     <div className="font-medium text-green-700 dark:text-green-400">${fmtMoney(appliedCreditForSelection)}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-muted-foreground text-xs">Nuevo cobro requerido</div>
-                     <div className={selectedBalance > 0.01
-                       ? "font-bold text-lg text-red-600 dark:text-red-400"
-                       : "font-medium text-sm text-emerald-700/70 dark:text-emerald-300/70"}>
-                      ${fmtMoney(selectedBalance)}
-                    </div>
-                  </div>
-                </div>
-                {mode === "checkout" && operationalBalance > 0.01 && allBillableItems.length === 0 && (
-                  <div className="mx-4 mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="alert">
-                    El folio tiene ${fmtMoney(operationalBalance)} pendientes, pero no hay cargos disponibles para facturar.
-                    Revisá los cobros y comprobantes de la reserva; no se puede finalizar la salida con este saldo.
-                  </div>
-                )}
-                 <div className="border-t px-4 py-2 flex items-center justify-end gap-2 text-xs">
-                   <Checkbox
-                     id="apply-released-credit"
-                     checked={applyReleasedCredit}
-                     disabled={(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0) <= 0.01}
-                     onCheckedChange={(checked) => setApplyReleasedCredit(checked === true)}
-                   />
-                   <Label htmlFor="apply-released-credit" className="cursor-pointer">
-                     Aplicar crédito a esta selección (reduce el nuevo cobro, nunca el importe a facturar)
-                   </Label>
-                 </div>
-                {(folio.payments || []).length > 0 && (
-                  <div className="mx-4 mb-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between gap-3 text-left font-medium text-foreground/80"
-                      onClick={() => setShowCreditDetail((current) => !current)}
-                      aria-expanded={showCreditDetail}
-                    >
-                      <span>Se aplicará ${fmtMoney(appliedCreditForSelection)} de crédito disponible</span>
-                      <span className="flex shrink-0 items-center gap-1 text-blue-700 dark:text-blue-300">
-                        {showCreditDetail ? "Ocultar detalle" : "Ver detalle"}
-                        {showCreditDetail ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                      </span>
-                    </button>
-                    {showCreditDetail && (
-                      <p className="mt-2 border-t pt-2">
-                        Cobros históricos: ${fmtMoney(folio.financialSummary?.historicalPayments ?? folio.totalPayments)} ·
-                        {" "}anticipo liberado por NC: ${fmtMoney(folio.financialSummary?.releasedAvailableAdvance ?? 0)}.
-                        {" "}El pendiente de facturar cubierto por crédito no genera nuevo dinero; el importe a facturar conserva el servicio bruto.
-                      </p>
-                    )}
-                  </div>
-                )}
                 <div className="border-t px-4 py-2 flex justify-end">
                   <Button
                     type="button"
@@ -1940,299 +2024,15 @@ export function PrefacturaDialog({
             ) : (
               <p className="text-sm text-muted-foreground text-center py-6">No se pudo cargar el folio.</p>
             )}
+              </div>}
+            </section>
 
-            {/* Facturar a */}
-            <div className="grid grid-cols-1 gap-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Facturar a</Label>
-                  <Select
-                    value={billingTarget}
-                    onValueChange={(v) => handleBillingTargetChange(v as any)}
-                    disabled={billingTargetLocked}
-                  >
-                    <SelectTrigger
-                      data-testid="select-billing-target"
-                      title={billingTargetLocked ? "La reserva tiene una entidad asociada — no se puede cambiar el destinatario aquí" : undefined}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allowedBillingTargets.includes("guest") && (
-                        <SelectItem value="guest"><span className="flex items-center gap-2"><User className="h-3.5 w-3.5" />Huésped</span></SelectItem>
-                      )}
-                      {allowedBillingTargets.includes("company") && (
-                        <SelectItem value="company"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Empresa</span></SelectItem>
-                      )}
-                      {allowedBillingTargets.includes("agency") && (
-                        <SelectItem value="agency"><span className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5" />Agencia</span></SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                   {hasReservationCompany && (
-                     <p className="text-xs text-muted-foreground mt-1">La empresa asociada también puede ser receptora</p>
-                  )}
-                   {hasReservationAgency && (
-                     <p className="text-xs text-muted-foreground mt-1">La agencia asociada también puede ser receptora</p>
-                  )}
-                </div>
-                {billingTarget === "company" && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Empresa</Label>
-                    {billingTargetLocked ? (
-                      <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
-                    ) : (
-                      <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "company")}>
-                        <SelectTrigger data-testid="select-billing-company"><SelectValue placeholder="Seleccionar empresa..." /></SelectTrigger>
-                        <SelectContent>
-                          {companies.filter((c: any) => c.id).map((c: any) => (
-                            <SelectItem key={c.id} value={String(c.id)}>{c.razonSocial || c.nombreFantasia}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                )}
-                {billingTarget === "agency" && (
-                  <div>
-                    <Label className="text-xs text-muted-foreground mb-1 block">Agencia</Label>
-                    {billingTargetLocked ? (
-                      <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
-                    ) : (
-                      <Select value={billingEntityId} onValueChange={(v) => handleEntitySelect(v, "agency")}>
-                        <SelectTrigger data-testid="select-billing-agency"><SelectValue placeholder="Seleccionar agencia..." /></SelectTrigger>
-                        <SelectContent>
-                          {agencies.filter((a: any) => a.id).map((a: any) => (
-                            <SelectItem key={a.id} value={String(a.id)}>{a.razonSocial || a.nombreFantasia}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Fiscal data is derived from the reservation and stays read-only here. */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Razón social / Nombre</Label>
-                  <Input value={razonSocial} readOnly className="h-8 text-sm bg-muted" />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">{documentType || (cuit ? "CUIT" : "Documento")}</Label>
-                  <Input value={cleanIdentifier(cuit) || cleanIdentifier(dni)} readOnly placeholder="Sin identificación registrada" className="h-8 text-sm bg-muted" />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Condición IVA</Label>
-                  <Input value={condicionIva} readOnly className="h-8 text-sm bg-muted" />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Nacionalidad</Label>
-                  <Input value={nationality || nationalityCode || "No registrada"} readOnly className="h-8 text-sm bg-muted" />
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-xs text-muted-foreground mb-1 block">Domicilio</Label>
-                  <Input value={domicilio || "No registrado"} readOnly className="h-8 text-sm bg-muted" />
-                </div>
-              </div>
-
-              {/* Invoice type & POS */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Tipo de comprobante</Label>
-                  <Select value={tipo} onValueChange={setTipo}>
-                    <SelectTrigger className="h-8 text-sm" data-testid="select-receipt-type"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {filteredTipoOptions.map(opt => (
-                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isFiscalTipo && ambiente === "ficticio" && (
-                    <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />Modo ficticio — CAE simulado
-                    </p>
-                  )}
-                  {!isFiscalTipo && (
-                    <p className="text-xs text-muted-foreground mt-1">Comprobante interno, sin CAE</p>
-                  )}
-                   {facturaANeedsCuit && (
-                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                      <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                       <span>Factura A requiere un <strong>CUIT válido de 11 dígitos</strong> y condición fiscal compatible.</span>
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Punto de venta</Label>
-                  <Select value={puntoVenta} onValueChange={setPuntoVenta}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger>
-                    <SelectContent>
-                      {posOptions.map((p: any) => (
-                        <SelectItem key={p.id} value={String(p.numero)}>
-                          PV {String(p.numero).padStart(4, "0")} {p.nombre ? `— ${p.nombre}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {puntoVenta && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Se emitirá con PV {puntoVenta.padStart(4, "0")}.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Condición de venta</Label>
-                <Select value={saleCondition} onValueChange={(value) => {
-                  setSubmitError(null);
-                  setSaleCondition(value as SaleCondition);
-                }}>
-                  <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem>
-                    <SelectItem value="cuenta_corriente" disabled={!billingEntityId}>
-                      {SALE_CONDITION_LABELS.cuenta_corriente}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {saleCondition === "cuenta_corriente" && (
-                  <p className="text-xs text-muted-foreground mt-1">El total se registra como cargo a la cuenta de la entidad; no genera un cobro de caja.</p>
-                )}
-              </div>
-            </div>
-
-            {/* Checkout option */}
-            {mode === "checkout" && (
-              <div className="flex items-center gap-3 rounded-lg border border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/20 px-4 py-3">
-                <Checkbox
-                  id="do-checkout"
-                  checked={doCheckout}
-                  onCheckedChange={v => setDoCheckout(!!v)}
-                />
-                <label htmlFor="do-checkout" className="text-sm cursor-pointer">
-                  <span className="font-medium">Hacer check-out al confirmar</span>
-                  <span className="text-muted-foreground ml-1">— libera la habitación y registra la salida</span>
-                </label>
-              </div>
-            )}
-
-            <DialogFooter className="gap-2 flex-wrap">
-              <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-              {safeEmittedInvoices.length > 0 && (
-                <>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span tabIndex={ncDisabled ? 0 : undefined}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700 dark:hover:bg-amber-950/30 disabled:pointer-events-none"
-                            onClick={() => setNcDialogOpen(true)}
-                            disabled={ncDisabled}
-                          >
-                            <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {ncDisabled && (
-                        <TooltipContent side="top">
-                          No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Crédito requiere al menos una factura base.
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  </TooltipProvider>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span tabIndex={ndDisabled ? 0 : undefined}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-blue-700 border-blue-300 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-950/30 disabled:pointer-events-none"
-                            onClick={() => setNdDialogOpen(true)}
-                            disabled={ndDisabled}
-                          >
-                            <PlusCircle className="h-4 w-4 mr-1" />Nota de Débito
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {ndDisabled && (
-                        <TooltipContent side="top">
-                          No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Débito requiere al menos una factura base.
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  </TooltipProvider>
-                </>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(`/api/reservations/${reservationId}/folio/pdf`, "_blank")}
-              >
-                <Printer className="h-4 w-4 mr-1" />Imprimir resumen
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-orange-700 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
-                onClick={() => setShowBulkTransfer(true)}
-                disabled={folioLoading || !folio || totalSelected <= 0.01}
-              >
-                <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
-              </Button>
-              {alreadyPaidAndInvoiced ? (
-                mode === "checkout" ? (
-                  <Button onClick={doSubmit} disabled={isSubmitting}>
-                    {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}
-                  </Button>
-                ) : (
-                  <Button variant="outline" onClick={handleClose}>Cerrar</Button>
-                )
-              ) : (
-                <Button
-                  onClick={() => {
-                    // Sync payment amount to match only the selected items (not full balance)
-                    if (totalSelected > 0) {
-                      setPaymentRows(prev =>
-                        prev.length === 1
-                          ? [{ ...prev[0], amount: String(totalSelected.toFixed(2)) }]
-                          : prev
-                      );
-                    }
-                    // amount already synced via useEffect on totalSelected
-                  }}
-                  disabled={true}
-                  className="hidden"
-                >
-                  hidden
-                </Button>
-              )}
-            </DialogFooter>
           </div>
         )}
 
         {/* ── STEP 2: Cobro ──────────────────────────────────────────────────── */}
-        {true && (
+        {step < 3 && (
           <div className="space-y-0">
-            {/* Cobro section — directly below prefactura on same screen */}
-            <div className="rounded-lg border bg-muted/20 px-4 py-3 flex flex-wrap gap-4 text-sm mt-4 mb-4">
-              <div><span className="text-muted-foreground">A facturar a: </span><span className="font-medium">{razonSocial || "—"}</span></div>
-              <div><span className="text-muted-foreground">Tipo: </span>
-                <span className="font-medium">{TIPO_OPTIONS.find(t => t.value === tipo)?.label || tipo}</span>
-              </div>
-                <div><span className="text-muted-foreground">A cobrar ahora: </span>
-                  <span className={`font-bold ${selectedBalance > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                    ${fmtMoney(selectedBalance)}
-                </span>
-              </div>
-            </div>
-
             {/* Zero-balance notice: no new payment required */}
             {totalSelected > 0.01 && selectedBalance <= 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
@@ -2365,29 +2165,6 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            {/* Running totals — only shown when there is an outstanding balance */}
-            {saleCondition === "contado" && selectedBalance > 0.01 && (
-            <Card className={saldoRestante > 0.01 ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10" : "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10"}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="space-y-1">
-                    <div className="flex gap-6">
-                      <span className="text-muted-foreground">Total a cobrar: <span className="font-medium text-foreground">${fmtMoney(selectedBalance)}</span></span>
-                      <span className="text-muted-foreground">Registrado: <span className="font-medium text-green-600">${fmtMoney(totalPayments)}</span></span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-muted-foreground">Saldo restante</div>
-                    <div className={`text-xl font-bold ${saldoRestante > 0.01 ? "text-red-600" : "text-green-600"}`}>
-                      ${fmtMoney(Math.max(0, saldoRestante))}
-                    </div>
-                    {saldoRestante < -0.01 && <div className="text-xs text-amber-600">Sobrepago: ${fmtMoney(Math.abs(saldoRestante))}</div>}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            )}
-
             {submitError && (
               <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3 flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
@@ -2395,19 +2172,65 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            <DialogFooter className="gap-2 flex-wrap">
-              <Button
-                onClick={handleSubmit}
-                disabled={isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
-                data-testid="button-registrar-emitir"
-              >
-                {isSubmitting ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
-                ) : (
-                  <><Receipt className="h-4 w-4 mr-1" />Registrar y emitir</>
-                )}
+            <div className="sticky bottom-0 z-10 mt-3 flex flex-col flex-wrap gap-2 border-t bg-background/95 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-end">
+              {mode === "checkout" && (
+                <div className="mr-auto flex items-center gap-2">
+                  <Checkbox id="do-checkout" checked={doCheckout} onCheckedChange={value => setDoCheckout(!!value)} />
+                  <Label htmlFor="do-checkout" className="cursor-pointer text-xs">Hacer check-out al confirmar</Label>
+                </div>
+              )}
+              <Button variant="outline" onClick={handleClose}>Cancelar</Button>
+              {safeEmittedInvoices.length > 0 && (
+                <>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={ncDisabled ? 0 : undefined}>
+                          <Button variant="outline" size="sm" className="text-amber-700 border-amber-300 hover:bg-amber-50 disabled:pointer-events-none" onClick={() => setNcDialogOpen(true)} disabled={ncDisabled}>
+                            <MinusCircle className="h-4 w-4 mr-1" />Nota de Crédito
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {ncDisabled && <TooltipContent side="top">No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Crédito requiere al menos una factura base.</TooltipContent>}
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span tabIndex={ndDisabled ? 0 : undefined}>
+                          <Button variant="outline" size="sm" className="text-blue-700 border-blue-300 hover:bg-blue-50 disabled:pointer-events-none" onClick={() => setNdDialogOpen(true)} disabled={ndDisabled}>
+                            <PlusCircle className="h-4 w-4 mr-1" />Nota de Débito
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {ndDisabled && <TooltipContent side="top">No hay facturas (FA/FB/FC/FT/FM/FMB) emitidas para esta reserva. La Nota de Débito requiere al menos una factura base.</TooltipContent>}
+                    </Tooltip>
+                  </TooltipProvider>
+                </>
+              )}
+              <Button variant="outline" size="sm" onClick={() => window.open(`/api/reservations/${reservationId}/folio/pdf`, "_blank")}>
+                <Printer className="h-4 w-4 mr-1" />Imprimir resumen
               </Button>
-            </DialogFooter>
+              <Button variant="outline" size="sm" className="text-orange-700 border-orange-300 hover:bg-orange-50" onClick={() => setShowBulkTransfer(true)} disabled={folioLoading || !folio || totalSelected <= 0.01}>
+                <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
+              </Button>
+              {alreadyPaidAndInvoiced && (mode === "checkout"
+                ? <Button onClick={doSubmit} disabled={isSubmitting}>{isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>
+                : <Button variant="outline" onClick={handleClose}>Cerrar</Button>)}
+              {!alreadyPaidAndInvoiced && (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
+                  data-testid="button-registrar-emitir"
+                >
+                  {isSubmitting ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
+                  ) : (
+                    <><Receipt className="h-4 w-4 mr-1" />Registrar y emitir</>
+                  )}
+                </Button>
+              )}
+            </div>
           </div>
         )}
 

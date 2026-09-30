@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -119,6 +119,7 @@ describe("PrefacturaDialog — empresa asociada al perfil del huésped, no a la 
       </Wrapper>,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 102/);
     const receiverSelect = await screen.findByTestId("select-billing-target");
     await waitFor(() => {
@@ -150,6 +151,7 @@ describe("PrefacturaDialog — empresa asociada al perfil del huésped, no a la 
       </Wrapper>,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: /Cargos de la habitación/ }));
     await screen.findByText(/Alojamiento Hab\. 102/);
     const receiverSelect = await screen.findByTestId("select-billing-target");
     await waitFor(() => expect(receiverSelect).toHaveTextContent("Huésped"));
