@@ -7,6 +7,7 @@ import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityTy
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { visibleGuestCondition } from "../guest-visibility";
+import { registerCcReceiptCashRepairRoutes } from "./cc-receipt-cash-repair";
 
 const PAYMENT_TOLERANCE = 0.01;
 
@@ -243,6 +244,7 @@ async function registerCcReceiptCashMovements(
 }
 
 export function registerGuestsRoutes(app: Express) {
+  registerCcReceiptCashRepairRoutes(app);
   // Companies
   app.get("/api/companies", async (req, res) => {
     try {

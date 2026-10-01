@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/utils";
 import { useLocation } from "wouter";
+import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Users2,
@@ -38,6 +39,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
+import { CcCashShiftRepairAction } from "@/components/cc-cash-shift-repair-action";
 
 type Movement = {
   id: string;
@@ -638,6 +640,8 @@ function AgingReportSection({ accountSummary, areaFilter }: {
 
 export default function AdminCuentasPage() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const canRepairCashShift = ["admin", "manager"].includes(user?.role ?? "");
   const { toast } = useToast();
   const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
   const [expandedEntityId, setExpandedEntityId] = useState<string | null>(null);
@@ -1315,6 +1319,7 @@ export default function AdminCuentasPage() {
                           >
                             <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
+                          <CcCashShiftRepairAction movement={r} canManage={canRepairCashShift} />
                           <CcVoidReceiptAction movement={r} entityLabel={r.entityName} />
                         </div>
                       </td>

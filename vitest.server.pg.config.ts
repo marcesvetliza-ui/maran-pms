@@ -12,6 +12,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Fixtures share one database, and "current shift" searches are global.
+    // Parallel files could route collections into another suite's open shift.
+    fileParallelism: false,
     include: ["server/tests/**/*.pg.test.ts"],
     exclude: ["node_modules/**", ".cache/**", "dist/**"],
   },
