@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   reservation: {} as any,
+  charges: [] as any[],
   groupLinks: [] as any[],
   extraCap: 0,
   extraDirectPaid: 0,
@@ -15,6 +16,7 @@ const state = vi.hoisted(() => ({
 
 const storage = {
   getReservation: vi.fn(async () => state.reservation),
+  getCharges: vi.fn(async () => state.charges),
   getChargesTotal: vi.fn(async () => 0),
   getPaymentsTotal: vi.fn(async () => 0),
   getPayments: vi.fn(async () => []),
@@ -132,6 +134,7 @@ beforeEach(() => {
     nights: 1,
   };
   state.groupLinks = [{ id: "link-policy", groupId: "group-policy", reservationId: state.reservation.id }];
+  state.charges = [];
   state.extraCap = 25;
   state.extraDirectPaid = 0;
   state.extraGroupFunds = 0;
@@ -179,7 +182,7 @@ describe("approved group departure and direct payment policy", () => {
   });
 
   it("allows explicit group departure with debt, without CC debt or payment, and audits the operator and balance", async () => {
-    storage.getChargesTotal.mockResolvedValue(15);
+    state.charges = [{ id: "group-charge", amount: "15", status: "active" }];
 
     await withServer(async (baseUrl) => {
       const result = await post(baseUrl, `/api/reservations/${state.reservation.id}/check-out`, {
@@ -208,6 +211,31 @@ describe("approved group departure and direct payment policy", () => {
         }),
       );
     });
+  });
+
+  it("keeps checkout blocked for unpaid services despite a negative NC audit adjustment", async () => {
+    state.groupLinks = [];
+    state.reservation.totalRoomAmount = "0";
+    state.reservation.finalRatePerNight = "0";
+    state.charges = [
+      {
+        id: "nc-adjustment",
+        amount: "-129000",
+        category: "adjustment",
+        description: "Ajuste NC [nc:3:charge-1]",
+        status: "active",
+      },
+      { id: "unpaid-service", amount: "129000", category: "otros", status: "active" },
+    ];
+
+    await withServer(async baseUrl => {
+      const result = await post(baseUrl, `/api/reservations/${state.reservation.id}/check-out`, {});
+      expect(result.status).toBe(400);
+      expect(result.body).toMatchObject({ error: "Saldo pendiente", balance: 129000 });
+    });
+
+    expect(storage.updateReservation).not.toHaveBeenCalled();
+    expect(storage.createReservationPaymentWithLedger).not.toHaveBeenCalled();
   });
 
   it("rejects groupDeparture on an unlinked reservation and keeps ordinary balance blocking", async () => {

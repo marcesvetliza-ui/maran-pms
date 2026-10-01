@@ -32,7 +32,7 @@ import {
 } from "./groupInvoiceScope";
 import { buildUnavailableGroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
-import { isInvoiceableReservationCharge } from "@shared/reservationFolio";
+import { getOperationalReservationCharges, isInvoiceableReservationCharge } from "@shared/reservationFolio";
 import { assertFinancialSchemaReady } from "../migrate";
 import { withInvoiceAdvisoryLock } from "./invoiceAdvisoryLock";
 import { exposeInvoiceReconciliation } from "./reconciliationPresentation";
@@ -2470,30 +2470,11 @@ export function registerBillingRoutes(app: Express) {
         const entityType = reservation.companyId ? "company" : reservation.agencyId ? "agency" : "guest";
         const entityId = reservation.companyId || reservation.agencyId || reservation.guestId;
         if (!entityId) throw new FolioInvoiceValidationError("La reserva no tiene titular de Cuenta Corriente", 409);
-        const repaired = await db.execute(sql`
-          SELECT si.id AS invoice_id, p.id AS payment_id
-          FROM sales_invoices si
-          JOIN payments p ON p.id = si.payment_id
-          WHERE si.reserva_id = ${reservationId}
-            AND si.cash_forma_pago = 'cuenta_corriente'
-            AND si.estado IN ('emitida','parcial')
-            AND p.reservation_id = ${reservationId}
-            AND p.method IN ('cuenta_corriente','current_account')
-            AND (p.status IS NULL OR p.status = 'active')
-          ORDER BY si.id DESC
-          LIMIT 2
-        `);
-        if (repaired.rows.length === 1) {
-          const row = repaired.rows[0] as any;
-          return { payment: { id: row.payment_id }, invoiceId: Number(row.invoice_id) };
-        }
-        if (repaired.rows.length > 1) {
-          throw new FolioInvoiceValidationError("Hay más de una reparación CC histórica posible", 409);
-        }
         // A current settlement can outlive the browser session that created its
         // operationId. Recover it by reservation when it is the only pending CC
         // intent. This completes the missing folio payment/Caja informational
-        // movement without creating a second account-current cargo.
+        // movement without creating a second account-current cargo. Prioritize
+        // this durable intent over any already-linked historical repair.
         const pendingIntents = await db.execute(sql`
           SELECT id
           FROM sales_invoices
@@ -2513,13 +2494,51 @@ export function registerBillingRoutes(app: Express) {
           await reconcileReservationCreditInvoice(invoiceId);
           await reconcileReservationCreditSettlement(invoiceId, true);
           const completed = await db.execute(sql`
-            SELECT payment_id FROM sales_invoices WHERE id = ${invoiceId}
+            SELECT id, tipo_comprobante, punto_venta, numero, monto_total, payment_id
+            FROM sales_invoices WHERE id = ${invoiceId}
           `);
-          const paymentId = String((completed.rows[0] as any)?.payment_id || "");
+          const invoice = completed.rows[0] as any;
+          const paymentId = String(invoice?.payment_id || "");
           if (!paymentId) {
             throw new FolioInvoiceValidationError("La liquidación CC se concilió sin vincular el pago del folio", 409);
           }
-          return { payment: { id: paymentId }, invoiceId };
+          return { payment: { id: paymentId }, invoiceId, invoice };
+        }
+        const operationalCharges = getOperationalReservationCharges(await storage.getCharges(reservationId));
+        const chargesTotal = operationalCharges.reduce((sum, charge) => sum + (Number(charge.amount) || 0), 0);
+        const paymentsTotal = await storage.getPaymentsTotal(reservationId);
+        const savedRoomTotal = Number(reservation.totalRoomAmount || "0");
+        const roomTotal = savedRoomTotal > 0
+          ? savedRoomTotal
+          : Number(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
+        const balance = roomTotal + chargesTotal - paymentsTotal;
+        const repaired = await db.execute(sql`
+          SELECT si.id AS invoice_id, si.tipo_comprobante, si.punto_venta, si.numero, si.monto_total,
+                 p.id AS payment_id
+          FROM sales_invoices si
+          JOIN payments p ON p.id = si.payment_id
+          WHERE si.reserva_id = ${reservationId}
+            AND si.cash_forma_pago = 'cuenta_corriente'
+            AND si.estado IN ('emitida','parcial')
+            AND p.reservation_id = ${reservationId}
+            AND p.method IN ('cuenta_corriente','current_account')
+            AND (p.status IS NULL OR p.status = 'active')
+          ORDER BY si.id DESC
+          LIMIT 2
+        `);
+        if (balance <= 0.01 && repaired.rows.length > 1) {
+          throw new FolioInvoiceValidationError("Hay más de una reparación CC histórica posible", 409);
+        }
+        if (balance <= 0.01 && repaired.rows.length === 1) {
+          // A previously linked invoice is recoverable only while it still
+          // settles the current folio. Do not let a stale invoice mask a new
+          // unpaid balance; leave that balance for the normal issuance flow.
+          const row = repaired.rows[0] as any;
+          return {
+            payment: { id: row.payment_id },
+            invoiceId: Number(row.invoice_id),
+            invoice: row,
+          };
         }
         const invoices = await db.execute(sql`
           SELECT * FROM sales_invoices
@@ -2656,13 +2675,26 @@ export function registerBillingRoutes(app: Express) {
             }),
           },
         });
-        return { payment, invoiceId: Number(match.invoice.id) };
+        return { payment, invoiceId: Number(match.invoice.id), invoice: match.invoice };
       });
       if (!adopted) return res.status(404).json({ error: "No existe una liquidación CC histórica inequívoca" });
       await audit(req, "update", "sales_invoices", `Liquidación CC histórica reparada — factura ${adopted.invoiceId}`, {
         entityType: "reservation", entityId: reservationId,
       });
-      res.json({ recovered: true, invoiceId: adopted.invoiceId, paymentId: adopted.payment.id });
+      const invoice = adopted.invoice as any;
+      res.json({
+        recovered: true,
+        invoiceId: adopted.invoiceId,
+        paymentId: adopted.payment.id,
+        invoice: {
+          id: invoice.id ?? invoice.invoice_id ?? adopted.invoiceId,
+          tipoComprobante: invoice.tipo_comprobante ?? invoice.tipoComprobante,
+          puntoVenta: invoice.punto_venta ?? invoice.puntoVenta,
+          numero: invoice.numero,
+          montoTotal: invoice.monto_total ?? invoice.montoTotal,
+          paymentId: adopted.payment.id,
+        },
+      });
     } catch (error: any) {
       res.status(error?.statusCode || error?.status || 500).json({ error: error?.message || "No se pudo adoptar la liquidación CC" });
     }

@@ -163,6 +163,63 @@ function buildFetchMock() {
   });
 }
 
+function buildRecoveredCcFetchMock({
+  folio = FAKE_FOLIO,
+  useLegacyRecovery = false,
+}: {
+  folio?: typeof FAKE_FOLIO;
+  useLegacyRecovery?: boolean;
+} = {}) {
+  const recoveredInvoice = {
+    id: 901,
+    tipoComprobante: "FB",
+    puntoVenta: 1,
+    numero: 901,
+    montoTotal: "100.00",
+    cae: "CAE-RECOVERED-901",
+    paymentId: "payment-recovered-901",
+  };
+  const mock = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    const strUrl = url.toString();
+    const method = options?.method?.toUpperCase() ?? "GET";
+
+    if (strUrl.includes(`/api/reservations/${RESERVATION_ID}/folio`)) {
+      return Response.json(folio);
+    }
+    if (
+      strUrl.includes(`/api/billing/reservations/${RESERVATION_ID}/operations/`) &&
+      strUrl.endsWith("/recover") &&
+      method === "POST"
+    ) {
+      return useLegacyRecovery
+        ? Response.json({ error: "No hay operación pendiente" }, { status: 404 })
+        : Response.json({ recovered: true, invoice: recoveredInvoice }, { status: 200 });
+    }
+    if (
+      strUrl.includes(`/api/billing/reservations/${RESERVATION_ID}/legacy-cc/recover`) &&
+      method === "POST"
+    ) {
+      return Response.json({
+        recovered: true,
+        invoiceId: recoveredInvoice.id,
+        paymentId: recoveredInvoice.paymentId,
+        invoice: recoveredInvoice,
+      }, { status: 200 });
+    }
+    if (
+      strUrl.includes(`/api/reservations/${RESERVATION_ID}/check-out`) &&
+      method === "POST"
+    ) {
+      return Response.json({ error: "Checkout failed" }, { status: 400 });
+    }
+    return new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return mock;
+}
+
 /**
  * Simulates another browser tab winning the reservation-scoped invoice lock.
  * The test asserts that a 409 from billing happens before any payment POST.
@@ -336,6 +393,7 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
   beforeEach(() => {
     fetchMock = buildFetchMock();
     vi.stubGlobal("fetch", fetchMock);
+    window.sessionStorage.clear();
     // Suppress PDF popup that fires after invoice emission
     vi.stubGlobal("open", vi.fn());
   });
@@ -453,6 +511,152 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     await advanceAndSubmit(user);
 
     expect(onCheckoutComplete).not.toHaveBeenCalled();
+  });
+
+  it("shows the recovered invoice when checkout fails without repeating issuance or clearing the operation", async () => {
+    const recoveryFetchMock = buildRecoveredCcFetchMock();
+    vi.stubGlobal("fetch", recoveryFetchMock);
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onCheckoutComplete = vi.fn();
+    const operationId = "stable-recovery-operation-id-901";
+    window.sessionStorage.setItem(`reservation-settlement-operation:${RESERVATION_ID}`, operationId);
+    renderDialog({
+      onClose,
+      onCheckoutComplete,
+      reservation: {
+        ...CONFLICT_RESERVATION,
+        guest: { ...CONFLICT_RESERVATION.guest, id: "guest-recovery-test" },
+      },
+    });
+
+    await user.click(await screen.findByTestId("select-sale-condition"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(await screen.findByTestId("button-registrar-emitir"));
+
+    expect(await screen.findByText(/cobro e factura registrados.*check-out pendiente/i)).toBeInTheDocument();
+    expect(screen.getByText(/el cobro y el comprobante ya fueron registrados correctamente/i)).toBeInTheDocument();
+    expect(screen.getByText(/FB 0001-00000901 — CAE: CAE-RECOVERED-901/)).toBeInTheDocument();
+
+    const postCalls = recoveryFetchMock.mock.calls.filter(([, options]) =>
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    expect(postCalls.some(([url]) => String(url).includes("/api/billing/invoices"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes("/api/payments"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes(`/api/reservations/${RESERVATION_ID}/check-out`))).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCheckoutComplete).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(`reservation-settlement-operation:${RESERVATION_ID}`)).toBe(operationId);
+  });
+
+  it("stops after partial recovered settlement, shows the remaining debt, and rotates the completed operation", async () => {
+    const recoveryFetchMock = buildRecoveredCcFetchMock({
+      folio: {
+        ...FAKE_FOLIO,
+        balance: 60,
+        financialSummary: {
+          operationalServices: 160,
+          netInvoiced: 100,
+          historicalPayments: 100,
+          releasedAvailableAdvance: 0,
+          pendingGrossInvoice: 60,
+          pendingInvoicing: 60,
+          operationalFolioBalance: 60,
+          newCollectionNeeded: 60,
+        },
+      } as typeof FAKE_FOLIO,
+    });
+    vi.stubGlobal("fetch", recoveryFetchMock);
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onCheckoutComplete = vi.fn();
+    const operationId = "stable-partial-operation-id-902";
+    window.sessionStorage.setItem(`reservation-settlement-operation:${RESERVATION_ID}`, operationId);
+    renderDialog({
+      onClose,
+      onCheckoutComplete,
+      reservation: {
+        ...CONFLICT_RESERVATION,
+        guest: { ...CONFLICT_RESERVATION.guest, id: "guest-recovery-test" },
+      },
+    });
+
+    await user.click(await screen.findByTestId("select-sale-condition"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(await screen.findByTestId("button-registrar-emitir"));
+
+    expect(await screen.findByText(/liquidación recuperada.*saldo pendiente de facturar/i)).toBeInTheDocument();
+    expect(screen.getByText(/importe fiscal de \$60,00 pendiente de facturar/i)).toBeInTheDocument();
+    expect(screen.getByText(/saldo operativo de \$60,00 pendiente de cobro/i)).toBeInTheDocument();
+    const postCalls = recoveryFetchMock.mock.calls.filter(([, options]) =>
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    expect(postCalls.some(([url]) => String(url).includes("/api/billing/invoices"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes("/api/payments"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes(`/api/reservations/${RESERVATION_ID}/check-out`))).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCheckoutComplete).not.toHaveBeenCalled();
+    const nextOperationId = window.sessionStorage.getItem(`reservation-settlement-operation:${RESERVATION_ID}`);
+    expect(nextOperationId).toBeTruthy();
+    expect(nextOperationId).not.toBe(operationId);
+  });
+
+  it("keeps covered operational balance separate from pending fiscal amount in legacy recovery", async () => {
+    const recoveryFetchMock = buildRecoveredCcFetchMock({
+      useLegacyRecovery: true,
+      folio: {
+        ...FAKE_FOLIO,
+        balance: 0,
+        financialSummary: {
+          operationalServices: 160,
+          netInvoiced: 100,
+          historicalPayments: 160,
+          releasedAvailableAdvance: 0,
+          pendingGrossInvoice: 60,
+          pendingInvoicing: 60,
+          operationalFolioBalance: 0,
+          newCollectionNeeded: 0,
+        },
+      } as typeof FAKE_FOLIO,
+    });
+    vi.stubGlobal("fetch", recoveryFetchMock);
+    const user = userEvent.setup();
+    const operationId = "stable-covered-legacy-operation-id-903";
+    window.sessionStorage.setItem(`reservation-settlement-operation:${RESERVATION_ID}`, operationId);
+    const onClose = vi.fn();
+    const onCheckoutComplete = vi.fn();
+    renderDialog({
+      onClose,
+      onCheckoutComplete,
+      reservation: {
+        ...CONFLICT_RESERVATION,
+        guest: { ...CONFLICT_RESERVATION.guest, id: "guest-recovery-test" },
+      },
+    });
+
+    await user.click(await screen.findByTestId("select-sale-condition"));
+    await user.click(await screen.findByRole("option", { name: "Cuenta Corriente" }));
+    await user.click(await screen.findByTestId("button-registrar-emitir"));
+
+    expect(await screen.findByText(/FB 0001-00000901 — CAE: CAE-RECOVERED-901/)).toBeInTheDocument();
+    expect(screen.getByText(/importe fiscal de \$60,00 pendiente de facturar/i)).toBeInTheDocument();
+    expect(screen.getByText(/saldo operativo está cubierto/i)).toBeInTheDocument();
+    expect(screen.getByText(/no se realizó el check-out/i)).toBeInTheDocument();
+    expect(recoveryFetchMock.mock.calls.some(([url, options]) =>
+      String(url).includes(`/api/billing/reservations/${RESERVATION_ID}/legacy-cc/recover`) &&
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    )).toBe(true);
+    const postCalls = recoveryFetchMock.mock.calls.filter(([, options]) =>
+      String((options as RequestInit | undefined)?.method).toUpperCase() === "POST",
+    );
+    expect(postCalls.some(([url]) => String(url).includes("/api/billing/invoices"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes("/api/payments"))).toBe(false);
+    expect(postCalls.some(([url]) => String(url).includes(`/api/reservations/${RESERVATION_ID}/check-out`))).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCheckoutComplete).not.toHaveBeenCalled();
+    const nextOperationId = window.sessionStorage.getItem(`reservation-settlement-operation:${RESERVATION_ID}`);
+    expect(nextOperationId).toBeTruthy();
+    expect(nextOperationId).not.toBe(operationId);
   });
 
   it("creates the payment with the emitted invoice reference before checkout fails", async () => {
