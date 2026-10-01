@@ -555,6 +555,12 @@ export function PrefacturaDialog({
   // True when payment+invoice succeeded but the checkout API call itself failed —
   // staff must complete checkout manually; the folio data is already persisted.
   const [checkoutFailed, setCheckoutFailed] = useState(false);
+  // A recovered CC invoice may settle only part of the pending folio. Keep the
+  // remaining operational balance visible without treating checkout as done.
+  const [recoveryPendingWork, setRecoveryPendingWork] = useState<{
+    pendingFiscalAmount: number;
+    operationalBalance: number;
+  } | null>(null);
   // True when at least one payment row was actually persisted in this submit.
   const [paymentRegistered, setPaymentRegistered] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -649,6 +655,7 @@ export function PrefacturaDialog({
       setEmittedInvoice(null);
       setCheckoutDone(false);
       setCheckoutFailed(false);
+      setRecoveryPendingWork(null);
       setPaymentRegistered(false);
       setSubmitError(null);
       setSelectedIds(new Set());
@@ -1235,20 +1242,85 @@ export function PrefacturaDialog({
         }
         if (recoveryRes.ok) {
           const recovered = await recoveryRes.json();
-          await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
-          if (mode === "checkout" && doCheckout) {
-            const checkoutRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
-            if (!checkoutRes.ok) throw new Error("Liquidación recuperada; el check-out sigue pendiente");
+          const recoveredInvoice = recovered.invoice
+            ? {
+                ...recovered.invoice,
+                tipo_comprobante: recovered.invoice.tipo_comprobante ?? recovered.invoice.tipoComprobante,
+                punto_venta: recovered.invoice.punto_venta ?? recovered.invoice.puntoVenta,
+                monto_total: recovered.invoice.monto_total ?? recovered.invoice.montoTotal,
+                paymentId: recovered.invoice.paymentId ?? recovered.invoice.payment_id,
+              }
+            : null;
+          setEmittedInvoice(recoveredInvoice);
+          const [recoveredFolio] = await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+          const financialSummary = recoveredFolio.data?.financialSummary;
+          const pendingInvoiceAmount = Math.max(
+            Number(financialSummary?.pendingGrossInvoice || 0),
+            Number(financialSummary?.pendingInvoicing || 0),
+          );
+          const operationalBalance = Number(financialSummary?.operationalFolioBalance || 0);
+          if (recoveredInvoice?.paymentId && pendingInvoiceAmount > 0.01) {
+            const nextOperationId = newSettlementOperationId();
             if (typeof window !== "undefined") {
-              window.sessionStorage.removeItem(settlementOperationKey(reservationId));
+              window.sessionStorage.setItem(settlementOperationKey(reservationId), nextOperationId);
             }
-            setCreditOperationId(newSettlementOperationId());
-            setCheckoutDone(true);
-            onCheckoutComplete?.();
-            onClose();
+            setCreditOperationId(nextOperationId);
+            setRecoveryPendingWork({
+              pendingFiscalAmount: pendingInvoiceAmount,
+              operationalBalance,
+            });
+            queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId)] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+            setStep(3);
             return;
           }
-          setEmittedInvoice(recovered.invoice);
+          if (mode === "checkout" && doCheckout) {
+            let checkoutSucceeded = false;
+            try {
+              await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+              checkoutSucceeded = true;
+              setCheckoutDone(true);
+            } catch {
+              // The recovered invoice/settlement is already persistent. Keep
+              // the operation ID so another attempt can safely retry checkout.
+              setCheckoutFailed(true);
+            }
+
+            // Refresh the persisted billing data regardless of checkout
+            // outcome; also refresh the room/reservation views after the
+            // completed recovery just as for an ordinary checkout.
+            queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId)] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations/check-out"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+            queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
+            queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+
+            if (checkoutSucceeded) {
+              if (typeof window !== "undefined") {
+                window.sessionStorage.removeItem(settlementOperationKey(reservationId));
+              }
+              setCreditOperationId(newSettlementOperationId());
+              onCheckoutComplete?.();
+              onClose();
+            } else {
+              setStep(3);
+            }
+            return;
+          }
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "invoices"] });
           setStep(3);
           return;
         }
@@ -1570,6 +1642,8 @@ export function PrefacturaDialog({
     setStep(1);
     setEmittedInvoice(null);
     setCheckoutDone(false);
+    setCheckoutFailed(false);
+    setRecoveryPendingWork(null);
     setSubmitError(null);
     setPaymentRows([{
       id: newRowId(), amount: String(selectedBalance.toFixed(2)),
@@ -2239,36 +2313,40 @@ export function PrefacturaDialog({
           <div className="space-y-4">
             {/* Success / partial-success / no-movements banner */}
             {(() => {
-              const bannerClass = checkoutFailed
+              const recoveryHasPendingFiscal = recoveryPendingWork !== null;
+              const showWarning = checkoutFailed || recoveryHasPendingFiscal;
+              const bannerClass = showWarning
                 ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/10"
                 : noMovements
                   ? "border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/10"
                   : "border-green-300 bg-green-50 dark:border-green-800 dark:bg-green-900/10";
-              const iconBg = checkoutFailed
+              const iconBg = showWarning
                 ? "bg-amber-100 dark:bg-amber-900/40"
                 : noMovements
                   ? "bg-blue-100 dark:bg-blue-900/40"
                   : "bg-green-100 dark:bg-green-900/40";
-              const icon = checkoutFailed
+              const icon = showWarning
                 ? <AlertTriangle className="h-7 w-7 text-amber-600 dark:text-amber-400" />
                 : noMovements
                   ? <CircleCheck className="h-7 w-7 text-blue-500 dark:text-blue-400" />
                   : <CircleCheck className="h-7 w-7 text-green-600 dark:text-green-400" />;
-              const headlineClass = checkoutFailed
+              const headlineClass = showWarning
                 ? "font-bold text-amber-700 dark:text-amber-400"
                 : noMovements
                   ? "font-bold text-blue-700 dark:text-blue-400"
                   : "font-bold text-green-700 dark:text-green-400";
               const headline = checkoutDone
                 ? "Check-out completado"
-                : checkoutFailed
+                : recoveryHasPendingFiscal
+                  ? "Liquidación recuperada — saldo pendiente de facturar"
+                  : checkoutFailed
                   ? noMovements
                     ? "Check-out pendiente"
                     : "Cobro e factura registrados — check-out pendiente"
                   : noMovements
                     ? "Sin movimientos pendientes"
                     : "Cobro registrado";
-              const sublineClass = checkoutFailed
+              const sublineClass = showWarning
                 ? "text-amber-700 dark:text-amber-300"
                 : noMovements
                   ? "text-blue-600 dark:text-blue-300"
@@ -2309,6 +2387,19 @@ export function PrefacturaDialog({
                       : "El cobro y el comprobante ya fueron registrados correctamente."}
                   </p>
                   <p>Sin embargo, el check-out no pudo completarse automáticamente. Para liberar la habitación, realizá el check-out manualmente desde el folio de la reserva.</p>
+                </div>
+              </div>
+            )}
+            {recoveryPendingWork !== null && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/20 px-4 py-3 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div className="text-sm text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-semibold">La liquidación recuperada ya tiene comprobante y pago asociados.</p>
+                  <p>Queda un importe fiscal de ${fmtMoney(recoveryPendingWork.pendingFiscalAmount)} pendiente de facturar.</p>
+                  {recoveryPendingWork.operationalBalance > 0.01
+                    ? <p>Además, queda un saldo operativo de ${fmtMoney(recoveryPendingWork.operationalBalance)} pendiente de cobro.</p>
+                    : <p>El saldo operativo está cubierto; este importe aún requiere su comprobante fiscal.</p>}
+                  <p>No se realizó el check-out; emití otro comprobante para los cargos fiscales restantes.</p>
                 </div>
               </div>
             )}

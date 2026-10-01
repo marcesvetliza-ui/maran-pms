@@ -77,3 +77,4 @@
 - [Direct CC receipt voiding](direct-cc-receipt-voiding.md) — void only direct CC receipts; preserve identity/audit and reverse accounting exactly once without touching linked collection flows.
 - [Group personal extras funding](group-personal-extras-funding.md) — never prorate unallocated master receipts to room extras; uncertain excess requires reconciliation before personal collection.
 - [Group notes in room observations](group-notes-observations.md) — display current group notes alongside each room's own notes; never copy them into editable reservation notes.
+- [CC recovery and current obligations](cc-recovery-current-obligation.md) — old linked invoices must not consume new settlement attempts; operational debt and pending fiscal issuance remain independent.
