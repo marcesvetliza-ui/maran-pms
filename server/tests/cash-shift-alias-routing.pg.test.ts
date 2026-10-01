@@ -162,6 +162,29 @@ runPostgresTests("PostgreSQL: cash shift alias routing", () => {
     }
   });
 
+  it("startup preserves an existing reception alias instead of creating a phantom recepcion shift", async () => {
+    const existingId = randomUUID();
+    const beforeIds = new Set((await testPool!.query<{ id: string }>("SELECT id FROM cash_shifts")).rows.map((shift) => shift.id));
+    const priorOpenIds = (await testPool!.query<{ id: string }>(
+      "SELECT id FROM cash_shifts WHERE area IN ('reception', 'recepcion') AND status = 'open'",
+    )).rows.map((shift) => shift.id);
+    try {
+      await testPool!.query("UPDATE cash_shifts SET status = 'closed' WHERE id = ANY($1::varchar[])", [priorOpenIds]);
+      await insertShift(existingId, "reception", "NOW() + INTERVAL '1 minute'");
+      await storage.initCashShifts();
+      expect((await storage.getCashShifts("recepcion", "open")).map((shift) => shift.id)).toEqual([existingId]);
+      expect((await storage.getCurrentShift("reception"))?.id).toBe(existingId);
+    } finally {
+      try {
+        const createdIds = (await testPool!.query<{ id: string }>("SELECT id FROM cash_shifts"))
+          .rows.map((shift) => shift.id).filter((id) => !beforeIds.has(id));
+        await removeFixtures(createdIds);
+      } finally {
+        await testPool!.query("UPDATE cash_shifts SET status = 'open' WHERE id = ANY($1::varchar[])", [priorOpenIds]);
+      }
+    }
+  });
+
   it("routes receipt tender and both retention rows through the selected shift's actual area", async () => {
     const staleId = randomUUID();
     const currentId = randomUUID();

@@ -7978,9 +7978,7 @@ export class DatabaseStorage implements IStorage {
   async initCashShifts(): Promise<void> {
     const areas = ["recepcion", "restaurant", "spa"];
     for (const area of areas) {
-      const [existing] = await db.select().from(cashShifts)
-        .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
-        .limit(1);
+      const existing = await this.getCurrentShift(area);
       if (!existing) {
         const nextNum = await this._nextShiftNumber(area);
         await db.insert(cashShifts).values({
