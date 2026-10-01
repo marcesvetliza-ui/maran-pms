@@ -131,7 +131,16 @@ runPostgresTests("PostgreSQL: cash shift alias routing", () => {
   it("does not reuse a closed alias shift and creates a normalized open shift when none exists", async () => {
     const closedId = randomUUID();
     let createdId: string | undefined;
+    // Other serialized suites may leave a legitimate auto-created open shift.
+    // This suite is restricted to disposable databases; restore that state.
+    const priorOpenIds = (await testPool!.query<{ id: string }>(
+      "SELECT id FROM cash_shifts WHERE area IN ('reception', 'recepcion') AND status = 'open'",
+    )).rows.map((shift) => shift.id);
     try {
+      await testPool!.query(
+        "UPDATE cash_shifts SET status = 'closed' WHERE id = ANY($1::varchar[])",
+        [priorOpenIds],
+      );
       await insertShift(closedId, "reception", "NOW() - INTERVAL '1 day'", "closed");
 
       expect(await storage.getCurrentShift("recepcion")).toBeUndefined();
@@ -142,7 +151,14 @@ runPostgresTests("PostgreSQL: cash shift alias routing", () => {
       expect(created).toMatchObject({ area: "recepcion", status: "open", autoCreado: true });
       expect(created.id).not.toBe(closedId);
     } finally {
-      await removeFixtures([closedId, ...(createdId ? [createdId] : [])]);
+      try {
+        await removeFixtures([closedId, ...(createdId ? [createdId] : [])]);
+      } finally {
+        await testPool!.query(
+          "UPDATE cash_shifts SET status = 'open' WHERE id = ANY($1::varchar[])",
+          [priorOpenIds],
+        );
+      }
     }
   });
 
