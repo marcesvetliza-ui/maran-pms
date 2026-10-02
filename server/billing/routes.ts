@@ -507,6 +507,27 @@ async function reconcileReservationCreditSettlement(invoiceId: number, lockAlrea
       if (amount > 0 && lockedSettlement.destination === "cuenta_corriente") {
         const reservation = await storage.getReservation(String(invoice.reserva_id));
         if (!reservation) throw new Error("No se encontró la reserva para registrar la liquidación CC");
+        // El rótulo que se ve en Caja/Reportes debe identificar a la persona u
+        // organización, no el id técnico de la operación (ese queda en el
+        // campo "reference" para trazabilidad, sin mostrarse en pantalla).
+        let ccOwnerName: string | null = null;
+        if (lockedSettlement.ccEntityType === "company" && lockedSettlement.ccEntityId) {
+          const company = await storage.getCompany(String(lockedSettlement.ccEntityId));
+          ccOwnerName = company?.razonSocial || company?.nombreFantasia || "Empresa vinculada";
+        } else if (lockedSettlement.ccEntityType === "agency" && lockedSettlement.ccEntityId) {
+          const agency = await storage.getAgency(String(lockedSettlement.ccEntityId));
+          ccOwnerName = agency?.razonSocial || agency?.nombreFantasia || "Agencia vinculada";
+        }
+        const guestLabel = reservation.guest
+          ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}`
+          : null;
+        const humanLabel = [
+          ccOwnerName,
+          `Reserva ${reservation.reservationCode}`,
+          reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
+          guestLabel,
+          "Liquidación CC",
+        ].filter(Boolean).join(" — ");
         await storage.createReservationPaymentWithLedger({
           payment: {
             reservationId: String(invoice.reserva_id),
@@ -517,7 +538,7 @@ async function reconcileReservationCreditSettlement(invoiceId: number, lockAlrea
             notes: lockedSettlement.label,
             invoiceRef: JSON.stringify({ id: invoice.id, operationId: lockedIntent.operationId }),
           } as any,
-          sourceLabel: `Reserva ${reservation.reservationCode} — ${canonicalReference}`,
+          sourceLabel: humanLabel,
           registeredBy: invoice.operador || undefined,
           accountSettlement: {
             entityType: lockedSettlement.ccEntityType,
@@ -2657,7 +2678,17 @@ export function registerBillingRoutes(app: Express) {
               total: match.invoice.monto_total,
             }),
           } as any,
-          sourceLabel: `Reserva ${reservation.reservationCode} — ${match.canonicalRef}`,
+          sourceLabel: [
+            reservation.company?.razonSocial || reservation.company?.nombreFantasia
+              || reservation.agency?.razonSocial || reservation.agency?.nombreFantasia
+              || null,
+            `Reserva ${reservation.reservationCode}`,
+            reservation.room?.roomNumber ? `Hab. ${reservation.room.roomNumber}` : null,
+            reservation.guest
+              ? `${reservation.guest.lastName}${reservation.guest.firstName ? ", " + reservation.guest.firstName : ""}`
+              : null,
+            `Adopción CC histórica ${match.legacyRef}`,
+          ].filter(Boolean).join(" — "),
           registeredBy: (req as any).user?.username,
           accountSettlement: {
             entityType: entityType as any,

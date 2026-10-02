@@ -68,6 +68,8 @@ vi.mock("../db-storage", () => ({
     getReservation: vi.fn(async () => state.reservation),
     getCharges: vi.fn(async () => state.chargeRows),
     getPaymentsTotal: vi.fn(async () => state.paymentsTotal),
+    getCompany: vi.fn(async () => ({ razonSocial: "Empresa Test S.A." })),
+    getAgency: vi.fn(async () => undefined),
     createReservationPaymentWithLedger: state.createPayment,
     registerCashMovement: state.registerCashMovement,
   },
