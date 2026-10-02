@@ -344,7 +344,13 @@ function DailyEntryTab() {
         </div>
         <div className="flex-1 min-w-48 space-y-1">
           <Label>Notas (opcional)</Label>
-          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={1} data-testid="input-breakfast-notes" />
+          <Textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={1}
+            className="min-h-0 h-9 resize-none"
+            data-testid="input-breakfast-notes"
+          />
         </div>
       </div>
 
