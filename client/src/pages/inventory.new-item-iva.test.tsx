@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 /**
  * Alícuota de IVA en el alta de artículo (Inventario): se guarda en el
@@ -12,15 +13,19 @@ import { describe, it, expect, vi } from "vitest";
 const { NewItemForm } = await import("./inventory");
 
 function renderForm(onSubmit = vi.fn()) {
+  const queryClient = new QueryClient();
   render(
-    <NewItemForm
-      categories={[]}
-      suppliers={[]}
-      existingItems={[]}
-      onSubmit={onSubmit}
-      isPending={false}
-      onCancel={vi.fn()}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <NewItemForm
+        categories={[]}
+        brands={[]}
+        suppliers={[]}
+        existingItems={[]}
+        onSubmit={onSubmit}
+        isPending={false}
+        onCancel={vi.fn()}
+      />
+    </QueryClientProvider>,
   );
   return onSubmit;
 }

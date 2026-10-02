@@ -74,22 +74,32 @@ type AccountingSupplier = {
   activo: boolean | null;
 };
 
+type Brand = {
+  id: string;
+  name: string;
+  isActive: string | null;
+};
+
 type InventoryItem = {
   id: string;
   sku: string | null;
   name: string;
   description: string | null;
   categoryId: string | null;
+  brandId: string | null;
   unit: "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquete" | "docena";
   costPrice: string;
   minStock: number;
   maxStock: number | null;
+  criticalStock: number | null;
   currentStock: number;
   location: string | null;
   isActive: string | null;
   itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
+  abcClass?: "A" | "B" | "C" | null;
   ivaRate?: string | null;
   category?: ItemCategory;
+  brand?: Brand;
   suppliers?: Array<{ id: number; razonSocial: string; cuit: string; isPreferred: boolean }>;
 };
 
@@ -703,6 +713,10 @@ export default function InventoryPage() {
   const [catDescription, setCatDescription] = useState("");
   const [catParentId, setCatParentId] = useState<string>("");
   const [catAccountId, setCatAccountId] = useState<string>("");
+  // Marcas (Brands) state
+  const [newBrandNameTab, setNewBrandNameTab] = useState("");
+  const [editingBrandId, setEditingBrandId] = useState<string | null>(null);
+  const [editingBrandName, setEditingBrandName] = useState("");
   // Group (Agrupamiento) state
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ItemCategory | null>(null);
@@ -739,6 +753,10 @@ export default function InventoryPage() {
 
   const { data: categories = [] } = useQuery<ItemCategory[]>({
     queryKey: ["/api/inventory/categories"],
+  });
+
+  const { data: brands = [] } = useQuery<Brand[]>({
+    queryKey: ["/api/inventory/brands"],
   });
 
   const { data: accountingSuppliers = [] } = useQuery<AccountingSupplier[]>({
@@ -1012,6 +1030,42 @@ export default function InventoryPage() {
     onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
   });
 
+  const createBrandTabMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiRequest("POST", "/api/inventory/brands", { name });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/brands"] });
+      setNewBrandNameTab("");
+      toast({ title: "Marca creada" });
+    },
+    onError: () => toast({ title: "Error al crear marca", variant: "destructive" }),
+  });
+
+  const updateBrandMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: { name?: string; isActive?: string } }) => {
+      const res = await apiRequest("PATCH", `/api/inventory/brands/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/brands"] });
+      setEditingBrandId(null);
+    },
+    onError: () => toast({ title: "Error al actualizar marca", variant: "destructive" }),
+  });
+
+  const deleteBrandMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest("DELETE", `/api/inventory/brands/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/brands"] });
+      toast({ title: "Marca eliminada" });
+    },
+    onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
+  });
+
   // Groups are categories with isGroup=true; leaf categories are those with a parentId
   const groups = categories.filter((c) => c.isGroup);
   // Leaf categories available for the category filter — when a group is selected, only show its children
@@ -1040,8 +1094,19 @@ export default function InventoryPage() {
     (item) => areaFilter === "all" || (item.category as any)?.area === areaFilter
   );
   const sinStockItems = areaScopedDashboardItems.filter((item) => Number(item.currentStock) <= 0);
+  // Stock Crítico es un umbral de ruptura propio, distinto del Stock Mínimo:
+  // un artículo por debajo del mínimo pero por encima del crítico está "Bajo"
+  // (reponer pronto); por debajo del crítico está "Crítico" (reponer ya).
+  const criticoItems = areaScopedDashboardItems.filter(
+    (item) => Number(item.currentStock) > 0
+      && item.criticalStock != null
+      && Number(item.currentStock) <= Number(item.criticalStock)
+  );
+  const criticoIds = new Set(criticoItems.map((item) => item.id));
   const stockBajoItems = areaScopedDashboardItems.filter(
-    (item) => Number(item.currentStock) > 0 && Number(item.currentStock) < Number(item.minStock)
+    (item) => Number(item.currentStock) > 0
+      && Number(item.currentStock) < Number(item.minStock)
+      && !criticoIds.has(item.id)
   );
 
   const totalValue = areaScopedDashboardItems.reduce(
@@ -1082,7 +1147,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
             <CardTitle className="text-sm font-medium">Total Articulos</CardTitle>
@@ -1099,6 +1164,15 @@ export default function InventoryPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{sinStockItems.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
+            <CardTitle className="text-sm font-medium">Stock Crítico</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{criticoItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1140,6 +1214,10 @@ export default function InventoryPage() {
           <TabsTrigger value="categorias" data-testid="tab-categorias">
             <Tag className="h-4 w-4 mr-2" />
             Categorías
+          </TabsTrigger>
+          <TabsTrigger value="marcas" data-testid="tab-marcas">
+            <Tag className="h-4 w-4 mr-2" />
+            Marcas
           </TabsTrigger>
           <TabsTrigger value="consumos" data-testid="tab-consumos">
             <BarChart3 className="h-4 w-4 mr-2" />
@@ -1272,6 +1350,9 @@ export default function InventoryPage() {
                         {item.sku && (
                           <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>
                         )}
+                        {item.brand?.name && (
+                          <div className="text-xs text-muted-foreground">{item.brand.name}</div>
+                        )}
                       </td>
                       <td className="p-3">
                         <div>{item.category?.name || "-"}</div>
@@ -1286,6 +1367,11 @@ export default function InventoryPage() {
                               data-testid={`badge-kind-${item.id}`}
                             >
                               {(item as any).itemKind === "materia_prima" ? "Materia Prima" : (item as any).itemKind === "plato" ? "Plato" : (item as any).itemKind === "activo_fijo" ? "Activo Fijo" : "Venta Directa"}
+                            </Badge>
+                          )}
+                          {item.abcClass && (
+                            <Badge variant="outline" className="text-[10px]" data-testid={`badge-abc-${item.id}`}>
+                              Clase {item.abcClass}
                             </Badge>
                           )}
                           {(item as any).isActive === "false" && (
@@ -1314,7 +1400,7 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="low-stock" className="space-y-6">
-          {sinStockItems.length === 0 && stockBajoItems.length === 0 ? (
+          {sinStockItems.length === 0 && criticoItems.length === 0 && stockBajoItems.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <TrendingUp className="h-12 w-12 text-green-500 mb-4" />
@@ -1347,6 +1433,40 @@ export default function InventoryPage() {
                           <div className="flex justify-between text-sm">
                             <span className="text-muted-foreground">A reponer:</span>
                             <span className="font-semibold">{item.minStock} {item.unit}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {criticoItems.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-orange-600">Stock Crítico ({criticoItems.length})</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {criticoItems.map((item) => (
+                      <Card key={item.id} className="border-orange-500/50" data-testid={`critico-${item.id}`}>
+                        <CardHeader className="pb-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <CardTitle className="text-base">{item.name}</CardTitle>
+                            <Badge className="bg-orange-600 hover:bg-orange-600">Crítico</Badge>
+                          </div>
+                          {(item.category as any)?.name && (
+                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
+                          )}
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock actual:</span>
+                            <span className="font-semibold text-orange-600">{item.currentStock} {item.unit}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock crítico:</span>
+                            <span>{item.criticalStock} {item.unit}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock minimo:</span>
+                            <span>{item.minStock} {item.unit}</span>
                           </div>
                         </CardContent>
                       </Card>
@@ -1674,6 +1794,108 @@ export default function InventoryPage() {
               </>
             );
           })()}
+        </TabsContent>
+
+        <TabsContent value="marcas" className="space-y-4">
+          <Card>
+            <CardContent className="pt-4 space-y-4">
+              <div className="flex gap-2 max-w-md">
+                <Input
+                  value={newBrandNameTab}
+                  onChange={(e) => setNewBrandNameTab(e.target.value)}
+                  placeholder="Nombre de la nueva marca"
+                  data-testid="input-new-brand-tab"
+                />
+                <Button
+                  disabled={!newBrandNameTab.trim() || createBrandTabMutation.isPending}
+                  onClick={() => createBrandTabMutation.mutate(newBrandNameTab.trim())}
+                  data-testid="button-add-brand"
+                >
+                  {createBrandTabMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
+                  Agregar
+                </Button>
+              </div>
+              {brands.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No hay marcas cargadas todavía.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {brands.map((b) => (
+                      <TableRow key={b.id} data-testid={`row-brand-${b.id}`}>
+                        <TableCell>
+                          {editingBrandId === b.id ? (
+                            <div className="flex gap-2">
+                              <Input
+                                autoFocus
+                                value={editingBrandName}
+                                onChange={(e) => setEditingBrandName(e.target.value)}
+                                className="h-8"
+                                data-testid={`input-edit-brand-${b.id}`}
+                              />
+                              <Button
+                                size="sm"
+                                disabled={!editingBrandName.trim() || updateBrandMutation.isPending}
+                                onClick={() => updateBrandMutation.mutate({ id: b.id, data: { name: editingBrandName.trim() } })}
+                              >
+                                Guardar
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => setEditingBrandId(null)}>
+                                Cancelar
+                              </Button>
+                            </div>
+                          ) : (
+                            b.name
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={b.isActive !== "false" ? "default" : "secondary"}>
+                            {b.isActive !== "false" ? "Activa" : "Inactiva"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right space-x-1">
+                          {editingBrandId !== b.id && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => { setEditingBrandId(b.id); setEditingBrandName(b.name); }}
+                                data-testid={`button-edit-brand-${b.id}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => updateBrandMutation.mutate({ id: b.id, data: { isActive: b.isActive !== "false" ? "false" : "true" } })}
+                                data-testid={`button-toggle-brand-${b.id}`}
+                              >
+                                {b.isActive !== "false" ? "Desactivar" : "Activar"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => deleteBrandMutation.mutate(b.id)}
+                                data-testid={`button-delete-brand-${b.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="consumos" className="space-y-4">
@@ -2406,6 +2628,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </DialogHeader>
           <NewItemForm
             categories={categories}
+            brands={brands}
             suppliers={accountingSuppliers}
             existingItems={items}
             onSubmit={(data) => createItemMutation.mutate(data)}
@@ -2588,6 +2811,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
 
 export function NewItemForm({
   categories,
+  brands,
   suppliers,
   existingItems,
   onSubmit,
@@ -2595,14 +2819,19 @@ export function NewItemForm({
   onCancel,
 }: {
   categories: ItemCategory[];
+  brands: Brand[];
   suppliers: AccountingSupplier[];
   existingItems: InventoryItem[];
   onSubmit: (data: Partial<InventoryItem>) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
+  const { toast } = useToast();
   const [name, setName] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [brandId, setBrandId] = useState("");
+  const [showNewBrandInput, setShowNewBrandInput] = useState(false);
+  const [newBrandName, setNewBrandName] = useState("");
   const [supplierIds, setSupplierIds] = useState<number[]>([]);
   const [preferredSupplierId, setPreferredSupplierId] = useState("");
   const [supplierSearch, setSupplierSearch] = useState("");
@@ -2610,8 +2839,24 @@ export function NewItemForm({
   const [costPrice, setCostPrice] = useState("0");
   const [minStock, setMinStock] = useState("0");
   const [maxStock, setMaxStock] = useState("");
+  const [criticalStock, setCriticalStock] = useState("");
   const [itemKind, setItemKind] = useState<string>("venta_directa");
+  const [abcClass, setAbcClass] = useState<string>("__none__");
   const [ivaRate, setIvaRate] = useState<string>("__none__");
+
+  const createBrandMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiRequest("POST", "/api/inventory/brands", { name });
+      return res.json();
+    },
+    onSuccess: (created: Brand) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/brands"] });
+      setBrandId(created.id);
+      setShowNewBrandInput(false);
+      setNewBrandName("");
+    },
+    onError: () => toast({ title: "No se pudo crear la marca", variant: "destructive" }),
+  });
 
   const duplicateMatches = name.trim().length > 1
     ? existingItems.filter(
@@ -2721,6 +2966,64 @@ export function NewItemForm({
           )}
         </div>
       </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Marca (opcional)</Label>
+          {showNewBrandInput ? (
+            <div className="flex gap-2">
+              <Input
+                autoFocus
+                value={newBrandName}
+                onChange={(e) => setNewBrandName(e.target.value)}
+                placeholder="Nombre de la marca"
+                data-testid="input-new-brand-name"
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={!newBrandName.trim() || createBrandMutation.isPending}
+                onClick={() => createBrandMutation.mutate(newBrandName.trim())}
+                data-testid="button-confirm-new-brand"
+              >
+                {createBrandMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Crear"}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => { setShowNewBrandInput(false); setNewBrandName(""); }}>
+                Cancelar
+              </Button>
+            </div>
+          ) : (
+            <Select
+              value={brandId}
+              onValueChange={(value) => value === "__new__" ? setShowNewBrandInput(true) : setBrandId(value)}
+            >
+              <SelectTrigger data-testid="select-brand">
+                <SelectValue placeholder="Sin marca" />
+              </SelectTrigger>
+              <SelectContent>
+                {brands.filter(b => b.isActive !== "false").map(b => (
+                  <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                ))}
+                <SelectItem value="__new__">+ Nueva marca...</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label>Clasificación ABC (opcional)</Label>
+          <Select value={abcClass} onValueChange={setAbcClass}>
+            <SelectTrigger data-testid="select-abc-class">
+              <SelectValue placeholder="Sin clasificar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— Sin clasificar —</SelectItem>
+              <SelectItem value="A">A — Mayor valor/rotación</SelectItem>
+              <SelectItem value="B">B — Valor/rotación intermedia</SelectItem>
+              <SelectItem value="C">C — Menor valor/rotación</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Clasificación manual por valor. No oculta alertas de stock: un artículo clase C puede ser igual de crítico operativamente.</p>
+        </div>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="space-y-2">
           <Label>Tipo de artículo</Label>
@@ -2784,6 +3087,19 @@ export function NewItemForm({
             data-testid="input-max-stock"
           />
         </div>
+        <div className="space-y-2">
+          <Label>Stock Crítico (opcional)</Label>
+          <Input
+            type="number"
+            min={0}
+            step="0.001"
+            value={criticalStock}
+            onChange={(e) => setCriticalStock(e.target.value)}
+            placeholder="Distinto del mínimo"
+            data-testid="input-critical-stock"
+          />
+          <p className="text-xs text-muted-foreground">Umbral de ruptura: por debajo de este valor es más urgente que estar solo bajo el mínimo.</p>
+        </div>
       </div>
       <div className="space-y-2">
         <Label>Alícuota de IVA</Label>
@@ -2813,11 +3129,14 @@ export function NewItemForm({
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,
               preferredAccountingSupplierId: preferredSupplierId ? Number(preferredSupplierId) : null,
+              brandId: brandId || null,
               unit: unit as any,
               costPrice,
               minStock,
               maxStock: maxStock.trim() === "" ? null : maxStock,
+              criticalStock: criticalStock.trim() === "" ? null : criticalStock,
               itemKind: itemKind as any,
+              abcClass: abcClass === "__none__" ? null : (abcClass as any),
               ivaRate: ivaRate === "__none__" ? null : ivaRate,
             } as any);
           }}

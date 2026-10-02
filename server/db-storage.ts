@@ -86,6 +86,7 @@ import {
   type Recipe, type InsertRecipe,
   type RecipeIngredient, type InsertRecipeIngredient, type RecipeWithIngredients,
   type ItemCategory, type InsertItemCategory,
+  type Brand, type InsertBrand,
   type AccountingSupplier,
   type InventoryItem, type InsertInventoryItem, type InventoryItemWithDetails,
   type StockMovement, type InsertStockMovement, type StockMovementWithItem,
@@ -141,7 +142,7 @@ import {
   type EventualWaiter, type InsertEventualWaiter,
   type RestaurantReservationAdvance, type InsertRestaurantReservationAdvance,
   orderSplits, recipes, recipeIngredients,
-  itemCategories, inventoryItems, inventoryItemSuppliers, accountingSuppliers, stockMovements, warehouseStock,
+  itemCategories, brands, inventoryItems, inventoryItemSuppliers, accountingSuppliers, stockMovements, warehouseStock,
   spaCabins, spaTreatmentCategories, spaTreatments, spaAppointments,
   spaTreatmentResources, spaAppointmentResources,
   spaAccounts, spaAccountItems, spaPayments, treatmentSupplies,
@@ -5262,21 +5263,43 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async getBrands(): Promise<Brand[]> {
+    return db.select().from(brands);
+  }
+
+  async createBrand(brand: InsertBrand): Promise<Brand> {
+    const [created] = await db.insert(brands).values(brand as any).returning();
+    return created;
+  }
+
+  async updateBrand(id: string, brand: Partial<InsertBrand>): Promise<Brand | undefined> {
+    const [updated] = await db.update(brands).set(brand as any).where(eq(brands.id, id)).returning();
+    return updated;
+  }
+
+  async deleteBrand(id: string): Promise<boolean> {
+    const result = await db.delete(brands).where(eq(brands.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async getInventoryItems(): Promise<InventoryItemWithDetails[]> {
     const items = await db.select().from(inventoryItems);
     const cats = await db.select().from(itemCategories);
+    const brandRows = await db.select().from(brands);
     const links = await db.select().from(inventoryItemSuppliers);
     const supplierIds = [...new Set(links.map(link => link.accountingSupplierId))];
     const sups = supplierIds.length
       ? await db.select().from(accountingSuppliers).where(inArray(accountingSuppliers.id, supplierIds))
       : [];
     const catsMap = new Map(cats.map(c => [c.id, c]));
+    const brandsMap = new Map(brandRows.map(b => [b.id, b]));
     const supsMap = new Map(sups.map(s => [s.id, s]));
     const linksMap = new Map<string, typeof links>();
     for (const link of links) linksMap.set(link.itemId, [...(linksMap.get(link.itemId) ?? []), link]);
     return items.map(i => ({
       ...i,
       category: i.categoryId ? catsMap.get(i.categoryId) : undefined,
+      brand: i.brandId ? brandsMap.get(i.brandId) : undefined,
       suppliers: (linksMap.get(i.id) ?? []).flatMap(link => {
         const supplier = supsMap.get(link.accountingSupplierId);
         return supplier ? [{
@@ -5293,6 +5316,7 @@ export class DatabaseStorage implements IStorage {
     const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
     if (!item) return undefined;
     const category = item.categoryId ? (await db.select().from(itemCategories).where(eq(itemCategories.id, item.categoryId)))[0] : undefined;
+    const brand = item.brandId ? (await db.select().from(brands).where(eq(brands.id, item.brandId)))[0] : undefined;
     const links = await db.select().from(inventoryItemSuppliers).where(eq(inventoryItemSuppliers.itemId, id));
     const supplierIds = links.map(link => link.accountingSupplierId);
     const sups = supplierIds.length
@@ -5302,6 +5326,7 @@ export class DatabaseStorage implements IStorage {
     return {
       ...item,
       category,
+      brand,
       suppliers: links.flatMap(link => {
         const supplier = supsMap.get(link.accountingSupplierId);
         return supplier ? [{

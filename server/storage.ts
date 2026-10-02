@@ -110,6 +110,8 @@ import {
   // Inventory
   type ItemCategory,
   type InsertItemCategory,
+  type Brand,
+  type InsertBrand,
   type AccountingSupplier,
   type InventoryItem,
   type InsertInventoryItem,
@@ -606,6 +608,12 @@ export interface IStorage {
   createItemCategory(category: InsertItemCategory): Promise<ItemCategory>;
   updateItemCategory(id: string, category: Partial<InsertItemCategory>): Promise<ItemCategory | undefined>;
   deleteItemCategory(id: string): Promise<boolean>;
+
+  // Brands (Marcas)
+  getBrands(): Promise<Brand[]>;
+  createBrand(brand: InsertBrand): Promise<Brand>;
+  updateBrand(id: string, brand: Partial<InsertBrand>): Promise<Brand | undefined>;
+  deleteBrand(id: string): Promise<boolean>;
 
   // Inventory Items
   getInventoryItems(): Promise<InventoryItemWithDetails[]>;

@@ -51,6 +51,47 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
+  // Brands (Marcas)
+  app.get("/api/inventory/brands", async (req, res) => {
+    try {
+      const items = await storage.getBrands();
+      res.json(items);
+    } catch (error) {
+      res.status(500).json({ error: "Error fetching brands" });
+    }
+  });
+
+  app.post("/api/inventory/brands", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+    try {
+      const brand = await storage.createBrand(req.body);
+      res.status(201).json(brand);
+    } catch (error) {
+      res.status(500).json({ error: "Error creating brand" });
+    }
+  });
+
+  app.patch("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+    try {
+      const brand = await storage.updateBrand(req.params.id, req.body);
+      if (!brand) return res.status(404).json({ error: "Brand not found" });
+      res.json(brand);
+    } catch (error) {
+      res.status(500).json({ error: "Error updating brand" });
+    }
+  });
+
+  app.delete("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+    try {
+      await storage.deleteBrand(req.params.id);
+      res.status(204).send();
+    } catch (error: any) {
+      if (error?.code === "23503") {
+        return res.status(400).json({ error: "No se puede eliminar — tiene artículos asociados" });
+      }
+      res.status(500).json({ error: "Error deleting brand" });
+    }
+  });
+
   // Inventory Items
   app.get("/api/inventory/items", requireAuth, async (req, res) => {
     try {

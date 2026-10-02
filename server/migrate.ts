@@ -4720,6 +4720,34 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     });
   });
 
+  // Marca (Bloque A del pedido de mejoras de Inventario), Clasificación ABC
+  // y Stock Crítico — campos nuevos que no tocan ninguna cantidad, costo
+  // histórico ni circuito de descuento existente.
+  await withTimeout("brands (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("brands", `
+      CREATE TABLE brands (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        name text NOT NULL,
+        is_active text DEFAULT 'true'
+      )
+    `)))
+  );
+  await withTimeout("inventory_items.brand_id", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice(
+      "inventory_items", "brand_id", "varchar REFERENCES brands(id)",
+    )))
+  );
+  await withTimeout("inventory_items.critical_stock", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice(
+      "inventory_items", "critical_stock", "decimal(10,3)",
+    )))
+  );
+  await withTimeout("inventory_items.abc_class", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice(
+      "inventory_items", "abc_class", "text",
+    )))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

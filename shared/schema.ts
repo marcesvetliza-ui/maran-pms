@@ -1520,20 +1520,40 @@ export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquet
 // menu_item del restaurante, generado y mantenido automáticamente por el sistema).
 export type ItemKind = "materia_prima" | "venta_directa" | "plato" | "activo_fijo";
 
+// Clasificación ABC/Pareto manual, independiente de "importancia operativa":
+// un artículo barato (sal, detergente) puede ser clase C por valor y a la vez
+// imprescindible. No se usa para ocultar ni filtrar alertas de stock.
+export type AbcClass = "A" | "B" | "C";
+
+export const brands = pgTable("brands", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  isActive: text("is_active").default("true"),
+});
+
+export const insertBrandSchema = createInsertSchema(brands).omit({ id: true });
+export type InsertBrand = z.infer<typeof insertBrandSchema>;
+export type Brand = typeof brands.$inferSelect;
+
 export const inventoryItems = pgTable("inventory_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sku: text("sku").unique(),
   name: text("name").notNull(),
   description: text("description"),
   categoryId: varchar("category_id"),
+  brandId: varchar("brand_id").references(() => brands.id),
   unit: text("unit").$type<UnitType>().notNull().default("unidad"),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }).default("0"),
   minStock: decimal("min_stock", { precision: 10, scale: 3 }).default("0"),
   maxStock: decimal("max_stock", { precision: 10, scale: 3 }),
+  // Umbral de ruptura, distinto del mínimo: un artículo puede estar por
+  // debajo del mínimo (reponer pronto) sin estar en crítico (reponer ya).
+  criticalStock: decimal("critical_stock", { precision: 10, scale: 3 }),
   currentStock: decimal("current_stock", { precision: 10, scale: 3 }).default("0"),
   location: text("location"),
   isActive: text("is_active").default("true"),
   itemKind: text("item_kind").$type<ItemKind>().notNull().default("venta_directa"),
+  abcClass: text("abc_class").$type<AbcClass>(),
   // Alícuota de IVA habitual del artículo ("2.5"|"5"|"10.5"|"21"|"27"|"exento"|"no_gravado"),
   // para precargar el renglón de la factura de Compras sin tener que elegirla cada vez.
   ivaRate: text("iva_rate"),
@@ -1545,6 +1565,7 @@ export type InventoryItem = typeof inventoryItems.$inferSelect;
 
 export type InventoryItemWithDetails = InventoryItem & {
   category?: ItemCategory;
+  brand?: Brand;
   suppliers?: Array<Pick<AccountingSupplier, "id" | "razonSocial" | "cuit"> & { isPreferred: boolean }>;
 };
 
