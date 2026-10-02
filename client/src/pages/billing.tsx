@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
+import { ArcaCredentialDiagnosticPanel } from "@/components/arca-credential-diagnostic";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
@@ -3650,6 +3651,8 @@ function BillingConfigPanel({ config }: { config: any }) {
           )}
         </CardContent>
       </Card>
+
+      <ArcaCredentialDiagnosticPanel key={config?.updatedAt ?? "no-config"} />
 
       <Button onClick={handleSave} disabled={mutation.isPending} data-testid="btn-guardar-billing-config">
         {mutation.isPending ? "Guardando..." : "Guardar configuración"}
