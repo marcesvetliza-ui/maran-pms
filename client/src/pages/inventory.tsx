@@ -54,6 +54,7 @@ import {
   FolderOpen,
   Check,
   ChevronsUpDown,
+  Building2,
 } from "lucide-react";
 
 type ItemCategory = {
@@ -1134,6 +1135,12 @@ export default function InventoryPage() {
             <Button variant="outline" data-testid="button-goto-purchase-invoices">
               <FileText className="h-4 w-4 mr-2" />
               Factura de Compra
+            </Button>
+          </Link>
+          <Link href="/accounting-suppliers">
+            <Button variant="outline" data-testid="button-goto-suppliers">
+              <Building2 className="h-4 w-4 mr-2" />
+              Proveedores
             </Button>
           </Link>
           <Button variant="outline" onClick={openInternalMov} data-testid="button-internal-movement">
