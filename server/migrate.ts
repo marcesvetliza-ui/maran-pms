@@ -4805,6 +4805,45 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // Producción: una Elaboración Base puede marcarse "producible" (tiene un
+  // artículo de Inventario propio que recibe stock real al registrar una
+  // corrida), y production_runs guarda cada corrida real registrada.
+  await withTimeout("recipes.output_inventory_item_id", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice(
+      "recipes", "output_inventory_item_id", "varchar",
+    )))
+  );
+  await withTimeout("production_runs (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("production_runs", `
+      CREATE TABLE production_runs (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        date date NOT NULL,
+        recipe_id varchar NOT NULL REFERENCES recipes(id),
+        output_inventory_item_id varchar NOT NULL REFERENCES inventory_items(id),
+        output_quantity decimal(10,3) NOT NULL,
+        output_unit_cost decimal(10,4) NOT NULL DEFAULT 0,
+        total_cost decimal(10,2) NOT NULL DEFAULT 0,
+        inputs jsonb NOT NULL,
+        warnings jsonb,
+        notes text,
+        registered_by text,
+        created_at timestamp NOT NULL DEFAULT now()
+      )
+    `)))
+  );
+  await withTimeout("production_runs_date_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "production_runs_date_idx",
+      "CREATE INDEX production_runs_date_idx ON production_runs (date)",
+    )))
+  );
+  await withTimeout("production_runs_output_item_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "production_runs_output_item_idx",
+      "CREATE INDEX production_runs_output_item_idx ON production_runs (output_inventory_item_id)",
+    )))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

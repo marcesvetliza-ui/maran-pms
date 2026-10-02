@@ -7,9 +7,10 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChefHat, Search, BookOpen, Plus, Trash2, Loader2, Edit, UtensilsCrossed,
-  Layers, FlaskConical, RefreshCw, ArrowRight, Coffee,
+  Layers, FlaskConical, RefreshCw, ArrowRight, Coffee, Factory,
 } from "lucide-react";
 import { BreakfastControlTab } from "@/components/breakfast-control-tab";
+import { ProductionTab } from "@/components/production-tab";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -172,7 +173,7 @@ export default function RecetasCostosPage() {
   });
 
   const { data: inventoryItems = [] } = useQuery<any[]>({
-    queryKey: ["/api/inventory/items?itemKind=materia_prima"],
+    queryKey: ["/api/inventory/items?itemKind=materia_prima,semielaborado"],
     enabled: isRecipeDialogOpen || isBaseRecipeDialogOpen,
   });
 
@@ -530,6 +531,10 @@ export default function RecetasCostosPage() {
             {baseRecipes.length > 0 && (
               <Badge variant="secondary" className="ml-2 text-xs px-1.5">{baseRecipes.length}</Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="produccion" data-testid="tab-produccion">
+            <Factory className="h-4 w-4 mr-2" />
+            Producción
           </TabsTrigger>
           <TabsTrigger value="desayunos" data-testid="tab-desayunos">
             <Coffee className="h-4 w-4 mr-2" />
@@ -892,6 +897,10 @@ export default function RecetasCostosPage() {
               })}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="produccion" className="mt-4">
+          <ProductionTab />
         </TabsContent>
 
         <TabsContent value="desayunos" className="mt-4">

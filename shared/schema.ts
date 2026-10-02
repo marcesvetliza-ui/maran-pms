@@ -1459,6 +1459,12 @@ export const recipes = pgTable("recipes", {
   name: text("name"),                          // display name (used when isBase=true)
   productionUnit: text("production_unit"),     // e.g. "ml", "g", "porciones", "kg"
   productionYield: decimal("production_yield", { precision: 10, scale: 3 }), // qty produced per batch
+  // Marca esta Elaboración Base como "producible": tiene un artículo de
+  // Inventario propio que recibe stock real cada vez que se registra una
+  // corrida en la pestaña Producción (server/production.ts). Nulo = la
+  // elaboración sigue siendo puramente virtual, expandida recursivamente
+  // recién al vender un plato que la usa (comportamiento de siempre).
+  outputInventoryItemId: varchar("output_inventory_item_id"),
 });
 
 export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true });
@@ -1490,6 +1496,39 @@ export type RecipeWithIngredients = Recipe & {
   ingredients: RecipeIngredient[];
 };
 
+// Producción: corridas reales de una Elaboración Base "producible" (ver
+// recipes.outputInventoryItemId). A diferencia de una Elaboración Base común
+// (virtual, se expande recursivamente recién al vender un plato), acá se
+// registra un lote físico real: se descuenta stock de los insumos
+// efectivamente usados (pueden diferir de la fórmula teórica — merma real) y
+// se suma stock al artículo producido, con su costo unitario recalculado.
+export const productionRuns = pgTable("production_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: date("date").notNull(),
+  recipeId: varchar("recipe_id").notNull(),               // la Elaboración Base usada como fórmula
+  outputInventoryItemId: varchar("output_inventory_item_id").notNull(),
+  outputQuantity: decimal("output_quantity", { precision: 10, scale: 3 }).notNull(), // cantidad real obtenida
+  outputUnitCost: decimal("output_unit_cost", { precision: 10, scale: 4 }).notNull().default("0"),
+  totalCost: decimal("total_cost", { precision: 10, scale: 2 }).notNull().default("0"),
+  // Snapshot de los insumos consumidos en esta corrida (cantidad teórica vs.
+  // real, costo al momento): [{ingredientName, inventoryItemId, subRecipeId,
+  // unit, quantityFormula, quantityActual, unitCost, totalCost}, ...]
+  inputs: jsonb("inputs").notNull(),
+  // Avisos no bloqueantes de insumos sin stock suficiente al momento de
+  // registrar la corrida: [{itemName, required, available}, ...]
+  warnings: jsonb("warnings"),
+  notes: text("notes"),
+  registeredBy: text("registered_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  dateIdx: index("production_runs_date_idx").on(table.date),
+  outputItemIdx: index("production_runs_output_item_idx").on(table.outputInventoryItemId),
+}));
+
+export const insertProductionRunSchema = createInsertSchema(productionRuns).omit({ id: true, createdAt: true });
+export type InsertProductionRun = z.infer<typeof insertProductionRunSchema>;
+export type ProductionRun = typeof productionRuns.$inferSelect;
+
 // ==================== INVENTORY MODULE ====================
 
 // Item Categories (for inventory)
@@ -1518,7 +1557,7 @@ export type UnitType = "unidad" | "kg" | "g" | "litro" | "ml" | "caja" | "paquet
 // Clasificación del artículo: materia prima (se usa como ingrediente de recetas),
 // venta directa (se vende tal cual, ej. agua embotellada) o plato (espejo de un
 // menu_item del restaurante, generado y mantenido automáticamente por el sistema).
-export type ItemKind = "materia_prima" | "venta_directa" | "plato" | "activo_fijo";
+export type ItemKind = "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | "semielaborado";
 
 // Clasificación ABC/Pareto manual, independiente de "importancia operativa":
 // un artículo barato (sal, detergente) puede ser clase C por valor y a la vez

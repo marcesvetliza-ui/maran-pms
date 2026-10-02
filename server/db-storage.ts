@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
+import { deductIngredientsAtMultiplier } from "./recipeStockDeduction";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
@@ -5459,98 +5460,22 @@ export class DatabaseStorage implements IStorage {
     const warnings: Array<{ itemName: string; required: number; available: number }> = [];
     const skipped: Array<{ ingredientName: string; reason: string }> = [];
 
-    // Recursive helper: deduct raw materials for a list of ingredients at a given multiplier.
-    // Supports sub-recipes (elaboraciones): when an ingredient has subRecipeId, its ingredients
-    // are expanded recursively in proportion to quantity/productionYield.
-    const deductIngredients = async (
-      ingredients: RecipeIngredient[],
-      multiplier: number,
-      depth: number = 0
-    ): Promise<void> => {
-      if (depth > 6) return; // safety guard against infinite recursion
-
-      for (const ingredient of ingredients) {
-        const subRecipeId = (ingredient as any).subRecipeId as string | null;
-
-        if (subRecipeId) {
-          // ── Sub-recipe / elaboración ─────────────────────────────────────
-          const subRecipe = await this.getRecipe(subRecipeId);
-          if (!subRecipe) {
-            skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta no encontrada" });
-            continue;
-          }
-          const subYield = parseFloat(String((subRecipe as any).productionYield || "0"));
-          if (subYield <= 0) {
-            skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta sin rendimiento (productionYield) definido" });
-            continue;
-          }
-          const merma = ingredient.merma ? parseFloat(String(ingredient.merma)) : 0;
-          const grossQty = merma > 0
-            ? parseFloat(String(ingredient.quantity)) / (1 - merma / 100)
-            : parseFloat(String(ingredient.quantity));
-          // How much of the sub-recipe batch is needed for this usage
-          const ratio = (grossQty / subYield) * multiplier;
-          await deductIngredients(subRecipe.ingredients, ratio, depth + 1);
-          continue;
-        }
-
-        // ── Raw material from inventory ───────────────────────────────────
-        if (!ingredient.inventoryItemId) {
-          skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sin vínculo con inventario" });
-          continue;
-        }
-
-        const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, ingredient.inventoryItemId));
-        if (!invItem) {
-          skipped.push({ ingredientName: ingredient.ingredientName, reason: "Ítem de inventario no encontrado" });
-          continue;
-        }
-
-        // Si hay merma, la cantidad bruta real = neta / (1 - merma/100)
-        const merma = ingredient.merma ? parseFloat(String(ingredient.merma)) : 0;
-        const grossQty = merma > 0
-          ? parseFloat(String(ingredient.quantity)) / (1 - merma / 100)
-          : parseFloat(String(ingredient.quantity));
-        const totalToDeduct = grossQty * multiplier;
-        const currentStock = parseFloat(String(invItem.currentStock ?? 0));
-
-        if (currentStock < totalToDeduct) {
-          warnings.push({ itemName: invItem.name, required: totalToDeduct, available: currentStock });
-        }
-
-        const actualDeduct = Math.min(totalToDeduct, currentStock);
-        if (actualDeduct <= 0) continue;
-
-        const newStock = Math.max(0, currentStock - actualDeduct);
-
-        await db.insert(stockMovements).values({
-          id: randomUUID(),
-          itemId: ingredient.inventoryItemId,
-          movementType: "consumo",
-          quantity: String(actualDeduct),
-          previousStock: String(currentStock),
-          newStock: String(newStock),
-          notes: `Consumo automático — Orden ${orderId}`,
-          sourceType: "restaurant_order",
-          sourceId: orderId,
-          createdAt: new Date(),
-        } as any);
-
-        await db.update(inventoryItems)
-          .set({ currentStock: String(newStock) as any })
-          .where(eq(inventoryItems.id, ingredient.inventoryItemId));
-
-        deducted.push({ itemName: invItem.name, quantity: actualDeduct, unit: invItem.unit });
-      }
-    };
-
     for (const orderItem of orderItems) {
       const recipe = await this.getRecipeByMenuItem(orderItem.menuItemId);
       if (!recipe || recipe.ingredients.length === 0) {
         skipped.push({ ingredientName: orderItem.menuItemId, reason: "Sin receta configurada" });
         continue;
       }
-      await deductIngredients(recipe.ingredients, orderItem.quantity);
+      const result = await deductIngredientsAtMultiplier(
+        db,
+        (id) => this.getRecipe(id),
+        recipe.ingredients,
+        orderItem.quantity,
+        { sourceType: "restaurant_order", sourceId: orderId, notes: `Consumo automático — Orden ${orderId}` },
+      );
+      deducted.push(...result.deducted);
+      warnings.push(...result.warnings);
+      skipped.push(...result.skipped);
     }
 
     return { deducted, warnings, skipped };

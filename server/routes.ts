@@ -51,6 +51,7 @@ import { registerHousekeepingRoutes } from "./routes/housekeeping";
 import { registerRestaurantRoutes } from "./routes/restaurant";
 import { registerInventoryRoutes } from "./routes/inventory";
 import { registerBreakfastRoutes } from "./routes/breakfast";
+import { registerProductionRoutes } from "./routes/production";
 import { registerSpaRoutes } from "./routes/spa";
 import { registerEventsRoutes } from "./routes/events";
 import { registerPresupuestosRoutes } from "./routes/presupuestos";
@@ -4012,6 +4013,7 @@ export async function registerRoutes(
   registerRestaurantRoutes(app);
   registerInventoryRoutes(app);
   registerBreakfastRoutes(app);
+  registerProductionRoutes(app);
   registerSpaRoutes(app);
   registerEventsRoutes(app);
   registerPresupuestosRoutes(app);

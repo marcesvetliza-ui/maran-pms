@@ -96,12 +96,20 @@ type InventoryItem = {
   currentStock: number;
   location: string | null;
   isActive: string | null;
-  itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | null;
+  itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | "semielaborado" | null;
   abcClass?: "A" | "B" | "C" | null;
   ivaRate?: string | null;
   category?: ItemCategory;
   brand?: Brand;
   suppliers?: Array<{ id: number; razonSocial: string; cuit: string; isPreferred: boolean }>;
+};
+
+const ITEM_KIND_LABELS: Record<string, string> = {
+  materia_prima: "Materia Prima",
+  semielaborado: "Semielaborado",
+  plato: "Plato",
+  activo_fijo: "Activo Fijo",
+  venta_directa: "Venta Directa",
 };
 
 type StockMovement = {
@@ -1302,6 +1310,7 @@ export default function InventoryPage() {
               <SelectContent>
                 <SelectItem value="all">Todos los tipos</SelectItem>
                 <SelectItem value="materia_prima">Materia Prima</SelectItem>
+                <SelectItem value="semielaborado">Semielaborado</SelectItem>
                 <SelectItem value="venta_directa">Venta Directa</SelectItem>
                 <SelectItem value="plato">Plato</SelectItem>
                 <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
@@ -1357,7 +1366,7 @@ export default function InventoryPage() {
                               className="text-[10px]"
                               data-testid={`badge-kind-${item.id}`}
                             >
-                              {(item as any).itemKind === "materia_prima" ? "Materia Prima" : (item as any).itemKind === "plato" ? "Plato" : (item as any).itemKind === "activo_fijo" ? "Activo Fijo" : "Venta Directa"}
+                              {ITEM_KIND_LABELS[(item as any).itemKind as string] || "Venta Directa"}
                             </Badge>
                           )}
                           {item.abcClass && (

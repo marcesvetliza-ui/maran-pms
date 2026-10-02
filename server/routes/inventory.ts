@@ -105,7 +105,8 @@ export function registerInventoryRoutes(app: Express) {
       }
       const itemKind = req.query.itemKind as string | undefined;
       if (itemKind) {
-        items = items.filter((item: any) => item.itemKind === itemKind);
+        const kinds = itemKind.split(",").map(k => k.trim()).filter(Boolean);
+        items = items.filter((item: any) => kinds.includes(item.itemKind));
       }
       res.json(items);
     } catch (error) {
