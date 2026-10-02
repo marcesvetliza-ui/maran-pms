@@ -17,6 +17,7 @@ import { generarFacturaPDF, generarVoucherHabitacionPDF, type VoucherHabitacionD
 import { requireAuth, requireRole, requirePermission } from "../auth";
 import { hasPermission } from "../permissions";
 import { normalizeToSpanishPaymentMethod } from "../payment-method";
+import { registerArcaCredentialDiagnosticRoutes } from "./credentialDiagnosticRoutes";
 import { audit } from "../audit";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assetPath } from "../utils/assetPath";
@@ -600,6 +601,7 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  registerArcaCredentialDiagnosticRoutes(app);
 
   // GET /api/billing/config
   app.get("/api/billing/config", requireAuth, async (req, res) => {
