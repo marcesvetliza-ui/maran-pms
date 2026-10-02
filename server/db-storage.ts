@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
@@ -5383,6 +5384,9 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db.transaction(async (tx) => {
       const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
       if (!result) return [];
+      if (itemValues.costPrice !== undefined) {
+        await cascadeRecipeCostsFromInventoryItem(tx, id, parseFloat(String(result.costPrice ?? 0)));
+      }
       if (accountingSupplierIds !== undefined) {
         const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
         if (preferredAccountingSupplierId !== null && preferredAccountingSupplierId !== undefined && !uniqueIds.includes(Number(preferredAccountingSupplierId))) {
