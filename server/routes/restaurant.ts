@@ -1618,7 +1618,7 @@ export function registerRestaurantRoutes(app: Express) {
 
       const empty = {
         periodo, resumen: { totalOrdenes: 0, totalVentas: 0, totalCubiertos: 0, ticketPromedio: 0, cubiertosPromedio: 0 },
-        topPlatos: [], porCategoria: [], tendenciaDiaria: [], porMetodoPago: [], porHora: [],
+        topPlatos: [], porCategoria: [], tendenciaDiaria: [], porMetodoPago: [], porHora: [], porMozo: [],
       };
       if (orders.length === 0) return res.json(empty);
 
