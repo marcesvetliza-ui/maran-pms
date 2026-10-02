@@ -4748,6 +4748,63 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // Control de Desayunos: catálogo de artículos + carga diaria por A&B,
+  // reemplaza la planilla Excel manual.
+  await withTimeout("breakfast_catalog_items (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("breakfast_catalog_items", `
+      CREATE TABLE breakfast_catalog_items (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        item_source_type text NOT NULL,
+        inventory_item_id varchar REFERENCES inventory_items(id),
+        recipe_id varchar REFERENCES recipes(id),
+        sort_order integer NOT NULL DEFAULT 0,
+        is_active text NOT NULL DEFAULT 'true'
+      )
+    `)))
+  );
+  await withTimeout("breakfast_days (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("breakfast_days", `
+      CREATE TABLE breakfast_days (
+        date date PRIMARY KEY,
+        pax integer NOT NULL,
+        notes text,
+        updated_at timestamp NOT NULL DEFAULT now(),
+        updated_by text
+      )
+    `)))
+  );
+  await withTimeout("breakfast_entries (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("breakfast_entries", `
+      CREATE TABLE breakfast_entries (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        date date NOT NULL,
+        catalog_item_id varchar REFERENCES breakfast_catalog_items(id),
+        item_source_type text NOT NULL,
+        inventory_item_id varchar REFERENCES inventory_items(id),
+        recipe_id varchar REFERENCES recipes(id),
+        item_name text NOT NULL,
+        unit text NOT NULL,
+        unit_cost_snapshot decimal(10,4) NOT NULL DEFAULT 0,
+        quantity_out decimal(10,3) NOT NULL DEFAULT 0,
+        quantity_recovered decimal(10,3) NOT NULL DEFAULT 0,
+        updated_at timestamp NOT NULL DEFAULT now(),
+        updated_by text
+      )
+    `)))
+  );
+  await withTimeout("breakfast_entries_date_catalog_item_unique", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "breakfast_entries_date_catalog_item_unique",
+      "CREATE UNIQUE INDEX breakfast_entries_date_catalog_item_unique ON breakfast_entries (date, catalog_item_id) WHERE catalog_item_id IS NOT NULL",
+    )))
+  );
+  await withTimeout("breakfast_entries_date_idx", T, () =>
+    db.execute(sql.raw(createIndexWithoutRerunNotice(
+      "breakfast_entries_date_idx",
+      "CREATE INDEX breakfast_entries_date_idx ON breakfast_entries (date)",
+    )))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

@@ -5,6 +5,41 @@ import { recipes, recipeIngredients } from "@shared/schema";
 type Executor = Omit<typeof db, "$client">;
 
 /**
+ * Costo total de los ingredientes de una receta, aplicando merma (la
+ * cantidad bruta real = cantidad / (1 - merma/100)) — misma fórmula que usa
+ * el cliente en recetas-costos.tsx.
+ */
+export async function computeRecipeTotalCost(executor: Executor, recipeId: string): Promise<number> {
+  const ingredients = await executor
+    .select()
+    .from(recipeIngredients)
+    .where(eq(recipeIngredients.recipeId, recipeId));
+
+  return ingredients.reduce((sum, ing) => {
+    const qty = parseFloat(String(ing.quantity));
+    const cost = parseFloat(String(ing.unitCost || "0"));
+    const merma = parseFloat(String(ing.merma || "0"));
+    const grossQty = merma > 0 ? qty / (1 - merma / 100) : qty;
+    return sum + grossQty * cost;
+  }, 0);
+}
+
+/**
+ * Costo por unidad producida de una Elaboración Base (isBase=true): costo
+ * total de sus ingredientes dividido su rinde (productionYield). Devuelve 0
+ * si la receta no existe, no es una Elaboración Base, o no tiene rinde
+ * cargado.
+ */
+export async function computeBaseRecipeCostPerUnit(executor: Executor, recipeId: string): Promise<number> {
+  const [recipe] = await executor.select().from(recipes).where(eq(recipes.id, recipeId));
+  if (!recipe || !recipe.isBase) return 0;
+  const yieldQty = parseFloat(String(recipe.productionYield || "0"));
+  if (yieldQty <= 0) return 0;
+  const totalCost = await computeRecipeTotalCost(executor, recipeId);
+  return totalCost / yieldQty;
+}
+
+/**
  * El costo de un ingrediente de receta (recipeIngredients.unitCost) es una
  * foto del costo del artículo/elaboración al momento de agregarlo — igual
  * que el costo de una Elaboración Base es una foto de sus ingredientes al
@@ -59,19 +94,7 @@ export async function cascadeRecipeCostsFromInventoryItem(
     const yieldQty = parseFloat(String(recipe.productionYield || "0"));
     if (yieldQty <= 0) continue;
 
-    const ingredients = await executor
-      .select()
-      .from(recipeIngredients)
-      .where(eq(recipeIngredients.recipeId, recipeId));
-
-    const totalCost = ingredients.reduce((sum, ing) => {
-      const qty = parseFloat(String(ing.quantity));
-      const cost = parseFloat(String(ing.unitCost || "0"));
-      const merma = parseFloat(String(ing.merma || "0"));
-      const grossQty = merma > 0 ? qty / (1 - merma / 100) : qty;
-      return sum + grossQty * cost;
-    }, 0);
-    const newCostPerUnit = totalCost / yieldQty;
+    const newCostPerUnit = await computeBaseRecipeCostPerUnit(executor, recipeId);
     const newCostPerUnitStr = newCostPerUnit.toFixed(4);
 
     const dependents = await executor

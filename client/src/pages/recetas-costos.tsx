@@ -7,8 +7,9 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChefHat, Search, BookOpen, Plus, Trash2, Loader2, Edit, UtensilsCrossed,
-  Layers, FlaskConical, RefreshCw, ArrowRight,
+  Layers, FlaskConical, RefreshCw, ArrowRight, Coffee,
 } from "lucide-react";
+import { BreakfastControlTab } from "@/components/breakfast-control-tab";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -530,6 +531,10 @@ export default function RecetasCostosPage() {
               <Badge variant="secondary" className="ml-2 text-xs px-1.5">{baseRecipes.length}</Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="desayunos" data-testid="tab-desayunos">
+            <Coffee className="h-4 w-4 mr-2" />
+            Desayunos
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="platos" className="mt-4 space-y-4">
@@ -887,6 +892,10 @@ export default function RecetasCostosPage() {
               })}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="desayunos" className="mt-4">
+          <BreakfastControlTab />
         </TabsContent>
       </Tabs>
 

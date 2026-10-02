@@ -2605,6 +2605,75 @@ export const inventoryItemSuppliers = pgTable("inventory_item_suppliers", {
 export type InventoryItemSupplier = typeof inventoryItemSuppliers.$inferSelect;
 export type InsertInventoryItemSupplier = typeof inventoryItemSuppliers.$inferInsert;
 
+// ==================== CONTROL DE DESAYUNOS ====================
+// Planilla diaria de A&B: qué artículos (Elaboraciones Base o artículos de
+// Inventario sueltos) salen al buffet, cuánto vuelve y el costo real por
+// pax — reemplaza la planilla Excel manual del gte de A&B.
+
+export type BreakfastItemSourceType = "inventario" | "elaboracion";
+
+// Catálogo maestro: la lista estándar de artículos de desayuno, cargada una
+// sola vez. Un artículo "novedad" que no esté acá puede agregarse igual
+// para un día puntual (ver breakfastEntries.catalogItemId nullable).
+export const breakfastCatalogItems = pgTable("breakfast_catalog_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  itemSourceType: text("item_source_type").$type<BreakfastItemSourceType>().notNull(),
+  inventoryItemId: varchar("inventory_item_id").references(() => inventoryItems.id),
+  recipeId: varchar("recipe_id").references(() => recipes.id),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: text("is_active").notNull().default("true"),
+});
+
+export const insertBreakfastCatalogItemSchema = createInsertSchema(breakfastCatalogItems).omit({ id: true });
+export type InsertBreakfastCatalogItem = z.infer<typeof insertBreakfastCatalogItemSchema>;
+export type BreakfastCatalogItem = typeof breakfastCatalogItems.$inferSelect;
+
+// Cabecera por día: N° de pax (precargado desde ocupación, editable a mano)
+// y notas. Solo existe una fila una vez que alguien guarda ese día.
+export const breakfastDays = pgTable("breakfast_days", {
+  date: date("date").primaryKey(),
+  pax: integer("pax").notNull(),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+});
+
+export const insertBreakfastDaySchema = createInsertSchema(breakfastDays);
+export type InsertBreakfastDay = z.infer<typeof insertBreakfastDaySchema>;
+export type BreakfastDay = typeof breakfastDays.$inferSelect;
+
+// Carga diaria por artículo. unitCostSnapshot se fija al momento de
+// guardar esa fila (igual que el resto de las recetas) para que el
+// histórico de un día no cambie solo si después cambia el costo del
+// artículo — ver server/recipeCostCascade.ts para el porqué.
+export const breakfastEntries = pgTable("breakfast_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: date("date").notNull(),
+  // null = artículo "novedad" agregado solo para este día, fuera del catálogo estándar.
+  catalogItemId: varchar("catalog_item_id").references(() => breakfastCatalogItems.id),
+  itemSourceType: text("item_source_type").$type<BreakfastItemSourceType>().notNull(),
+  inventoryItemId: varchar("inventory_item_id").references(() => inventoryItems.id),
+  recipeId: varchar("recipe_id").references(() => recipes.id),
+  itemName: text("item_name").notNull(),
+  unit: text("unit").notNull(),
+  unitCostSnapshot: decimal("unit_cost_snapshot", { precision: 10, scale: 4 }).notNull().default("0"),
+  quantityOut: decimal("quantity_out", { precision: 10, scale: 3 }).notNull().default("0"),
+  quantityRecovered: decimal("quantity_recovered", { precision: 10, scale: 3 }).notNull().default("0"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+}, (table) => ({
+  // Un artículo del catálogo estándar no puede estar duplicado el mismo día —
+  // los artículos "novedad" (catalogItemId null) sí pueden repetirse.
+  dateCatalogItemUnique: uniqueIndex("breakfast_entries_date_catalog_item_unique")
+    .on(table.date, table.catalogItemId)
+    .where(sql`${table.catalogItemId} IS NOT NULL`),
+  dateIdx: index("breakfast_entries_date_idx").on(table.date),
+}));
+
+export const insertBreakfastEntrySchema = createInsertSchema(breakfastEntries).omit({ id: true });
+export type InsertBreakfastEntry = z.infer<typeof insertBreakfastEntrySchema>;
+export type BreakfastEntry = typeof breakfastEntries.$inferSelect;
+
 // Plan de Cuentas Contables
 export const accountingAccounts = pgTable("accounting_accounts", {
   id: serial("id").primaryKey(),
