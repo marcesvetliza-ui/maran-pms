@@ -756,10 +756,6 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/items"],
   });
 
-  const { data: lowStockItems = [] } = useQuery<InventoryItem[]>({
-    queryKey: ["/api/inventory/items/low-stock"],
-  });
-
   const { data: movements = [] } = useQuery<StockMovement[]>({
     queryKey: ["/api/inventory/movements"],
   });
@@ -1036,7 +1032,19 @@ export default function InventoryPage() {
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
-  const totalValue = items.reduce(
+  // Indicadores del dashboard: excluyen los "plato" (referencias internas que
+  // el restaurante sincroniza desde el menú, no son artículos de inventario
+  // reales) y respetan el filtro de área, igual que el listado de abajo.
+  const dashboardScopeItems = items.filter((item) => (item as any).itemKind !== "plato");
+  const areaScopedDashboardItems = dashboardScopeItems.filter(
+    (item) => areaFilter === "all" || (item.category as any)?.area === areaFilter
+  );
+  const sinStockItems = areaScopedDashboardItems.filter((item) => Number(item.currentStock) <= 0);
+  const stockBajoItems = areaScopedDashboardItems.filter(
+    (item) => Number(item.currentStock) > 0 && Number(item.currentStock) < Number(item.minStock)
+  );
+
+  const totalValue = areaScopedDashboardItems.reduce(
     (sum, item) => sum + (item.currentStock * parseFloat(item.costPrice || "0")),
     0
   );
@@ -1081,7 +1089,16 @@ export default function InventoryPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{items.length}</div>
+            <div className="text-2xl font-bold">{dashboardScopeItems.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
+            <CardTitle className="text-sm font-medium">Sin Stock</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{sinStockItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1090,7 +1107,7 @@ export default function InventoryPage() {
             <AlertTriangle className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{lowStockItems.length}</div>
+            <div className="text-2xl font-bold text-yellow-600">{stockBajoItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1277,7 +1294,7 @@ export default function InventoryPage() {
                         </div>
                       </td>
                       <td className="p-3 text-right">
-                        <span className={item.currentStock < item.minStock ? "text-red-600 font-semibold" : ""}>
+                        <span className={Number(item.currentStock) < Number(item.minStock) ? "text-red-600 font-semibold" : ""}>
                           {item.currentStock}
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{item.unit}</span>
@@ -1296,8 +1313,8 @@ export default function InventoryPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="low-stock" className="space-y-4">
-          {lowStockItems.length === 0 ? (
+        <TabsContent value="low-stock" className="space-y-6">
+          {sinStockItems.length === 0 && stockBajoItems.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <TrendingUp className="h-12 w-12 text-green-500 mb-4" />
@@ -1306,35 +1323,75 @@ export default function InventoryPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {lowStockItems.map((item) => (
-                <Card key={item.id} className="border-yellow-500/50" data-testid={`low-stock-${item.id}`}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-base">{item.name}</CardTitle>
-                      <Badge variant="destructive">
-                        <TrendingDown className="h-3 w-3 mr-1" />
-                        Bajo
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Stock actual:</span>
-                      <span className="font-semibold text-red-600">{item.currentStock} {item.unit}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Stock minimo:</span>
-                      <span>{item.minStock} {item.unit}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Faltante:</span>
-                      <span className="font-semibold">{item.minStock - item.currentStock} {item.unit}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <>
+              {sinStockItems.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-red-600">Sin Stock ({sinStockItems.length})</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {sinStockItems.map((item) => (
+                      <Card key={item.id} className="border-red-500/50" data-testid={`sin-stock-${item.id}`}>
+                        <CardHeader className="pb-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <CardTitle className="text-base">{item.name}</CardTitle>
+                            <Badge variant="destructive">Sin stock</Badge>
+                          </div>
+                          {(item.category as any)?.name && (
+                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
+                          )}
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock minimo:</span>
+                            <span>{item.minStock} {item.unit}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">A reponer:</span>
+                            <span className="font-semibold">{item.minStock} {item.unit}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {stockBajoItems.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-yellow-600">Stock Bajo ({stockBajoItems.length})</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {stockBajoItems.map((item) => (
+                      <Card key={item.id} className="border-yellow-500/50" data-testid={`low-stock-${item.id}`}>
+                        <CardHeader className="pb-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <CardTitle className="text-base">{item.name}</CardTitle>
+                            <Badge variant="destructive">
+                              <TrendingDown className="h-3 w-3 mr-1" />
+                              Bajo
+                            </Badge>
+                          </div>
+                          {(item.category as any)?.name && (
+                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
+                          )}
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock actual:</span>
+                            <span className="font-semibold text-red-600">{item.currentStock} {item.unit}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Stock minimo:</span>
+                            <span>{item.minStock} {item.unit}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Faltante:</span>
+                            <span className="font-semibold">{(item.minStock - item.currentStock).toFixed(2)} {item.unit}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </TabsContent>
 
@@ -2343,7 +2400,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       </Dialog>
 
       <Dialog open={isNewItemDialogOpen} onOpenChange={setIsNewItemDialogOpen}>
-        <DialogContent>
+        <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nuevo Articulo</DialogTitle>
           </DialogHeader>
@@ -2551,7 +2608,8 @@ export function NewItemForm({
   const [supplierSearch, setSupplierSearch] = useState("");
   const [unit, setUnit] = useState<string>("unidad");
   const [costPrice, setCostPrice] = useState("0");
-  const [minStock, setMinStock] = useState(0);
+  const [minStock, setMinStock] = useState("0");
+  const [maxStock, setMaxStock] = useState("");
   const [itemKind, setItemKind] = useState<string>("venta_directa");
   const [ivaRate, setIvaRate] = useState<string>("__none__");
 
@@ -2663,20 +2721,20 @@ export function NewItemForm({
           )}
         </div>
       </div>
-      <div className="space-y-2">
-        <Label>Tipo de artículo</Label>
-        <Select value={itemKind} onValueChange={setItemKind}>
-          <SelectTrigger data-testid="select-item-kind">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="materia_prima">Materia Prima (insumo para recetas)</SelectItem>
-            <SelectItem value="venta_directa">Venta Directa (se vende tal cual)</SelectItem>
-            <SelectItem value="activo_fijo">Activo Fijo (bien de uso / equipamiento)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-2">
+          <Label>Tipo de artículo</Label>
+          <Select value={itemKind} onValueChange={setItemKind}>
+            <SelectTrigger data-testid="select-item-kind">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="materia_prima">Materia Prima (insumo para recetas)</SelectItem>
+              <SelectItem value="venta_directa">Venta Directa (se vende tal cual)</SelectItem>
+              <SelectItem value="activo_fijo">Activo Fijo (bien de uso / equipamiento)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
           <Select value={unit} onValueChange={setUnit}>
@@ -2708,9 +2766,22 @@ export function NewItemForm({
           <Input
             type="number"
             min={0}
+            step="0.001"
             value={minStock}
-            onChange={(e) => setMinStock(parseInt(e.target.value) || 0)}
+            onChange={(e) => setMinStock(e.target.value)}
             data-testid="input-min-stock"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label>Stock Máximo (opcional)</Label>
+          <Input
+            type="number"
+            min={0}
+            step="0.001"
+            value={maxStock}
+            onChange={(e) => setMaxStock(e.target.value)}
+            placeholder="Sin límite"
+            data-testid="input-max-stock"
           />
         </div>
       </div>
@@ -2745,6 +2816,7 @@ export function NewItemForm({
               unit: unit as any,
               costPrice,
               minStock,
+              maxStock: maxStock.trim() === "" ? null : maxStock,
               itemKind: itemKind as any,
               ivaRate: ivaRate === "__none__" ? null : ivaRate,
             } as any);
