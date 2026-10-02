@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
-import { Link } from "wouter";
 import { useQuery, useQueries, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InventoryTabPanels } from "@/components/inventory-tab-panels";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,7 +35,6 @@ import {
   Tag,
   Pencil,
   Trash2,
-  FileText,
   Warehouse,
   ArrowLeftRight,
   DollarSign,
@@ -690,6 +690,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
 export default function InventoryPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
+  const [movementTab, setMovementTab] = useState("movements");
   const [searchQuery, setSearchQuery] = useState("");
   const today = getArgentinaToday();
   const [consumoFrom, setConsumoFrom] = useState(today);
@@ -786,7 +787,7 @@ export default function InventoryPage() {
   }>({
     queryKey: ["/api/inventory/consumo-report", consumoFrom, consumoTo],
     queryFn: () => fetch(`/api/inventory/consumo-report?from=${consumoFrom}&to=${consumoTo}`, { credentials: "include" }).then(r => r.json()),
-    enabled: activeTab === "consumos",
+    enabled: activeTab === "movements" && movementTab === "consumos",
   });
 
   const { data: warehouses = [], refetch: refetchWarehouses } = useQuery<InventoryWarehouse[]>({
@@ -814,7 +815,7 @@ export default function InventoryPage() {
   const { data: internalMovements = [], isLoading: internosLoading } = useQuery<InternalMovement[]>({
     queryKey: ["/api/inventory/internal-movements", internosFrom, internosTo],
     queryFn: () => fetch(`/api/inventory/internal-movements?from=${internosFrom}&to=${internosTo}`, { credentials: "include" }).then(r => r.json()),
-    enabled: activeTab === "internos",
+    enabled: activeTab === "movements" && movementTab === "internos",
   });
 
   const { data: internosReport, isLoading: internosReportLoading } = useQuery<{
@@ -824,7 +825,7 @@ export default function InventoryPage() {
   }>({
     queryKey: ["/api/inventory/internal-movements/report", internosFrom, internosTo],
     queryFn: () => fetch(`/api/inventory/internal-movements/report?from=${internosFrom}&to=${internosTo}`, { credentials: "include" }).then(r => r.json()),
-    enabled: activeTab === "internos",
+    enabled: activeTab === "movements" && movementTab === "internos",
   });
 
   // Toma de Inventario queries
@@ -1131,22 +1132,12 @@ export default function InventoryPage() {
           <p className="text-muted-foreground">Gestiona stock, artículos y movimientos</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/purchase-invoices">
-            <Button variant="outline" data-testid="button-goto-purchase-invoices">
-              <FileText className="h-4 w-4 mr-2" />
-              Factura de Compra
-            </Button>
-          </Link>
           <Link href="/accounting-suppliers">
             <Button variant="outline" data-testid="button-goto-suppliers">
               <Building2 className="h-4 w-4 mr-2" />
               Proveedores
             </Button>
           </Link>
-          <Button variant="outline" onClick={openInternalMov} data-testid="button-internal-movement">
-            <ArrowDownToLine className="h-4 w-4 mr-2" />
-            Movimiento Interno
-          </Button>
           <Button onClick={() => setIsNewItemDialogOpen(true)} data-testid="button-add-item">
             <Plus className="h-4 w-4 mr-2" />
             Nuevo Artículo
@@ -1205,7 +1196,7 @@ export default function InventoryPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <TabsList aria-label="Secciones de inventario">
           <TabsTrigger value="items" data-testid="tab-items">
             <Package className="h-4 w-4 mr-2" />
             Articulos
@@ -1226,10 +1217,6 @@ export default function InventoryPage() {
             <Tag className="h-4 w-4 mr-2" />
             Marcas
           </TabsTrigger>
-          <TabsTrigger value="consumos" data-testid="tab-consumos">
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Consumos
-          </TabsTrigger>
           <TabsTrigger value="depositos" data-testid="tab-depositos">
             <Warehouse className="h-4 w-4 mr-2" />
             Depósitos
@@ -1238,12 +1225,9 @@ export default function InventoryPage() {
             <ClipboardList className="h-4 w-4 mr-2" />
             Toma de Inventario
           </TabsTrigger>
-          <TabsTrigger value="internos" data-testid="tab-internos">
-            <ArrowDownToLine className="h-4 w-4 mr-2" />
-            Mov. Internos
-          </TabsTrigger>
         </TabsList>
 
+        <InventoryTabPanels movementTab={movementTab} onMovementTabChange={setMovementTab}>
         <TabsContent value="items" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -2450,6 +2434,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             </div>
           )}
         </TabsContent>
+        </InventoryTabPanels>
       </Tabs>
 
       {/* ==================== WAREHOUSE DIALOGS ==================== */}
