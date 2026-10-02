@@ -8,7 +8,7 @@ import {
   projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
 import { visibleGuestCondition } from "./guest-visibility";
-import { normalizeCashShiftArea } from "./cashArea";
+import { getCashShiftAreaVariants, normalizeCashShiftArea } from "./cashArea";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -7775,17 +7775,17 @@ export class DatabaseStorage implements IStorage {
 
   async getCashShifts(area?: string, status?: string): Promise<CashShift[]> {
     const conditions: any[] = [];
-    if (area) conditions.push(eq(cashShifts.area, area));
+    if (area) conditions.push(inArray(cashShifts.area, getCashShiftAreaVariants(area)));
     if (status) conditions.push(eq(cashShifts.status, status));
     return db.select().from(cashShifts)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(cashShifts.openedAt));
+      .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id));
   }
 
   async getCurrentShift(area: string): Promise<CashShift | undefined> {
     const [shift] = await db.select().from(cashShifts)
-      .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
-      .orderBy(desc(cashShifts.openedAt))
+      .where(and(inArray(cashShifts.area, getCashShiftAreaVariants(area)), eq(cashShifts.status, "open")))
+      .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id))
       .limit(1);
     return shift;
   }
@@ -7956,18 +7956,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrCreateActiveTurno(area: string): Promise<CashShift> {
-    const [turnoActivo] = await db.select().from(cashShifts)
-      .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
-      .orderBy(desc(cashShifts.openedAt))
-      .limit(1);
+    const turnoActivo = await this.getCurrentShift(area);
 
     if (turnoActivo) return turnoActivo;
 
     console.warn(`[CashShift] No había turno abierto para ${area}. Autocreando.`);
-    const nextNum = await this._nextShiftNumber(area);
+    const areaNormalizada = normalizeCashShiftArea(area);
+    const nextNum = await this._nextShiftNumber(areaNormalizada);
     const [turnoNuevo] = await db.insert(cashShifts).values({
       id: randomUUID(),
-      area,
+      area: areaNormalizada,
       shiftNumber: nextNum,
       openedBy: null,
       openedAt: new Date(),
@@ -7980,9 +7978,7 @@ export class DatabaseStorage implements IStorage {
   async initCashShifts(): Promise<void> {
     const areas = ["recepcion", "restaurant", "spa"];
     for (const area of areas) {
-      const [existing] = await db.select().from(cashShifts)
-        .where(and(eq(cashShifts.area, area), eq(cashShifts.status, "open")))
-        .limit(1);
+      const existing = await this.getCurrentShift(area);
       if (!existing) {
         const nextNum = await this._nextShiftNumber(area);
         await db.insert(cashShifts).values({
@@ -8207,16 +8203,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
-    // Distintos llamadores todavía pasan vocabularios de área distintos
-    // ("reception", "eventos") para el mismo turno real — normalizar acá,
-    // en el único punto de entrada, evita crear un turno "fantasma" que
-    // nunca se ve junto al resto de los movimientos de esa área.
+    // Resolver ambos alias y conservar el área del turno elegido.
     area = normalizeCashShiftArea(area);
     const turno = await this.getOrCreateActiveTurno(area);
     const [movement] = await db.insert(cashMovements).values({
       id: randomUUID(),
       shiftId: turno.id,
-      area,
+      area: turno.area,
       sourceType,
       sourceId,
       sourceLabel,

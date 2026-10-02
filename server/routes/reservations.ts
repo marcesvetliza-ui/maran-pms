@@ -1516,7 +1516,8 @@ export function registerReservationsRoutes(app: Express) {
       const forceCheckout = req.body.forceCheckout === true || isHistorical;
 
       // Always compute balance (needed for both the block and the CC cargo creation)
-      const chargesTotal = await storage.getChargesTotal(req.params.id);
+      const operationalCharges = getOperationalReservationCharges(await storage.getCharges(req.params.id));
+      const chargesTotal = operationalCharges.reduce((sum, charge) => sum + (Number(charge.amount) || 0), 0);
       const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
       const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
       const roomTotal = savedRoomTotal > 0
