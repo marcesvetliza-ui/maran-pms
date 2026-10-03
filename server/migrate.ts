@@ -1577,7 +1577,7 @@ export async function runMigrations() {
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
   await withTimeout("lost_found_items.shipping_details", T, () =>
-    db.execute(sql`ALTER TABLE lost_found_items ADD COLUMN IF NOT EXISTS shipping_details jsonb`)
+    db.execute(sql.raw(addColumnWithoutRerunNotice("lost_found_items", "shipping_details", "jsonb")))
   );
 
   await withTimeout("cash_shifts.turno_tipo", T, () =>
