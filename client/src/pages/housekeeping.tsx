@@ -92,6 +92,8 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem, SafeBoxOpening, InsertSafeBoxOpening } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { DeliveryDialog } from "@/components/lost-found-delivery-dialog";
+import type { LostFoundStatusUpdate } from "@shared/lostFoundDelivery";
 
 type TaskStatus = "pending" | "in_progress" | "completed" | "inspected";
 type TaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "maintenance_prep";
@@ -422,7 +424,7 @@ function LostFoundCard({
   guestName?: string;
   onEdit: () => void;
   onDeliver: () => void;
-  onStatusChange: (status: string) => void;
+  onStatusChange: (status: LostFoundStatusUpdate["status"]) => void;
 }) {
   const cfg = LF_STATUS_CONFIG[item.status] || LF_STATUS_CONFIG.en_custodia;
   const daysInCustody = Math.floor((Date.now() - new Date(item.foundDate + "T12:00:00").getTime()) / 86400000);
@@ -459,6 +461,15 @@ function LostFoundCard({
               Entregado a: {item.claimedBy}{item.claimedDate && ` · ${new Date(item.claimedDate + "T12:00:00").toLocaleDateString("es-AR")}`}
             </p>
           )}
+          {item.status === "entregado" && item.deliveryType === "envio" && item.shippingDetails && (
+            <div className="mt-1 text-xs text-muted-foreground" data-testid={`shipping-details-${item.id}`}>
+              <p>Envío a: {item.shippingDetails.fullName} · {item.shippingDetails.address}, {item.shippingDetails.city}, {item.shippingDetails.province} {item.shippingDetails.postalCode}, {item.shippingDetails.country}</p>
+              <p>Pago: <span className={item.shippingDetails.paymentStatus === "pagado" ? "font-medium text-green-600 dark:text-green-400" : "font-medium"}>{item.shippingDetails.paymentStatus === "pagado" ? "Pagado" : "No pagado"}</span></p>
+            </div>
+          )}
+          {item.status === "entregado" && item.deliveryType === "envio" && !item.shippingDetails && (
+            <p className="mt-1 text-xs text-muted-foreground" data-testid={`shipping-details-legacy-${item.id}`}>Envío registrado sin datos de destino</p>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1 ml-4 shrink-0">
@@ -467,9 +478,9 @@ function LostFoundCard({
             Contactado
           </Button>
         )}
-        {(item.status === "en_custodia" || item.status === "contactado") && (
+        {(item.status === "en_custodia" || item.status === "contactado" || (item.status === "entregado" && item.deliveryType === "envio")) && (
           <Button size="sm" onClick={onDeliver} data-testid={`button-deliver-${item.id}`}>
-            Entregar
+            {item.status === "entregado" ? "Editar envío" : "Entregar"}
           </Button>
         )}
         <Button size="icon" variant="ghost" onClick={onEdit} data-testid={`button-edit-lf-${item.id}`}>
@@ -703,78 +714,6 @@ function LostFoundForm({
   );
 }
 
-function DeliveryDialog({
-  item,
-  open,
-  onOpenChange,
-  onConfirm,
-  isPending,
-}: {
-  item: LostFoundItem;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onConfirm: (data: { status: string; claimedBy: string; claimedDate: string; deliveryType: string; deliveredBy: string; notes?: string }) => void;
-  isPending: boolean;
-}) {
-  const today = getArgentinaToday();
-  const [claimedBy, setClaimedBy] = useState("");
-  const [claimedDate, setClaimedDate] = useState(today);
-  const [deliveryType, setDeliveryType] = useState("retiro_hotel");
-  const [deliveredBy, setDeliveredBy] = useState("");
-  const [notes, setNotes] = useState("");
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Registrar entrega</DialogTitle>
-          <DialogDescription>{item.description} · {item.codigo}</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 py-2">
-          <div>
-            <Label>Retirado por *</Label>
-            <Input value={claimedBy} onChange={e => setClaimedBy(e.target.value)} placeholder="Nombre de quien retira" data-testid="input-delivery-claimed-by" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Fecha de retiro *</Label>
-              <Input type="date" value={claimedDate} onChange={e => setClaimedDate(e.target.value)} data-testid="input-delivery-date" />
-            </div>
-            <div>
-              <Label>Tipo de entrega</Label>
-              <Select value={deliveryType} onValueChange={setDeliveryType}>
-                <SelectTrigger data-testid="select-delivery-type"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="retiro_hotel">Retiro en hotel</SelectItem>
-                  <SelectItem value="envio">Envío</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div>
-            <Label>Entregado por (operador)</Label>
-            <Input value={deliveredBy} onChange={e => setDeliveredBy(e.target.value)} placeholder="Nombre del empleado que entrega" data-testid="input-delivery-by" />
-          </div>
-          <div>
-            <Label>Notas</Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Observaciones..." rows={2} data-testid="input-delivery-notes" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button
-            onClick={() => onConfirm({ status: "entregado", claimedBy, claimedDate, deliveryType, deliveredBy, notes: notes || undefined })}
-            disabled={isPending || !claimedBy.trim() || !claimedDate}
-            data-testid="button-delivery-confirm"
-          >
-            {isPending ? "Procesando..." : "Confirmar entrega"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function LostFoundTab() {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -826,7 +765,7 @@ function LostFoundTab() {
   });
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, ...data }: { id: string; status: string; claimedBy?: string; claimedDate?: string; deliveryType?: string; deliveredBy?: string; notes?: string }) =>
+    mutationFn: ({ id, ...data }: LostFoundStatusUpdate & { id: string }) =>
       apiRequest("PATCH", `/api/lost-found/${id}/status`, data).then(r => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/lost-found"] });
