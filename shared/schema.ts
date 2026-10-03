@@ -3065,8 +3065,6 @@ export const ccInvoiceTracking = pgTable("cc_invoice_tracking", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   salesInvoiceId: integer("sales_invoice_id").notNull().unique(),
   estado: text("estado").$type<CcInvoiceTrackingEstado>().notNull().default("pendiente"),
-  enviadaPorUserId: varchar("enviada_por_user_id"),
-  numeroRecibo: text("numero_recibo"),
   observaciones: text("observaciones"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedBy: varchar("updated_by"),
