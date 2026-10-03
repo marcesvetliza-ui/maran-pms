@@ -78,6 +78,7 @@ import {
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
@@ -263,6 +264,8 @@ function RoomFormDialog({
     floor: room?.floor || 1,
     status: room?.status || "available",
     bedConfig: room?.bedConfig || undefined,
+    allowedBedConfigs: room?.allowedBedConfigs || [],
+    maxOccupancy: room?.maxOccupancy ?? 2,
     notes: room?.notes || "",
   });
 
@@ -274,10 +277,22 @@ function RoomFormDialog({
         floor: room?.floor || 1,
         status: room?.status || "available",
         bedConfig: room?.bedConfig || undefined,
+        allowedBedConfigs: room?.allowedBedConfigs || [],
+        maxOccupancy: room?.maxOccupancy ?? 2,
         notes: room?.notes || "",
       });
     }
   }, [open, room?.id]);
+
+  const toggleAllowedBedConfig = (value: BedConfig) => {
+    setFormData(prev => {
+      const current = prev.allowedBedConfigs || [];
+      const next = current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value];
+      return { ...prev, allowedBedConfigs: next };
+    });
+  };
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertRoom>) => {
@@ -369,6 +384,35 @@ function RoomFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Camajes que admite la habitación</Label>
+              <div className="grid grid-cols-1 gap-1.5 rounded-md border p-3">
+                {BED_CONFIG_OPTIONS.map(({ value, label }) => (
+                  <label key={value} className="flex items-center gap-2 text-sm font-normal">
+                    <Checkbox
+                      checked={(formData.allowedBedConfigs || []).includes(value)}
+                      onCheckedChange={() => toggleAllowedBedConfig(value)}
+                      data-testid={`checkbox-allowed-bedconfig-${value}`}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Si no marcás ninguno, se permite cualquier camaje. Esto define qué opciones aparecen al cambiar el camaje desde Housekeeping y Planning.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="maxOccupancy">Pax máximo</Label>
+              <Input
+                id="maxOccupancy"
+                type="number"
+                min={1}
+                value={formData.maxOccupancy ?? ""}
+                onChange={(e) => setFormData({ ...formData, maxOccupancy: e.target.value ? parseInt(e.target.value) : undefined })}
+                data-testid="input-max-occupancy"
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="floor">Piso</Label>

@@ -2694,6 +2694,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE rooms ADD COLUMN is_active boolean NOT NULL DEFAULT true`)))
   );
 
+  await withTimeout("rooms.allowed_bed_configs", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE rooms ADD COLUMN allowed_bed_configs text[]`)))
+  );
+
   // restaurant_tables: event-specific columns for "Evento por Mesa" salon
   await withTimeout("restaurant_tables.event_cols", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`

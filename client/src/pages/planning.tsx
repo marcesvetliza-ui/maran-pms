@@ -39,7 +39,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { Textarea } from "@/components/ui/textarea";
-import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType } from "@shared/schema";
+import type { PlanningData, PlanningCellStatus, Guest, RoomWithType, RoomType, ReservationWithDetails, ReservationStatus, ReservationSource, RatePlan, Company, Agency, InsertAgency, Package, BedType, BedConfig } from "@shared/schema";
 import { ReservationFormDialog } from "./reservations";
 import { CompanySelector, AgencySelector } from "@/components/entity-selector";
 import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
@@ -197,7 +197,7 @@ export default function PlanningPage() {
   const [newReservationOpen, setNewReservationOpen] = useState(false);
   const [newReservationDefaults, setNewReservationDefaults] = useState<{ roomId?: string; roomTypeId?: string; checkInDate?: string } | null>(null);
 
-  const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string } | null>(null);
+  const [editingBedConfig, setEditingBedConfig] = useState<{ roomId: string; roomNumber: string; current: string; allowed?: BedConfig[] | null } | null>(null);
   const [roomPopoverOpen, setRoomPopoverOpen] = useState<string | null>(null);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);

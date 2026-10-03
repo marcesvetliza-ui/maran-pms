@@ -162,6 +162,20 @@ export function getBedConfigLabel(value: string): string {
   return bedConfigLabels[value as BedConfig] || value;
 }
 
+/**
+ * Si la habitación tiene camajes permitidos configurados, devuelve solo esas
+ * opciones. Si no tiene ninguno configurado, devuelve todas (no restringe
+ * habitaciones que todavía no tienen este dato cargado).
+ */
+export function getAllowedBedConfigOptions(
+  allowedBedConfigs: BedConfig[] | null | undefined,
+): ReadonlyArray<{ value: BedConfig; label: string }> {
+  if (!allowedBedConfigs || allowedBedConfigs.length === 0) {
+    return BED_CONFIG_OPTIONS;
+  }
+  return BED_CONFIG_OPTIONS.filter(opt => allowedBedConfigs.includes(opt.value));
+}
+
 export const ROOM_STATUS_OPTIONS: { value: string; label: string; dot: string }[] = [
   { value: "available",      label: "Libre limpia",    dot: "bg-green-500" },
   { value: "dirty",          label: "Libre sucia",     dot: "bg-orange-500" },

@@ -101,6 +101,7 @@ export const rooms = pgTable("rooms", {
   floor: integer("floor").notNull().default(1),
   status: text("status").$type<RoomStatus>().notNull().default("available"),
   bedConfig: text("bed_config"),
+  allowedBedConfigs: text("allowed_bed_configs").array().$type<BedConfig[]>(),
   features: text("features").array(),
   maxOccupancy: integer("max_occupancy").default(2),
   notes: text("notes"),

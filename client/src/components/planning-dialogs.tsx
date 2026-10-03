@@ -17,7 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
+import { getAllowedBedConfigOptions } from "@/lib/planning-utils";
+import type { BedConfig } from "@shared/schema";
 
 // ─── MoveConfirmDialog ────────────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ export function PlanningMoveConfirmDialog({
 // ─── BedConfigDialog ──────────────────────────────────────────────────────────
 
 interface BedConfigDialogProps {
-  editingBedConfig: { roomId: string; roomNumber: string; current: string } | null;
+  editingBedConfig: { roomId: string; roomNumber: string; current: string; allowed?: BedConfig[] | null } | null;
   isPending: boolean;
   onChange: (value: string) => void;
   onConfirm: () => void;
@@ -134,6 +135,7 @@ export function PlanningBedConfigDialog({
   onConfirm,
   onCancel,
 }: BedConfigDialogProps) {
+  const options = getAllowedBedConfigOptions(editingBedConfig?.allowed);
   return (
     <Dialog open={!!editingBedConfig} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-w-xs">
@@ -150,7 +152,7 @@ export function PlanningBedConfigDialog({
               <SelectValue placeholder="Seleccionar" />
             </SelectTrigger>
             <SelectContent>
-              {BED_CONFIG_OPTIONS.map(opt => (
+              {options.map(opt => (
                 <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
               ))}
             </SelectContent>

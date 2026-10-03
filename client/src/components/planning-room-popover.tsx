@@ -1,13 +1,13 @@
 import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert, ShieldCheck, Ban } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { featureIconMap, getBedConfigLabel, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
-import type { RoomWithType } from "@shared/schema";
+import type { BedConfig, RoomWithType } from "@shared/schema";
 
 interface RoomPopoverProps {
   room: RoomWithType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onEditBedConfig: (data: { roomId: string; roomNumber: string; current: string }) => void;
+  onEditBedConfig: (data: { roomId: string; roomNumber: string; current: string; allowed?: BedConfig[] | null }) => void;
   onUpdateStatus: (data: { roomId: string; status: string }) => void;
   isPendingStatusUpdate: boolean;
   maintenanceAlertRoomIds: Set<string>;
@@ -79,7 +79,7 @@ export function RoomPopover({
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenChange(false);
-                onEditBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "" });
+                onEditBedConfig({ roomId: room.id, roomNumber: room.roomNumber, current: room.bedConfig || "", allowed: room.allowedBedConfigs });
               }}
               data-testid={`button-edit-bedconfig-${room.id}`}
             >

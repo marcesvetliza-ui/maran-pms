@@ -1,4 +1,4 @@
-import { BED_CONFIG_OPTIONS, getBedConfigLabel } from "@/lib/planning-utils";
+import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -2886,7 +2886,7 @@ export default function Housekeeping() {
                 <SelectValue placeholder="Seleccionar camaje" />
               </SelectTrigger>
               <SelectContent>
-                {BED_CONFIG_OPTIONS.map(opt => (
+                {getAllowedBedConfigOptions(rooms?.find(r => r.id === bedConfigRoomId)?.allowedBedConfigs).map(opt => (
                   <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                 ))}
               </SelectContent>
