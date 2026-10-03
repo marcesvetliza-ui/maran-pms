@@ -64,6 +64,24 @@ describe("safe ARCA credential diagnostic panel", () => {
     expect(screen.queryByText("Revisión local correcta")).toBeNull();
   });
 
+  it("shows both public identifiers with a privacy notice without treating them as ARCA approval", async () => {
+    const certificateFingerprint = "a".repeat(64);
+    const keyFingerprint = "b".repeat(64);
+    state.request.mockResolvedValue({ json: async () => ({
+      ...report, ok: false, pairMatches: false,
+      certificate: { ...report.certificate, publicKeyFingerprintSha256: certificateFingerprint },
+      privateKey: { ...report.privateKey, publicKeyFingerprintSha256: keyFingerprint },
+    }) });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Comprobar certificado y clave" }));
+    expect(await screen.findByTestId("arca-certificate-public-fingerprint")).toHaveTextContent(certificateFingerprint);
+    expect(screen.getByTestId("arca-key-public-fingerprint")).toHaveTextContent(keyFingerprint);
+    expect(screen.getByText(/sin mostrar la clave privada/)).toBeTruthy();
+    expect(screen.getByText(/No validan la autorización de ARCA/)).toBeTruthy();
+    expect(screen.getByText("Certificado y clave NO coinciden")).toBeTruthy();
+    expect(state.request).toHaveBeenCalledExactlyOnceWith("GET", "/api/billing/credential-diagnostic");
+  });
+
   it("reports errors without showing raw error details and can retry", async () => {
     state.request.mockRejectedValueOnce(new Error("SENSITIVE_EXCEPTION"));
     mount();

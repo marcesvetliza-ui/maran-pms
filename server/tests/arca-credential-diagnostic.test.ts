@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, createPrivateKey, generateKeyPairSync, X509Certificate } from "node:crypto";
 import forge from "node-forge";
 import { describe, expect, it } from "vitest";
 import { diagnoseArcaCredentials } from "../billing/credentialDiagnostic";
@@ -33,6 +33,37 @@ describe("local ARCA credential diagnosis", () => {
     expect(report.pairMatches).toBe(false);
     expect(report.ok).toBe(false);
     expect(report.issues).toContain("El certificado y la clave privada no corresponden al mismo par.");
+    expect(report.certificate.publicKeyFingerprintSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.privateKey.publicKeyFingerprintSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.privateKey.publicKeyFingerprintSha256).not.toBe(report.certificate.publicKeyFingerprintSha256);
+  });
+
+  it("identifies only the public SPKI and stays stable across private-key PEM encodings", () => {
+    const expected = createHash("sha256")
+      .update(new X509Certificate(config.arcaCert).publicKey.export({ type: "spki", format: "der" }))
+      .digest("hex");
+    const privateKey = createPrivateKey(syntheticPrivateKey);
+    for (const type of ["pkcs1", "pkcs8"] as const) {
+      const key = privateKey.export({ type, format: "pem" }).toString();
+      const input = { ...config, arcaKey: key };
+      const before = JSON.stringify(input);
+      const report = diagnoseArcaCredentials(input, now);
+      expect(report.certificate.publicKeyFingerprintSha256).toBe(expected);
+      expect(report.privateKey.publicKeyFingerprintSha256).toBe(expected);
+      expect(report.pairMatches).toBe(true);
+      expect(report.arcaContacted).toBe(false);
+      expect(report.ticketRequested).toBe(false);
+      expect(JSON.stringify(input)).toBe(before);
+      expect(JSON.stringify(report)).not.toContain(key);
+      expect(expected).not.toBe(createHash("sha256").update(key).digest("hex"));
+    }
+  });
+
+  it("can identify the public half of a readable key when the certificate is absent", () => {
+    const report = diagnoseArcaCredentials({ arcaKey: syntheticPrivateKey }, now);
+    expect(report.certificate.publicKeyFingerprintSha256).toBeNull();
+    expect(report.privateKey.publicKeyFingerprintSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.pairMatches).toBeNull();
   });
 
   it.each([
@@ -52,6 +83,8 @@ describe("local ARCA credential diagnosis", () => {
     expect(report.privateKey.present).toBe(false);
     expect(report.pairMatches).toBeNull();
     expect(report.issues).toHaveLength(3);
+    expect(report.certificate.publicKeyFingerprintSha256).toBeNull();
+    expect(report.privateKey.publicKeyFingerprintSha256).toBeNull();
   });
 
   it("does not expose malformed credential input or parser errors", () => {
@@ -59,6 +92,8 @@ describe("local ARCA credential diagnosis", () => {
     expect(report.certificate.validity).toBe("invalid");
     expect(report.privateKey.parseable).toBe(false);
     expect(report.pairMatches).toBeNull();
+    expect(report.certificate.publicKeyFingerprintSha256).toBeNull();
+    expect(report.privateKey.publicKeyFingerprintSha256).toBeNull();
     expect(JSON.stringify(report)).not.toMatch(/SENSITIVE|error:|openssl|PEM routines/);
   });
 
@@ -68,6 +103,7 @@ describe("local ARCA credential diagnosis", () => {
     const report = diagnoseArcaCredentials({ ...config, arcaKey: encrypted }, now);
     expect(report.ok).toBe(false);
     expect(report.privateKey.parseable).toBe(false);
+    expect(report.privateKey.publicKeyFingerprintSha256).toBeNull();
     expect(JSON.stringify(report)).not.toMatch(/SYNTHETIC_PASSWORD|BEGIN|bad decrypt/);
   });
 

@@ -17,8 +17,15 @@ export type ArcaCredentialDiagnostic = {
     suggestedEnvironment: "homologacion" | "produccion" | null;
     publicKeyType: string | null;
     rsaBits: number | null;
+    /** SHA-256 of the public key's canonical SPKI DER, never of a private PEM. */
+    publicKeyFingerprintSha256?: string | null;
   };
-  privateKey: { present: boolean; parseable: boolean };
+  privateKey: {
+    present: boolean;
+    parseable: boolean;
+    /** Fingerprint of the public key derived from the private key. */
+    publicKeyFingerprintSha256?: string | null;
+  };
   pairMatches: boolean | null;
   signerCompatible: boolean | null;
   issues: string[];

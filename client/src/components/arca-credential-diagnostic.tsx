@@ -74,6 +74,28 @@ export function ArcaCredentialDiagnosticPanel() {
               <div><dt className="text-muted-foreground">Tipo de clave pública</dt>
                 <dd>{report.certificate.publicKeyType ?? "—"}{report.certificate.rsaBits ? ` · ${report.certificate.rsaBits} bits` : ""}</dd></div>
             </dl>
+            {(report.certificate.publicKeyFingerprintSha256 || report.privateKey.publicKeyFingerprintSha256) && (
+              <div className="space-y-2">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="min-w-0">
+                    <dt className="text-muted-foreground">Huella pública del certificado</dt>
+                    <dd className="font-mono text-xs break-all select-all" data-testid="arca-certificate-public-fingerprint">
+                      {report.certificate.publicKeyFingerprintSha256 ?? "No disponible"}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-muted-foreground">Huella pública derivada de la clave</dt>
+                    <dd className="font-mono text-xs break-all select-all" data-testid="arca-key-public-fingerprint">
+                      {report.privateKey.publicKeyFingerprintSha256 ?? "No disponible"}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  SHA-256 de las claves públicas (SPKI). Permiten comparar con el certificado o la solicitud original,
+                  sin mostrar la clave privada. No validan la autorización de ARCA.
+                </p>
+              </div>
+            )}
             {report.certificate.suggestedEnvironment && (
               <p className="text-xs">Ambiente sugerido por el nombre del emisor: {report.certificate.suggestedEnvironment} (sin validar su autenticidad en ARCA).</p>
             )}
