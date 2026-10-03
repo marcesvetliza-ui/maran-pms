@@ -1,7 +1,6 @@
 import type { Express } from "express";
 import {
   getCcInvoiceTrackingList, upsertCcInvoiceTracking, getCcInvoiceTrackingMonthReport,
-  getActiveSystemUsersForTracking,
 } from "../ccInvoiceTracking";
 
 export function registerCcInvoiceTrackingRoutes(app: Express) {
@@ -23,9 +22,9 @@ export function registerCcInvoiceTrackingRoutes(app: Express) {
     try {
       const salesInvoiceId = parseInt(req.params.salesInvoiceId, 10);
       if (!Number.isInteger(salesInvoiceId)) return res.status(400).json({ error: "Factura inválida" });
-      const { estado, enviadaPorUserId, numeroRecibo, observaciones } = req.body;
+      const { estado, observaciones } = req.body;
       const user = (req as any).user?.fullName || (req as any).user?.username || null;
-      await upsertCcInvoiceTracking(salesInvoiceId, { estado, enviadaPorUserId, numeroRecibo, observaciones }, user);
+      await upsertCcInvoiceTracking(salesInvoiceId, { estado, observaciones }, user);
       const [row] = await getCcInvoiceTrackingList({ salesInvoiceId });
       res.json(row ?? { ok: true });
     } catch (error: any) {
@@ -44,15 +43,6 @@ export function registerCcInvoiceTrackingRoutes(app: Express) {
       res.json(summary);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Error obteniendo el informe mensual" });
-    }
-  });
-
-  app.get("/api/cc-invoice-tracking/users", async (req, res) => {
-    try {
-      const users = await getActiveSystemUsersForTracking();
-      res.json(users);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Error obteniendo los usuarios" });
     }
   });
 }

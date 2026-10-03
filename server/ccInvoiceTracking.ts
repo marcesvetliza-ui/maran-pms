@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
-  salesInvoices, ccInvoiceTracking, companies, agencies, reservations, guests, systemUsers,
+  salesInvoices, ccInvoiceTracking, companies, agencies, reservations, guests,
   type CcInvoiceTrackingEstado,
 } from "@shared/schema";
 
@@ -18,9 +18,6 @@ export type CcInvoiceTrackingRow = {
   motivo: string | null;
   monto: number;
   estado: CcInvoiceTrackingEstado;
-  enviadaPorUserId: string | null;
-  enviadaPorName: string | null;
-  numeroRecibo: string | null;
   observaciones: string | null;
   updatedAt: string | null;
 };
@@ -62,12 +59,11 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
   const reservaIds = [...new Set(invoices.map(i => i.reservaId).filter((id): id is string => !!id))];
   const invoiceIds = invoices.map(i => i.id);
 
-  const [companyRows, agencyRows, reservationRows, trackingRows, userRows] = await Promise.all([
+  const [companyRows, agencyRows, reservationRows, trackingRows] = await Promise.all([
     companyIds.length ? db.select({ id: companies.id, name: sql<string>`COALESCE(${companies.nombreFantasia}, ${companies.razonSocial})` }).from(companies).where(inArray(companies.id, companyIds)) : Promise.resolve([]),
     agencyIds.length ? db.select({ id: agencies.id, name: sql<string>`COALESCE(${agencies.nombreFantasia}, ${agencies.razonSocial})` }).from(agencies).where(inArray(agencies.id, agencyIds)) : Promise.resolve([]),
     reservaIds.length ? db.select({ id: reservations.id, guestId: reservations.guestId }).from(reservations).where(inArray(reservations.id, reservaIds)) : Promise.resolve([]),
     db.select().from(ccInvoiceTracking).where(inArray(ccInvoiceTracking.salesInvoiceId, invoiceIds)),
-    db.select({ id: systemUsers.id, fullName: systemUsers.fullName }).from(systemUsers),
   ]);
 
   const guestIds = [...new Set(reservationRows.map(r => r.guestId).filter((id): id is string => !!id))];
@@ -80,7 +76,6 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
   const guestNameById = new Map(guestRows.map(g => [g.id, `${g.lastName}${g.firstName ? ", " + g.firstName : ""}`]));
   const reservationGuestById = new Map(reservationRows.map(r => [r.id, r.guestId ? guestNameById.get(r.guestId) ?? null : null]));
   const trackingByInvoiceId = new Map(trackingRows.map(t => [t.salesInvoiceId, t]));
-  const userNameById = new Map(userRows.map(u => [u.id, u.fullName]));
 
   const rows: CcInvoiceTrackingRow[] = invoices.map(inv => {
     const tracking = trackingByInvoiceId.get(inv.id);
@@ -100,9 +95,6 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
       motivo: inv.reservaId ? reservationGuestById.get(inv.reservaId) ?? null : null,
       monto: parseFloat(String(inv.montoTotal)),
       estado,
-      enviadaPorUserId: tracking?.enviadaPorUserId ?? null,
-      enviadaPorName: tracking?.enviadaPorUserId ? userNameById.get(tracking.enviadaPorUserId) ?? null : null,
-      numeroRecibo: tracking?.numeroRecibo ?? null,
       observaciones: tracking?.observaciones ?? null,
       updatedAt: tracking?.updatedAt ? tracking.updatedAt.toISOString() : null,
     };
@@ -125,8 +117,6 @@ export async function upsertCcInvoiceTracking(
   salesInvoiceId: number,
   data: {
     estado?: CcInvoiceTrackingEstado;
-    enviadaPorUserId?: string | null;
-    numeroRecibo?: string | null;
     observaciones?: string | null;
   },
   updatedBy: string | null,
@@ -140,8 +130,6 @@ export async function upsertCcInvoiceTracking(
   const [existing] = await db.select().from(ccInvoiceTracking).where(eq(ccInvoiceTracking.salesInvoiceId, salesInvoiceId));
   const next = {
     estado: data.estado ?? existing?.estado ?? "pendiente",
-    enviadaPorUserId: data.enviadaPorUserId !== undefined ? data.enviadaPorUserId : existing?.enviadaPorUserId ?? null,
-    numeroRecibo: data.numeroRecibo !== undefined ? data.numeroRecibo : existing?.numeroRecibo ?? null,
     observaciones: data.observaciones !== undefined ? data.observaciones : existing?.observaciones ?? null,
   };
 
@@ -192,10 +180,4 @@ export async function getCcInvoiceTrackingMonthReport(year: number, month: numbe
     porEstado: ESTADOS.map(estado => ({ estado, ...porEstadoMap.get(estado)! })),
     porEmpresa: [...porEmpresaMap.values()].sort((a, b) => b.monto - a.monto),
   };
-}
-
-export async function getActiveSystemUsersForTracking(): Promise<Array<{ id: string; fullName: string }>> {
-  const rows = await db.select({ id: systemUsers.id, fullName: systemUsers.fullName, isActive: systemUsers.isActive })
-    .from(systemUsers);
-  return rows.filter(u => u.isActive !== "false").map(u => ({ id: u.id, fullName: u.fullName }));
 }

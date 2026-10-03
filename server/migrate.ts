@@ -4852,13 +4852,37 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         sales_invoice_id integer NOT NULL UNIQUE REFERENCES sales_invoices(id),
         estado text NOT NULL DEFAULT 'pendiente',
-        enviada_por_user_id varchar,
-        numero_recibo text,
         observaciones text,
         updated_at timestamp NOT NULL DEFAULT now(),
         updated_by varchar
       )
     `)))
+  );
+  // "Enviada por" y "N° de Recibo" se sacaron del diseño: alcanza con
+  // Estado + Observaciones, igual que pidió el hotel. Si una instancia ya
+  // había creado la tabla con esas dos columnas (versión anterior de esta
+  // migración), se eliminan acá — con el resguardo de no borrar nada si
+  // alguien ya llegó a cargar un valor.
+  await withTimeout("cc_invoice_tracking.drop_enviada_por_numero_recibo", T, () =>
+    db.execute(sql`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'cc_invoice_tracking' AND column_name = 'enviada_por_user_id'
+        ) THEN
+          IF EXISTS (
+            SELECT 1 FROM cc_invoice_tracking
+            WHERE enviada_por_user_id IS NOT NULL OR numero_recibo IS NOT NULL
+          ) THEN
+            RAISE EXCEPTION
+              'Migración detenida: cc_invoice_tracking tiene datos cargados en enviada_por_user_id/numero_recibo';
+          END IF;
+          ALTER TABLE cc_invoice_tracking DROP COLUMN enviada_por_user_id;
+          ALTER TABLE cc_invoice_tracking DROP COLUMN numero_recibo;
+        END IF;
+      END $$;
+    `)
   );
 
   const financialSchema = await verifyFinancialSchema();

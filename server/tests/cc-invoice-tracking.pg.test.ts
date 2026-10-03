@@ -2,10 +2,11 @@
  * Seguimiento de Facturas CC: reemplaza la planilla manual que llevaba
  * Recepción para hacer seguimiento de las facturas emitidas a Empresas y
  * Agencias en Cuenta Corriente (enviada / reclamada / pagada / cargada a
- * extranet, con N° de recibo y observaciones).
+ * extranet, con observaciones libres — eso lo completa el gte de Recepción
+ * a mano, el sistema no lo adivina).
  *
  * El listado se arma solo a partir de facturas reales ya emitidas (no se
- * re-tipean número/empresa/monto/fecha): este test confirma que el join
+ * re-tipea número/empresa/monto/fecha): este test confirma que el join
  * trae los datos correctos, que excluye Notas de Crédito/Débito y facturas
  * anuladas, que el "motivo" resuelve al huésped de la reserva vinculada, y
  * que el upsert de seguimiento hace merge parcial sin pisar lo ya cargado.
@@ -24,7 +25,6 @@ suite("PostgreSQL real: Seguimiento de Facturas CC", () => {
   let companyId: string;
   let guestId: string;
   let reservationId: string;
-  let userId: string;
   const invoiceIds: number[] = [];
   const testMonth = { year: 2001, month: 3 }; // lejos de cualquier dato real/seed
 
@@ -47,13 +47,6 @@ suite("PostgreSQL real: Seguimiento de Facturas CC", () => {
        VALUES ($1, $2, $3, 'faketype', 'fakeroom', '2001-03-01', '2001-03-02', 'confirmed', NOW())`,
       [reservationId, `CCTRACK-${reservationId}`, guestId],
     );
-
-    const [sysUser] = await pool.query(
-      `INSERT INTO system_users (id, username, email, full_name, role, is_active, created_at)
-       VALUES ($1, $2, $3, 'Lucía Tester', 'admin', 'true', NOW()) RETURNING id`,
-      [randomUUID(), `cc-tracking-user-${Date.now()}`, `cc-tracking-${Date.now()}@test.com`],
-    ).then(r => r.rows);
-    userId = sysUser.id;
 
     async function insertInvoice(tipo: string, numero: number, monto: string, reservaId: string | null): Promise<number> {
       const result = await pool!.query(
@@ -79,7 +72,6 @@ suite("PostgreSQL real: Seguimiento de Facturas CC", () => {
     await pool.query("DELETE FROM sales_invoices WHERE id = ANY($1)", [invoiceIds]);
     await pool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
     await pool.query("DELETE FROM guests WHERE id = $1", [guestId]);
-    await pool.query("DELETE FROM system_users WHERE id = $1", [userId]);
     await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
     await pool.end();
   });
@@ -96,7 +88,7 @@ suite("PostgreSQL real: Seguimiento de Facturas CC", () => {
     expect(withReserva!.motivo).toBe("Testigo, María");
     expect(withReserva!.monto).toBe(10000);
     expect(withReserva!.estado).toBe("pendiente");
-    expect(withReserva!.enviadaPorName).toBeNull();
+    expect(withReserva!.observaciones).toBeNull();
 
     const withoutReserva = rows.find(r => r.salesInvoiceId === invoiceIds[1]);
     expect(withoutReserva!.motivo).toBeNull();
@@ -108,20 +100,17 @@ suite("PostgreSQL real: Seguimiento de Facturas CC", () => {
     if (!pool) return;
 
     await tracking.upsertCcInvoiceTracking(invoiceIds[0], {
-      estado: "enviada", enviadaPorUserId: userId, numeroRecibo: "4463", observaciones: "Enviada por mail",
+      estado: "enviada", observaciones: "Enviada por mail",
     }, "tester");
 
     let [row] = await tracking.getCcInvoiceTrackingList({ salesInvoiceId: invoiceIds[0] });
     expect(row.estado).toBe("enviada");
-    expect(row.enviadaPorName).toBe("Lucía Tester");
-    expect(row.numeroRecibo).toBe("4463");
     expect(row.observaciones).toBe("Enviada por mail");
 
-    // Segunda edición: solo cambia el estado a "pagada" — el resto debe permanecer.
+    // Segunda edición: solo cambia el estado a "pagada" — las observaciones deben permanecer.
     await tracking.upsertCcInvoiceTracking(invoiceIds[0], { estado: "pagada" }, "tester");
     [row] = await tracking.getCcInvoiceTrackingList({ salesInvoiceId: invoiceIds[0] });
     expect(row.estado).toBe("pagada");
-    expect(row.numeroRecibo).toBe("4463");
     expect(row.observaciones).toBe("Enviada por mail");
   });
 

@@ -26,14 +26,9 @@ type TrackingRow = {
   motivo: string | null;
   monto: number;
   estado: Estado;
-  enviadaPorUserId: string | null;
-  enviadaPorName: string | null;
-  numeroRecibo: string | null;
   observaciones: string | null;
   updatedAt: string | null;
 };
-
-type SystemUserLite = { id: string; fullName: string };
 
 type MonthSummary = {
   totalFacturado: number;
@@ -62,20 +57,16 @@ function fmtMoney(n: number) {
   return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function TrackingRowEditor({ row, users }: { row: TrackingRow; users: SystemUserLite[] }) {
+function TrackingRowEditor({ row }: { row: TrackingRow }) {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(false);
   const [estado, setEstado] = useState<Estado>(row.estado);
-  const [enviadaPorUserId, setEnviadaPorUserId] = useState(row.enviadaPorUserId || "");
-  const [numeroRecibo, setNumeroRecibo] = useState(row.numeroRecibo || "");
   const [observaciones, setObservaciones] = useState(row.observaciones || "");
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("PUT", `/api/cc-invoice-tracking/${row.salesInvoiceId}`, {
         estado,
-        enviadaPorUserId: enviadaPorUserId || null,
-        numeroRecibo: numeroRecibo || null,
         observaciones: observaciones || null,
       });
       return res.json();
@@ -105,8 +96,7 @@ function TrackingRowEditor({ row, users }: { row: TrackingRow; users: SystemUser
             {ESTADO_LABELS[row.estado]}
           </Badge>
         </TableCell>
-        <TableCell className="text-muted-foreground">{row.enviadaPorName || "-"}</TableCell>
-        <TableCell className="text-muted-foreground">{row.numeroRecibo || "-"}</TableCell>
+        <TableCell className="text-muted-foreground max-w-56 truncate">{row.observaciones || "-"}</TableCell>
         <TableCell className="text-right">
           <Button size="icon" variant="ghost" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -115,10 +105,7 @@ function TrackingRowEditor({ row, users }: { row: TrackingRow; users: SystemUser
       </TableRow>
       {expanded && (
         <TableRow className="bg-muted/20 hover:bg-muted/20">
-          <TableCell colSpan={9} className="py-3 px-4">
-            {row.observaciones && (
-              <p className="text-xs text-muted-foreground mb-2">Obs. actual: {row.observaciones}</p>
-            )}
+          <TableCell colSpan={8} className="py-3 px-4">
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Estado</Label>
@@ -128,25 +115,6 @@ function TrackingRowEditor({ row, users }: { row: TrackingRow; users: SystemUser
                     {Object.entries(ESTADO_LABELS).map(([k, label]) => <SelectItem key={k} value={k}>{label}</SelectItem>)}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Enviada por</Label>
-                <Select value={enviadaPorUserId || "none"} onValueChange={(v) => setEnviadaPorUserId(v === "none" ? "" : v)}>
-                  <SelectTrigger className="w-48" data-testid={`select-enviada-por-${row.salesInvoiceId}`}><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin asignar</SelectItem>
-                    {users.map(u => <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">N° Recibo</Label>
-                <Input
-                  className="w-32"
-                  value={numeroRecibo}
-                  onChange={(e) => setNumeroRecibo(e.target.value)}
-                  data-testid={`input-numero-recibo-${row.salesInvoiceId}`}
-                />
               </div>
               <div className="flex-1 min-w-48 space-y-1">
                 <Label className="text-xs">Observaciones</Label>
@@ -192,8 +160,6 @@ function ListadoTab() {
       return res.json();
     },
   });
-
-  const { data: users = [] } = useQuery<SystemUserLite[]>({ queryKey: ["/api/cc-invoice-tracking/users"] });
 
   const total = rows.reduce((sum, r) => sum + r.monto, 0);
 
@@ -242,13 +208,12 @@ function ListadoTab() {
                 <TableHead>Motivo</TableHead>
                 <TableHead className="text-right">Monto</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Enviada por</TableHead>
-                <TableHead>N° Recibo</TableHead>
+                <TableHead>Observaciones</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(row => <TrackingRowEditor key={row.salesInvoiceId} row={row} users={users} />)}
+              {rows.map(row => <TrackingRowEditor key={row.salesInvoiceId} row={row} />)}
             </TableBody>
           </Table>
           <div className="text-sm text-muted-foreground text-right">
@@ -361,7 +326,7 @@ export function CcInvoiceTrackingSection() {
         <h2 className="text-lg font-semibold">Seguimiento de Facturas CC</h2>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
-        Facturas emitidas a Empresas y Agencias en Cuenta Corriente. El estado, quién la envió, el N° de recibo y las observaciones se cargan y editan acá.
+        Facturas emitidas a Empresas y Agencias en Cuenta Corriente. El estado y las observaciones se cargan y editan acá.
       </p>
       <Tabs defaultValue="listado">
         <TabsList>
