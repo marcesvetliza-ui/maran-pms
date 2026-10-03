@@ -1,15 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "./db";
-
-export type DespegarUnbilledRow = {
-  reservationId: string;
-  reservationCode: string | null;
-  roomNumber: string;
-  guestName: string;
-  checkInDate: string;
-  checkOutDate: string;
-  totalRoomAmount: number | null;
-};
+import type { DespegarUnbilledRow } from "../shared/despegarUnbilled";
+export type { DespegarUnbilledRow } from "../shared/despegarUnbilled";
 
 /**
  * Reservas de Despegar que ya hicieron check-out pero no tienen ninguna
@@ -38,13 +30,20 @@ export async function getDespegarUnbilledCheckouts(): Promise<DespegarUnbilledRo
     FROM reservations r
     JOIN rooms rm ON rm.id = r.room_id
     LEFT JOIN guests g ON g.id = r.guest_id
-    WHERE r.source = 'despegar'
+    LEFT JOIN agencies a ON a.id = r.agency_id
+    WHERE (
+      r.source = 'despegar'
+      OR regexp_replace(upper(COALESCE(a.razon_social, '')), '[^A-Z0-9]', '', 'g')
+        IN ('DESPEGAR', 'DESPEGARSA', 'DESPEGARCOMAR', 'DESPEGARCOMARSA')
+      OR regexp_replace(upper(COALESCE(a.nombre_fantasia, '')), '[^A-Z0-9]', '', 'g')
+        IN ('DESPEGAR', 'DESPEGARSA', 'DESPEGARCOMAR', 'DESPEGARCOMARSA')
+    )
       AND r.status = 'checked_out'
       AND NOT EXISTS (
         SELECT 1 FROM sales_invoices si
         WHERE si.reserva_id = r.id AND si.estado <> 'anulada' AND si.monto_total > 0
       )
-    ORDER BY r.check_out_date DESC
+    ORDER BY r.check_out_date DESC, r.id
   `);
   return (result.rows as any[]).map(row => ({
     reservationId: row.reservation_id,

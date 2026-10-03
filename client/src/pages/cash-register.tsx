@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { DespegarUnbilledSection } from "@/components/despegar-unbilled-section";
+import { DESPEGAR_UNBILLED_QUERY_KEY } from "@shared/despegarUnbilled";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime, formatHotelTime } from "@/lib/hotelTime";
 import { useAuth } from "@/App";
@@ -2635,6 +2637,7 @@ function NightAuditTab() {
       setLastResult(data);
       refetchStatus(); refetchHistory();
       queryClient.invalidateQueries({ queryKey: ["/api/night-audit"] });
+      await queryClient.invalidateQueries({ queryKey: DESPEGAR_UNBILLED_QUERY_KEY });
       toast({ title: "Night Audit completado", description: `${data.inHouse?.total ?? 0} hab. ocupadas, ${data.arrivals?.total ?? 0} llegadas mañana` });
     } catch (err: any) {
       toast({ title: "Error en Night Audit", description: err.message, variant: "destructive" });
@@ -2813,61 +2816,6 @@ function NightAuditTab() {
 
       <DespegarUnbilledSection />
     </div>
-  );
-}
-
-function DespegarUnbilledSection() {
-  const { data: rows = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/night-audit/despegar-sin-facturar"] });
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500" />
-          Reservas Despegar sin facturar
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Hicieron check-out y todavía no tienen factura vinculada — control para que ninguna se pierda de vista
-          (ej. tarifas en USD, pendientes de la orden de pago de Despegar).
-        </p>
-      </CardHeader>
-      <CardContent className="p-0">
-        {isLoading ? (
-          <Skeleton className="h-20 w-full m-4" />
-        ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground p-4 text-center">No hay reservas de Despegar sin facturar.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Reserva</TableHead>
-                <TableHead>Habitación</TableHead>
-                <TableHead>Huésped</TableHead>
-                <TableHead>Check-in</TableHead>
-                <TableHead>Check-out</TableHead>
-                <TableHead className="text-right">Importe</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row: any) => (
-                <TableRow key={row.reservationId} data-testid={`row-despegar-unbilled-${row.reservationId}`}>
-                  <TableCell className="font-mono text-sm">{row.reservationCode || "-"}</TableCell>
-                  <TableCell>{row.roomNumber}</TableCell>
-                  <TableCell>{row.guestName}</TableCell>
-                  <TableCell>{row.checkInDate}</TableCell>
-                  <TableCell>{row.checkOutDate}</TableCell>
-                  <TableCell className="text-right">
-                    {row.totalRoomAmount != null
-                      ? `$${row.totalRoomAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
-                      : "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 
