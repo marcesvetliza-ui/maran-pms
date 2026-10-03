@@ -35,14 +35,14 @@ suite("PostgreSQL real: Reservas Despegar sin facturar", () => {
     return id;
   }
 
-  async function insertInvoice(reservaId: string, estado: string, numero: number): Promise<number> {
+  async function insertInvoice(reservaId: string, estado: string, numero: number, montoTotal = 50000): Promise<number> {
     const result = await pool!.query(
       `INSERT INTO sales_invoices
          (tipo_comprobante, punto_venta, numero, fecha_emision, cliente_razon_social, cliente_condicion_iva,
           monto_neto, monto_total, estado, reserva_id)
-       VALUES ('FB', 1, $1, '2001-04-15', 'Despegarcomar SA', 'responsable_inscripto', 50000, 50000, $2, $3)
+       VALUES ('FB', 1, $1, '2001-04-15', 'Despegarcomar SA', 'responsable_inscripto', $4, $4, $2, $3)
        RETURNING id`,
-      [numero, estado, reservaId],
+      [numero, estado, reservaId, montoTotal],
     );
     const id = result.rows[0].id;
     invoiceIds.push(id);
@@ -89,12 +89,17 @@ suite("PostgreSQL real: Reservas Despegar sin facturar", () => {
     const otherSource = await insertReservation({
       source: "directo", status: "checked_out", checkIn: "2001-04-10", checkOut: "2001-04-15", code: "DIRECTO-UNBILLED",
     });
+    const zeroRateInvoice = await insertReservation({
+      source: "despegar", status: "checked_out", checkIn: "2001-04-10", checkOut: "2001-04-15", code: "DESP-ZERO-RATE",
+    });
+    await insertInvoice(zeroRateInvoice, "emitida", 70003, 0);
 
     const rows = await despegarUnbilled.getDespegarUnbilledCheckouts();
     const ids = rows.map(r => r.reservationId);
 
     expect(ids).toContain(unbilled);
     expect(ids).toContain(onlyVoidedInvoice); // la factura anulada no cuenta como facturada
+    expect(ids).toContain(zeroRateInvoice); // factura a $0 cerrada en CC: tampoco cuenta como facturada
     expect(ids).not.toContain(billed);
     expect(ids).not.toContain(stillCheckedIn); // todavía no hizo check-out
     expect(ids).not.toContain(otherSource); // no es de Despegar

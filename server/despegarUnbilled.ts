@@ -13,11 +13,14 @@ export type DespegarUnbilledRow = {
 
 /**
  * Reservas de Despegar que ya hicieron check-out pero no tienen ninguna
- * factura vigente vinculada. Algunas quedan así a propósito (tarifa en
- * USD: no se factura hasta que llega la orden de pago de Despegar, que
- * trae la cotización promedio para pasarla a pesos) — esta consulta no
- * distingue el motivo, solo detecta "ya se fue y sigue sin facturar" para
- * que ninguna se pierda de vista, se sepa o no todavía por qué.
+ * factura vigente con importe real vinculada. Algunas quedan así a
+ * propósito (tarifa en USD: no se factura hasta que llega la orden de pago
+ * de Despegar, que trae la cotización promedio para pasarla a pesos) —
+ * esta consulta no distingue el motivo, solo detecta "ya se fue y sigue
+ * sin facturar" para que ninguna se pierda de vista, se sepa o no todavía
+ * por qué. Una factura vigente a $0 (cerrada en la CC de Despegar como
+ * placeholder mientras se espera la cotización real) no cuenta como
+ * facturada: el problema de fondo sigue sin resolver.
  */
 export async function getDespegarUnbilledCheckouts(): Promise<DespegarUnbilledRow[]> {
   const result = await db.execute(sql`
@@ -39,7 +42,7 @@ export async function getDespegarUnbilledCheckouts(): Promise<DespegarUnbilledRo
       AND r.status = 'checked_out'
       AND NOT EXISTS (
         SELECT 1 FROM sales_invoices si
-        WHERE si.reserva_id = r.id AND si.estado <> 'anulada'
+        WHERE si.reserva_id = r.id AND si.estado <> 'anulada' AND si.monto_total > 0
       )
     ORDER BY r.check_out_date DESC
   `);
