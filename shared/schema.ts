@@ -1,3 +1,4 @@
+import type { LostFoundShippingDetails } from "./lostFoundDelivery";
 import { sql } from "drizzle-orm";
 import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -3141,6 +3142,7 @@ export const lostFoundItems = pgTable("lost_found_items", {
   claimedDate: date("claimed_date"),
   deliveryType: text("delivery_type"),
   deliveredBy: text("delivered_by"),
+  shippingDetails: jsonb("shipping_details").$type<LostFoundShippingDetails>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
