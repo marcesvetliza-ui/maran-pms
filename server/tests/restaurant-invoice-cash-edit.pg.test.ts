@@ -163,6 +163,9 @@ suite("PostgreSQL real: edición de forma de pago de facturas de Restaurante", (
       });
       invoiceId = Number(closed.body.invoiceId);
 
+      // /close responde antes de terminar el pago del folio; esperar evita
+      // que aparezca un movimiento después de empezar a borrar la fixture.
+      await waitForFolioPayment(orderId, 300);
       const edited = await request("PATCH", `/api/billing/invoices/${invoiceId}`, { cashFormaPago: "cuenta_corriente" });
       expect(edited.status).toBe(400);
       expect(edited.body.error).toMatch(/Cuenta Corriente/);
