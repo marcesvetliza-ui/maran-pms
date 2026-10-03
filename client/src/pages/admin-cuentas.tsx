@@ -40,6 +40,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 import { CcCashShiftRepairAction } from "@/components/cc-cash-shift-repair-action";
+import { CcInvoiceTrackingSection } from "@/components/cc-invoice-tracking-section";
 
 type Movement = {
   id: string;
@@ -1333,6 +1334,8 @@ export default function AdminCuentasPage() {
       </div>
 
       <Separator />
+
+      <CcInvoiceTrackingSection />
 
       {/* Reporte de Facturación en página completa */}
       <div>

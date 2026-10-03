@@ -3054,6 +3054,28 @@ export const insertSalesInvoiceSchema = createInsertSchema(salesInvoices).omit({
 export type InsertSalesInvoice = z.infer<typeof insertSalesInvoiceSchema>;
 export type SalesInvoice = typeof salesInvoices.$inferSelect;
 
+// Seguimiento administrativo de facturas emitidas a Empresas/Agencias en
+// Cuenta Corriente — reemplaza la planilla manual que llevaba Recepción
+// (envío, reclamo, pago, carga a extranet). No duplica los datos de la
+// factura (número, empresa, monto, fecha ya están en sales_invoices): esta
+// tabla guarda solo el seguimiento posterior, una fila por factura.
+export type CcInvoiceTrackingEstado = "pendiente" | "enviada" | "reclamada" | "pagada" | "cargada_extranet";
+
+export const ccInvoiceTracking = pgTable("cc_invoice_tracking", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  salesInvoiceId: integer("sales_invoice_id").notNull().unique(),
+  estado: text("estado").$type<CcInvoiceTrackingEstado>().notNull().default("pendiente"),
+  enviadaPorUserId: varchar("enviada_por_user_id"),
+  numeroRecibo: text("numero_recibo"),
+  observaciones: text("observaciones"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by"),
+});
+
+export const insertCcInvoiceTrackingSchema = createInsertSchema(ccInvoiceTracking).omit({ id: true, updatedAt: true });
+export type InsertCcInvoiceTracking = z.infer<typeof insertCcInvoiceTrackingSchema>;
+export type CcInvoiceTracking = typeof ccInvoiceTracking.$inferSelect;
+
 export const invoiceCounters = pgTable("invoice_counters", {
   id: serial("id").primaryKey(),
   tipoComprobante: text("tipo_comprobante").notNull(),
