@@ -4844,6 +4844,23 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     )))
   );
 
+  // Seguimiento de facturas CC a Empresas/Agencias (reemplaza la planilla
+  // manual de Recepción): una fila de estado/envío/observaciones por factura.
+  await withTimeout("cc_invoice_tracking (create)", T, () =>
+    db.execute(sql.raw(createTableWithoutRerunNotice("cc_invoice_tracking", `
+      CREATE TABLE cc_invoice_tracking (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        sales_invoice_id integer NOT NULL UNIQUE REFERENCES sales_invoices(id),
+        estado text NOT NULL DEFAULT 'pendiente',
+        enviada_por_user_id varchar,
+        numero_recibo text,
+        observaciones text,
+        updated_at timestamp NOT NULL DEFAULT now(),
+        updated_by varchar
+      )
+    `)))
+  );
+
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {
