@@ -2810,7 +2810,64 @@ function NightAuditTab() {
         open={!!selectedAudit}
         onClose={() => setSelectedAudit(null)}
       />
+
+      <DespegarUnbilledSection />
     </div>
+  );
+}
+
+function DespegarUnbilledSection() {
+  const { data: rows = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/night-audit/despegar-sin-facturar"] });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          Reservas Despegar sin facturar
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Hicieron check-out y todavía no tienen factura vinculada — control para que ninguna se pierda de vista
+          (ej. tarifas en USD, pendientes de la orden de pago de Despegar).
+        </p>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <Skeleton className="h-20 w-full m-4" />
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground p-4 text-center">No hay reservas de Despegar sin facturar.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Reserva</TableHead>
+                <TableHead>Habitación</TableHead>
+                <TableHead>Huésped</TableHead>
+                <TableHead>Check-in</TableHead>
+                <TableHead>Check-out</TableHead>
+                <TableHead className="text-right">Importe</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row: any) => (
+                <TableRow key={row.reservationId} data-testid={`row-despegar-unbilled-${row.reservationId}`}>
+                  <TableCell className="font-mono text-sm">{row.reservationCode || "-"}</TableCell>
+                  <TableCell>{row.roomNumber}</TableCell>
+                  <TableCell>{row.guestName}</TableCell>
+                  <TableCell>{row.checkInDate}</TableCell>
+                  <TableCell>{row.checkOutDate}</TableCell>
+                  <TableCell className="text-right">
+                    {row.totalRoomAmount != null
+                      ? `$${row.totalRoomAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                      : "-"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

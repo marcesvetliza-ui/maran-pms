@@ -4095,6 +4095,15 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/night-audit/despegar-sin-facturar", requireAuth, async (req, res) => {
+    try {
+      const { getDespegarUnbilledCheckouts } = await import("./despegarUnbilled");
+      res.json(await getDespegarUnbilledCheckouts());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error obteniendo reservas Despegar sin facturar" });
+    }
+  });
+
   // ── Elementos Prestados ──────────────────────────────────────────────────
   app.get("/api/loan-items", requireAuth, async (req, res) => {
     try {
