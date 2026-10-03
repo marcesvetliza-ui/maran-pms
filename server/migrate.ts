@@ -1576,6 +1576,9 @@ export async function runMigrations() {
   // Incremental schema additions — each wrapped in an 8s timeout so a hung
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
+  await withTimeout("lost_found_items.shipping_details", T, () =>
+    db.execute(sql`ALTER TABLE lost_found_items ADD COLUMN IF NOT EXISTS shipping_details jsonb`)
+  );
 
   await withTimeout("cash_shifts.turno_tipo", T, () =>
     db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn))

@@ -1,3 +1,4 @@
+import { lostFoundShippingSchema, lostFoundStatusUpdateSchema } from "@shared/lostFoundDelivery";
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
@@ -212,8 +213,10 @@ export function registerHousekeepingRoutes(app: Express) {
 
   app.post("/api/lost-found", requireAuth, async (req, res) => {
     try {
+      const shipping = lostFoundShippingSchema.nullable().optional().safeParse(req.body.shippingDetails);
+      if (!shipping.success) return res.status(400).json({ error: "Datos de envío inválidos" });
       const codigo = await generateLostFoundCode();
-      const [item] = await db.insert(lostFoundItems).values({ ...req.body, codigo }).returning();
+      const [item] = await db.insert(lostFoundItems).values({ ...req.body, shippingDetails: shipping.data, codigo }).returning();
       res.json(item);
     } catch (error) {
       res.status(500).json({ error: "Error creating lost and found item" });
@@ -249,9 +252,11 @@ export function registerHousekeepingRoutes(app: Express) {
 
   app.patch("/api/lost-found/:id", requireAuth, async (req, res) => {
     try {
+      const shipping = lostFoundShippingSchema.nullable().optional().safeParse(req.body.shippingDetails);
+      if (!shipping.success) return res.status(400).json({ error: "Datos de envío inválidos" });
       const { codigo, createdAt, ...data } = req.body;
       const [updated] = await db.update(lostFoundItems)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...data, shippingDetails: shipping.data, updatedAt: new Date() })
         .where(eq(lostFoundItems.id, req.params.id))
         .returning();
       if (!updated) return res.status(404).json({ error: "Item not found" });
@@ -263,11 +268,17 @@ export function registerHousekeepingRoutes(app: Express) {
 
   app.patch("/api/lost-found/:id/status", requireAuth, async (req, res) => {
     try {
-      const { status, claimedBy, claimedDate, deliveryType, deliveredBy, notes } = req.body;
+      const parsed = lostFoundStatusUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Datos de entrega inválidos", details: parsed.error.flatten() });
+      }
+      const { status, claimedBy, claimedDate, deliveryType, deliveredBy, notes, shippingDetails } = parsed.data;
       const updateData: any = { status, updatedAt: new Date() };
       if (claimedBy !== undefined) updateData.claimedBy = claimedBy;
       if (claimedDate !== undefined) updateData.claimedDate = claimedDate;
       if (deliveryType !== undefined) updateData.deliveryType = deliveryType;
+      if (deliveryType === "retiro_hotel") updateData.shippingDetails = null;
+      else if (shippingDetails !== undefined) updateData.shippingDetails = shippingDetails;
       if (deliveredBy !== undefined) updateData.deliveredBy = deliveredBy;
       if (notes !== undefined) updateData.notes = notes;
       const [updated] = await db.update(lostFoundItems)
