@@ -1,4 +1,4 @@
-import { createPrivateKey, X509Certificate } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, X509Certificate, type KeyObject } from "node:crypto";
 import type { ArcaCredentialDiagnostic } from "@shared/arcaCredentialDiagnostic";
 
 type CredentialConfig = {
@@ -8,6 +8,12 @@ type CredentialConfig = {
   puntoVenta?: number | null;
   puntoVentaHomolog?: number | null;
 };
+
+// Only public SPKI bytes are hashed. PKCS#1/PKCS#8 private encodings give
+// the same identifier without exporting or hashing the private key itself.
+function publicKeyFingerprint(key: KeyObject): string {
+  return createHash("sha256").update(key.export({ type: "spki", format: "der" })).digest("hex");
+}
 
 // Deliberately local: no WSAA client, network, persistence or ticket cache.
 // Never return parser exceptions, PEMs, subjects, serials, tokens or signatures.
@@ -28,8 +34,9 @@ export function diagnoseArcaCredentials(
       present: Boolean(config?.arcaCert), parseable: false, validity: "missing",
       validFrom: null, validTo: null, issuerCommonName: null,
       suggestedEnvironment: null, publicKeyType: null, rsaBits: null,
+      publicKeyFingerprintSha256: null,
     },
-    privateKey: { present: Boolean(config?.arcaKey), parseable: false },
+    privateKey: { present: Boolean(config?.arcaKey), parseable: false, publicKeyFingerprintSha256: null },
     pairMatches: null,
     signerCompatible: null,
     issues: [],
@@ -64,6 +71,7 @@ export function diagnoseArcaCredentials(
       }
       result.certificate.publicKeyType = certificate.publicKey.asymmetricKeyType ?? null;
       result.certificate.rsaBits = certificate.publicKey.asymmetricKeyDetails?.modulusLength ?? null;
+      result.certificate.publicKeyFingerprintSha256 = publicKeyFingerprint(certificate.publicKey);
     } catch {
       certificate = undefined;
       result.certificate.validity = "invalid";
@@ -77,6 +85,7 @@ export function diagnoseArcaCredentials(
     try {
       const key = createPrivateKey(config!.arcaKey!);
       result.privateKey.parseable = true;
+      result.privateKey.publicKeyFingerprintSha256 = publicKeyFingerprint(createPublicKey(key));
       if (certificate) {
         result.pairMatches = certificate.checkPrivateKey(key);
         result.signerCompatible = key.asymmetricKeyType === "rsa" && certificate.publicKey.asymmetricKeyType === "rsa";
