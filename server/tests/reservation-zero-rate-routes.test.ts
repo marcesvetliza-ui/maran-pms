@@ -34,7 +34,10 @@ vi.mock("../db", () => ({
   },
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
-vi.mock("../auth", () => ({ requireAuth: (_req: any, _res: any, next: () => void) => next() }));
+vi.mock("../auth", () => ({
+  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
+}));
 vi.mock("../billing/invoiceService", () => ({
   emitirFactura: vi.fn(),
   buildComprobanteAsociado: (doc: any) => ({

@@ -94,6 +94,7 @@ vi.mock("../db", () => ({
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
 vi.mock("../auth", () => ({
+  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, res: any, next: () => void) => {
     if (req.headers["x-test-auth"] === "authenticated") return next();
     return res.status(401).json({ error: "No autenticado" });

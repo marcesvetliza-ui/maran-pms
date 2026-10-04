@@ -52,6 +52,7 @@ vi.mock("../db-storage", () => ({ storage: mockStorage }));
 
 // Auth — requireAuth passes every request through (no session needed in tests).
 vi.mock("../auth", () => ({
+  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 
