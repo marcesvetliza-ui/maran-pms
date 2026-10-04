@@ -1,5 +1,5 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { logger } from "./logger";
 import { eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import { channexConnections, rolePermissions, resourcePermissionSeeds, type FolioEntityType, type SystemUserRole } from "@shared/schema";
@@ -1573,6 +1573,10 @@ export async function backfillAccountMovementReceiptNumbers(): Promise<void> {
 }
 
 export async function runMigrations() {
+  // Authentication must not depend on the development-only baseline.
+  const { ensureSessionStoreSchema } = await import("./sessionStoreSchema");
+  await ensureSessionStoreSchema(pool);
+
   // In production Railway uses PgBouncer (connection pooling). Drizzle's migrate()
   // issues DDL commands (CREATE SCHEMA, advisory locks) that are incompatible with
   // pooled connections and fail with "Control plane request failed".
