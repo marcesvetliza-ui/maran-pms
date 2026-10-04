@@ -38,7 +38,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: reservation payment ledger transacti
     await pool.end();
   });
 
-  it("creates the payment, reception cash movement, and folio movement together", async () => {
+  it.each(["reception", "recepcion"])("creates payment, cash and folio together with a %s shift", async (area) => {
     if (!testPool) return;
     const suffix = randomUUID();
     const reservationId = `reservation-ledger-success-${suffix}`;
@@ -46,8 +46,8 @@ runIfDatabaseIsConfigured("PostgreSQL real: reservation payment ledger transacti
     await createReservation(reservationId);
     await testPool.query(
       `INSERT INTO cash_shifts (id, area, shift_number, opened_at, status)
-       VALUES ($1, 'reception', 900001, NOW(), 'open')`,
-      [shiftId],
+       VALUES ($1, $2, 900001, NOW(), 'open')`,
+      [shiftId, area],
     );
     try {
       const payment = await storage.createReservationPaymentWithLedger({

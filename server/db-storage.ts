@@ -1772,8 +1772,8 @@ export class DatabaseStorage implements IStorage {
         if (existing.rows.length) return;
         const openShift = await tx.execute(sql`
           SELECT id FROM cash_shifts
-          WHERE area IN ('reception', 'recepcion') AND status = 'open'
-          ORDER BY opened_at DESC
+          WHERE ${inArray(cashShifts.area, getCashShiftAreaVariants("reception"))} AND status = 'open'
+          ORDER BY opened_at DESC, id ASC
           LIMIT 1 FOR UPDATE
         `);
         const shiftId = (openShift.rows[0] as any)?.id;
@@ -1865,8 +1865,8 @@ export class DatabaseStorage implements IStorage {
         // rows using another spelling remain untouched.
         const openShift = await tx.execute(sql`
           SELECT id FROM cash_shifts
-          WHERE area = 'reception' AND status = 'open'
-          ORDER BY opened_at DESC
+          WHERE ${inArray(cashShifts.area, getCashShiftAreaVariants("reception"))} AND status = 'open'
+          ORDER BY opened_at DESC, id ASC
           LIMIT 1
           FOR UPDATE
         `);
@@ -3761,8 +3761,8 @@ export class DatabaseStorage implements IStorage {
       if (cashRows.length > 0) {
         const openShift = await tx.execute(sql`
           SELECT id FROM cash_shifts
-          WHERE area = 'reception' AND status = 'open'
-          ORDER BY opened_at DESC
+          WHERE ${inArray(cashShifts.area, getCashShiftAreaVariants("reception"))} AND status = 'open'
+          ORDER BY opened_at DESC, id ASC
           LIMIT 1
           FOR UPDATE
         `);

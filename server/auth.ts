@@ -8,6 +8,7 @@ import { db, pool } from "./db";
 import { systemUsers, failedLoginAttempts } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { Express, Request, Response, NextFunction } from "express";
+import { createSessionStoreReadiness } from "./sessionStoreSchema";
 import { hasPermission } from "./permissions";
 
 const SALT_ROUNDS = 10;
@@ -75,6 +76,19 @@ async function recordLoginAttempt(
 
 export function setupAuth(app: Express) {
   const PgSession = connectPgSimple(session);
+
+  // Routes are registered before background migrations finish. Hold session
+  // requests until their own schema exists, including on a brand-new database.
+  const sessionStoreReady = createSessionStoreReadiness(pool, () => {
+    console.error("[auth] No se pudo preparar el almacenamiento de sesiones.");
+  });
+  void sessionStoreReady();
+  app.use(async (_req, res, next) => {
+    if (!await sessionStoreReady()) {
+      return res.status(503).json({ error: "El inicio de sesión no está disponible. Revisá la inicialización del servidor." });
+    }
+    next();
+  });
 
   app.use(
     session({

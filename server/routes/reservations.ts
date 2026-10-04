@@ -12,9 +12,14 @@ import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
+import {
+  anularManualChargeLegacy,
+  manualChargeHasSourceLedger,
+  registerManualChargeActionRoutes,
+} from "./manual-charge-actions";
 import {
   getAvailableReservationAdvancePayments,
   getAvailableReservationAdvanceTotal,
@@ -98,6 +103,8 @@ export function calculateGroupPersonalExtrasCap(input: {
 }
 
 export function registerReservationsRoutes(app: Express) {
+  registerManualChargeActionRoutes(app);
+
   // ── PDF confirmation download ───────────────────────────────────────────────
   app.get("/api/reservations/:id/confirmation-pdf", requireAuth, handleConfirmationPdf);
 
@@ -1889,7 +1896,7 @@ export function registerReservationsRoutes(app: Express) {
       const charge = await storage.createCharge(req.body);
       // Motor financiero: escribir al folio de la reserva
       if (charge.reservationId) {
-        storage.addFolioCharge(
+        await storage.addFolioCharge(
           "reservation",
           charge.reservationId,
           parseFloat(charge.amount),
@@ -1897,7 +1904,7 @@ export function registerReservationsRoutes(app: Express) {
           "charge",
           charge.id,
           (req as any).user?.username,
-        ).catch(e => console.error("[Folio] Error escribiendo cargo:", e));
+        );
       }
       res.status(201).json(charge);
     } catch (error) {
@@ -1905,7 +1912,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/charges/:id", async (req, res) => {
+  app.patch("/api/charges/:id", requireAuth, requireRole(["admin", "manager", "reception"]), async (req, res) => {
     try {
       const existing = await storage.getCharge(req.params.id);
       if (!existing) {
@@ -1917,6 +1924,9 @@ export function registerReservationsRoutes(app: Express) {
           return res.status(403).json({ error: "No se puede modificar cargos de una reserva cerrada de días anteriores" });
         }
       }
+      if (existing.reservationId) {
+        return res.status(409).json({ error: "Los cargos de reserva solo pueden editarse desde la acción segura de extras de prefactura." });
+      }
       const charge = await storage.updateCharge(req.params.id, req.body);
       res.json(charge);
     } catch (error) {
@@ -1924,10 +1934,10 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/charges/:id/anular", requireAuth, async (req, res) => {
+  app.patch("/api/charges/:id/anular", requireAuth, requireRole(["admin", "manager", "reception"]), async (req, res) => {
     try {
       const { motivoAnulacion, anuladoPor } = req.body;
-      if (!motivoAnulacion?.trim()) {
+      if (typeof motivoAnulacion !== "string" || !motivoAnulacion.trim()) {
         return res.status(400).json({ error: "El motivo de anulación es requerido" });
       }
       const existing = await storage.getCharge(req.params.id);
@@ -1939,13 +1949,29 @@ export function registerReservationsRoutes(app: Express) {
           return res.status(403).json({ error: "No se puede anular cargos de una reserva cerrada" });
         }
       }
+      if (existing.reservationId && await manualChargeHasSourceLedger(existing.id)) {
+        const updated = await anularManualChargeLegacy(
+          existing.reservationId,
+          { id: existing.id, description: existing.description, amount: existing.amount },
+          motivoAnulacion,
+          {
+            id: String((req as any).user?.id ?? ""),
+            name: String((req as any).user?.username ?? (req as any).user?.fullName ?? ""),
+            ipAddress: String(req.ip ?? req.socket?.remoteAddress ?? ""),
+          },
+        );
+        return res.json(updated);
+      }
+      if (existing.reservationId) {
+        return res.status(409).json({ error: "Los cargos de reserva solo pueden anularse desde la acción segura de extras de prefactura." });
+      }
       const [updated] = await db.update(charges)
         .set({ status: "anulado", anuladoPor: anuladoPor || null, motivoAnulacion, anuladoAt: new Date() })
         .where(eq(charges.id, req.params.id))
         .returning();
       res.json(updated);
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -2025,12 +2051,21 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/charges/:id", async (req, res) => {
+  app.delete("/api/charges/:id", requireAuth, requireRole(["admin", "manager", "reception"]), async (req, res) => {
     console.warn(`[DEPRECADO] DELETE /api/charges/${req.params.id} — usar PATCH /anular`);
     try {
       const existing = await storage.getCharge(req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Charge not found" });
+      }
+      if (existing.reservationId) {
+        const reservation = await storage.getReservation(existing.reservationId);
+        if (reservation && isReservationLocked(reservation)) {
+          return res.status(403).json({ error: "No se pueden eliminar cargos de una reserva cerrada de días anteriores" });
+        }
+      }
+      if (existing.reservationId || await manualChargeHasSourceLedger(existing.id)) {
+        return res.status(409).json({ error: "No se pueden eliminar cargos con posible evidencia financiera. Usá la acción segura de anulación de extras." });
       }
       if (existing.reservationId) {
         const reservation = await storage.getReservation(existing.reservationId);

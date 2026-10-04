@@ -19,6 +19,7 @@ import { verifyFinancialSchema } from "../migrate";
  */
 
 vi.mock("../auth", () => ({
+  requireRole: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { username: "recepcion-pg-tester" };
     next();
