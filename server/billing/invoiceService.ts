@@ -215,13 +215,30 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-/** Contador local — solo se usa en modo ficticio y homologación */
+/**
+ * Contador local — solo se usa en modo ficticio (ni AFIP ni ARCA lo conocen;
+ * acá la única fuente de verdad es esta misma base).
+ *
+ * Siempre respeta el número más alto que sales_invoices ya tenga para ese
+ * tipo+punto_venta, aunque el contador nunca se haya actualizado para llegar
+ * ahí (por ejemplo: una fila cargada por otra vía — una sincronización desde
+ * AFIP en homologación/producción que alcanzó a insertar la factura pero no
+ * llegó a sincronizar el contador, un dato de prueba o una importación
+ * manual). Sin este resguardo, el contador podía devolver un número ya
+ * ocupado y chocar contra la restricción única de sales_invoices.
+ */
 async function getNextInvoiceNumber(tipo: string, puntoVenta: number): Promise<number> {
   const result = await db.execute(sql`
     INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
-    VALUES (${tipo}, ${puntoVenta}, 1)
+    VALUES (
+      ${tipo}, ${puntoVenta},
+      COALESCE((SELECT MAX(numero) FROM sales_invoices WHERE tipo_comprobante = ${tipo} AND punto_venta = ${puntoVenta}), 0) + 1
+    )
     ON CONFLICT (tipo_comprobante, punto_venta)
-    DO UPDATE SET ultimo_numero = invoice_counters.ultimo_numero + 1
+    DO UPDATE SET ultimo_numero = GREATEST(
+      invoice_counters.ultimo_numero + 1,
+      COALESCE((SELECT MAX(numero) FROM sales_invoices WHERE tipo_comprobante = ${tipo} AND punto_venta = ${puntoVenta}), 0) + 1
+    )
     RETURNING ultimo_numero
   `);
   return (result.rows[0] as any).ultimo_numero;
