@@ -1,4 +1,4 @@
-import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { resolveFiscalRecipientDocument, resolveCondicionIvaReceptorId } from "./fiscalDocument";
 
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
@@ -195,6 +195,7 @@ export async function feCAESolicitar(
   });
   const docTipo = recipientDocument.tipo;
   const docNro = recipientDocument.numero;
+  const condicionIvaReceptorId = resolveCondicionIvaReceptorId(req.clienteCondicionIva);
   const ivaBlock = buildIvaBlock(req.montoNeto21, req.montoIva21, req.montoNeto105, req.montoIva105);
   const impIva   = (req.montoIva21 + req.montoIva105).toFixed(2);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
@@ -234,6 +235,7 @@ export async function feCAESolicitar(
     `<ar:MonCotiz>1</ar:MonCotiz>` +
     `${cbtesAsocBlock}` +
     `${ivaBlock}` +
+    `<ar:CondicionIVAReceptorId>${condicionIvaReceptorId}</ar:CondicionIVAReceptorId>` +
     `</ar:FECAEDetRequest></ar:FeDetReq>` +
     `</ar:FeCAEReq>` +
     `</ar:FECAESolicitar></soapenv:Body></soapenv:Envelope>`;

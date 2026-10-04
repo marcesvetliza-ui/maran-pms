@@ -33,3 +33,26 @@ export function resolveFiscalRecipientDocument(input: {
   if (dni) return { tipo: 96, numero: dni };
   return { tipo: 99, numero: "0" };
 }
+
+/**
+ * ARCA's CondicionIVAReceptorId (AFIP table FEParamGetCondicionIvaReceptor),
+ * mandatory on every FECAESolicitar since RG 5616. Accepts both the
+ * snake_case IvaCondition codes (companies.condicionIva/agencies.condicionIva)
+ * and the Title Case labels the billing dialog stores on
+ * sales_invoices.cliente_condicion_iva (CONDICION_IVA_OPTIONS in billing.tsx)
+ * — both reach here depending on which flow built the invoice.
+ */
+const CONDICION_IVA_RECEPTOR_ID: Record<string, number> = {
+  responsable_inscripto: 1,
+  exento: 4,
+  consumidor_final: 5,
+  no_responsable: 5,
+  monotributo: 6,
+  monotributista: 6,
+  no_categorizado: 7,
+};
+
+export function resolveCondicionIvaReceptorId(condicionIva: unknown): number {
+  const normalized = String(condicionIva ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return CONDICION_IVA_RECEPTOR_ID[normalized] ?? 5; // Consumidor Final: la condición más permisiva (Factura B/C) si no se reconoce el valor.
+}
