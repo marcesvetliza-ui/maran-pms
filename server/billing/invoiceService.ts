@@ -277,6 +277,42 @@ async function getNextInvoiceNumberFromAfip(
   return proximo;
 }
 
+/**
+ * Frees a (tipo_comprobante, punto_venta, numero) slot occupied by a stale
+ * "autorizacion_pendiente" draft, but only after ARCA itself confirms — via
+ * FECompConsultar — that it never authorized that number. Returns false
+ * (without deleting anything) whenever that can't be established safely:
+ * no row there, the row isn't a pending draft, or ARCA reports it as
+ * authorized after all. Never call this for a row this same request didn't
+ * just fail to insert past.
+ */
+async function freeStaleRejectedDraft(
+  tipo: string,
+  puntoVenta: number,
+  numero: number,
+  token: string,
+  sign: string,
+  cuitEmisor: string,
+  wsfeUrl: string,
+  ambiente: "homologacion" | "produccion",
+): Promise<boolean> {
+  const existing = await db.execute(sql`
+    SELECT id FROM sales_invoices
+    WHERE tipo_comprobante = ${tipo} AND punto_venta = ${puntoVenta} AND numero = ${numero}
+      AND estado = 'autorizacion_pendiente'
+    LIMIT 1
+  `);
+  const row = existing.rows[0] as any;
+  if (!row) return false;
+
+  const { feCompConsultar } = await import("./wsfevClient");
+  const authorized = await feCompConsultar({ tipo, puntoVenta, numero, cuitEmisor, token, sign }, ambiente);
+  if (authorized) return false; // ARCA sí la autorizó — no es un borrador huérfano, no se toca.
+
+  await db.delete(salesInvoices).where(eq(salesInvoices.id, Number(row.id)));
+  return true;
+}
+
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
   if (isUnsupportedSaleType(data.tipoComprobante)) {
     throw Object.assign(
@@ -434,8 +470,30 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     // The draft must exist before the outbound ARCA call. If the process stops
     // after ARCA authorizes it, the original invoice, its exact charge mapping
     // and a resolvable pending NC are already stored locally.
+    //
+    // getNextInvoiceNumberFromAfip always asks AFIP for its own last-authorized
+    // number, so a prior attempt that never got a CAE (ARCA rejected it, or the
+    // request never reached ARCA at all) hands back that exact same "next"
+    // number again. If that same prior attempt got far enough to insert its own
+    // pending draft, this insert collides with it (sales_invoices' unique
+    // (tipo_comprobante, punto_venta, numero) constraint) — the retry can never
+    // proceed, even with corrected data, until that stale draft is cleared.
+    // One bounded retry: on that exact collision, confirm with ARCA itself
+    // (feCompConsultar) that the blocking draft was indeed never authorized,
+    // then free it and insert again. A row ARCA confirms as authorized is left
+    // untouched — this never discards a real comprobante.
     if (recoverableBeforeAuthorization && !pendingInvoice) {
-      await insertPendingInvoice();
+      try {
+        await insertPendingInvoice();
+      } catch (err: any) {
+        if (err?.code !== "23505" || !(await freeStaleRejectedDraft(
+          data.tipoComprobante, puntoVenta, numero, token, sign, cuitAuth, wsfeUrl,
+          ambiente as "homologacion" | "produccion",
+        ))) {
+          throw err;
+        }
+        await insertPendingInvoice();
+      }
     }
 
     // The fiscal dates must use the same Argentina calendar day stored on the invoice.

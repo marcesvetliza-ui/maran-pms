@@ -949,6 +949,32 @@ function incrementalIndexSql(key: IncrementalIndexKey): string {
   return createIndexWithoutRerunNotice(definition.indexName, definition.createSql);
 }
 
+/**
+ * Already enforced in production (a comprobante must never share tipo +
+ * punto_venta + numero with another), but missing from the migration chain —
+ * a fresh database built purely from migrate.ts never got it. Audited and
+ * guarded the same way as the other constraints added after the table had
+ * real data: skip instead of failing startup if duplicates somehow exist.
+ */
+export const SALES_INVOICES_TIPO_PV_NUMERO_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conname = 'sales_invoices_tipo_comprobante_punto_venta_numero_key'
+        AND conrelid = 'sales_invoices'::regclass
+    ) AND NOT EXISTS (
+      SELECT 1 FROM sales_invoices
+      GROUP BY tipo_comprobante, punto_venta, numero
+      HAVING COUNT(*) > 1
+    ) THEN
+      ALTER TABLE sales_invoices
+        ADD CONSTRAINT sales_invoices_tipo_comprobante_punto_venta_numero_key
+        UNIQUE (tipo_comprobante, punto_venta, numero);
+    END IF;
+  END $$
+`);
+
 export const CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL = serializeIncrementalDdl(`
   DO $$
   BEGIN
@@ -3417,6 +3443,13 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // duplicate-relation warnings when the index already exists.
   await withTimeout("cash_register_configs.area_unique", T, () =>
     db.execute(sql.raw(CASH_REGISTER_CONFIGS_AREA_UNIQUE_MIGRATION_SQL))
+  );
+
+  // sales_invoices: unique constraint on (tipo_comprobante, punto_venta, numero) —
+  // already present in production, missing from a database built only from
+  // migrate.ts. See SALES_INVOICES_TIPO_PV_NUMERO_UNIQUE_MIGRATION_SQL above.
+  await withTimeout("sales_invoices.tipo_pv_numero_unique", T, () =>
+    db.execute(sql.raw(SALES_INVOICES_TIPO_PV_NUMERO_UNIQUE_MIGRATION_SQL))
   );
 
   // ── Seed inicial de empresas y agencias ──────────────────────────────────

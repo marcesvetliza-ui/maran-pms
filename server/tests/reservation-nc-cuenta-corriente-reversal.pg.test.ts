@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Guards the fix for: crediting (Nota de Crédito) a reservation invoice that
@@ -41,6 +41,8 @@ const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe
 const pool = process.env.DATABASE_URL
   ? new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
   : null;
+
+const originalFetch = global.fetch;
 
 let baseUrl = "";
 let httpServer: http.Server | null = null;
@@ -87,6 +89,25 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     mocks.getTokenAuth.mockResolvedValue({ token: "test-token", sign: "test-sign" });
     mocks.feCompConsultar.mockResolvedValue({ cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") });
     mocks.feCAESolicitar.mockResolvedValue({ cae: "71234567890123", caeFechaVto: new Date("2026-09-10T12:00:00Z") });
+
+    // emitirFactura asks AFIP for its own last-authorized number (FECompUltimoAutorizado)
+    // before every NC, not just the first — each one here must get its own
+    // fiscal number, exactly like two real, separately-authorized NCs would.
+    // Only the outbound call to AFIP's own WSFE host is faked; the test's own
+    // requests to its local Express server (postNotaCredito) must go through
+    // untouched.
+    let lastAuthorized = 0;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (!url.includes("afip.gov.ar")) return originalFetch(input as any, init);
+      const body = `<soap:Envelope><CbteNro>${lastAuthorized}</CbteNro></soap:Envelope>`;
+      lastAuthorized += 1;
+      return new Response(body, { status: 200 });
+    }) as any;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   it("acredita el saldo de cuenta corriente exactamente en el monto de la NC, y una segunda NC nunca lo pasa de cero", async () => {
