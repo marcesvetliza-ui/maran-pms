@@ -767,21 +767,35 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservation?.id, open, companies.length, agencies.length]);
 
-  // Auto-suggest default POS. Falls back to billing_config.puntoVenta
-  // whenever pos_configs no tiene filas activas para matchear — antes, ese
+  // Auto-suggest default POS. En homologación hay un único PV válido (el
+  // dedicado a pruebas, separado del de producción a propósito) — nunca se
+  // ofrece ni se sugiere otro. Fuera de homologación, se prioriza el PV con
+  // el que el usuario inició la sesión (localStorage, el mismo que muestra
+  // la barra superior) antes que el configurado en Facturación o el primero
+  // de la lista: facturar con el PV de Recepción activo, no con uno
+  // arbitrario, es lo esperable. Falls back a billing_config.puntoVenta
+  // cuando pos_configs no tiene filas activas para matchear — antes, ese
   // fallback solo se probaba si pos_configs estaba vacía del todo, así que
   // con filas inactivas o sin match quedaba en blanco para siempre.
   useEffect(() => {
     if (puntoVenta) return;
+    if (billingConfig?.arcaAmbiente === "homologacion") {
+      if (billingConfig?.puntoVentaHomolog) setPuntoVenta(String(billingConfig.puntoVentaHomolog));
+      return;
+    }
     const activePos = posConfigs.filter((p: any) => p.activo !== false);
+    const sessionPosNumero = Number(localStorage.getItem("maranPosNumero"));
+    const sessionPos = Number.isFinite(sessionPosNumero)
+      ? activePos.find((p: any) => p.numero === sessionPosNumero)
+      : undefined;
     const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
-    const defaultPos = configuredPos || activePos[0];
+    const defaultPos = sessionPos || configuredPos || activePos[0];
     if (defaultPos) {
       setPuntoVenta(String(defaultPos.numero));
     } else if (billingConfig?.puntoVenta) {
       setPuntoVenta(String(billingConfig.puntoVenta));
     }
-  }, [posConfigs, billingConfig?.puntoVenta, puntoVenta]);
+  }, [posConfigs, billingConfig?.puntoVenta, billingConfig?.puntoVentaHomolog, billingConfig?.arcaAmbiente, puntoVenta]);
 
   function fillFromReservation(
     res: ReservationWithDetails,
@@ -1094,12 +1108,19 @@ export function PrefacturaDialog({
   // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
   // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
   // se ofrece igual el PV único de billing_config en vez de dejarlo vacío.
+  // En homologación, los PV operativos (Recepción, Restaurant, etc. — son de
+  // producción) ni se muestran: mezclar su numeración con la del PV de
+  // pruebas es justo lo que ese PV dedicado existe para evitar.
   const activePosConfigs = posConfigs.filter((p: any) => p.activo !== false);
-  const posOptions = activePosConfigs.length > 0
-    ? activePosConfigs
-    : billingConfig?.puntoVenta
-      ? [{ id: "default-pv", numero: billingConfig.puntoVenta, nombre: "" }]
-      : [];
+  const posOptions = ambiente === "homologacion"
+    ? (billingConfig?.puntoVentaHomolog
+        ? [{ id: "pv-homologacion", numero: billingConfig.puntoVentaHomolog, nombre: "Homologación (pruebas ARCA)" }]
+        : [])
+    : activePosConfigs.length > 0
+      ? activePosConfigs
+      : billingConfig?.puntoVenta
+        ? [{ id: "default-pv", numero: billingConfig.puntoVenta, nombre: "" }]
+        : [];
 
   // A linked company/agency is a billing option, never a forced recipient:
   // reception must still be able to issue the stay to the guest. And it's
