@@ -583,7 +583,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     return finalized;
   }
 
-  const [factura] = await db.insert(salesInvoices).values({
+  const finalValues: typeof salesInvoices.$inferInsert = {
     tipoComprobante: data.tipoComprobante,
     puntoVenta,
     numero,
@@ -627,7 +627,39 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     sourceChargeIds: data.sourceChargeIds ?? null,
     sourceChargeAmounts: data.sourceChargeAmounts ?? null,
     observaciones: data.observaciones || null,
-  }).returning();
+  };
 
-  return factura;
+  try {
+    const [factura] = await db.insert(salesInvoices).values(finalValues).returning();
+    return factura;
+  } catch (err: any) {
+    if (err?.code !== "23505") throw err;
+    // ARCA already handed back a real CAE for (tipo, punto_venta, numero) — this
+    // is never a stale draft to clean up (this non-recoverable path only
+    // inserts here, after authorization, so nothing of its own could already
+    // be sitting on that number). A matching CAE means an earlier attempt's
+    // response never reached the caller (timeout, dropped connection) and
+    // this is the exact same invoice: return it instead of erroring out from
+    // under a comprobante ARCA has already legitimately issued. Anything else
+    // is a genuine anomaly — a different, unrelated invoice already holds
+    // this exact number — and must surface for manual review, never be
+    // guessed at.
+    const existing = await db.execute(sql`
+      SELECT * FROM sales_invoices
+      WHERE tipo_comprobante = ${data.tipoComprobante} AND punto_venta = ${puntoVenta} AND numero = ${numero}
+      LIMIT 1
+    `);
+    const row = existing.rows[0] as any;
+    if (row && row.cae === cae) {
+      return row as typeof salesInvoices.$inferSelect;
+    }
+    throw Object.assign(
+      new Error(
+        `ARCA autorizó CAE ${cae} para ${data.tipoComprobante} ${puntoVenta}-${numero}, pero ese número ya está ` +
+        `ocupado localmente por otro comprobante${row ? ` (id ${row.id}, CAE ${row.cae || "sin CAE"})` : ""}. ` +
+        `Requiere revisión manual antes de reintentar — no se descartó nada.`
+      ),
+      { statusCode: 409 },
+    );
+  }
 }
