@@ -2327,6 +2327,18 @@ export async function registerRoutes(
       const [mov] = await db.select().from(cashMovements).where(eq(cashMovements.id, req.params.id));
       if (!mov) return res.status(404).json({ error: "Movimiento no encontrado" });
       if (mov.anulado) return res.status(400).json({ error: "Ya está anulado" });
+      // La UI solo muestra el botón de anular para movimientos "manual" (los
+      // que el propio usuario cargó en Caja) o para admin/manager/jefe de
+      // recepción/resp. administración (api:cash:area-admin, "anular
+      // ajenos"). El servidor solo exigía estar autenticado, así que
+      // cualquier sesión (mozo, reception) podía anular por API un cobro de
+      // Restaurant/SPA/Reserva/etc. que la UI le ocultaba.
+      if (mov.sourceType !== "manual") {
+        const user = req.user as any;
+        if (!user || !hasPermission(String(user.role || ""), "api:cash:area-admin")) {
+          return res.status(403).json({ error: "Solo administración puede anular un movimiento que no sea manual" });
+        }
+      }
       if (mov.shiftId && !forceAdmin) {
         const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, mov.shiftId));
         if (shift && shift.status === "closed") {
@@ -2406,6 +2418,44 @@ export async function registerRoutes(
           }
         } catch (e) {
           console.error("[anular-caja] propagación al folio:", e);
+        }
+      }
+
+      // ── Movimientos de Restaurant no tienen payment_id (no pasan por la
+      // tabla `payments`) — su cobro queda únicamente en el folio del pedido
+      // (entity_type='restaurant_order'), escrito por POST /close. Sin este
+      // contraasiento, anular el cobro en Caja dejaba el folio del pedido con
+      // el pago "vivo" (total_payments y balance sin cambios).
+      if (["restaurant_order", "restaurant_split", "restaurant_partial"].includes(mov.sourceType || "") && mov.sourceId) {
+        try {
+          const orderFolioRows = await db.execute(sql`
+            SELECT id FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = ${mov.sourceId} LIMIT 1
+          `);
+          const orderFolio = orderFolioRows.rows?.[0] as any;
+          if (orderFolio) {
+            const originalRows = await db.execute(sql`
+              SELECT fm.id FROM folio_movements fm
+              WHERE fm.folio_id = ${orderFolio.id} AND fm.type = 'payment' AND fm.source_type = 'restaurant_payment'
+                AND fm.source_id = ${mov.sourceId} AND fm.amount::numeric = ${mov.amount}::numeric
+                AND NOT EXISTS (
+                  SELECT 1 FROM folio_movements v
+                  WHERE v.folio_id = ${orderFolio.id} AND v.type = 'void' AND v.voided_movement_id = fm.id
+                )
+              LIMIT 2
+            `);
+            if (originalRows.rows.length === 1) {
+              const originalId = (originalRows.rows[0] as any).id;
+              await storage.addFolioAdjustment(
+                orderFolio.id, "void", -parseFloat(mov.amount),
+                `Anulación caja — ${mov.paymentMethod} — ${motivoAnulacion}`,
+                operator, originalId, motivoAnulacion,
+              );
+            } else {
+              console.warn(`[anular-caja] No se encontró un pago de folio unívoco para el pedido ${mov.sourceId} (candidatos: ${originalRows.rows.length})`);
+            }
+          }
+        } catch (e) {
+          console.error("[anular-caja] propagación al folio de restaurant:", e);
         }
       }
 
