@@ -25,7 +25,6 @@ import { format, addDays, subDays, startOfDay, parseISO, isSameDay, startOfWeek,
 import { es } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
-import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { EmitirFacturaDialog, type EmitirFacturaInitialValues } from "./billing";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
@@ -1948,8 +1947,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <Settings className="h-4 w-4 mr-1" /> Configuración
           </Button>
         </div>
-
-        <EmitirComprobanteButton area="spa" />
       </div>
 
       {activeTab === "agenda" && (
@@ -2021,23 +2018,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               >
                 <Receipt className="h-4 w-4 mr-2" /> Turnos vendidos
               </Button>
-              {viewMode === "daily" && (
-                <Button onClick={() => {
-                  setIsEditMode(false);
-                  setEditingAppointmentId(null);
-                  setEditingAppointmentResources([]);
-                  setCircuitBookings([]);
-                  setCircuitDraftTreatmentId(null);
-                  form.reset({
-                    cabinId: "", treatmentId: "", guestName: "", guestLastName: "",
-                    guestPhone: "", guestEmail: "", appointmentDate: dateStr,
-                    startTime: "", reservationId: "", notes: "",
-                  });
-                  setIsNewDialogOpen(true);
-                }} data-testid="button-new-appointment">
-                  <Plus className="h-4 w-4 mr-2" /> Nuevo Turno
-                </Button>
-              )}
             </div>
           </div>
 
