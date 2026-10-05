@@ -56,6 +56,26 @@ async function createOpenOrder(total: string, extra: Record<string, unknown> = {
   return orderId;
 }
 
+// POST /close escribe el folio del pedido (entityType="restaurant_order")
+// en un .then() sin esperarlo (fire-and-forget, server/routes/restaurant.ts
+// — el mismo patrón ya documentado en restaurant-invoice-cash-edit.pg.test.ts).
+// Sin esperarlo, la limpieza del test puede borrar `folios` mientras ese
+// .then() todavía está en vuelo; cuando aterriza, reinserta folio_movements
+// contra un folio ya borrado o deja una fila huérfana que choca contra
+// folio_movements_folio_id_folios_id_fk al intentar borrar `folios` después.
+async function waitForOrderFolioSettled(orderId: string, expectedTotal: number) {
+  for (let i = 0; i < 40; i++) {
+    const row = await pool!.query(
+      "SELECT total_payments FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1",
+      [orderId],
+    );
+    const paid = parseFloat(row.rows[0]?.total_payments ?? "0");
+    if (paid >= expectedTotal - 0.01) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Folio del pedido ${orderId} nunca reflejó el pago (fire-and-forget no completó a tiempo)`);
+}
+
 async function cleanupOrder(orderId: string) {
   await pool!.query("DELETE FROM order_splits WHERE order_id = $1", [orderId]);
   await pool!.query("DELETE FROM order_items WHERE order_id = $1", [orderId]);
@@ -145,6 +165,7 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         );
         expect(cash.rows).toHaveLength(1);
       } finally {
+        await waitForOrderFolioSettled(orderId, 100);
         await cleanupOrder(orderId);
       }
     });
@@ -169,6 +190,7 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         const orderRow = await pool.query("SELECT status FROM restaurant_orders WHERE id = $1", [orderId]);
         expect(orderRow.rows[0].status).toBe("closed");
       } finally {
+        await waitForOrderFolioSettled(orderId, 250);
         await cleanupOrder(orderId);
       }
     });
@@ -290,6 +312,7 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         `, [reservationId]);
         expect(folioMovement.rows).toEqual([{ type: "charge", amount: "180.00" }]);
       } finally {
+        await waitForOrderFolioSettled(orderId, 180);
         await cleanupOrder(orderId);
         await cleanupReservationFixture(reservationId);
       }
