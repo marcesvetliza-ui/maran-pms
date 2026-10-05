@@ -13,6 +13,7 @@ import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceServi
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth, requireRole } from "../auth";
+import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
 import {
@@ -2754,6 +2755,14 @@ export function registerReservationsRoutes(app: Express) {
     let lockedReservationId: string | undefined;
     let groupRowTransactionOpen = false;
     try {
+      const user = (req as any).user;
+      const paymentRequest = parseReservationPaymentRequest(req.body, String(user?.id || user?.username || ""));
+      delete req.body.paymentRequestId;
+      delete req.body.paymentRequestFingerprint;
+      if (paymentRequest) {
+        const existing = await storage.getReservationPaymentRequest(paymentRequest);
+        if (existing) return res.status(200).json(existing);
+      }
       if (req.body.method === "cuenta_corriente") assertFinancialSchemaReady();
       // Prefactura emits the invoice before recording its payment. Persist the
       // invoice reference with the payment creation itself instead of relying
@@ -2807,6 +2816,12 @@ export function registerReservationsRoutes(app: Express) {
           );
           await groupPaymentLockClient.query("BEGIN");
           groupRowTransactionOpen = true;
+          // A concurrent retry may have waited for the original collection.
+          // Replay it before recalculating the now-reduced extras allowance.
+          if (paymentRequest) {
+            const existing = await storage.getReservationPaymentRequest(paymentRequest);
+            if (existing) return res.status(200).json(existing);
+          }
           await groupPaymentLockClient.query(
             "SELECT id FROM groups WHERE id = $1 FOR UPDATE",
             [groupLink.groupId],
@@ -2977,6 +2992,7 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
       const payment = await storage.createReservationPaymentWithLedger({
+        paymentRequest,
         payment: req.body,
         sourceLabel: groupPersonalExtras ? `[personal_extras] ${cashLabel}` : cashLabel,
         registeredBy: (req as any).user?.username,
@@ -2984,6 +3000,7 @@ export function registerReservationsRoutes(app: Express) {
         accountSettlement,
       });
 
+      if (payment.paymentRequestReplayed) return res.status(200).json(payment);
       await audit(req, "create", "payments",
         `${groupPersonalExtras ? "Pago de extras personales" : "Pago registrado"}: $${req.body.amount} (${req.body.method}) — Reserva ${req.body.reservationId || "N/A"}`,
         { entityType: "payment", entityId: payment.id }

@@ -137,6 +137,7 @@ describe("PrefacturaDialog — retención impositiva en el cobro", () => {
   let fetchMock: ReturnType<typeof buildFetchMock>;
 
   beforeEach(() => {
+    sessionStorage.clear();
     fetchMock = buildFetchMock();
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("open", vi.fn());
@@ -164,6 +165,8 @@ describe("PrefacturaDialog — retención impositiva en el cobro", () => {
     const retPost = posts.find(p => p.method === "retencion_iibb");
     expect(netPost).toMatchObject({ amount: "98.00" });
     expect(retPost).toMatchObject({ amount: "2.00" });
+    expect(netPost.paymentRequestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(retPost.paymentRequestId).not.toBe(netPost.paymentRequestId);
     // La retención nunca es plata real: nunca debe viajar bajo el método de
     // pago elegido para el neto.
     expect(posts.every(p => p.method !== "efectivo" || p.amount === "98.00")).toBe(true);
@@ -180,5 +183,72 @@ describe("PrefacturaDialog — retención impositiva en el cobro", () => {
     await waitFor(() => expect(paymentPosts(fetchMock).length).toBe(1));
     const posts = paymentPosts(fetchMock);
     expect(posts[0]).toMatchObject({ method: "efectivo", amount: "100.00" });
+  });
+
+  it.each(["efectivo", "retencion_iibb"])("reintenta una respuesta perdida de %s aun después de cerrar y abrir", async lostMethod => {
+    const baseFetch = buildFetchMock();
+    let lose = true;
+    const recorded = new Map<string, unknown>();
+    fetchMock = vi.fn(async (url, options) => {
+      if (String(url) === "/api/payments" && options?.method === "POST") {
+        const body = JSON.parse(String(options.body));
+        recorded.set(body.paymentRequestId, body);
+        if (body.method === lostMethod && lose) {
+          lose = false;
+          throw new Error("Respuesta perdida");
+        }
+      }
+      return baseFetch(url, options);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(<Wrapper><PrefacturaDialog open onClose={vi.fn()} reservationId={RESERVATION_ID} reservation={RESERVATION} mode="billing" /></Wrapper>);
+    const amount = await screen.findByTestId("input-payment-amount-0");
+    await user.clear(amount);
+    await user.type(amount, "98");
+    await user.click(screen.getByTestId("btn-add-retencion-0"));
+    await user.type(screen.getByTestId("input-retencion-monto-0"), "2");
+    await user.click(screen.getByTestId("button-registrar-emitir"));
+    await screen.findByText("Respuesta perdida");
+    view.unmount();
+    renderDialog();
+    await user.click(await screen.findByTestId("button-retry-prefactura"));
+    await waitFor(() => expect(recorded.size).toBe(2));
+    await waitFor(() => expect(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)).toBeNull());
+    const posts = paymentPosts(fetchMock);
+    expect(posts.filter(p => p.method === "efectivo")).toHaveLength(2);
+    expect(posts[0]).toEqual(posts.find((p, index) => index > 0 && p.method === "efectivo"));
+    const retention = posts.filter(p => p.method === "retencion_iibb");
+    if (lostMethod === "retencion_iibb") expect(retention[0]).toEqual(retention[1]);
+    expect(baseFetch.mock.calls.filter(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toHaveLength(1);
+  });
+
+  it.each([false, true])("solo permite corregir un rechazo cuando no existe un comprobante persistido (exists=%s)", async exists => {
+    const baseFetch = buildFetchMock();
+    fetchMock = vi.fn(async (url, options) => {
+      if (String(url) === "/api/billing/invoices" && options?.method === "POST") {
+        return new Response(JSON.stringify({ error: "Datos fiscales rechazados" }), { status: 400 });
+      }
+      if (String(url).endsWith("/status") && String(url).includes("/operations/")) {
+        return new Response(JSON.stringify({ exists }), { status: 200 });
+      }
+      return baseFetch(url, options);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderDialog();
+    const button = await screen.findByTestId("button-registrar-emitir");
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await screen.findByText(/Datos fiscales rechazados/);
+    expect(paymentPosts(fetchMock)).toHaveLength(0);
+    if (exists) {
+      expect(screen.getByTestId("button-retry-prefactura")).toBeEnabled();
+      expect(button).toBeDisabled();
+    } else {
+      expect(screen.queryByTestId("button-retry-prefactura")).not.toBeInTheDocument();
+      expect(button).toBeEnabled();
+      expect(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)).toBeNull();
+    }
   });
 });

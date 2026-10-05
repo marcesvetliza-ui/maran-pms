@@ -2413,6 +2413,29 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
+  // Read-only proof for a definitively rejected submission. The browser must
+  // never discard a retry identity merely because it did not receive an invoice.
+  app.get("/api/billing/reservations/:reservationId/operations/:operationId/status", requireAuth, async (req, res) => {
+    const { reservationId, operationId } = req.params;
+    if (!/^[0-9a-f-]{20,}$/i.test(operationId)) {
+      return res.status(400).json({ error: "Operación de liquidación inválida" });
+    }
+    try {
+      const exists = await withReservationInvoiceLock(reservationId, async () => {
+        const result = await db.execute(sql`
+          SELECT id FROM sales_invoices
+          WHERE reserva_id = ${reservationId}
+            AND credit_reapplication_intent->>'operationId' = ${operationId}
+          LIMIT 1
+        `);
+        return result.rows.length > 0;
+      });
+      res.json({ exists });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "No se pudo verificar la operación" });
+    }
+  });
+
   // Resume only the local, server-side settlement saga. This endpoint never
   // allocates a number or contacts ARCA.
   app.post("/api/billing/reservations/:reservationId/operations/:operationId/recover", requireAuth, async (req, res) => {

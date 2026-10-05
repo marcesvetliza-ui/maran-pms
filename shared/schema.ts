@@ -400,9 +400,11 @@ export const payments = pgTable("payments", {
   invoiceRef: text("invoice_ref"), // JSON-encoded ARCA invoice result when this advance has a linked factura
   invoiceLinkFailed: boolean("invoice_link_failed").default(false), // true when invoice was emitted but linking failed
   groupPaymentId: varchar("group_payment_id"), // FK to group_payments when this payment was created as part of a group payment distribution
+  paymentRequestId: varchar("payment_request_id").unique("payments_request_id_unique"),
+  paymentRequestFingerprint: text("payment_request_fingerprint"),
 });
 
-export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
+export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true, paymentRequestId: true, paymentRequestFingerprint: true });
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 export type Payment = typeof payments.$inferSelect;
 

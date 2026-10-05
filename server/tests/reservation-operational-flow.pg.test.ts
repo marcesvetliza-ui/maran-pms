@@ -3,6 +3,7 @@ import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createPrefacturaSubmission } from "../../client/src/lib/prefactura-submission";
 
 // Never infer permission to modify a database from ambient DATABASE_URL.
 const testUrl = process.env.RESERVATION_FLOW_TEST_DATABASE_URL;
@@ -49,6 +50,9 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
       return realFetch(input, init);
     });
     testPool = new pg.Pool({ connectionString: testUrl, max: 3 });
+    const { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } = await import("../reservationPaymentRequest");
+    await testPool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL);
+    await testPool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL); // Startup is repeatable.
     // Only the disposable database's empty session table is removed, to prove
     // setupAuth itself supports the first login without manual provisioning.
     expect((await testPool.query("SELECT count(*) FROM sessions")).rows[0].count).toBe("0");
@@ -168,4 +172,173 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
     expect(Number(summary.total_transfer)).toBe(120000);
     expect(Number(summary.total_general)).toBe(120000);
   }, 30_000);
+  it("concurrent confirmation and response-loss retries collect once; new operations remain valid", async () => {
+    const guestId = randomUUID(), typeId = randomUUID(), roomId = randomUUID();
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    await testPool.query("INSERT INTO guests (id, first_name, last_name) VALUES ($1, 'Duplicate', 'Test')", [guestId]);
+    await testPool.query("INSERT INTO room_types (id, code, name) VALUES ($1, $2, 'Duplicate test')", [typeId, `dup-${typeId}`]);
+    await testPool.query("INSERT INTO rooms (id, room_number, room_type_id, status) VALUES ($1, $2, $3, 'available')", [roomId, `dup-${roomId}`, typeId]);
+    expect((await api("POST", "/api/cash/init-shifts")).status).toBe(200);
+    const created = await api("POST", "/api/reservations", {
+      guestId, roomTypeId: typeId, roomId, checkInDate: today, checkOutDate: tomorrow,
+      finalRatePerNight: "100000.00", totalRoomAmount: "100000.00", numberOfGuests: 1,
+      status: "confirmed", source: "directo",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const reservationId = created.body.id;
+    expect((await api("POST", `/api/reservations/${reservationId}/check-in`, {})).status).toBe(200);
+    const body = { reservationId, amount: "100000.00", method: "efectivo", date: today, paymentRequestId: randomUUID() };
+    const confirmations = await Promise.all([api("POST", "/api/payments", body), api("POST", "/api/payments", body)]);
+    expect(confirmations.map(r => r.status).sort()).toEqual([200, 201]);
+    expect(confirmations[0].body.id).toBe(confirmations[1].body.id);
+    const paymentId = confirmations[0].body.id;
+    expect((await api("POST", "/api/payments", body)).body.id).toBe(paymentId);
+    expect((await testPool.query("SELECT count(*) AS n, sum(amount)::text AS total FROM payments WHERE reservation_id = $1", [reservationId])).rows[0])
+      .toEqual({ n: "1", total: "100000.00" });
+    expect((await testPool.query("SELECT count(*) AS n FROM cash_movements WHERE payment_id = $1", [paymentId])).rows[0].n).toBe("1");
+    expect((await testPool.query("SELECT count(*) AS n FROM folio_movements WHERE source_type = 'payment' AND source_id = $1", [paymentId])).rows[0].n).toBe("1");
+    expect((await testPool.query("SELECT balance::text FROM folios WHERE entity_type = 'reservation' AND entity_id = $1", [reservationId])).rows[0].balance).toBe("0.00");
+    expect((await api("POST", "/api/payments", { ...body, amount: "50000.00" })).status).toBe(409);
+    expect((await api("POST", "/api/payments", { ...body, paymentRequestId: "invalid" })).status).toBe(400);
+    // A different intentional payment is not guessed to be a duplicate by amount/date.
+    const second = await api("POST", "/api/payments", { ...body, paymentRequestId: randomUUID() });
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    expect(second.body.id).not.toBe(paymentId);
+    // PATCH and void cannot recycle the original operation into another collection.
+    expect((await api("PATCH", `/api/payments/${paymentId}`, { paymentRequestId: randomUUID(), paymentRequestFingerprint: "forged" })).status).toBe(200);
+    expect((await api("PATCH", `/api/payments/${paymentId}/anular`, { motivoAnulacion: "Synthetic correction" })).status).toBe(200);
+    const replayVoided = await api("POST", "/api/payments", body);
+    expect(replayVoided.status).toBe(200);
+    expect(replayVoided.body.id).toBe(paymentId);
+    expect(replayVoided.body.status).toBe("anulado");
+    expect((await testPool.query("SELECT count(*) AS n FROM payments WHERE reservation_id = $1", [reservationId])).rows[0].n).toBe("2");
+    const { storage } = await import("../db-storage");
+    const { parseReservationPaymentRequest } = await import("../reservationPaymentRequest");
+    const rollbackBody = { ...body, amount: "500.00", paymentRequestId: randomUUID() };
+    const request = parseReservationPaymentRequest(rollbackBody, username)!;
+    const input = {
+      payment: { reservationId, amount: "500.00", method: "efectivo", date: today },
+      paymentRequest: request, sourceLabel: "Fail at Caja insert\0",
+    };
+    await expect(storage.createReservationPaymentWithLedger(input)).rejects.toThrow();
+    expect((await testPool.query("SELECT count(*) AS n FROM payments WHERE payment_request_id = $1", [request.id])).rows[0].n).toBe("0");
+    // The failed transaction does not consume the operation ID.
+    const recovered = await storage.createReservationPaymentWithLedger({ ...input, sourceLabel: "Recovered synthetic payment" });
+    expect(recovered.paymentRequestId).toBe(request.id);
+  }, 30_000);
+
+  it.each(["invoice", "net", "retention", "retention-rollback", "split-cc", "single-cc"])(
+    "Prefactura recovers %s with one invoice and one ledger entry per intent",
+    async failure => {
+      const guestId = randomUUID(), typeId = randomUUID(), roomId = randomUUID();
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      await testPool.query("INSERT INTO guests (id, first_name, last_name) VALUES ($1, 'Prefactura', 'Test')", [guestId]);
+      await testPool.query("INSERT INTO room_types (id, code, name) VALUES ($1, $2, 'Prefactura test')", [typeId, `pf-${typeId}`]);
+      await testPool.query("INSERT INTO rooms (id, room_number, room_type_id, status) VALUES ($1, $2, $3, 'available')", [roomId, `pf-${roomId}`, typeId]);
+      expect((await api("POST", "/api/cash/init-shifts")).status).toBe(200);
+      const created = await api("POST", "/api/reservations", {
+        guestId, roomTypeId: typeId, roomId, checkInDate: today, checkOutDate: tomorrow,
+        finalRatePerNight: "100.00", totalRoomAmount: "100.00", numberOfGuests: 1,
+        status: "confirmed", source: "directo",
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const reservationId = created.body.id;
+      expect((await api("POST", `/api/reservations/${reservationId}/check-in`, {})).status).toBe(200);
+      const config = await api("GET", "/api/billing/config");
+      expect(config.status).toBe(200);
+      await testPool.query("UPDATE billing_config SET arca_ambiente = 'ficticio', modo_arca = false");
+      expect((await testPool.query("SELECT arca_ambiente FROM billing_config")).rows.every(row => row.arca_ambiente === "ficticio")).toBe(true);
+
+      const journal = new Map<string, string>();
+      const browserStorage = {
+        getItem: (key: string) => journal.get(key) ?? null,
+        setItem: (key: string, value: string) => { journal.set(key, value); },
+        removeItem: (key: string) => { journal.delete(key); },
+      };
+      const submission = createPrefacturaSubmission(browserStorage);
+      const common = { reservationId, date: today, reference: null, receiptType: "factura_b", billingTarget: "guest", companyId: null, agencyId: null };
+      const splitCc = failure === "split-cc";
+      const singleCc = failure === "single-cc";
+      const rows = singleCc ? [{ ...common, method: "cuenta_corriente", amount: "100.00", notes: null }] : [
+        { ...common, method: "efectivo", amount: splitCc ? "50.00" : "98.00", notes: null },
+        ...(splitCc ? [{ ...common, method: "cuenta_corriente", amount: "48.00", notes: null }] : []),
+        { ...common, method: "retencion_iibb", amount: "2.00", notes: JSON.stringify({ retencion: { tipo: "iibb", monto: 2, neto: splitCc ? 50 : 98 } }) },
+      ];
+      const operationId = randomUUID();
+      const attempt = submission.prepare(reservationId, {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Prefactura Test", dni: "12345678", condicionIva: "Consumidor Final" },
+        items: [{ descripcion: "Alojamiento", cantidad: 1, precioUnitario: 100, alicuotaIva: "21", subtotalNeto: 82.64, subtotal: 100 }],
+        reservaId: reservationId, sourceChargeIds: ["accommodation"], sourceChargeAmounts: { accommodation: 100 },
+        cashFormaPago: singleCc ? "cuenta_corriente" : "pago_dividido", cashFormaPagoDetalle: rows.map(row => ({ method: row.method, amount: Number(row.amount) })),
+        ordinaryAdvanceApplications: [], creditReapplications: [], creditOperationId: operationId,
+        ...(splitCc || singleCc ? { ccEntityType: "guest", ccEntityId: guestId } : {}),
+        ...(singleCc ? { reservationSettlementMethod: "cuenta_corriente" } : {}),
+      }, singleCc ? [] : rows);
+      const statusPath = `/api/billing/reservations/${reservationId}/operations/${operationId}/status`;
+      expect((await api("GET", statusPath)).body).toEqual({ exists: false });
+      const retentionKey = attempt.payments.at(-1)?.paymentRequestId;
+      if (failure === "retention-rollback") {
+        // Trigger is installed only in the explicitly isolated disposable DB.
+        await testPool.query(`
+          CREATE FUNCTION prefactura_fail_retention() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW.payment_request_id = '${retentionKey}' THEN RAISE EXCEPTION 'Synthetic retention failure'; END IF;
+            RETURN NEW;
+          END $$;
+          CREATE TRIGGER prefactura_fail_retention BEFORE INSERT ON payments
+            FOR EACH ROW EXECUTE FUNCTION prefactura_fail_retention();
+        `);
+      }
+      let lose = true;
+      const post = async (url: string, body: Record<string, any>) => {
+        const result = await api("POST", url, body);
+        if (result.status >= 400) throw new Error(JSON.stringify(result.body));
+        const stage = url.endsWith("invoices") ? "invoice" : body.method === "retencion_iibb" ? "retention" : "net";
+        if (lose && stage === (singleCc ? "invoice" : splitCc ? "retention" : failure)) {
+          lose = false;
+          throw new Error("Synthetic response loss after commit");
+        }
+        return result.body;
+      };
+      try {
+        await expect(submission.run(reservationId, post)).rejects.toThrow();
+      } finally {
+        if (failure === "retention-rollback") {
+          await testPool.query("DROP TRIGGER prefactura_fail_retention ON payments; DROP FUNCTION prefactura_fail_retention()");
+        }
+      }
+      const reopened = createPrefacturaSubmission(browserStorage);
+      const completed = await reopened.run(reservationId, post);
+      expect(completed.paymentCount).toBe(singleCc ? 0 : rows.length);
+      const invoiceId = completed.invoice!.id;
+      expect((await api("GET", statusPath)).body).toEqual({ exists: true });
+      expect((await testPool.query("SELECT count(*) AS n FROM sales_invoices WHERE reserva_id = $1", [reservationId])).rows[0].n).toBe("1");
+      const payments = (await testPool.query("SELECT id, amount, invoice_ref, payment_request_id FROM payments WHERE reservation_id = $1 ORDER BY amount", [reservationId])).rows;
+      expect(payments).toHaveLength(rows.length);
+      if (!singleCc) expect(new Set(payments.map(row => row.payment_request_id)).size).toBe(rows.length);
+      for (const payment of payments) {
+        expect(JSON.parse(payment.invoice_ref).id).toBe(invoiceId);
+        expect((await testPool.query("SELECT count(*) AS n FROM cash_movements WHERE payment_id = $1", [payment.id])).rows[0].n).toBe("1");
+        expect((await testPool.query("SELECT count(*) AS n FROM folio_movements WHERE source_type = 'payment' AND source_id = $1", [payment.id])).rows[0].n).toBe("1");
+      }
+      expect((await testPool.query("SELECT total_payments::text, balance::text FROM folios WHERE entity_type = 'reservation' AND entity_id = $1", [reservationId])).rows[0])
+        .toEqual({ total_payments: "100.00", balance: "0.00" });
+      const cash = (await testPool.query("SELECT movement_type, sum(amount)::text AS total FROM cash_movements WHERE payment_id = ANY($1) GROUP BY movement_type ORDER BY movement_type", [payments.map(p => p.id)])).rows;
+      expect(cash).toEqual(singleCc ? [{ movement_type: "informational", total: "100.00" }] : [
+        { movement_type: "income", total: splitCc ? "50.00" : "98.00" },
+        { movement_type: "informational", total: splitCc ? "50.00" : "2.00" },
+      ]);
+      if (splitCc || singleCc) {
+        expect((await testPool.query("SELECT count(*) AS n, sum(amount)::text AS total FROM account_movements WHERE entity_type = 'guest' AND entity_id = $1 AND type = 'cargo'", [guestId])).rows[0])
+          .toEqual({ n: "1", total: singleCc ? "100.00" : "48.00" });
+      }
+      // A changed fiscal reference cannot reuse this payment operation.
+      const stored = reopened.pending(reservationId)!;
+      if (!singleCc) expect((await api("POST", "/api/payments", { ...stored.payments[0], invoiceData: { id: Number(invoiceId) + 1 } })).status).toBe(409);
+      reopened.complete(reservationId);
+    }, 30_000,
+  );
 });
