@@ -2,13 +2,61 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { restaurantOrders, orderItems, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
 import { assertFinancialSchemaReady } from "../migrate";
 import { getArgentinaOperationalDate, getArgentinaOperationalParts } from "../utils/argentinaDateTime";
+
+// Serializa la apertura de mesa: el chequeo de "¿hay una orden activa para
+// esta mesa?" y el insert de la orden nueva no son atómicos entre sí, así que
+// dos requests concurrentes (doble tap, dos mozos) podían pasar el chequeo
+// antes de que cualquiera de los dos insertara, dejando dos órdenes activas
+// para la misma mesa. El lock serializa ambos pasos por mesa.
+async function withTableOpenLock<T>(tableId: string, action: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  const lockKey = `restaurant-table-open:${tableId}`;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+    return await action();
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
+    client.release();
+  }
+}
+
+// Registra el cargo a la reserva (tabla `charges`, para el saldo que ve
+// recepción) Y el movimiento en el folio de la reserva (tabla `folios` /
+// `folio_movements`, lo que efectivamente imprime "Imprimir Folio"). Antes
+// solo se hacía lo primero, así que un consumo de Restaurant cargado a la
+// habitación quedaba bien reflejado en el saldo pero ausente del folio
+// impreso que se le entrega al huésped.
+async function chargeReservationForRestaurant(
+  reservationId: string,
+  description: string,
+  amount: string,
+  date: string,
+  registeredBy?: string,
+) {
+  const charge = await storage.createCharge({
+    reservationId,
+    description,
+    amount,
+    category: "restaurant",
+    date,
+  });
+  try {
+    await storage.addFolioCharge(
+      "reservation", reservationId, parseFloat(amount), description,
+      "charge", charge.id, registeredBy,
+    );
+  } catch (e) {
+    console.error("[Folio] Error registrando cargo a habitación (restaurant):", e);
+  }
+  return charge;
+}
 
 export function registerRestaurantRoutes(app: Express) {
   // Restaurant Areas
@@ -282,57 +330,74 @@ export function registerRestaurantRoutes(app: Express) {
       if (!tableId && (!orderLabel || !orderLabel.trim())) {
         return res.status(400).json({ error: "Etiqueta de orden es requerida para areas sin mesas" });
       }
+      const createOrder = async () => {
+        const orderNumber = storage.generateOrderNumber();
+        const order = await storage.createRestaurantOrder({
+          ...req.body,
+          orderNumber,
+          openedAt: new Date(),
+        });
+        if (order.tableId) {
+          await storage.updateRestaurantTable(order.tableId, { status: "occupied" });
+        }
+        return order;
+      };
+
       // Auto-cerrar solo órdenes VIEJAS (de días anteriores) de la misma mesa.
       // NO cerrar órdenes activas de HOY — si una orden de hoy existe para esta mesa,
       // devolver error para evitar destruir accidentalmente una comanda en curso.
       if (tableId) {
-        // Verificar si hay una orden activa de HOY para esta mesa
-        const activeToday = await db
-          .select({ id: restaurantOrders.id, orderNumber: restaurantOrders.orderNumber })
-          .from(restaurantOrders)
-          .where(
-            and(
-              eq(restaurantOrders.tableId, tableId),
-              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
-              sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+        // El chequeo de "¿hay una orden activa de hoy?" y el insert de la orden
+        // nueva se serializan por mesa: sin el lock, dos requests concurrentes
+        // podían pasar el chequeo antes de que cualquiera insertara, y la mesa
+        // terminaba con dos órdenes activas en simultáneo.
+        const result = await withTableOpenLock(tableId, async () => {
+          // Verificar si hay una orden activa de HOY para esta mesa
+          const activeToday = await db
+            .select({ id: restaurantOrders.id, orderNumber: restaurantOrders.orderNumber })
+            .from(restaurantOrders)
+            .where(
+              and(
+                eq(restaurantOrders.tableId, tableId),
+                not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
+                sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+              )
             )
-          )
-          .limit(1);
-        if (activeToday.length > 0) {
+            .limit(1);
+          if (activeToday.length > 0) {
+            return { conflict: activeToday[0] };
+          }
+          // Cerrar órdenes viejas (de días anteriores) antes de crear la nueva
+          const staleForTable = await db
+            .select({ id: restaurantOrders.id })
+            .from(restaurantOrders)
+            .where(
+              and(
+                eq(restaurantOrders.tableId, tableId),
+                not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
+                sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+              )
+            );
+          if (staleForTable.length > 0) {
+            const staleIds = staleForTable.map(o => o.id);
+            await db
+              .update(restaurantOrders)
+              .set({ status: "closed" as any })
+              .where(inArray(restaurantOrders.id, staleIds));
+          }
+          return { order: await createOrder() };
+        });
+        if (result.conflict) {
           return res.status(409).json({
             error: "ORDEN_ACTIVA_EXISTENTE",
-            message: `La mesa ya tiene una orden activa (${activeToday[0].orderNumber}). Retomá desde la pantalla de mesas.`,
-            orderId: activeToday[0].id,
+            message: `La mesa ya tiene una orden activa (${result.conflict.orderNumber}). Retomá desde la pantalla de mesas.`,
+            orderId: result.conflict.id,
           });
         }
-        // Cerrar órdenes viejas (de días anteriores) antes de crear la nueva
-        const staleForTable = await db
-          .select({ id: restaurantOrders.id })
-          .from(restaurantOrders)
-          .where(
-            and(
-              eq(restaurantOrders.tableId, tableId),
-              not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[])),
-              sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
-            )
-          );
-        if (staleForTable.length > 0) {
-          const staleIds = staleForTable.map(o => o.id);
-          await db
-            .update(restaurantOrders)
-            .set({ status: "closed" as any })
-            .where(inArray(restaurantOrders.id, staleIds));
-        }
+        return res.status(201).json(result.order);
       }
-      const orderNumber = storage.generateOrderNumber();
-      const order = await storage.createRestaurantOrder({
-        ...req.body,
-        orderNumber,
-        openedAt: new Date(),
-      });
-      if (order.tableId) {
-        await storage.updateRestaurantTable(order.tableId, { status: "occupied" });
-      }
+
+      const order = await createOrder();
       res.status(201).json(order);
     } catch (error) {
       res.status(500).json({ error: "Error creating order" });
@@ -354,6 +419,13 @@ export function registerRestaurantRoutes(app: Express) {
     try {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
+      // Evita re-ejecutar todos los efectos de cierre (caja, folio, factura,
+      // descuento de stock) ante un doble click o un reintento sobre un pedido
+      // que ya fue cerrado. El guard atómico más abajo (closeRestaurantOrderIfOpen)
+      // cubre además la carrera entre dos requests simultáneos para el mismo pedido.
+      if (order.status === "closed" || order.status === "cancelled") {
+        return res.status(409).json({ error: "El pedido ya fue cerrado" });
+      }
 
       const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions } = req.body;
 
@@ -409,7 +481,7 @@ export function registerRestaurantRoutes(app: Express) {
         }
       }
 
-      const updatedOrder = await storage.updateRestaurantOrder(req.params.id, {
+      const updatedOrder = await storage.closeRestaurantOrderIfOpen(req.params.id, {
         status: "closed",
         closedAt: new Date(),
         chargedToRoom: isRoomCharge ? "true" : "false",
@@ -419,6 +491,9 @@ export function registerRestaurantRoutes(app: Express) {
         total: String(finalTotal.toFixed(2)),
         notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
       });
+      if (!updatedOrder) {
+        return res.status(409).json({ error: "El pedido ya fue cerrado" });
+      }
 
       // Room charges — support multiple cuenta_habitacion splits
       const today = getArgentinaOperationalDate();
@@ -427,23 +502,23 @@ export function registerRestaurantRoutes(app: Express) {
         // Multi-split: handle room charges per split
         for (const split of paymentSplits) {
           if (split.method === "cuenta_habitacion" && split.roomReservationId) {
-            await storage.createCharge({
-              reservationId: split.roomReservationId,
-              description: `${orderLabel} — $${parseFloat(split.amount || "0").toFixed(2)}`,
-              amount: String(parseFloat(split.amount || "0").toFixed(2)),
-              category: "restaurant",
-              date: today,
-            });
+            await chargeReservationForRestaurant(
+              split.roomReservationId,
+              `${orderLabel} — $${parseFloat(split.amount || "0").toFixed(2)}`,
+              String(parseFloat(split.amount || "0").toFixed(2)),
+              today,
+              (req as any).user?.username,
+            );
           }
         }
       } else if (isRoomCharge && effectiveReservationId) {
-        await storage.createCharge({
-          reservationId: effectiveReservationId,
-          description: orderLabel,
-          amount: String(finalTotal.toFixed(2)),
-          category: "restaurant",
-          date: today,
-        });
+        await chargeReservationForRestaurant(
+          effectiveReservationId,
+          orderLabel,
+          String(finalTotal.toFixed(2)),
+          today,
+          (req as any).user?.username,
+        );
       }
 
       if (order.tableId) {
@@ -979,19 +1054,34 @@ export function registerRestaurantRoutes(app: Express) {
       });
       if (!split) return res.status(404).json({ error: "Split not found" });
 
-      // If charging to room, create the charge on the reservation
+      const order = await storage.getRestaurantOrder(req.params.id);
+
+      // If charging to room, create the charge on the reservation (+ folio)
       if (method === "cuenta_habitacion" && roomReservationId) {
-        const order = await storage.getRestaurantOrder(req.params.id);
         try {
-          await storage.createCharge({
-            reservationId: roomReservationId,
-            description: `Restaurante - Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
-            amount: split.amount,
-            category: "restaurant",
-            date: getArgentinaOperationalDate(),
-          });
+          await chargeReservationForRestaurant(
+            roomReservationId,
+            `Restaurante - Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+            split.amount,
+            getArgentinaOperationalDate(),
+            (req as any).user?.username,
+          );
         } catch (e) {
           console.error("Error creando cargo a habitación en split:", e);
+        }
+      } else {
+        // Antes ningún split pagado en efectivo/tarjeta/etc. generaba
+        // movimiento de caja — el dinero cobrado quedaba fuera de Caja.
+        try {
+          await storage.registerCashMovement(
+            "restaurant", "restaurant_split", req.params.id,
+            `Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+            method, split.amount,
+            method === "consumo_interno" ? "expense" : "income",
+            (req as any).user?.username, receiptType || undefined,
+          );
+        } catch (e) {
+          console.error("[split] Error registrando movimiento de caja:", e);
         }
       }
 
@@ -1001,7 +1091,7 @@ export function registerRestaurantRoutes(app: Express) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
-          const splitOrder = await storage.getRestaurantOrder(req.params.id);
+          const splitOrder = order;
           const invoice = await emitirFactura({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
@@ -1030,16 +1120,34 @@ export function registerRestaurantRoutes(app: Express) {
       const allPaid = allSplits.every((s: any) => s.isPaid === "true");
 
       if (allPaid) {
-        const orderForClose = await storage.getRestaurantOrder(req.params.id);
-        await storage.updateRestaurantOrder(req.params.id, {
+        // Guard atómico: si dos splits se pagan casi en simultáneo (o la
+        // misma orden ya fue cerrada por otra vía), que cierre y descuente
+        // stock una sola vez.
+        const closedOrder = await storage.closeRestaurantOrderIfOpen(req.params.id, {
           status: "closed",
           closedAt: new Date(),
           paymentMethod: method,
           receiptType: receiptType || null,
           chargedToRoom: method === "cuenta_habitacion" ? "true" : "false",
         });
-        if (orderForClose?.tableId) {
-          await storage.updateRestaurantTable(orderForClose.tableId, { status: "available" });
+        if (closedOrder) {
+          if (closedOrder.tableId) {
+            await storage.updateRestaurantTable(closedOrder.tableId, { status: "available" });
+          }
+          // El cierre por /close descuenta stock al cerrar; el cierre por
+          // splits lo omitía por completo, dejando el stock sin consumir.
+          try {
+            const orderItemsList = await storage.getOrderItems(req.params.id);
+            const stockResult = await storage.deductStockFromOrder(
+              req.params.id,
+              orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+            );
+            if (stockResult.warnings.length > 0) {
+              console.warn(`[Stock] Advertencias en orden ${req.params.id} (split):`, stockResult.warnings);
+            }
+          } catch (stockError) {
+            console.error("[Stock] Error en descuento automático (split):", stockError);
+          }
         }
       }
 
@@ -1158,13 +1266,13 @@ export function registerRestaurantRoutes(app: Express) {
       // If room charge
       if (method === "cuenta_habitacion" && roomReservationId) {
         try {
-          await storage.createCharge({
-            reservationId: roomReservationId,
-            description: `Restaurante — Pedido ${order.orderNumber} (${selectedItems.length} ítem${selectedItems.length !== 1 ? "s" : ""})`,
+          await chargeReservationForRestaurant(
+            roomReservationId,
+            `Restaurante — Pedido ${order.orderNumber} (${selectedItems.length} ítem${selectedItems.length !== 1 ? "s" : ""})`,
             amount,
-            category: "restaurant",
-            date: getArgentinaOperationalDate(),
-          });
+            getArgentinaOperationalDate(),
+            (req as any).user?.username,
+          );
         } catch (e) {
           console.error("[pay-items] room charge:", e);
         }

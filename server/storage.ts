@@ -545,6 +545,11 @@ export interface IStorage {
   getOrdersByTable(tableId: string): Promise<RestaurantOrder[]>;
   createRestaurantOrder(order: InsertRestaurantOrder): Promise<RestaurantOrder>;
   updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined>;
+  // Atomic close: only applies `order` (and flips status to "closed") when the
+  // order isn't already closed/cancelled. Returns undefined if it lost the
+  // race (or was already closed), so callers can skip re-running side effects
+  // (cash movement, folio, stock deduction, AFIP invoice) a second time.
+  closeRestaurantOrderIfOpen(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined>;
   deleteRestaurantOrder(id: string): Promise<boolean>;
   generateOrderNumber(): string;
 

@@ -1920,21 +1920,29 @@ export class DatabaseStorage implements IStorage {
         eq(folios.entityId, payment.reservationId),
       )).limit(1);
       if (!folio) {
-        // Keep the existing sequential display code while serializing its
-        // generation inside this transaction.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('folio_codigo_reservation'))`);
-        [folio] = await tx.select().from(folios).where(and(
-          eq(folios.entityType, "reservation"),
-          eq(folios.entityId, payment.reservationId),
-        )).limit(1);
-        if (!folio) {
-          const [countRow] = await tx.select({ cnt: sql<number>`count(*)` }).from(folios)
-            .where(eq(folios.entityType, "reservation"));
-          const codigo = `RS-${(Number(countRow?.cnt ?? 0) + 1).toString().padStart(6, "0")}`;
-          [folio] = await tx.insert(folios).values({
-            codigo, entityType: "reservation", entityId: payment.reservationId,
-            status: "open", totalCharges: "0", totalPayments: "0", balance: "0",
-          }).returning();
+        // Antes este bloque generaba el código contando filas existentes
+        // (COUNT(*)+1) bajo un advisory lock propio, divorciado del sequence
+        // atómico (folio_seq_reservation) que generateFolioCodigo()/
+        // getOrCreateFolio() usan en el resto del código para el mismo
+        // entityType. Cualquier gap entre ambos esquemas — un folio borrado
+        // por limpieza de test, o uno creado por el otro camino — hacía que
+        // COUNT(*)+1 recalculara un código ya ocupado y chocara contra
+        // folios_codigo_unique. Reusa el mismo sequence (atómico, sin lock
+        // propio necesario) y el mismo patrón ON CONFLICT DO NOTHING que
+        // getOrCreateFolio() para la carrera de "dos pagos simultáneos sin
+        // folio todavía" sobre folios_entity_type_entity_id_unique.
+        const codigo = await this.generateFolioCodigo("reservation");
+        const inserted = await tx.insert(folios).values({
+          codigo, entityType: "reservation", entityId: payment.reservationId,
+          status: "open", totalCharges: "0", totalPayments: "0", balance: "0",
+        }).onConflictDoNothing({ target: [folios.entityType, folios.entityId] }).returning();
+        if (inserted[0]) {
+          folio = inserted[0];
+        } else {
+          [folio] = await tx.select().from(folios).where(and(
+            eq(folios.entityType, "reservation"),
+            eq(folios.entityId, payment.reservationId),
+          )).limit(1);
         }
       }
       // A payment movement and its aggregate update must serialize with every
@@ -4981,6 +4989,14 @@ export class DatabaseStorage implements IStorage {
 
   async updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined> {
     const [updated] = await db.update(restaurantOrders).set(order as any).where(eq(restaurantOrders.id, id)).returning();
+    return updated;
+  }
+
+  async closeRestaurantOrderIfOpen(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined> {
+    const [updated] = await db.update(restaurantOrders)
+      .set(order as any)
+      .where(and(eq(restaurantOrders.id, id), not(inArray(restaurantOrders.status, ["closed", "cancelled"] as any[]))))
+      .returning();
     return updated;
   }
 
