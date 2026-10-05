@@ -1,6 +1,6 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-function handleSessionExpired() {
+export function handleSessionExpired() {
   window.location.href = "/auth?session_expired=1";
 }
 

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError, handleSessionExpired } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -682,6 +682,11 @@ export default function SpaPage() {
       const response = await fetch(
         `/api/spa/appointments?startDate=${dateStr}&endDate=${dateStr}`
       );
+      // Esta query usa fetch() propio en vez del queryFn por defecto, así que
+      // no heredaba el redirect a /auth que el resto de la app hace al vencer
+      // la sesión (el store expira a las 8hs) — una sesión vencida quedaba
+      // como "planing vacío" sin ningún aviso, en vez de mandar a loguearse.
+      if (response.status === 401) { handleSessionExpired(); throw new Error("Sesión expirada"); }
       if (!response.ok) throw new Error("Error fetching appointments");
       return response.json();
     },
@@ -698,6 +703,7 @@ export default function SpaPage() {
       const response = await fetch(
         `/api/spa/appointments/weekly-summary?startDate=${weekStartStr}&endDate=${weekEndStr}`
       );
+      if (response.status === 401) { handleSessionExpired(); throw new Error("Sesión expirada"); }
       if (!response.ok) throw new Error("Error");
       return response.json();
     },
