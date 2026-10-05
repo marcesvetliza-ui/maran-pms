@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Receipt, ArrowLeft, Plus, Trash2 } from "lucide-react";
-import { EmitirFacturaDialog, NotaCreditoDialog, CASH_AREA_TO_PV_AREA, CONDICION_IVA_OPTIONS, isRiOrExento } from "@/pages/billing";
+import { EmitirFacturaDialog, NotaCreditoDialog, CASH_AREA_TO_PV_AREA, CONDICION_IVA_OPTIONS, isRiOrExento, NON_FISCAL_TIPOS_SET } from "@/pages/billing";
 import { InvoiceDialog, PurchaseInventoryPicker, type PurchaseInventoryOption, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 import { PrefacturaDialog, isArgentineNationality } from "@/components/PrefacturaDialog";
@@ -399,7 +399,11 @@ export default function EmitirComprobantePage() {
                   allowedTipos={[tipo]}
                   cashArea={area}
                   showPaymentMethod
-                  requireLinkedRecipient
+                  // Las facturas fiscales (FA/FB/FM/FMB) sí deben salir de una
+                  // ficha registrada. Los comprobantes no fiscales (vouchers
+                  // internos, ticket) son habituales con clientes no
+                  // registrados — ahí se permite tipear el nombre a mano.
+                  requireLinkedRecipient={!NON_FISCAL_TIPOS_SET.has(tipo)}
                   operationKey={`centro-comprobantes-venta-${area}-${tipo}`}
                 />
               )}

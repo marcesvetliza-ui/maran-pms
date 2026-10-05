@@ -146,7 +146,7 @@ const TIPO_LABELS: Record<string, { nombre: string; color: string }> = {
 };
 
 // Tipos no-fiscales: no llaman a ARCA, no generan CAE real (solo numeración local interna).
-const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
+export const NON_FISCAL_TIPOS_SET = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "voucher_room_service", "voucher_consumo_interno", "cierre_habitacion", "cierre_spa", "cierre_spa_agustin", "cierre_spa_cortesia"]);
 
 // cashArea (recepcion/restaurant/spa/events, per emitir-comprobante-button.tsx
 // and the Centro de Comprobantes) uses "events" while pos_configs.area (see
