@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -494,6 +495,9 @@ export function PrefacturaDialog({
   // Tracks whether the folio has been initialized for the current open session
   // (false = first load, true = subsequent re-fetches after NC/ND/reversal)
   const folioInitializedRef = useRef(false);
+  const submission = useRef<ReturnType<typeof createPrefacturaSubmission> | null>(null);
+  if (!submission.current) submission.current = createPrefacturaSubmission(window.sessionStorage);
+  const [hasPendingSubmission, setHasPendingSubmission] = useState(false);
 
   // Steps
   const [step, setStep] = useState(1);
@@ -650,6 +654,7 @@ export function PrefacturaDialog({
   // On open: reset step and mark folio as not-yet-initialized for this session
   useEffect(() => {
     if (open) {
+      setHasPendingSubmission(!!submission.current!.pending(reservationId));
       setStep(1);
       setDoCheckout(true);
       setEmittedInvoice(null);
@@ -1169,6 +1174,11 @@ export function PrefacturaDialog({
 
   // Gate: warn if user enters less than the full balance before actually submitting
   function handleSubmit() {
+    if (submission.current!.isBusy()) return;
+    if (submission.current!.pending(reservationId)) {
+      void doSubmit();
+      return;
+    }
     if (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
@@ -1190,6 +1200,8 @@ export function PrefacturaDialog({
   }
 
   async function doSubmit() {
+    if (submission.current!.isBusy()) return;
+    const retrying = !!submission.current!.pending(reservationId);
     const isCcPayment = saleCondition === "cuenta_corriente";
     const appliedPaymentDetails = buildAppliedPaymentMethodDetails(
       applyReleasedCredit ? availableAdvancePayments : [],
@@ -1209,39 +1221,40 @@ export function PrefacturaDialog({
     const usesCcEntity = isCcPayment || invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
     const invoiceSettlesCcPayment = invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
 
-    if (totalSelected <= 0.01 && !alreadyPaidAndInvoiced && saleCondition !== "cuenta_corriente") {
+    if (!retrying && totalSelected <= 0.01 && !alreadyPaidAndInvoiced && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
     }
     const balanceOwed = selectedBalance;
     // Same guard: only require amounts when there is an actual outstanding balance.
-    if (saleCondition === "contado" && balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
+    if (!retrying && saleCondition === "contado" && balanceOwed > 0.01 && paymentRows.some(r => !r.amount || parseFloat(r.amount) <= 0)) {
       setSubmitError("Ingresá un monto en cada forma de pago.");
       return;
     }
-    if (!alreadyPaidAndInvoiced && facturaANeedsCuit) {
+    if (!retrying && !alreadyPaidAndInvoiced && facturaANeedsCuit) {
       setSubmitError("Factura A requiere CUIT válido (11 dígitos).");
       return;
     }
-    if (!alreadyPaidAndInvoiced && usesCcEntity &&
+    if (!retrying && !alreadyPaidAndInvoiced && usesCcEntity &&
       (!["guest", "company", "agency"].includes(billingTarget) || !billingEntityId)) {
       setSubmitError("Cuenta Corriente requiere un huésped, empresa o agencia seleccionada antes de emitir el comprobante.");
       return;
     }
     // Empresa/Agencia: se puede facturar sin entidad pre-registrada si se ingresó
     // razón social a mano. El CUIT se valida más abajo para Factura A.
-    if (!alreadyPaidAndInvoiced && billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
+    if (!retrying && !alreadyPaidAndInvoiced && billingTarget === "company" && !billingEntityId && !razonSocial.trim()) {
       setSubmitError("Ingresá la razón social de la empresa o seleccionala del listado.");
       return;
     }
-    if (!alreadyPaidAndInvoiced && billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
+    if (!retrying && !alreadyPaidAndInvoiced && billingTarget === "agency" && !billingEntityId && !razonSocial.trim()) {
       setSubmitError("Ingresá la razón social de la agencia o seleccionala del listado.");
       return;
     }
-    if (!alreadyPaidAndInvoiced && isFiscalTipo && !razonSocial.trim()) {
+    if (!retrying && !alreadyPaidAndInvoiced && isFiscalTipo && !razonSocial.trim()) {
       setSubmitError("Ingresá el nombre / razón social.");
       return;
     }
+    if (!submission.current!.acquire()) return;
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -1250,7 +1263,7 @@ export function PrefacturaDialog({
 
       // A browser may disappear after ARCA/local issuance and before checkout.
       // Recover the persisted server saga before consulting the now-empty folio.
-      if (saleCondition === "cuenta_corriente" && creditOperationId) {
+      if (!retrying && saleCondition === "cuenta_corriente" && creditOperationId) {
         let recoveryRes = await fetch(
           `/api/billing/reservations/${reservationId}/operations/${creditOperationId}/recover`,
           { method: "POST", headers: { "Content-Type": "application/json" } },
@@ -1353,7 +1366,7 @@ export function PrefacturaDialog({
 
       // Guard: if the folio is already fully paid AND has invoices, skip payment+invoice
       // and go straight to checkout. This prevents duplicate invoices.
-      if (alreadyPaidAndInvoiced) {
+      if (!retrying && alreadyPaidAndInvoiced) {
         let checkoutDidFail = false;
         if (mode === "checkout" && doCheckout) {
           try {
@@ -1391,8 +1404,7 @@ export function PrefacturaDialog({
       const invoiceItems = folio
         ? buildInvoiceItems(invoiceItemsToEmit, tipo)
         : [];
-      if (invoiceItems.length > 0) {
-        const invoiceRes = await apiRequest("POST", "/api/billing/invoices", {
+      const invoiceRequest = invoiceItems.length > 0 ? {
           tipoComprobante: tipo,
           cliente: {
             razonSocial: razonSocial || "Consumidor Final",
@@ -1427,46 +1439,14 @@ export function PrefacturaDialog({
               paymentId: application.paymentId!,
               amount: application.amount,
             })),
-          creditOperationId: (usesCcEntity || selectedPaymentApplications.length > 0)
-             ? creditOperationId : undefined,
-        });
-        const invoiceBody = await invoiceRes.json();
-        if (!invoiceRes.ok) throw new Error(invoiceBody?.error || invoiceBody?.message || "Error al emitir comprobante");
-        invoiceData = invoiceBody;
-        setTimeout(() => {
-          if (typeof window !== "undefined") {
-            window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank");
-          }
-        }, 300);
-
-        // Apply prior advances only after the fiscal document exists. A failed
-        // link is persisted for manual retry, never silently discarded.
-        for (const paymentId of saleCondition === "contado" && !creditOperationId ? selectedAdvancePaymentIds : []) {
-          const linkRes = await apiRequest("PATCH", `/api/payments/${paymentId}/invoice`, { invoiceData });
-          if (!linkRes.ok) {
-            await apiRequest("PATCH", `/api/payments/${paymentId}/invoice-link-failed`, { invoiceData }).catch(() => undefined);
-            toast({
-              title: "Factura emitida con vínculo pendiente",
-              description: "Un anticipo previo no pudo vincularse automáticamente. Quedó marcado para reintento.",
-              variant: "destructive",
-            });
-            throw new Error("La factura fue emitida, pero un anticipo quedó pendiente de vinculación");
-          }
-        }
-      }
+           creditOperationId,
+        } : null;
 
       // 2. Register payments only after the invoice has been accepted. The
       // invoice reference is persisted during payment creation, so there is no
       // later best-effort link request that can leave an orphaned payment.
-      const invoiceRef = invoiceData ? {
-        id: invoiceData.id,
-        tipoComprobante: invoiceData.tipoComprobante ?? invoiceData.tipo_comprobante,
-        puntoVenta: invoiceData.puntoVenta ?? invoiceData.punto_venta,
-        numero: invoiceData.numero,
-        cae: invoiceData.cae,
-        total: invoiceData.montoTotal ?? invoiceData.monto_total,
-      } : undefined;
-      let paymentCount = 0;
+      const paymentPayloads: Record<string, any>[] = [];
+      const paymentDate = getLocalToday();
       // A single CC method is settled atomically by POST /api/billing/invoices
       // using creditOperationId. Posting that same row here would duplicate the
       // account movement. Split payments remain row-based because the invoice
@@ -1485,50 +1465,52 @@ export function PrefacturaDialog({
         // method's amount — otherwise Caja and the comprobante would show
         // money that was never actually received.
         if (netAmount > 0) {
-          const res = await apiRequest("POST", "/api/payments", {
+          paymentPayloads.push({
             reservationId,
             amount: netAmount.toFixed(2),
             method: row.method,
-            date: getLocalToday(),
+            date: paymentDate,
             reference: null,
             notes: null,
             receiptType,
             billingTarget,
             companyId: billingTarget === "company" ? billingEntityId : null,
             agencyId: billingTarget === "agency" ? billingEntityId : null,
-            invoiceData: invoiceRef,
           });
-          const resBody = await res.json();
-          if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar el pago");
-          paymentCount++;
         }
         if (retMonto > 0) {
           const notes = JSON.stringify({ retencion: { tipo: row.retencionTipo, monto: retMonto, neto: netAmount } });
-          const res = await apiRequest("POST", "/api/payments", {
+          paymentPayloads.push({
             reservationId,
             amount: retMonto.toFixed(2),
             method: `retencion_${row.retencionTipo}`,
-            date: getLocalToday(),
+            date: paymentDate,
             reference: null,
             notes,
             receiptType,
             billingTarget,
             companyId: billingTarget === "company" ? billingEntityId : null,
             agencyId: billingTarget === "agency" ? billingEntityId : null,
-            invoiceData: invoiceRef,
           });
-          const resBody = await res.json();
-          if (!res.ok) throw new Error(resBody?.error || "La factura fue emitida, pero no se pudo registrar la retención");
-          paymentCount++;
         }
       }
-      if (paymentCount > 0) setPaymentRegistered(true);
+      submission.current!.prepare(reservationId, invoiceRequest, paymentPayloads, mode === "checkout" && doCheckout);
+      setHasPendingSubmission(true);
+      const completed = await submission.current!.run(reservationId, async (url, body) => {
+        const response = await apiRequest("POST", url, body);
+        return response.json();
+      });
+      invoiceData = completed.invoice;
+      if (completed.paymentCount > 0) setPaymentRegistered(true);
+      if (invoiceData) {
+        setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
+      }
 
       // 3. Checkout if applicable
       // Use a local flag so we can gate onCheckoutComplete reliably within this
       // async function (React state updates are async and not readable immediately).
       let checkoutSucceeded = false;
-      if (mode === "checkout" && doCheckout) {
+      if (completed.checkoutRequested) {
         try {
           const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
           if (!coRes.ok) {
@@ -1561,7 +1543,12 @@ export function PrefacturaDialog({
 
       const refreshed = await refetchFolio();
       const [refreshedInvoices] = await Promise.all([refetchEmittedInvoices(), refetchTransferRemaining()]);
-      if (mode === "checkout" && doCheckout && !checkoutSucceeded) {
+      if (refreshed.error || refreshedInvoices.error) {
+        throw new Error("El cobro se guardó, pero no se pudo actualizar el folio. Reintentá completar la misma operación.");
+      }
+      submission.current!.complete(reservationId);
+      setHasPendingSubmission(false);
+      if (completed.checkoutRequested && !checkoutSucceeded) {
         // Payment and invoice have been saved, but the room must not be treated
         // as closed until staff resolve the failed checkout.
         setEmittedInvoice(invoiceData);
@@ -1569,7 +1556,7 @@ export function PrefacturaDialog({
         return;
       }
 
-      if (mode === "checkout" && doCheckout && checkoutSucceeded) {
+      if (completed.checkoutRequested && checkoutSucceeded) {
         if (typeof window !== "undefined") {
           window.sessionStorage.removeItem(settlementOperationKey(reservationId));
         }
@@ -1648,14 +1635,32 @@ export function PrefacturaDialog({
       onClose();
 
     } catch (err: any) {
+      try {
+        const discarded = await submission.current!.discardRejectedInvoice(reservationId, err, async operationId => {
+          const response = await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${operationId}/status`);
+          const status = await response.json();
+          // Unknown/malformed responses are not proof that an operation is safe
+          // to discard. A status lookup never resumes ARCA or writes money.
+          return status.exists !== false;
+        });
+        if (discarded) {
+          setHasPendingSubmission(false);
+          const nextOperationId = newSettlementOperationId();
+          window.sessionStorage.setItem(settlementOperationKey(reservationId), nextOperationId);
+          setCreditOperationId(nextOperationId);
+        }
+      } catch {
+        // Verification failed; preserve the original operation for safe retry.
+      }
       setSubmitError(err.message || "Error inesperado");
     } finally {
+      submission.current!.release();
       setIsSubmitting(false);
     }
   }
 
   function handleClose() {
-    if (isSubmitting) return;
+    if (submission.current!.isBusy()) return;
     onClose();
   }
 
@@ -2260,6 +2265,14 @@ export function PrefacturaDialog({
               </div>
             )}
 
+            {hasPendingSubmission && (
+              <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
+                <p className="text-sm">Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado.</p>
+                <Button onClick={() => void doSubmit()} disabled={isSubmitting} data-testid="button-retry-prefactura">
+                  {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
+                </Button>
+              </div>
+            )}
             {submitError && (
               <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3 flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
@@ -2309,13 +2322,13 @@ export function PrefacturaDialog({
               <Button variant="outline" size="sm" className="text-orange-700 border-orange-300 hover:bg-orange-50" onClick={() => setShowBulkTransfer(true)} disabled={folioLoading || !folio || totalSelected <= 0.01}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
               </Button>
-              {alreadyPaidAndInvoiced && (mode === "checkout"
+              {!hasPendingSubmission && alreadyPaidAndInvoiced && (mode === "checkout"
                 ? <Button onClick={doSubmit} disabled={isSubmitting}>{isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>
                 : <Button variant="outline" onClick={handleClose}>Cerrar</Button>)}
               {!alreadyPaidAndInvoiced && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
+                  disabled={hasPendingSubmission || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
                   data-testid="button-registrar-emitir"
                 >
                   {isSubmitting ? (

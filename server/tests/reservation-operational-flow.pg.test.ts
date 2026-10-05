@@ -3,6 +3,7 @@ import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createPrefacturaSubmission } from "../../client/src/lib/prefactura-submission";
 
 // Never infer permission to modify a database from ambient DATABASE_URL.
 const testUrl = process.env.RESERVATION_FLOW_TEST_DATABASE_URL;
@@ -226,4 +227,118 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
     const recovered = await storage.createReservationPaymentWithLedger({ ...input, sourceLabel: "Recovered synthetic payment" });
     expect(recovered.paymentRequestId).toBe(request.id);
   }, 30_000);
+
+  it.each(["invoice", "net", "retention", "retention-rollback", "split-cc", "single-cc"])(
+    "Prefactura recovers %s with one invoice and one ledger entry per intent",
+    async failure => {
+      const guestId = randomUUID(), typeId = randomUUID(), roomId = randomUUID();
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+      await testPool.query("INSERT INTO guests (id, first_name, last_name) VALUES ($1, 'Prefactura', 'Test')", [guestId]);
+      await testPool.query("INSERT INTO room_types (id, code, name) VALUES ($1, $2, 'Prefactura test')", [typeId, `pf-${typeId}`]);
+      await testPool.query("INSERT INTO rooms (id, room_number, room_type_id, status) VALUES ($1, $2, $3, 'available')", [roomId, `pf-${roomId}`, typeId]);
+      expect((await api("POST", "/api/cash/init-shifts")).status).toBe(200);
+      const created = await api("POST", "/api/reservations", {
+        guestId, roomTypeId: typeId, roomId, checkInDate: today, checkOutDate: tomorrow,
+        finalRatePerNight: "100.00", totalRoomAmount: "100.00", numberOfGuests: 1,
+        status: "confirmed", source: "directo",
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const reservationId = created.body.id;
+      expect((await api("POST", `/api/reservations/${reservationId}/check-in`, {})).status).toBe(200);
+      const config = await api("GET", "/api/billing/config");
+      expect(config.status).toBe(200);
+      await testPool.query("UPDATE billing_config SET arca_ambiente = 'ficticio', modo_arca = false");
+      expect((await testPool.query("SELECT arca_ambiente FROM billing_config")).rows.every(row => row.arca_ambiente === "ficticio")).toBe(true);
+
+      const journal = new Map<string, string>();
+      const browserStorage = {
+        getItem: (key: string) => journal.get(key) ?? null,
+        setItem: (key: string, value: string) => { journal.set(key, value); },
+        removeItem: (key: string) => { journal.delete(key); },
+      };
+      const submission = createPrefacturaSubmission(browserStorage);
+      const common = { reservationId, date: today, reference: null, receiptType: "factura_b", billingTarget: "guest", companyId: null, agencyId: null };
+      const splitCc = failure === "split-cc";
+      const singleCc = failure === "single-cc";
+      const rows = singleCc ? [{ ...common, method: "cuenta_corriente", amount: "100.00", notes: null }] : [
+        { ...common, method: "efectivo", amount: splitCc ? "50.00" : "98.00", notes: null },
+        ...(splitCc ? [{ ...common, method: "cuenta_corriente", amount: "48.00", notes: null }] : []),
+        { ...common, method: "retencion_iibb", amount: "2.00", notes: JSON.stringify({ retencion: { tipo: "iibb", monto: 2, neto: splitCc ? 50 : 98 } }) },
+      ];
+      const operationId = randomUUID();
+      const attempt = submission.prepare(reservationId, {
+        tipoComprobante: "FB",
+        cliente: { razonSocial: "Prefactura Test", dni: "12345678", condicionIva: "Consumidor Final" },
+        items: [{ descripcion: "Alojamiento", cantidad: 1, precioUnitario: 100, alicuotaIva: "21", subtotalNeto: 82.64, subtotal: 100 }],
+        reservaId: reservationId, sourceChargeIds: ["accommodation"], sourceChargeAmounts: { accommodation: 100 },
+        cashFormaPago: singleCc ? "cuenta_corriente" : "pago_dividido", cashFormaPagoDetalle: rows.map(row => ({ method: row.method, amount: Number(row.amount) })),
+        ordinaryAdvanceApplications: [], creditReapplications: [], creditOperationId: operationId,
+        ...(splitCc || singleCc ? { ccEntityType: "guest", ccEntityId: guestId } : {}),
+        ...(singleCc ? { reservationSettlementMethod: "cuenta_corriente" } : {}),
+      }, singleCc ? [] : rows);
+      const statusPath = `/api/billing/reservations/${reservationId}/operations/${operationId}/status`;
+      expect((await api("GET", statusPath)).body).toEqual({ exists: false });
+      const retentionKey = attempt.payments.at(-1)?.paymentRequestId;
+      if (failure === "retention-rollback") {
+        // Trigger is installed only in the explicitly isolated disposable DB.
+        await testPool.query(`
+          CREATE FUNCTION prefactura_fail_retention() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW.payment_request_id = '${retentionKey}' THEN RAISE EXCEPTION 'Synthetic retention failure'; END IF;
+            RETURN NEW;
+          END $$;
+          CREATE TRIGGER prefactura_fail_retention BEFORE INSERT ON payments
+            FOR EACH ROW EXECUTE FUNCTION prefactura_fail_retention();
+        `);
+      }
+      let lose = true;
+      const post = async (url: string, body: Record<string, any>) => {
+        const result = await api("POST", url, body);
+        if (result.status >= 400) throw new Error(JSON.stringify(result.body));
+        const stage = url.endsWith("invoices") ? "invoice" : body.method === "retencion_iibb" ? "retention" : "net";
+        if (lose && stage === (singleCc ? "invoice" : splitCc ? "retention" : failure)) {
+          lose = false;
+          throw new Error("Synthetic response loss after commit");
+        }
+        return result.body;
+      };
+      try {
+        await expect(submission.run(reservationId, post)).rejects.toThrow();
+      } finally {
+        if (failure === "retention-rollback") {
+          await testPool.query("DROP TRIGGER prefactura_fail_retention ON payments; DROP FUNCTION prefactura_fail_retention()");
+        }
+      }
+      const reopened = createPrefacturaSubmission(browserStorage);
+      const completed = await reopened.run(reservationId, post);
+      expect(completed.paymentCount).toBe(singleCc ? 0 : rows.length);
+      const invoiceId = completed.invoice!.id;
+      expect((await api("GET", statusPath)).body).toEqual({ exists: true });
+      expect((await testPool.query("SELECT count(*) AS n FROM sales_invoices WHERE reserva_id = $1", [reservationId])).rows[0].n).toBe("1");
+      const payments = (await testPool.query("SELECT id, amount, invoice_ref, payment_request_id FROM payments WHERE reservation_id = $1 ORDER BY amount", [reservationId])).rows;
+      expect(payments).toHaveLength(rows.length);
+      if (!singleCc) expect(new Set(payments.map(row => row.payment_request_id)).size).toBe(rows.length);
+      for (const payment of payments) {
+        expect(JSON.parse(payment.invoice_ref).id).toBe(invoiceId);
+        expect((await testPool.query("SELECT count(*) AS n FROM cash_movements WHERE payment_id = $1", [payment.id])).rows[0].n).toBe("1");
+        expect((await testPool.query("SELECT count(*) AS n FROM folio_movements WHERE source_type = 'payment' AND source_id = $1", [payment.id])).rows[0].n).toBe("1");
+      }
+      expect((await testPool.query("SELECT total_payments::text, balance::text FROM folios WHERE entity_type = 'reservation' AND entity_id = $1", [reservationId])).rows[0])
+        .toEqual({ total_payments: "100.00", balance: "0.00" });
+      const cash = (await testPool.query("SELECT movement_type, sum(amount)::text AS total FROM cash_movements WHERE payment_id = ANY($1) GROUP BY movement_type ORDER BY movement_type", [payments.map(p => p.id)])).rows;
+      expect(cash).toEqual(singleCc ? [{ movement_type: "informational", total: "100.00" }] : [
+        { movement_type: "income", total: splitCc ? "50.00" : "98.00" },
+        { movement_type: "informational", total: splitCc ? "50.00" : "2.00" },
+      ]);
+      if (splitCc || singleCc) {
+        expect((await testPool.query("SELECT count(*) AS n, sum(amount)::text AS total FROM account_movements WHERE entity_type = 'guest' AND entity_id = $1 AND type = 'cargo'", [guestId])).rows[0])
+          .toEqual({ n: "1", total: singleCc ? "100.00" : "48.00" });
+      }
+      // A changed fiscal reference cannot reuse this payment operation.
+      const stored = reopened.pending(reservationId)!;
+      if (!singleCc) expect((await api("POST", "/api/payments", { ...stored.payments[0], invoiceData: { id: Number(invoiceId) + 1 } })).status).toBe(409);
+      reopened.complete(reservationId);
+    }, 30_000,
+  );
 });
