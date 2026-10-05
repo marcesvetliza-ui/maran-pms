@@ -1330,7 +1330,7 @@ export function registerRestaurantRoutes(app: Express) {
       const allPaid = unpaidItems.length === 0;
 
       if (allPaid) {
-        await storage.updateRestaurantOrder(req.params.id, {
+        const closedOrder = await storage.closeRestaurantOrderIfOpen(req.params.id, {
           status: "closed",
           closedAt: new Date(),
           paymentMethod: method,
@@ -1340,8 +1340,24 @@ export function registerRestaurantRoutes(app: Express) {
           tax: "0",
           total: "0",
         });
-        if (order.tableId) {
-          await storage.updateRestaurantTable(order.tableId, { status: "available" });
+        if (closedOrder) {
+          if (closedOrder.tableId) {
+            await storage.updateRestaurantTable(closedOrder.tableId, { status: "available" });
+          }
+          // /close y /split descuentan stock al cerrar; esta rama (completar
+          // el pago ítem por ítem) cerraba la orden sin pasar por ahí, así
+          // que una venta cobrada por pay-items nunca consumía materia prima.
+          try {
+            const stockResult = await storage.deductStockFromOrder(
+              req.params.id,
+              freshItems.map((i: any) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+            );
+            if (stockResult.warnings.length > 0) {
+              console.warn(`[Stock] Advertencias en orden ${req.params.id} (pay-items):`, stockResult.warnings);
+            }
+          } catch (stockError) {
+            console.error("[Stock] Error en descuento automático (pay-items):", stockError);
+          }
         }
       } else {
         await storage.updateRestaurantOrder(req.params.id, {
@@ -1370,6 +1386,12 @@ export function registerRestaurantRoutes(app: Express) {
       const { itemIds, targetOrderId, newOrderData } = req.body;
       if (!itemIds || itemIds.length === 0) return res.status(400).json({ error: "Seleccioná al menos un ítem" });
 
+      const sourceItemsBefore = await storage.getOrderItems(req.params.id);
+      const requestedItems = sourceItemsBefore.filter((i: any) => itemIds.includes(i.id));
+      if (requestedItems.some((i: any) => i.paid)) {
+        return res.status(400).json({ error: "No se pueden transferir ítems ya cobrados" });
+      }
+
       let finalTargetOrderId = targetOrderId;
 
       // If "new", create a new order first
@@ -1395,9 +1417,13 @@ export function registerRestaurantRoutes(app: Express) {
       // Move items
       await storage.moveOrderItems(itemIds, finalTargetOrderId);
 
-      // Recalculate source order total
+      // Recalculate source order total — solo ítems pendientes: los ya
+      // cobrados (vía pay-items) no deben volver a sumarse al total, o la
+      // orden queda con un saldo "pendiente" que en realidad ya se cobró y
+      // se vuelve a cobrar al cerrarla.
       const sourceItems = await storage.getOrderItems(req.params.id);
-      const sourceTotal = sourceItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      const sourceUnpaid = sourceItems.filter((i: any) => !i.paid);
+      const sourceTotal = sourceUnpaid.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
       const sourceNeto = parseFloat((sourceTotal / 1.21).toFixed(2));
       const sourceTax = parseFloat((sourceTotal - sourceNeto).toFixed(2));
       await storage.updateRestaurantOrder(req.params.id, {
@@ -1406,9 +1432,10 @@ export function registerRestaurantRoutes(app: Express) {
         total: sourceTotal.toFixed(2),
       });
 
-      // Recalculate target order total
+      // Recalculate target order total — mismo criterio: solo ítems pendientes.
       const targetItems = await storage.getOrderItems(finalTargetOrderId);
-      const targetTotal = targetItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
+      const targetUnpaid = targetItems.filter((i: any) => !i.paid);
+      const targetTotal = targetUnpaid.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
       const targetNeto = parseFloat((targetTotal / 1.21).toFixed(2));
       const targetTax = parseFloat((targetTotal - targetNeto).toFixed(2));
       const updatedTarget = await storage.updateRestaurantOrder(finalTargetOrderId, {
