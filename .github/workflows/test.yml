@@ -59,6 +59,9 @@ jobs:
       - name: Instalar dependencias
         run: npm ci --no-audit --no-fund
 
+      - name: Verificar tipos
+        run: npm run check
+
       - name: Preparar esquema de PostgreSQL para tests de integración
         run: npm run db:migrate:ci
 
@@ -69,3 +72,60 @@ jobs:
 
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
+
+  reservation-flow:
+    name: Detectar cobros duplicados en reintentos de Prefactura
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # A separate job gets a fresh service: no sessions or cash shifts from
+    # maran_test or any other suite can affect this operational circuit.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: reservation_flow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      # Exact equality and 127.0.0.1 are required by the suite's safety guard.
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reservation_flow_test
+      RESERVATION_FLOW_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/reservation_flow_test
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Validar URLs del lockfile npm
+        run: |
+          if grep -Fq "package-firewall.replit.local" package-lock.json; then
+            echo "::error file=package-lock.json::El lockfile contiene URLs del proxy interno package-firewall.replit.local, inaccesibles desde GitHub Actions."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependencias
+        run: npm ci --no-audit --no-fund
+
+      - name: Migrar la base descartable del circuito de reservas
+        run: npm run db:migrate:ci
+
+      # This file uses real authenticated local endpoints, prohibits external
+      # fetch, and switches billing to ficticio before issuing any invoice.
+      # Never run the full PostgreSQL suite against this dedicated database.
+      - name: Verificar reintentos, respuestas perdidas y retenciones sin ARCA real
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/reservation-operational-flow.pg.test.ts
