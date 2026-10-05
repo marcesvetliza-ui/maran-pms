@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
@@ -2477,6 +2478,15 @@ export function ReservationDetailDialog({
   const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; method: string; reference: string; billingTarget: string; companyId?: string; agencyId?: string }>>([
     { amount: "", method: "efectivo", reference: "", billingTarget: "guest" },
   ]);
+  const paymentSubmission = useRef(createReservationPaymentSubmission());
+  const paymentSubmissionDate = useRef(getLocalToday());
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
+  useEffect(() => {
+    if (showAddPayment) {
+      paymentSubmission.current.beginSession();
+      paymentSubmissionDate.current = getLocalToday();
+    }
+  }, [showAddPayment, reservation.id]);
 
   // Edit titular (guest)
   const [editingGuest, setEditingGuest] = useState(false);
@@ -2778,7 +2788,7 @@ export function ReservationDetailDialog({
   });
 
   const addPaymentMutation = useMutation({
-    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; billingTarget?: string; reservationId: string; date: string; paymentPurpose?: "personal_extras" }) => {
+    mutationFn: async (paymentData: { amount: string; method: PaymentMethod; reference?: string; notes?: string; billingTarget?: string; reservationId: string; date: string; paymentPurpose?: "personal_extras"; paymentRequestId?: string }) => {
       if (isGroupReservation) {
         if (paymentData.paymentPurpose !== "personal_extras") {
           throw new Error("En una reserva grupal solo se pueden registrar pagos de extras personales desde este folio.");
@@ -2798,12 +2808,14 @@ export function ReservationDetailDialog({
           date: paymentData.date,
           billingTarget: "guest",
           paymentPurpose: "personal_extras",
+          paymentRequestId: paymentData.paymentRequestId,
         });
       }
       return apiRequest("POST", "/api/payments", paymentData);
     },
     onSuccess: () => {
       refetchPayments();
+      if (paymentSubmission.current.isBusy()) return;
       setShowAddPayment(false);
       setNewPayment({ amount: "", method: "efectivo", reference: "", notes: "", billingTarget: "guest" });
       toast({ title: "Pago registrado", description: "El pago ha sido registrado exitosamente." });
@@ -2976,6 +2988,9 @@ export function ReservationDetailDialog({
   };
 
   const handleAddMultiPayment = async () => {
+    if (!paymentSubmission.current.acquire()) return;
+    setIsConfirmingPayment(true);
+    try {
     const validRows = paymentRows.filter(r => r.amount && parseFloat(r.amount) > 0);
     if (validRows.length === 0) return;
 
@@ -3025,20 +3040,22 @@ export function ReservationDetailDialog({
 
     let successCount = 0;
     let lastPaymentId: string | null = null;
-    for (const row of validRows) {
+    for (const [index, row] of validRows.entries()) {
       try {
-        const res = await addPaymentMutation.mutateAsync({
+        const payload = {
           amount: row.amount,
           method: row.method as PaymentMethod,
           reference: row.reference || undefined,
           notes: undefined,
           billingTarget: (isGroupReservation ? "guest" : row.billingTarget) as "guest" | "company",
           reservationId: reservation.id,
-          date: getLocalToday(),
+          date: paymentSubmissionDate.current,
           ...(isGroupReservation ? { paymentPurpose: "personal_extras" as const } : {}),
           ...(row.companyId ? { companyId: row.companyId } : {}),
           ...(row.agencyId ? { agencyId: row.agencyId } : {}),
-        } as any);
+        };
+        const paymentRequestId = paymentSubmission.current.requestId(index, payload);
+        const res = await addPaymentMutation.mutateAsync({ ...payload, paymentRequestId } as any);
         // Capture the created payment's ID so we can optionally link an invoice
         try {
           const saved = await (res as any).clone().json();
@@ -3054,9 +3071,14 @@ export function ReservationDetailDialog({
     }
     setShowAddPayment(false);
     setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]);
+    toast({ title: "Pago registrado", description: `${successCount} pago(s) confirmado(s).` });
     // Only offer invoice linking when a single advance was registered (clear intent)
     if (successCount === 1 && lastPaymentId) {
       setInvoicingPaymentId(lastPaymentId);
+    }
+    } finally {
+      paymentSubmission.current.release();
+      setIsConfirmingPayment(false);
     }
   };
 
@@ -4103,7 +4125,7 @@ export function ReservationDetailDialog({
                     setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
                   setShowAddPayment(!showAddPayment);
-                }} data-testid="button-add-payment" disabled={isGroupReservation && groupPersonalExtrasBalance <= 0.009}>
+                }} data-testid="button-add-payment" disabled={isConfirmingPayment || (isGroupReservation && groupPersonalExtrasBalance <= 0.009)}>
                   <Plus className="h-4 w-4 mr-1" />
                   {isGroupReservation ? "Cobrar extras personales" : "Registrar Pago"}
                 </Button>
@@ -4123,6 +4145,7 @@ export function ReservationDetailDialog({
                       El servidor verificará nuevamente el saldo de extras personales antes de registrar el pago.
                     </p>
                   )}
+                  <fieldset disabled={isConfirmingPayment} className="contents">
                   {paymentRows.map((row, index) => (
                     <div key={index} className="space-y-1">
                       <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
@@ -4325,7 +4348,7 @@ export function ReservationDetailDialog({
                       size="sm" 
                       onClick={handleAddMultiPayment} 
                       disabled={
-                        addPaymentMutation.isPending ||
+                        isConfirmingPayment || addPaymentMutation.isPending ||
                         paymentRows.every(r => !r.amount) ||
                         (isGroupReservation && (
                           paymentRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0) > groupPersonalExtrasBalance + 0.009 ||
@@ -4334,9 +4357,10 @@ export function ReservationDetailDialog({
                       }
                       data-testid="button-confirm-payment"
                     >
-                      Confirmar
+                      {isConfirmingPayment ? "Registrando…" : "Confirmar"}
                     </Button>
                   </div>
+                  </fieldset>
                 </div>
               )}
 
