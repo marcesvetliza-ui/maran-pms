@@ -49,6 +49,9 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
       return realFetch(input, init);
     });
     testPool = new pg.Pool({ connectionString: testUrl, max: 3 });
+    const { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } = await import("../reservationPaymentRequest");
+    await testPool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL);
+    await testPool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL); // Startup is repeatable.
     // Only the disposable database's empty session table is removed, to prove
     // setupAuth itself supports the first login without manual provisioning.
     expect((await testPool.query("SELECT count(*) FROM sessions")).rows[0].count).toBe("0");
@@ -167,5 +170,60 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
     expect(Number(summary.total_cash)).toBe(0);
     expect(Number(summary.total_transfer)).toBe(120000);
     expect(Number(summary.total_general)).toBe(120000);
+  }, 30_000);
+  it("concurrent confirmation and response-loss retries collect once; new operations remain valid", async () => {
+    const guestId = randomUUID(), typeId = randomUUID(), roomId = randomUUID();
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+    await testPool.query("INSERT INTO guests (id, first_name, last_name) VALUES ($1, 'Duplicate', 'Test')", [guestId]);
+    await testPool.query("INSERT INTO room_types (id, code, name) VALUES ($1, $2, 'Duplicate test')", [typeId, `dup-${typeId}`]);
+    await testPool.query("INSERT INTO rooms (id, room_number, room_type_id, status) VALUES ($1, $2, $3, 'available')", [roomId, `dup-${roomId}`, typeId]);
+    expect((await api("POST", "/api/cash/init-shifts")).status).toBe(200);
+    const created = await api("POST", "/api/reservations", {
+      guestId, roomTypeId: typeId, roomId, checkInDate: today, checkOutDate: tomorrow,
+      finalRatePerNight: "100000.00", totalRoomAmount: "100000.00", numberOfGuests: 1,
+      status: "confirmed", source: "directo",
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const reservationId = created.body.id;
+    expect((await api("POST", `/api/reservations/${reservationId}/check-in`, {})).status).toBe(200);
+    const body = { reservationId, amount: "100000.00", method: "efectivo", date: today, paymentRequestId: randomUUID() };
+    const confirmations = await Promise.all([api("POST", "/api/payments", body), api("POST", "/api/payments", body)]);
+    expect(confirmations.map(r => r.status).sort()).toEqual([200, 201]);
+    expect(confirmations[0].body.id).toBe(confirmations[1].body.id);
+    const paymentId = confirmations[0].body.id;
+    expect((await api("POST", "/api/payments", body)).body.id).toBe(paymentId);
+    expect((await testPool.query("SELECT count(*) AS n, sum(amount)::text AS total FROM payments WHERE reservation_id = $1", [reservationId])).rows[0])
+      .toEqual({ n: "1", total: "100000.00" });
+    expect((await testPool.query("SELECT count(*) AS n FROM cash_movements WHERE payment_id = $1", [paymentId])).rows[0].n).toBe("1");
+    expect((await testPool.query("SELECT count(*) AS n FROM folio_movements WHERE source_type = 'payment' AND source_id = $1", [paymentId])).rows[0].n).toBe("1");
+    expect((await testPool.query("SELECT balance::text FROM folios WHERE entity_type = 'reservation' AND entity_id = $1", [reservationId])).rows[0].balance).toBe("0.00");
+    expect((await api("POST", "/api/payments", { ...body, amount: "50000.00" })).status).toBe(409);
+    expect((await api("POST", "/api/payments", { ...body, paymentRequestId: "invalid" })).status).toBe(400);
+    // A different intentional payment is not guessed to be a duplicate by amount/date.
+    const second = await api("POST", "/api/payments", { ...body, paymentRequestId: randomUUID() });
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    expect(second.body.id).not.toBe(paymentId);
+    // PATCH and void cannot recycle the original operation into another collection.
+    expect((await api("PATCH", `/api/payments/${paymentId}`, { paymentRequestId: randomUUID(), paymentRequestFingerprint: "forged" })).status).toBe(200);
+    expect((await api("PATCH", `/api/payments/${paymentId}/anular`, { motivoAnulacion: "Synthetic correction" })).status).toBe(200);
+    const replayVoided = await api("POST", "/api/payments", body);
+    expect(replayVoided.status).toBe(200);
+    expect(replayVoided.body.id).toBe(paymentId);
+    expect(replayVoided.body.status).toBe("anulado");
+    expect((await testPool.query("SELECT count(*) AS n FROM payments WHERE reservation_id = $1", [reservationId])).rows[0].n).toBe("2");
+    const { storage } = await import("../db-storage");
+    const { parseReservationPaymentRequest } = await import("../reservationPaymentRequest");
+    const rollbackBody = { ...body, amount: "500.00", paymentRequestId: randomUUID() };
+    const request = parseReservationPaymentRequest(rollbackBody, username)!;
+    const input = {
+      payment: { reservationId, amount: "500.00", method: "efectivo", date: today },
+      paymentRequest: request, sourceLabel: "Fail at Caja insert\0",
+    };
+    await expect(storage.createReservationPaymentWithLedger(input)).rejects.toThrow();
+    expect((await testPool.query("SELECT count(*) AS n FROM payments WHERE payment_request_id = $1", [request.id])).rows[0].n).toBe("0");
+    // The failed transaction does not consume the operation ID.
+    const recovered = await storage.createReservationPaymentWithLedger({ ...input, sourceLabel: "Recovered synthetic payment" });
+    expect(recovered.paymentRequestId).toBe(request.id);
   }, 30_000);
 });

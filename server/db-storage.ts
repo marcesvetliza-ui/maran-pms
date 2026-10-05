@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
 import { deductIngredientsAtMultiplier } from "./recipeStockDeduction";
+import { assertPaymentRequestMatches, type ReservationPaymentRequest } from "./reservationPaymentRequest";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
@@ -1516,6 +1517,13 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async getReservationPaymentRequest(request: ReservationPaymentRequest): Promise<Payment | undefined> {
+    const [existing] = await db.select().from(payments)
+      .where(eq(payments.paymentRequestId, request.id)).limit(1);
+    if (existing) assertPaymentRequestMatches(existing, request);
+    return existing;
+  }
+
   /**
    * Atomically void a reservation payment and every financial projection it
    * owns. Routes must use this instead of independently changing payments or
@@ -1680,6 +1688,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createReservationPaymentWithLedger(input: {
+    paymentRequest?: ReservationPaymentRequest;
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
     registeredBy?: string;
@@ -1696,7 +1705,7 @@ export class DatabaseStorage implements IStorage {
       adoptedCanonicalReference?: string;
       advanceInvoiceRef?: string;
     };
-  }): Promise<Payment> {
+  }): Promise<Payment & { paymentRequestReplayed?: boolean }> {
     const methodMap: Record<string, string> = {
       efectivo: "cash",
       cash: "cash",
@@ -1752,6 +1761,15 @@ export class DatabaseStorage implements IStorage {
     const cashBearingMethods = new Set(["cash", "debit_card", "credit_card", "transfer", "mercadopago"]);
     const informationalMethods = new Set(["current_account", "voucher", "retencion_iibb", "retencion_ganancias", "retencion_iva"]);
     return db.transaction(async (tx) => {
+      if (input.paymentRequest) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`payment-request:${input.paymentRequest.id}`}))`);
+        const [existing] = await tx.select().from(payments)
+          .where(eq(payments.paymentRequestId, input.paymentRequest.id)).limit(1);
+        if (existing) {
+          assertPaymentRequestMatches(existing, input.paymentRequest);
+          return { ...existing, paymentRequestReplayed: true };
+        }
+      }
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
       // repair by payment identity and make the event explicitly idempotent.
@@ -1848,6 +1866,8 @@ export class DatabaseStorage implements IStorage {
       const [payment] = await tx.insert(payments).values({
         ...input.payment,
         amount: canonicalAmount,
+        paymentRequestId: input.paymentRequest?.id ?? null,
+        paymentRequestFingerprint: input.paymentRequest?.fingerprint ?? null,
       } as any).returning();
       let cashMovementId: string | undefined;
 
@@ -2046,7 +2066,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updatePayment(id: string, payment: Partial<InsertPayment>): Promise<Payment | undefined> {
-    const [updated] = await db.update(payments).set(payment as any).where(eq(payments.id, id)).returning();
+    const { paymentRequestId, paymentRequestFingerprint, ...editable } = payment as Partial<Payment>;
+    if (!Object.values(editable).some(value => value !== undefined)) {
+      const [existing] = await db.select().from(payments).where(eq(payments.id, id)).limit(1);
+      return existing;
+    }
+    const [updated] = await db.update(payments).set(editable as any).where(eq(payments.id, id)).returning();
     return updated;
   }
 

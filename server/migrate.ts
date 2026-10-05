@@ -1,4 +1,5 @@
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } from "./reservationPaymentRequest";
 import { db, pool } from "./db";
 import { logger } from "./logger";
 import { eq, isNotNull, sql, type SQL } from "drizzle-orm";
@@ -1606,6 +1607,9 @@ export async function runMigrations() {
   // Incremental schema additions — each wrapped in an 8s timeout so a hung
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
+  await withTimeout("payments.request_identity", T, () =>
+    pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL)
+  );
   await withTimeout("lost_found_items.shipping_details", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("lost_found_items", "shipping_details", "jsonb")))
   );
