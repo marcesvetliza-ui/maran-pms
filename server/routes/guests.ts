@@ -3,7 +3,7 @@ import { storage } from "../db-storage";
 import { requireAuth, requirePermission } from "../auth";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
-import { guests, reservations, roomTypes as roomTypesTable, type AccountEntityType } from "../../shared/schema";
+import { guests, reservations, roomTypes as roomTypesTable, accountMovements, type AccountEntityType } from "../../shared/schema";
 import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { visibleGuestCondition } from "../guest-visibility";
@@ -744,12 +744,15 @@ export function registerGuestsRoutes(app: Express) {
       // Revalida tipo/área/estado antes de borrar — ids no es un filtro de
       // confianza ciega, solo acota CUÁLES de los que ya cumplen el perfil
       // de "cargo de sincronización sin anular" se borran.
-      const result = await db.execute(sql`
-        DELETE FROM account_movements
-        WHERE id = ANY(${ids}::varchar[]) AND type = 'cargo' AND area = 'recepcion' AND voided = false
-        RETURNING id
-      `);
-      res.json({ deleted: result.rows.length });
+      const result = await db.delete(accountMovements)
+        .where(and(
+          inArray(accountMovements.id, ids),
+          eq(accountMovements.type, "cargo"),
+          eq(accountMovements.area, "recepcion"),
+          eq(accountMovements.voided, false),
+        ))
+        .returning({ id: accountMovements.id });
+      res.json({ deleted: result.length });
     } catch (error: any) {
       res.status(500).json({ error: error?.message || "Error deshaciendo los cargos" });
     }
