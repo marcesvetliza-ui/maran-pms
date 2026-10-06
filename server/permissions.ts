@@ -275,7 +275,9 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:admin:countries-list": ["admin", "manager"],
   "api:account-movements:void": ["admin", "manager"],
   "api:admin:audit-logs": ["admin", "manager"],
-  "api:admin:reconcile-cc-payments": ["admin", "manager"],
+  // Recorre TODO el historial de pagos en Cta. Cte. y puede crear muchos
+  // movimientos de golpe (ver incidente del 6/10) — restringido a admin.
+  "api:admin:reconcile-cc-payments": ["admin"],
   "api:cash:configs-write": ["admin", "manager"],
   "api:cash:payment-links-audit": ["admin", "manager"],
   "api:cash:repair-movements": ["admin", "manager"],

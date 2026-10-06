@@ -645,6 +645,11 @@ export default function AdminCuentasPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const canRepairCashShift = ["admin", "manager"].includes(user?.role ?? "");
+  // "Sincronizar pagos en CC" recorre TODO el historial de pagos y puede
+  // crear muchos movimientos de golpe (ver incidente del 6/10) — se limita
+  // a admin, aunque el permiso de servidor (api:admin:reconcile-cc-payments)
+  // también deja pasar a manager.
+  const canReconcileCc = user?.role === "admin";
   const { toast } = useToast();
   const [expandedCard, setExpandedCard] = useState<ExpandedCard>(null);
   const [expandedEntityId, setExpandedEntityId] = useState<string | null>(null);
@@ -1205,7 +1210,8 @@ export default function AdminCuentasPage() {
         <AgingReportSection accountSummary={accountSummary} areaFilter={areaFilter} />
       )}
 
-      {/* Reconciliación de pagos CC existentes */}
+      {/* Reconciliación de pagos CC existentes — solo admin, ver nota en canReconcileCc */}
+      {canReconcileCc && (
       <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/10">
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1230,7 +1236,11 @@ export default function AdminCuentasPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => reconcileMutation.mutate()}
+                onClick={() => {
+                  if (window.confirm("Esto revisa TODO el historial de pagos en Cta. Cte. y puede crear muchos movimientos nuevos de golpe. ¿Confirmás que querés sincronizar ahora?")) {
+                    reconcileMutation.mutate();
+                  }
+                }}
                 disabled={reconcileMutation.isPending}
                 className="border-amber-300 dark:border-amber-700"
                 data-testid="button-reconcile-cc"
@@ -1305,6 +1315,7 @@ export default function AdminCuentasPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <Separator />
 

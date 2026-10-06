@@ -257,13 +257,16 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       "api:admin:setup-utilities", "api:admin:guests-cleanup", "api:admin:clean-data",
       "api:incidents:delete", "api:admin:chatbot-secret", "api:admin:purchase-invoices-truncate",
       "api:spa:reset-nc", "api:events:reset-nc",
+      // Recorre TODO el historial de pagos en Cta. Cte. y puede crear muchos
+      // movimientos de golpe (ver incidente del 6/10) — restringido a admin.
+      "api:admin:reconcile-cc-payments",
     ];
     for (const key of adminOnlyKeys) {
       expect(API_RESOURCE_PERMISSIONS[key], key).toEqual(["admin"]);
     }
     const adminManagerKeys = [
       "api:admin:countries-list", "api:account-movements:void", "api:admin:audit-logs",
-      "api:admin:reconcile-cc-payments", "api:cash:configs-write", "api:cash:payment-links-audit",
+      "api:cash:configs-write", "api:cash:payment-links-audit",
       "api:cash:repair-movements", "api:cash:force-anular",
     ];
     for (const key of adminManagerKeys) {
