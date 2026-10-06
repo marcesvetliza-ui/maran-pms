@@ -507,7 +507,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/cabins/:id", requireAuth, async (req, res) => {
+  app.delete("/api/spa/cabins/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       await storage.deleteSpaCabin(req.params.id);
       res.status(204).send();
@@ -555,7 +555,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/treatment-categories/:id", requireAuth, async (req, res) => {
+  app.delete("/api/spa/treatment-categories/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       await storage.deleteSpaTreatmentCategory(req.params.id);
       res.status(204).send();
@@ -612,7 +612,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/treatments/:id", requireAuth, async (req, res) => {
+  app.delete("/api/spa/treatments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       await storage.deleteSpaTreatment(req.params.id);
       res.status(204).send();
@@ -1442,7 +1442,12 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/appointments/:id", requireAuth, async (req, res) => {
+  // Ningún botón de la app llama a este borrado duro — cancelar un turno pasa
+  // por PATCH status=cancelled, que preserva el registro. Este endpoint queda
+  // para una corrección administrativa puntual (p.ej. un turno de prueba), así
+  // que solo debe estar al alcance de quien ya administra Spa, no de cualquier
+  // sesión autenticada en el hotel.
+  app.delete("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       await db.transaction(async (tx) => {
         await tx.delete(spaAppointmentResources).where(eq(spaAppointmentResources.appointmentId, req.params.id));
@@ -2053,6 +2058,58 @@ export function registerSpaRoutes(app: Express) {
         .where(eq(spaPayments.id, req.params.id))
         .returning();
 
+      const operator = (req as any).user?.username || "sistema";
+
+      // Anular el pago acá adentro (spa_payments) no tocaba Caja ni el folio
+      // de la cuenta: el movimiento de caja original quedaba "vivo" y
+      // total_payments del folio nunca bajaba, aunque el pago ya no contara
+      // — exactamente el mismo gap que ya se corrigió para Restaurant.
+      if (pay.method !== "room_charge") {
+        try {
+          const candidates = await db.execute(sql`
+            SELECT id FROM cash_movements
+            WHERE source_type = 'spa_account' AND source_id = ${pay.accountId}
+              AND payment_method = ${pay.method} AND amount::numeric = ${pay.amount}::numeric
+              AND anulado = false
+            LIMIT 2
+          `);
+          if (candidates.rows.length === 1) {
+            const movementId = (candidates.rows[0] as any).id;
+            await db.execute(sql`
+              UPDATE cash_movements
+              SET anulado = true, motivo_anulacion = ${motivoAnulacion}, anulado_por = ${operator}, anulado_at = NOW()
+              WHERE id = ${movementId}
+            `);
+          } else {
+            console.warn(`[SPA] No se encontró un movimiento de caja unívoco para el pago ${pay.id} (candidatos: ${candidates.rows.length})`);
+          }
+        } catch (e) {
+          console.error("[SPA] Error anulando movimiento de caja:", e);
+        }
+      }
+
+      try {
+        const folioRows = await db.execute(sql`
+          SELECT id FROM folios WHERE entity_type = 'spa_account' AND entity_id = ${pay.accountId} LIMIT 1
+        `);
+        const folio = folioRows.rows?.[0] as any;
+        if (folio) {
+          const originalRows = await db.execute(sql`
+            SELECT id FROM folio_movements
+            WHERE folio_id = ${folio.id} AND type = 'payment' AND source_type = 'spa_payment' AND source_id = ${pay.id}
+          `);
+          if (originalRows.rows.length === 1) {
+            await storage.addFolioAdjustment(
+              folio.id, "void", -parseFloat(pay.amount),
+              `Anulación pago SPA — ${motivoAnulacion}`,
+              operator, (originalRows.rows[0] as any).id, motivoAnulacion,
+            );
+          }
+        }
+      } catch (e) {
+        console.error("[SPA] Error anulando folio de la cuenta:", e);
+      }
+
       if (pay.method === "gift_voucher" && pay.voucherId) {
         try {
           const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", pay.accountId);
@@ -2151,7 +2208,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/account-items/:id", requireAuth, async (req, res) => {
+  app.delete("/api/spa/account-items/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       await storage.deleteSpaAccountItem(req.params.id);
       res.status(204).send();
@@ -2279,7 +2336,7 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/spa/treatments/supplies/:supplyId", requireAuth, async (req, res) => {
+  app.delete("/api/spa/treatments/supplies/:supplyId", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       const ok = await storage.deleteTreatmentSupply(req.params.supplyId);
       res.json({ success: ok });

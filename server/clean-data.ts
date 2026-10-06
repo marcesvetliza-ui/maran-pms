@@ -20,6 +20,25 @@ import {
 } from "@shared/schema";
 
 async function cleanTestData() {
+  // Este script borra casi toda la base operativa (reservas, huéspedes,
+  // turnos de SPA, pedidos de Restaurant, caja, eventos...) sin pedir
+  // confirmación ni dejar rastro (hasta audit_logs se borra). Se escribió una
+  // sola vez para vaciar datos de prueba antes de poner el sistema en
+  // producción — correrlo de nuevo contra la base real sería catastrófico.
+  // El guard de abajo exige un flag explícito y a propósito para que nadie
+  // (persona o agente) pueda dispararlo sin darse cuenta de lo que hace.
+  if (!process.argv.includes("--yes-delete-everything")) {
+    console.error(
+      "\n⛔ Este script borra reservas, huéspedes, turnos de SPA, pedidos de " +
+      "Restaurant, caja y más — de forma IRREVERSIBLE y sin dejar registro.\n" +
+      "No se ejecuta sin confirmación explícita.\n" +
+      "Si estás absolutamente seguro de que esto es lo que querés (y NO es " +
+      "la base de producción), volvé a correrlo agregando:\n" +
+      "  --yes-delete-everything\n",
+    );
+    process.exit(1);
+  }
+
   console.log("Iniciando limpieza de datos de prueba...");
 
   console.log("Borrando movimientos de caja...");

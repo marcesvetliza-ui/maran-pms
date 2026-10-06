@@ -2595,6 +2595,17 @@ export async function registerRoutes(
 
   app.post("/api/admin/clean-data", requirePermission("api:admin:clean-data"), async (req, res) => {
     try {
+      // Esta ruta borra reservas, huéspedes, turnos de SPA, pedidos de
+      // Restaurant, caja, eventos y más — de forma irreversible, y hasta
+      // borra audit_logs, así que no quedaba rastro de quién la disparó. El
+      // permiso de admin ya la protege de otros roles, pero una sesión admin
+      // válida sola no debería alcanzar para esto: hace falta tipear a
+      // propósito la frase de confirmación.
+      if (req.body?.confirm !== "ELIMINAR TODOS LOS DATOS") {
+        return res.status(400).json({
+          error: "Confirmación requerida. Esta acción borra reservas, huéspedes, turnos de SPA, pedidos de Restaurant, caja y más — sin forma de deshacerla. Enviá confirm: \"ELIMINAR TODOS LOS DATOS\" para continuar.",
+        });
+      }
       const { sql } = await import("drizzle-orm");
       await db.execute(sql`DELETE FROM cash_movements`);
       await db.execute(sql`DELETE FROM cash_closing_summaries`);
@@ -2629,6 +2640,14 @@ export async function registerRoutes(
       await db.execute(sql`DELETE FROM companies`);
       await db.execute(sql`UPDATE rooms SET status = 'available'`);
       await db.execute(sql`UPDATE restaurant_tables SET status = 'available'`);
+      // audit_logs quedó vacía recién arriba — dejar esta fila es lo único
+      // que va a sobrevivir para decir quién disparó el borrado y cuándo.
+      const user = req.user as any;
+      await db.execute(sql`
+        INSERT INTO audit_logs (id, user_id, user_name, action, module, description, ip_address, timestamp)
+        VALUES (gen_random_uuid(), ${user?.id || null}, ${user?.username || "desconocido"}, 'delete', 'admin',
+          'Limpieza total de datos (POST /api/admin/clean-data)', ${req.ip || req.socket?.remoteAddress || null}, NOW())
+      `);
       res.json({ success: true, message: "Datos de prueba eliminados correctamente" });
     } catch (error: any) {
       console.error("Error cleaning data:", error);
