@@ -26,6 +26,7 @@ import {
   FileText,
   Search,
   Receipt,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
@@ -672,10 +674,39 @@ export default function AdminCuentasPage() {
         title: "Reconciliación completada",
         description: data.message || `${data.created} movimientos creados`,
       });
+      setUndoReviewOpen(true);
     },
     onError: () => {
       toast({ title: "Error en reconciliación", variant: "destructive" });
     },
+  });
+
+  type RecentReconcileCargo = {
+    id: string; entity_type: string; entity_id: string; date: string;
+    description: string; amount: string; reservation_code: string | null;
+    guest_name: string | null; created_at: string;
+  };
+  const [undoReviewOpen, setUndoReviewOpen] = useState(false);
+  const { data: recentReconcileCargos = [], isLoading: recentReconcileLoading } = useQuery<RecentReconcileCargo[]>({
+    queryKey: ["/api/admin/reconcile-cc-payments/recent"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/admin/reconcile-cc-payments/recent?minutes=20");
+      return res.json();
+    },
+    enabled: undoReviewOpen,
+  });
+  const undoReconcileMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await apiRequest("POST", "/api/admin/reconcile-cc-payments/undo", { ids });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reconcile-cc-payments/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
+      toast({ title: `Se deshicieron ${data.deleted} movimiento(s)` });
+    },
+    onError: (error: any) => toast({ title: "Error al deshacer", description: error.message, variant: "destructive" }),
   });
 
   const [reporteFrom, setReporteFrom] = useState(() => {
@@ -1187,18 +1218,91 @@ export default function AdminCuentasPage() {
                 </p>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => reconcileMutation.mutate()}
-              disabled={reconcileMutation.isPending}
-              className="border-amber-300 dark:border-amber-700 shrink-0"
-              data-testid="button-reconcile-cc"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
-              {reconcileMutation.isPending ? "Sincronizando..." : "Sincronizar ahora"}
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setUndoReviewOpen(v => !v)}
+                data-testid="button-review-reconcile-cc"
+              >
+                {undoReviewOpen ? "Ocultar revisión" : "Revisar / deshacer"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => reconcileMutation.mutate()}
+                disabled={reconcileMutation.isPending}
+                className="border-amber-300 dark:border-amber-700"
+                data-testid="button-reconcile-cc"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${reconcileMutation.isPending ? "animate-spin" : ""}`} />
+                {reconcileMutation.isPending ? "Sincronizando..." : "Sincronizar ahora"}
+              </Button>
+            </div>
           </div>
+          {undoReviewOpen && (
+            <div className="mt-3 border-t border-amber-200 dark:border-amber-800 pt-3 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Cargos creados por "Sincronizar ahora" en los últimos 20 minutos. Revisá que correspondan antes de deshacerlos — una vez deshechos, hay que volver a correr la sincronización para recuperarlos.
+              </p>
+              {recentReconcileLoading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : recentReconcileCargos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No hay cargos de sincronización en los últimos 20 minutos.</p>
+              ) : (
+                <>
+                  <div className="max-h-64 overflow-y-auto rounded-md border bg-background">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Fecha</TableHead>
+                          <TableHead>Reserva</TableHead>
+                          <TableHead>Huésped</TableHead>
+                          <TableHead className="text-right">Monto</TableHead>
+                          <TableHead className="w-10"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {recentReconcileCargos.map(c => (
+                          <TableRow key={c.id} data-testid={`row-recent-reconcile-${c.id}`}>
+                            <TableCell className="whitespace-nowrap">{c.date}</TableCell>
+                            <TableCell>{c.reservation_code || "-"}</TableCell>
+                            <TableCell>{c.guest_name || "-"}</TableCell>
+                            <TableCell className="text-right">${Number(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-destructive hover:text-destructive"
+                                disabled={undoReconcileMutation.isPending}
+                                onClick={() => undoReconcileMutation.mutate([c.id])}
+                                data-testid={`button-undo-reconcile-${c.id}`}
+                              >
+                                Deshacer
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={undoReconcileMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`¿Deshacer los ${recentReconcileCargos.length} cargos listados? Esta acción no se puede revertir directamente.`)) {
+                        undoReconcileMutation.mutate(recentReconcileCargos.map(c => c.id));
+                      }
+                    }}
+                    data-testid="button-undo-all-reconcile"
+                  >
+                    Deshacer los {recentReconcileCargos.length} listados
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

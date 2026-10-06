@@ -713,6 +713,48 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
+  // Los cargos que "Sincronizar pagos en CC" (POST /api/admin/reconcile-cc-payments)
+  // crea no tienen un "void" dedicado (voidDirectAccountPayment solo anula
+  // recibos de tipo "pago" sin reserva asociada). Si una corrida trae
+  // cargos de más — por ejemplo por su deduplicación débil (reserva+monto) —
+  // esto permite revisar y deshacer exactamente lo recién creado, en dos
+  // pasos: primero listar (sin tocar nada), después borrar solo los ids que
+  // el propio listado devolvió.
+  app.get("/api/admin/reconcile-cc-payments/recent", requirePermission("api:admin:reconcile-cc-payments"), async (req, res) => {
+    try {
+      const minutes = Math.min(Math.max(parseInt(String(req.query.minutes ?? "15"), 10) || 15, 1), 240);
+      const rows = await db.execute(sql`
+        SELECT id, entity_type, entity_id, date, description, amount,
+               reservation_code, guest_name, created_at
+        FROM account_movements
+        WHERE type = 'cargo' AND area = 'recepcion' AND voided = false
+          AND created_at >= NOW() - (${minutes} * interval '1 minute')
+        ORDER BY created_at DESC
+      `);
+      res.json(rows.rows);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Error listando los cargos recientes" });
+    }
+  });
+
+  app.post("/api/admin/reconcile-cc-payments/undo", requirePermission("api:admin:reconcile-cc-payments"), async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id: unknown) => typeof id === "string" && id) : [];
+      if (ids.length === 0) return res.status(400).json({ error: "No se indicaron movimientos a deshacer" });
+      // Revalida tipo/área/estado antes de borrar — ids no es un filtro de
+      // confianza ciega, solo acota CUÁLES de los que ya cumplen el perfil
+      // de "cargo de sincronización sin anular" se borran.
+      const result = await db.execute(sql`
+        DELETE FROM account_movements
+        WHERE id = ANY(${ids}::varchar[]) AND type = 'cargo' AND area = 'recepcion' AND voided = false
+        RETURNING id
+      `);
+      res.json({ deleted: result.rows.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Error deshaciendo los cargos" });
+    }
+  });
+
   // Receipts list — only pago movements, with filters
   app.get("/api/account-movements/receipts", async (req, res) => {
     try {
