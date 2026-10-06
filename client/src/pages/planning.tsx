@@ -202,6 +202,7 @@ export default function PlanningPage() {
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [blocksExpanded, setBlocksExpanded] = useState(false);
+  const [maintenanceBlockDialogRoom, setMaintenanceBlockDialogRoom] = useState<{ id: string; roomNumber: string } | null>(null);
   const [showRevenue, setShowRevenue] = useState(() => localStorage.getItem("planning_revenue") === "true");
 
   const toggleRevenue = () => setShowRevenue(v => {
@@ -247,6 +248,29 @@ export default function PlanningPage() {
     },
     onError: () => {
       toast({ title: "Error al actualizar estado", variant: "destructive" });
+    },
+  });
+
+  const { data: maintenanceBlockDialogBlocks = [], isLoading: maintenanceBlockDialogLoading } = useQuery<
+    Array<{ id: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }>
+  >({
+    queryKey: ["/api/maintenance/blocks", maintenanceBlockDialogRoom?.id],
+    queryFn: () =>
+      fetch(`/api/maintenance/blocks?roomId=${encodeURIComponent(maintenanceBlockDialogRoom!.id)}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!maintenanceBlockDialogRoom,
+  });
+
+  const removeMaintenanceBlockMutation = useMutation({
+    mutationFn: (blockId: string) => apiRequest("DELETE", `/api/maintenance/blocks/${blockId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.refetchQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Bloqueo eliminado", description: "La habitación fue desbloqueada del planning." });
+      setMaintenanceBlockDialogRoom(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo eliminar el bloqueo.", variant: "destructive" });
     },
   });
 
@@ -663,7 +687,7 @@ export default function PlanningPage() {
 
   const handleCellClick = (room: RoomWithType, day: string, status: PlanningCellStatus, reservationId?: string) => {
     if (status === "maintenance") {
-      toast({ title: "Habitación en mantenimiento", description: "No se pueden crear reservas en esta habitación mientras está en mantenimiento.", variant: "destructive" });
+      setMaintenanceBlockDialogRoom({ id: room.id, roomNumber: room.roomNumber });
       return;
     }
     if (status === "late_blocked") {
@@ -1552,6 +1576,50 @@ export default function PlanningPage() {
         onSelectColor={(reservationId, color) => updateReservationColorMutation.mutate({ reservationId, color })}
         onClose={() => setColorContextMenu(null)}
       />
+
+      <Dialog open={!!maintenanceBlockDialogRoom} onOpenChange={(open) => { if (!open) setMaintenanceBlockDialogRoom(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Habitación {maintenanceBlockDialogRoom?.roomNumber} — Mantenimiento</DialogTitle>
+            <DialogDescription>
+              Esta habitación aparece bloqueada en el planning por los siguientes bloqueos de fechas.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {maintenanceBlockDialogLoading ? (
+              <p className="text-sm text-muted-foreground">Cargando...</p>
+            ) : maintenanceBlockDialogBlocks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No se encontró ningún bloqueo activo para esta habitación. Si el planning sigue mostrándola bloqueada,
+                probá recargar la página — si persiste, avisá a soporte con el ID de habitación: <code className="text-xs">{maintenanceBlockDialogRoom?.id}</code>
+              </p>
+            ) : (
+              maintenanceBlockDialogBlocks.map(block => (
+                <div key={block.id} className="rounded-md border p-3 space-y-1">
+                  <p className="text-sm font-medium">{block.blockFrom} — {block.blockTo}</p>
+                  <p className="text-xs text-muted-foreground">Bloqueado por {block.blockedBy}</p>
+                  {block.notes && <p className="text-xs text-muted-foreground">Motivo: {block.notes}</p>}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={removeMaintenanceBlockMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`¿Finalizar este bloqueo (${block.blockFrom} — ${block.blockTo})? La habitación quedará disponible en el planning.`)) {
+                        removeMaintenanceBlockMutation.mutate(block.id);
+                      }
+                    }}
+                  >
+                    {removeMaintenanceBlockMutation.isPending ? "Eliminando..." : "Finalizar bloqueo"}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMaintenanceBlockDialogRoom(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

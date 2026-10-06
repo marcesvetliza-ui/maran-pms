@@ -77,6 +77,16 @@ app.use(helmet({
   frameguard: false, // Managed per-route above
 }));
 
+// Las respuestas de /api/* son siempre dinámicas (datos de reservas, planning,
+// caja, etc.) y nunca deben quedar cacheadas — ni por el navegador ni por un
+// CDN delante de la app (ej. Cloudflare). Sin este header, una respuesta
+// vieja puede quedar "pegada" y mostrar datos desactualizados (habitaciones
+// que siguen apareciendo bloqueadas después de desbloquearlas, etc.).
+app.use("/api", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  next();
+});
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,

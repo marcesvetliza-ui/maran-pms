@@ -1620,8 +1620,8 @@ export default function Housekeeping() {
       setBlockNotes("");
       toast({ title: "Bloqueo aplicado", description: "La habitación fue bloqueada en el planning." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo crear el bloqueo.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo crear el bloqueo.", variant: "destructive" });
     },
   });
 
@@ -1631,13 +1631,16 @@ export default function Housekeeping() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      // El refresco automático de Planning es cada 30s (refetchInterval); forzamos
+      // un refetch inmediato para que no parezca que el bloqueo sigue activo.
+      queryClient.refetchQueries({ queryKey: ["/api/planning"] });
       setEditingBlockId(null);
       setBlockFrom("");
       setBlockTo("");
       toast({ title: "Bloqueo actualizado", description: "Las fechas del bloqueo fueron modificadas." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo actualizar el bloqueo.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo actualizar el bloqueo.", variant: "destructive" });
     },
   });
 
@@ -1646,10 +1649,11 @@ export default function Housekeeping() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance/blocks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.refetchQueries({ queryKey: ["/api/planning"] });
       toast({ title: "Bloqueo eliminado", description: "La habitación fue desbloqueada del planning." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo eliminar el bloqueo.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Error", description: error?.message || "No se pudo eliminar el bloqueo.", variant: "destructive" });
     },
   });
 
@@ -2641,11 +2645,15 @@ export default function Housekeeping() {
                             size="sm"
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
-                            onClick={() => removeRoomBlockMutation.mutate(block.id)}
+                            onClick={() => {
+                              if (window.confirm(`¿Finalizar el bloqueo del ${block.blockFrom} al ${block.blockTo}? La habitación quedará disponible para el planning.`)) {
+                                removeRoomBlockMutation.mutate(block.id);
+                              }
+                            }}
                             disabled={removeRoomBlockMutation.isPending}
                             data-testid="button-remove-room-block"
                           >
-                            Eliminar
+                            {removeRoomBlockMutation.isPending ? "Eliminando..." : "Eliminar"}
                           </Button>
                         </div>
                       </div>
