@@ -113,6 +113,74 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
   return filtered;
 }
 
+export type CcInvoiceRecipientBackfillResult = {
+  updated: number;
+  unmatched: number;
+  details: Array<{
+    salesInvoiceId: number;
+    numeroFactura: string;
+    status: "matched" | "unmatched" | "ambiguous";
+    entityType?: "company" | "agency";
+    entityName?: string;
+  }>;
+};
+
+/**
+ * Factura CC emitidas antes de que recipientEntityType/Id existiera en este
+ * flujo (facturas de reserva cobradas a la Cta. Cte. de una empresa/agencia,
+ * ver server/billing/routes.ts) quedaron sin ese dato y por eso no aparecen
+ * en "Seguimiento de Facturas CC". Esto las vincula retroactivamente
+ * buscando, por CUIT exacto, una única empresa o agencia — no toca nada más
+ * de la factura (montos, fechas, estado), y una factura que no tenga un
+ * único match queda como estaba, sin tocar.
+ */
+export async function backfillCcInvoiceRecipients(): Promise<CcInvoiceRecipientBackfillResult> {
+  const candidates = await db.select({
+    id: salesInvoices.id,
+    numero: salesInvoices.numero,
+    clienteCuit: salesInvoices.clienteCuit,
+  }).from(salesInvoices).where(and(
+    eq(salesInvoices.estado, "emitida"),
+    eq(salesInvoices.cashFormaPago, "cuenta_corriente"),
+    sql`${salesInvoices.tipoComprobante} LIKE 'F%'`,
+    sql`${salesInvoices.recipientEntityType} IS NULL`,
+  ));
+
+  const details: CcInvoiceRecipientBackfillResult["details"] = [];
+  let updated = 0;
+
+  for (const inv of candidates) {
+    const numeroFactura = String(inv.numero).padStart(8, "0");
+    const cuitDigits = String(inv.clienteCuit || "").replace(/\D/g, "");
+    if (!cuitDigits) {
+      details.push({ salesInvoiceId: inv.id, numeroFactura, status: "unmatched" });
+      continue;
+    }
+    const [companyMatches, agencyMatches] = await Promise.all([
+      db.select({ id: companies.id, name: sql<string>`COALESCE(${companies.nombreFantasia}, ${companies.razonSocial})` })
+        .from(companies).where(sql`regexp_replace(${companies.cuilCuit}, '\D', '', 'g') = ${cuitDigits}`),
+      db.select({ id: agencies.id, name: sql<string>`COALESCE(${agencies.nombreFantasia}, ${agencies.razonSocial})` })
+        .from(agencies).where(sql`regexp_replace(${agencies.cuilCuit}, '\D', '', 'g') = ${cuitDigits}`),
+    ]);
+    const allMatches = [
+      ...companyMatches.map(m => ({ ...m, type: "company" as const })),
+      ...agencyMatches.map(m => ({ ...m, type: "agency" as const })),
+    ];
+    if (allMatches.length !== 1) {
+      details.push({ salesInvoiceId: inv.id, numeroFactura, status: allMatches.length === 0 ? "unmatched" : "ambiguous" });
+      continue;
+    }
+    const match = allMatches[0];
+    await db.update(salesInvoices)
+      .set({ recipientEntityType: match.type, recipientEntityId: match.id } as any)
+      .where(eq(salesInvoices.id, inv.id));
+    updated += 1;
+    details.push({ salesInvoiceId: inv.id, numeroFactura, status: "matched", entityType: match.type, entityName: match.name });
+  }
+
+  return { updated, unmatched: details.length - updated, details };
+}
+
 export async function upsertCcInvoiceTracking(
   salesInvoiceId: number,
   data: {

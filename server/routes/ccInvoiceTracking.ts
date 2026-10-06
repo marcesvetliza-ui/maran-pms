@@ -1,9 +1,24 @@
 import type { Express } from "express";
 import {
   getCcInvoiceTrackingList, upsertCcInvoiceTracking, getCcInvoiceTrackingMonthReport,
+  backfillCcInvoiceRecipients,
 } from "../ccInvoiceTracking";
+import { requireAuth, requirePermission } from "../auth";
 
 export function registerCcInvoiceTrackingRoutes(app: Express) {
+  // Vincula retroactivamente facturas CC emitidas antes de que este
+  // seguimiento existiera (ver backfillCcInvoiceRecipients). Un solo uso
+  // por lote de facturas sin vincular — se puede correr más de una vez sin
+  // riesgo, ya que solo toca filas con recipientEntityType nulo.
+  app.post("/api/cc-invoice-tracking/backfill-recipients", requireAuth, requirePermission("api:admin:reconcile-cc-payments"), async (_req, res) => {
+    try {
+      const result = await backfillCcInvoiceRecipients();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Error vinculando facturas CC antiguas" });
+    }
+  });
+
   app.get("/api/cc-invoice-tracking", async (req, res) => {
     try {
       const { from, to, entityType, entityId, estado, search } = req.query as Record<string, string | undefined>;

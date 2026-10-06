@@ -318,15 +318,52 @@ function InformeMensualTab() {
   );
 }
 
+function BackfillRecipientsButton() {
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cc-invoice-tracking/backfill-recipients");
+      return res.json();
+    },
+    onSuccess: (result: { updated: number; unmatched: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cc-invoice-tracking"] });
+      toast({
+        title: result.updated > 0 ? `Se vincularon ${result.updated} factura(s)` : "No había facturas para vincular",
+        description: result.unmatched > 0
+          ? `${result.unmatched} factura(s) no se pudieron vincular automáticamente (CUIT sin un único match en Empresas/Agencias).`
+          : undefined,
+      });
+    },
+    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+  });
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+      data-testid="button-backfill-cc-recipients"
+    >
+      {mutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+      Vincular facturas antiguas
+    </Button>
+  );
+}
+
 export function CcInvoiceTrackingSection() {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <FileCheck className="h-5 w-5 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Seguimiento de Facturas CC</h2>
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <div className="flex items-center gap-2">
+          <FileCheck className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Seguimiento de Facturas CC</h2>
+        </div>
+        <BackfillRecipientsButton />
       </div>
       <p className="text-sm text-muted-foreground mb-4">
         Facturas emitidas a Empresas y Agencias en Cuenta Corriente. El estado y las observaciones se cargan y editan acá.
+        Si falta una factura que ya sabés que es de Cta. Cte., probá "Vincular facturas antiguas".
       </p>
       <Tabs defaultValue="listado">
         <TabsList>

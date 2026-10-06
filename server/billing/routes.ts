@@ -1890,11 +1890,24 @@ export function registerBillingRoutes(app: Express) {
           }
         }
 
+        // Las facturas de reserva que se cobran a la Cuenta Corriente de una
+        // empresa/agencia (ccEntityType/ccEntityId, usado para generar el
+        // cargo en account_movements) no pasan por el flujo de "ficha
+        // vinculada" de Centro de Comprobantes, así que nunca llenaban
+        // recipientEntityType/Id en sales_invoices — y por eso no aparecían
+        // en "Seguimiento de Facturas CC", que filtra por esas columnas.
+        // No las sometemos a la validación estricta de esa ficha (líneas
+        // arriba): ccEntityId ya se usa para generar el cargo real en Cta.
+        // Cte., así que confiamos en que identifica la cuenta correcta.
+        const fallbackRecipientEntity = (!verifiedRecipientEntity && ccEntityType && ccEntityType !== "guest" && ccEntityId)
+          ? { type: ccEntityType as "company" | "agency", id: String(ccEntityId) }
+          : verifiedRecipientEntity;
+
         const user = (req as any).user;
         const emitted = await emitirFactura({
           tipoComprobante,
           cliente: persistedCliente,
-          recipientEntity: verifiedRecipientEntity,
+          recipientEntity: fallbackRecipientEntity,
           centerSettlementArea: recipientMode === "centro_comprobantes" ? String(cashArea) : undefined,
           items: persistedItems,
           reservaId: reservationId || undefined,
