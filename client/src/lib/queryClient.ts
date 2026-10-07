@@ -67,15 +67,31 @@ export async function apiRequestWithGroupInventoryWarning(
     const payload = parseApiErrorPayload(error);
     if (payload?.code !== "GROUP_BLOCK_WARNING" || payload.canOverride !== true) throw error;
     const rows = payload.warning?.warnings ?? [];
-    const groups = [...new Set(rows.map(row => row.groupName || row.groupId))].join(", ");
-    const dates = [...new Set(rows.map(row => row.date))].sort();
-    const dateText = dates.length === 1 ? dates[0] : `${dates[0]} a ${dates[dates.length - 1]}`;
-    const message = [
-      "Esta operación consume disponibilidad comprometida para un grupo tentativo.",
-      groups ? `Grupo(s): ${groups}.` : "",
-      dates.length ? `Fecha(s): ${dateText}.` : "",
-      "¿Desea continuar de todos modos?",
-    ].filter(Boolean).join("\n");
+    let message: string;
+    if (rows.length > 0) {
+      const groups = [...new Set(rows.map(row => row.groupName || row.groupId))].join(", ");
+      const dates = [...new Set(rows.map(row => row.date))].sort();
+      const dateText = dates.length === 1 ? dates[0] : `${dates[0]} a ${dates[dates.length - 1]}`;
+      message = [
+        "Esta operación consume disponibilidad comprometida para un grupo tentativo.",
+        groups ? `Grupo(s): ${groups}.` : "",
+        dates.length ? `Fecha(s): ${dateText}.` : "",
+        "¿Desea continuar de todos modos?",
+      ].filter(Boolean).join("\n");
+    } else {
+      // No hay filas de "warnings" de grupo: este aviso viene de un déficit
+      // de categoría (GROUP_BLOCK_SHORTAGE) rebajado a confirmable porque la
+      // habitación puntual elegida está libre — ver server/routes/reservations.ts.
+      const w = payload.warning as any;
+      const roomTypeLabel = w?.roomTypeName || w?.roomTypeId;
+      message = [
+        `La categoría${roomTypeLabel ? ` "${roomTypeLabel}"` : ""} ya está al límite de su inventario operativo${w?.date ? ` para el ${w.date}` : ""}.`,
+        (w?.hardDemand !== undefined && w?.operationalInventory !== undefined)
+          ? `Demanda: ${w.hardDemand} / Habitaciones operativas: ${w.operationalInventory}.`
+          : "",
+        "La habitación elegida está libre — ¿confirmás igual el movimiento?",
+      ].filter(Boolean).join("\n");
+    }
     if (!window.confirm(message)) throw error;
     return apiRequest(method, url, { ...data, overrideTentativeGroupWarning: true });
   }
