@@ -1182,7 +1182,8 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Inventario</h1>
           <p className="text-muted-foreground">Gestiona stock, artículos y movimientos</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <InventoryPendingConsumptions compact readOnly={!canOperate} />
           <Link href="/accounting-suppliers">
             <Button variant="outline" data-testid="button-goto-suppliers">
               <Building2 className="h-4 w-4 mr-2" />
@@ -1248,7 +1249,6 @@ export default function InventoryPage() {
 
       <p className="text-sm text-muted-foreground">Cantidades: {locationFilter === "all" ? "stock global" : warehouses.find(w=>w.id===locationFilter)?.name}. Las alertas cuentan situaciones artículo–depósito configuradas. {locationsLoading ? "Cargando alertas…" : locationsError ? "No se pudieron consultar las alertas." : `${alertScope.filter(l=>l.status==='unconfigured').length} ubicaciones sin alerta configurada.`}</p>
       <InventoryPreparation />
-      <InventoryPendingConsumptions readOnly={!canOperate} />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Secciones de inventario">
           <TabsTrigger value="items" data-testid="tab-items">
