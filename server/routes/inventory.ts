@@ -1,3 +1,4 @@
+import {registerInventoryHistoryRoutes} from "../inventoryHistory";
 import {registerInventoryLocationRoutes} from "../inventoryLocations";
 import {inventoryAccess,inventoryWritePermission} from "../inventoryAccess";
 import { catalogLock, validateCategory, validateItemClassification, protectCategoryDeletion } from "../inventoryCatalog";
@@ -19,6 +20,7 @@ export function registerInventoryRoutes(app: Express) {
   app.use("/api/inventory", requireAuth, inventoryAccess);
   registerInventoryStage2Routes(app);
   registerInventoryLocationRoutes(app);
+  registerInventoryHistoryRoutes(app);
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
     try {

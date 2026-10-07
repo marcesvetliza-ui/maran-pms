@@ -1,3 +1,4 @@
+import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
 import {InventoryPreparation} from "@/components/inventory-preparation";
 import {INVENTORY_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
@@ -734,6 +735,9 @@ export default function InventoryPage() {
   const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
   const [areaFilter, setAreaFilter] = useState("all");
+  const [stockDate,setStockDate]=useState(today);
+  const historical=stockDate!==today;
+  const {data:stockHistory,isLoading:historyLoading,isError:historyError}=useQuery<{items:{itemId:string;stock:number|null}[];locations:{itemId:string;warehouseId:string;stock:number|null}[]}>({queryKey:['/api/inventory/stock-at-date',stockDate],queryFn:async()=>(await apiRequest('GET','/api/inventory/stock-at-date?date='+encodeURIComponent(stockDate))).json(),enabled:historical&&!!stockDate});
   const [locationFilter, setLocationFilter] = useState("all");
   const {data: locationData = [], isLoading: locationsLoading, isError: locationsError} = useQuery<InventoryLocation[]>({queryKey:["/api/inventory/locations"],queryFn:async()=>(await apiRequest("GET","/api/inventory/locations")).json(),refetchInterval:30000});
   const locations = Array.isArray(locationData) ? locationData : [];
@@ -1137,7 +1141,8 @@ export default function InventoryPage() {
     : categories.filter((c) => !c.isGroup && String(c.parentId) === groupFilter && (areaFilter === "all" || c.area === areaFilter));
 
   const scopedItems = locationFilter === "all" ? items : items.filter(item => locations.some(l => l.itemId === item.id && l.warehouseId === locationFilter)).map(item => {const l=locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)!;return {...item,currentStock:Number(l.stock)};});
-  const filteredItems = scopedItems
+  const historicalItems=historical?items.filter(i=>locationFilter==='all'||stockHistory?.locations.some(l=>l.itemId===i.id&&l.warehouseId===locationFilter)).map(i=>({...i,currentStock:(locationFilter==='all'?stockHistory?.items.find(l=>l.itemId===i.id):stockHistory?.locations.find(l=>l.itemId===i.id&&l.warehouseId===locationFilter))?.stock??null})):scopedItems;
+  const filteredItems = historicalItems
     .filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1149,6 +1154,9 @@ export default function InventoryPage() {
       return matchesSearch && matchesArea && matchesCategory && matchesKind && matchesGroup;
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
+
+  const reportUnavailable=historical?(historyLoading||historyError):locationFilter!=='all'&&(locationsLoading||locationsError);
+  const stockReport:StockReport={date:stockDate,warehouse:locationFilter==='all'?'Stock global · todos los depósitos':warehouses.find(w=>w.id===locationFilter)?.name||'',historical,filters:[searchQuery&&'Búsqueda: '+searchQuery,areaFilter!=='all'&&inventoryAreaLabel(areaFilter),groupFilter!=='all'&&categories.find(c=>String(c.id)===groupFilter)?.name,categoryFilter!=='all'&&categories.find(c=>String(c.id)===categoryFilter)?.name,kindFilter!=='all'&&kindFilter].filter(Boolean).join(' · ')||'Todos los artículos',rows:filteredItems.map(i=>({name:i.name,sku:i.sku,unit:i.unit,category:i.category?.name,quantity:i.currentStock===null?null:Number(i.currentStock),...(canCost&&!historical?{cost:Number(i.costPrice)}:{})}))};
 
   // Indicadores del dashboard: excluyen los "plato" (referencias internas que
   // el restaurante sincroniza desde el menú, no son artículos de inventario
@@ -1285,10 +1293,10 @@ export default function InventoryPage() {
         <TabsContent value="items" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
-            <Button disabled={locationFilter!=="all" && (locationsLoading||locationsError)} onClick={()=>{
-              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
-              const url=URL.createObjectURL(new Blob([locationCsv(rows,canCost)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='articulos-filtrados.csv';a.click();URL.revokeObjectURL(url);
-            }}>Exportar artículos filtrados</Button>
+            <label className="flex items-center gap-2 text-sm">Fecha de stock<Input aria-label="Fecha de stock" type="date" max={today} value={stockDate} onChange={e=>setStockDate(e.target.value||today)} className="w-[165px]"/></label>
+            <Button variant="outline" disabled={reportUnavailable||!filteredItems.length} onClick={()=>{const popup=window.open('','_blank');if(!popup){toast({title:'Permití abrir la ventana de impresión',variant:'destructive'});return;}popup.document.write(stockReportHtml(stockReport));popup.document.close();popup.focus();popup.print();}}>Imprimir stock filtrado</Button>
+            <Button disabled={reportUnavailable} onClick={()=>{if(!historical){              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
+              const url=URL.createObjectURL(new Blob([locationCsv(rows,canCost)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='articulos-filtrados.csv';a.click();URL.revokeObjectURL(url);;return;}const url=URL.createObjectURL(new Blob([stockReportCsv(stockReport)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='stock-'+stockDate+'.csv';a.click();URL.revokeObjectURL(url);}}>Exportar artículos filtrados</Button>
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -1370,7 +1378,8 @@ export default function InventoryPage() {
             </Select>
           </div>
 
-          {filteredItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{historical?'Stock al cierre del '+stockDate.split('-').reverse().join('/')+'. Clasificación y mínimos actuales; costos históricos no disponibles.':'Stock actual de hoy (día en curso).'} Los indicadores superiores corresponden al stock actual.</p>
+          {historical&&historyError?<p role="alert">No se pudo consultar el stock de esa fecha. Volvé a intentar.</p>:historical&&historyLoading?<p>Cargando stock histórico…</p>:filteredItems.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                 <Package className="h-12 w-12 text-muted-foreground mb-4" />
@@ -1433,7 +1442,7 @@ export default function InventoryPage() {
                       </td>
                       <td className="p-3 text-right">
                         <span className={locationFilter === "all" ? "" : ["zero","critical","low"].includes(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.status || "") ? "text-red-600 font-semibold" : ""}>
-                          {Number(item.currentStock).toLocaleString("es-AR",{maximumFractionDigits:3})}
+                          {item.currentStock===null?"Sin información histórica":Number(item.currentStock).toLocaleString("es-AR",{maximumFractionDigits:3})}
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{item.unit}</span>
                       </td>
@@ -1441,9 +1450,9 @@ export default function InventoryPage() {
                         {locationFilter === "all" ? Number(item.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}) : (locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock == null ? "—" : Number(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}))}
                       </td>
                       <td className="p-3 text-right">
-                        {canCost ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
+                        {canCost && !historical ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(item)}><Pencil className="h-4 w-4" /></Button><Button permission="catalog" variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button><Button permission="catalog" variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
