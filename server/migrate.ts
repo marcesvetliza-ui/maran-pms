@@ -2498,7 +2498,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   // ── preventive_tasks: registro de demora ─────────────────────────────────
   await withTimeout("preventive_tasks.room_interval_months", T, () =>
-    db.execute(sql`ALTER TABLE preventive_tasks ADD COLUMN IF NOT EXISTS room_interval_months integer NOT NULL DEFAULT 1 CHECK (room_interval_months IN (1, 2, 3, 6, 12))`)
+    db.execute(sql.raw(addColumnWithoutRerunNotice("preventive_tasks", "room_interval_months", "integer NOT NULL DEFAULT 1 CHECK (room_interval_months IN (1, 2, 3, 6, 12))")))
   );
 
   await withTimeout("preventive_tasks.last_overdue_days", T, () =>

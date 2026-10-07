@@ -37,6 +37,7 @@ vi.mock("../db", () => ({
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
 vi.mock("../auth", () => ({
+  requirePermission: () => (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, res: any, next: () => void) => {
     if (req.headers["x-test-auth"] === "authenticated") {

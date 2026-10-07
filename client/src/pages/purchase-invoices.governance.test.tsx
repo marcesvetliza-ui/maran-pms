@@ -115,6 +115,9 @@ describe("Compras: proveedores, artículos e importe", () => {
       if (url.endsWith("/api/inventory/items") && !options?.method) {
         return new Response(JSON.stringify([{ id: "item-1", name: "Filtro", unit: "unidad", currentStock: "1" }]), { status: 200 });
       }
+      if (url.endsWith("/api/inventory/warehouses")) {
+        return new Response(JSON.stringify([{ id: "deposito-1", name: "Depósito Cocina", isActive: "true" }]), { status: 200 });
+      }
       if (url.endsWith("/api/purchase-invoices") && options?.method === "POST") {
         captured.push(JSON.parse(String(options.body)));
         return new Response(JSON.stringify({ id: 99 }), { status: 201 });
@@ -134,9 +137,11 @@ describe("Compras: proveedores, artículos e importe", () => {
     await user.click(await screen.findByText("Filtro"));
     await user.clear(screen.getByTestId("input-inv-qty-0"));
     await user.type(screen.getByTestId("input-inv-qty-0"), "2");
+    await user.click(screen.getByTestId("select-inv-warehouse-0"));
+    await user.click(await screen.findByRole("option", { name: "Depósito Cocina" }));
     await user.click(screen.getByTestId("btn-submit-invoice"));
     await waitFor(() => expect(captured).toHaveLength(1));
-    expect(captured[0].stockItems).toEqual([{ itemId: "item-1", warehouseId: null, quantity: "2", unitCost: "0", vatRate: null }]);
+    expect(captured[0].stockItems).toEqual([{ itemId: "item-1", warehouseId: "deposito-1", unit: "unidad", quantity: "2", unitCost: "0", vatRate: null }]);
     expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
   });
 
@@ -145,6 +150,9 @@ describe("Compras: proveedores, artículos e importe", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
       if (url.endsWith("/api/inventory/items") && !options?.method) {
         return new Response(JSON.stringify([{ id: "item-1", name: "Filtro", sku: "FIL-01", unit: "unidad", currentStock: "1" }]), { status: 200 });
+      }
+      if (url.endsWith("/api/inventory/warehouses")) {
+        return new Response(JSON.stringify([{ id: "deposito-1", name: "Depósito Cocina", isActive: "true" }]), { status: 200 });
       }
       if (url.endsWith("/api/purchase-invoices") && options?.method === "POST") {
         captured.push(JSON.parse(String(options.body)));
@@ -172,9 +180,11 @@ describe("Compras: proveedores, artículos e importe", () => {
     expect(screen.getByTestId("article-amount-comparison")).toHaveTextContent("Diferencia");
     await user.click(screen.getByRole("button", { name: "Volver a sugerir desde artículos" }));
     await waitFor(() => expect(screen.getByTestId("input-neto-line-0")).toHaveValue(100));
+    await user.click(screen.getByTestId("select-inv-warehouse-0"));
+    await user.click(await screen.findByRole("option", { name: "Depósito Cocina" }));
     await user.click(screen.getByTestId("btn-submit-invoice"));
     await waitFor(() => expect(captured).toHaveLength(1));
-    expect(captured[0].stockItems[0]).toMatchObject({ itemId: "item-1", vatRate: "21", unitCost: "100" });
+    expect(captured[0].stockItems[0]).toMatchObject({ itemId: "item-1", warehouseId: "deposito-1", vatRate: "21", unitCost: "100" });
     expect(captured[0]).toMatchObject({ montoNeto: "100.00", montoIva21: "21.00" });
   });
 

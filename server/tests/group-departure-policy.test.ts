@@ -65,6 +65,7 @@ vi.mock("../db", () => ({
   },
 }));
 vi.mock("../auth", () => ({
+  requirePermission: () => (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, res: any, next: () => void) => {
     if (!state.authenticated) return res.status(401).json({ error: "No autenticado" });
