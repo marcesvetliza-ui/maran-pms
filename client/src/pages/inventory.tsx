@@ -1048,10 +1048,11 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       setIsCategoryDialogOpen(false);
       toast({ title: editingCategory ? "Categoría actualizada" : "Categoría creada" });
     },
-    onError: () => toast({ title: "Error al guardar categoría", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al guardar categoría", description: e.message, variant: "destructive" }),
   });
 
   const saveGroupMutation = useMutation({
@@ -1063,10 +1064,11 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       setIsGroupDialogOpen(false);
       toast({ title: editingGroup ? "Agrupamiento actualizado" : "Agrupamiento creado" });
     },
-    onError: () => toast({ title: "Error al guardar agrupamiento", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al guardar agrupamiento", description: e.message, variant: "destructive" }),
   });
 
   const deleteCategoryMutation = useMutation({
@@ -1075,6 +1077,7 @@ export default function InventoryPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       toast({ title: "Categoría eliminada" });
     },
     onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
@@ -1117,11 +1120,11 @@ export default function InventoryPage() {
   });
 
   // Groups are categories with isGroup=true; leaf categories are those with a parentId
-  const groups = categories.filter((c) => c.isGroup);
+  const groups = categories.filter((c) => c.isGroup && (areaFilter === "all" || c.area === areaFilter));
   // Leaf categories available for the category filter — when a group is selected, only show its children
   const categoriesForFilter = groupFilter === "all"
-    ? categories.filter((c) => !c.isGroup)
-    : categories.filter((c) => !c.isGroup && String(c.parentId) === groupFilter);
+    ? categories.filter((c) => !c.isGroup && (areaFilter === "all" || c.area === areaFilter))
+    : categories.filter((c) => !c.isGroup && String(c.parentId) === groupFilter && (areaFilter === "all" || c.area === areaFilter));
 
   const filteredItems = items
     .filter((item) => {
@@ -1129,7 +1132,7 @@ export default function InventoryPage() {
         item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
       const matchesCategory = categoryFilter === "all" || String((item.category as any)?.id || item.categoryId || "") === categoryFilter;
-      const matchesKind = kindFilter === "all" || (item as any).itemKind === kindFilter;
+      const matchesKind = kindFilter === "all" ? item.itemKind !== "plato" : item.itemKind === kindFilter;
       // Group filter: item matches if its category's parentId equals the selected group
       const matchesGroup = groupFilter === "all" || String((item.category as any)?.parentId || "") === groupFilter;
       return matchesSearch && matchesArea && matchesCategory && matchesKind && matchesGroup;
@@ -1328,7 +1331,7 @@ export default function InventoryPage() {
                   ))}
               </SelectContent>
             </Select>
-            <Select value={areaFilter} onValueChange={setAreaFilter}>
+            <Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
               <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
                 <SelectValue placeholder="Todas las áreas" />
               </SelectTrigger>
@@ -2745,7 +2748,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             </div>
             {/* Agrupamiento selector — solo muestra grupos del área seleccionada */}
             {(() => {
-              const matchingGroups = categories.filter(c => c.isGroup && c.area === catArea);
+              const matchingGroups = categories.filter(c => c.isGroup && c.area === catArea && (c.isActive !== "false" || c.id === catParentId));
               return matchingGroups.length > 0 ? (
                 <div className="space-y-1">
                   <Label>Agrupamiento <span className="text-muted-foreground font-normal">(opcional)</span></Label>
@@ -2900,6 +2903,8 @@ export function NewItemForm({
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [newItemArea, setNewItemArea] = useState("general");
+  const [newItemGroup, setNewItemGroup] = useState("all");
   const [brandId, setBrandId] = useState("");
   const [showNewBrandInput, setShowNewBrandInput] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
@@ -2959,15 +2964,25 @@ export function NewItemForm({
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label>Categoria</Label>
+          <Label>Área</Label>
+          <Select value={newItemArea} onValueChange={v => { setNewItemArea(v); setNewItemGroup("all"); setCategoryId(""); }}>
+            <SelectTrigger data-testid="select-item-area"><SelectValue /></SelectTrigger>
+            <SelectContent>{["general","spa","restaurant","housekeeping","maintenance","admin","marketing","hotel"].map(a => <SelectItem key={a} value={a}>{({general:"General",spa:"SPA",restaurant:"Restaurante",housekeeping:"Housekeeping",maintenance:"Mantenimiento",admin:"Administración",marketing:"Marketing",hotel:"Hotel"} as Record<string,string>)[a]}</SelectItem>)}</SelectContent>
+          </Select>
+          <Label>Agrupamiento</Label>
+          <Select value={newItemGroup} onValueChange={v => { setNewItemGroup(v); setCategoryId(""); }}>
+            <SelectTrigger data-testid="select-item-group"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">Todos los agrupamientos</SelectItem>{categories.filter(c => c.isGroup && c.area === newItemArea && c.isActive !== "false").map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+          </Select>
+          <Label>Subagrupamiento / categoría</Label>
           <Select value={categoryId} onValueChange={setCategoryId}>
             <SelectTrigger data-testid="select-category">
               <SelectValue placeholder="Seleccionar categoría" />
             </SelectTrigger>
             <SelectContent>
               {(() => {
-                const leafCats = categories.filter(c => !c.isGroup);
-                const groups = categories.filter(c => c.isGroup);
+                const leafCats = categories.filter(c => !c.isGroup && c.isActive !== "false" && c.area === newItemArea && (newItemGroup === "all" || c.parentId === newItemGroup) && (!c.parentId || categories.some(g => g.id === c.parentId && g.isActive !== "false")));
+                const groups = categories.filter(c => c.isGroup && c.isActive !== "false" && c.area === newItemArea);
                 // Build: grouped under their parent, then ungrouped
                 const grouped: { groupName: string | null; cats: ItemCategory[] }[] = [];
                 for (const g of groups) {

@@ -1,3 +1,4 @@
+import { catalogLock, validateCategory, validateItemClassification, protectCategoryDeletion } from "../inventoryCatalog";
 import {registerInventoryStage2Routes} from "../inventoryStage2Routes";
 import { consumeInventoryInternally, internalConsumptionOrigins } from "../inventoryInternalConsumption";
 import { safeInventoryTransfer, safeWarehouseMovement, stockUnits } from "../inventorySafety";
@@ -30,29 +31,29 @@ export function registerInventoryRoutes(app: Express) {
 
   app.post("/api/inventory/categories", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const category = await storage.createItemCategory(req.body);
+      const category = await withDatabaseTransaction(async () => { await catalogLock(); const data = await validateCategory(req.body); return storage.createItemCategory(data); });
       res.status(201).json(category);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating category" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Error creating category" });
     }
   });
 
   app.patch("/api/inventory/categories/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const category = await storage.updateItemCategory(req.params.id, req.body);
+      const category = await withDatabaseTransaction(async () => { await catalogLock(); const data = await validateCategory(req.body, req.params.id); return storage.updateItemCategory(req.params.id, data); });
       if (!category) return res.status(404).json({ error: "Category not found" });
       res.json(category);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating category" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Error updating category" });
     }
   });
 
   app.delete("/api/inventory/categories/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      await storage.deleteItemCategory(req.params.id);
+      await withDatabaseTransaction(async () => { await catalogLock(); await protectCategoryDeletion(req.params.id); await storage.deleteItemCategory(req.params.id); });
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting category" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Error deleting category" });
     }
   });
 
@@ -77,7 +78,7 @@ export function registerInventoryRoutes(app: Express) {
 
   app.patch("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const brand = await storage.updateBrand(req.params.id, req.body);
+      const brand = await withDatabaseTransaction(async () => { await catalogLock(); return storage.updateBrand(req.params.id, req.body); });
       if (!brand) return res.status(404).json({ error: "Brand not found" });
       res.json(brand);
     } catch (error) {
@@ -87,7 +88,7 @@ export function registerInventoryRoutes(app: Express) {
 
   app.delete("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      await storage.deleteBrand(req.params.id);
+      await withDatabaseTransaction(async () => { await catalogLock(); await storage.deleteBrand(req.params.id); });
       res.status(204).send();
     } catch (error: any) {
       if (error?.code === "23503") {
@@ -135,6 +136,7 @@ export function registerInventoryRoutes(app: Express) {
       if(quantity&&!warehouseId)return res.status(400).json({error:'El stock inicial necesita depósito de destino'});
       const item=await withDatabaseTransaction(async()=>{
         if(quantity){const wh=await db.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${warehouseId} AND is_active='true' FOR SHARE`);if(!wh.rows.length)throw Object.assign(new Error('Depósito inexistente o inactivo'),{statusCode:400});}
+        await catalogLock(); await validateItemClassification(body);
         const created=await storage.createInventoryItem({...body,currentStock:(quantity/1000).toFixed(3)});
         if(quantity){await db.execute(sql`INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock,updated_at) VALUES(${warehouseId},${created.id},${quantity/1000},now())`);
           await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,created_at,created_by,warehouse_id) VALUES(${created.id},'entrada',${quantity/1000},0,${quantity/1000},'Stock inicial','manual',now(),${req.user?.id || null},${warehouseId})`);
@@ -146,7 +148,7 @@ export function registerInventoryRoutes(app: Express) {
   app.patch("/api/inventory/items/:id", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
       if(req.body.currentStock!==undefined)return res.status(409).json({error:"Las cantidades se corrigen con movimientos de stock por depósito."});
-      const item = await storage.updateInventoryItem(req.params.id, req.body);
+      const item = await withDatabaseTransaction(async () => { await catalogLock(); await validateItemClassification(req.body, req.params.id); return storage.updateInventoryItem(req.params.id, req.body); });
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
     } catch (error: any) {
