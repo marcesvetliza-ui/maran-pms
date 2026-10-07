@@ -1,3 +1,4 @@
+import {inventoryAccess} from "../inventoryAccess";
 import {requireAuth,requirePermission} from "../auth";
 import type { Express } from "express";
 import {
@@ -7,6 +8,7 @@ import {
 } from "../production";
 
 export function registerProductionRoutes(app: Express) {
+  app.use("/api/production", requireAuth, inventoryAccess);
   app.get("/api/production/formulas", requireAuth, async (req, res) => {
     try {
       const formulas = await getProducibleFormulas();
@@ -25,7 +27,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
+  app.post("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:catalog"), async (req, res) => {
     try {
       const { outputInventoryItemId } = req.body;
       if (!outputInventoryItemId) return res.status(400).json({ error: "Falta el artículo de inventario" });
@@ -36,7 +38,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/formulas/:recipeId/link-new", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
+  app.post("/api/production/formulas/:recipeId/link-new", requireAuth, requirePermission("api:inventory:catalog"), async (req, res) => {
     try {
       const { name, unit, categoryId } = req.body;
       const id = await createAndLinkOutputItem(req.params.recipeId, { name, unit, categoryId });
@@ -46,7 +48,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
+  app.delete("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:catalog"), async (req, res) => {
     try {
       await unlinkRecipeOutput(req.params.recipeId);
       res.status(204).send();
@@ -55,7 +57,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/runs", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
+  app.post("/api/production/runs", requireAuth, requirePermission("api:inventory:operate"), async (req, res) => {
     try {
       const { date, recipeId, outputQuantity, outputWarehouseId, requestId, lines, notes } = req.body;
       if(!requestId)return res.status(400).json({error:"Falta el identificador de la operación; actualizá la página y reintentá."});

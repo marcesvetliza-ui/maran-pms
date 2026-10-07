@@ -47,11 +47,11 @@ async function startApp(role: string) {
   });
 }
 
-describe("inventory write routes — migradas a requirePermission(api:inventory:write)", () => {
+describe("inventory write routes — migradas a permisos específicos", () => {
   let app: { baseUrl: string; close: () => Promise<void> };
 
   beforeEach(() => {
-    permissionsState.granted = new Set(["restaurant:api:inventory:write"]);
+    permissionsState.granted = new Set(["restaurant:api:inventory:catalog"]);
   });
 
   afterEach(async () => {

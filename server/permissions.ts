@@ -218,6 +218,11 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   // server/routes/inventory.ts — antes INVENTORY_WRITE_ROLES, 15 endpoints
   // de escritura de categorías/artículos/depósitos/movimientos/conteos.
+  "api:inventory:read": ["admin", "manager", "resp_deposito", "resp_administracion", "restaurant", "spa", "ama_de_llaves", "responsable_area"],
+  "api:inventory:catalog": ["admin", "manager", "resp_deposito", "resp_administracion"],
+  "api:inventory:operate": ["admin", "manager", "resp_deposito", "resp_administracion", "restaurant"],
+  "api:inventory:adjust": ["admin", "manager", "resp_deposito", "resp_administracion"],
+  "api:inventory:cost": ["admin", "manager", "resp_deposito", "resp_administracion"],
   "api:inventory:write": ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"],
 
   // server/reports/routes.ts — un resourceKey por informe (antes FINANCE_ROLES
@@ -387,7 +392,12 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:spa:fiscal-review": { label: "Revisión de borradores fiscales de Spa", section: "API — Spa" },
   "api:rooms:write": { label: "Alta y edición de habitaciones y tipos", section: "API — Habitaciones" },
   "api:rates:write": { label: "Alta y edición de planes de tarifas", section: "API — Habitaciones" },
-  "api:inventory:write": { label: "Categorías, artículos, depósitos y conteos", section: "API — Inventario" },
+  "api:inventory:read": {label: "Consultar Inventario", section: "API — Inventario"},
+  "api:inventory:catalog": {label: "Editar catálogo y depósitos", section: "API — Inventario"},
+  "api:inventory:operate": {label: "Operar stock y elaboraciones", section: "API — Inventario"},
+  "api:inventory:adjust": {label: "Ajustar, anular y cerrar conteos", section: "API — Inventario"},
+  "api:inventory:cost": {label: "Consultar y modificar costos", section: "API — Inventario"},
+  "api:inventory:write": { label: "Permiso anterior (reemplazado por permisos específicos)", section: "API — Inventario" },
 
   "api:reports:estado-resultados": { label: "Estado de Resultados", section: "API — Reportes" },
   "api:reports:kpis": { label: "KPIs", section: "API — Reportes" },

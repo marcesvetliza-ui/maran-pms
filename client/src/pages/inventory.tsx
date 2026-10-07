@@ -9,7 +9,7 @@ import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useQueries, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { InventoryButton as Button, useInventoryPermission } from "@/components/inventory-access";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InventoryTabPanels } from "@/components/inventory-tab-panels";
@@ -222,7 +222,7 @@ const motivoLabels: Record<string, string> = {
 function printInternalVoucher(movement: InternalMovement & { items: InternalMovementItem[] }) {
   const motLabel = motivoLabels[movement.motivo] || movement.motivo;
   const totalCost = (movement.items || []).reduce((s, i) =>
-    s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
+    s + parseFloat(i.quantity) * parseFloat(i.cost_price || "0"), 0);
   const html = `<!DOCTYPE html><html><head><title>Movimiento Interno — ${motLabel}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:24px;max-width:700px;margin:0 auto;font-size:13px}
@@ -250,8 +250,8 @@ ${(movement.items || []).map(i => `    <tr>
       <td>${i.item_name}</td>
       <td>${i.unit}</td>
       <td class="num">${parseFloat(i.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
-      <td class="num">$${parseFloat(i.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+      <td class="num">$${parseFloat(i.cost_price || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+      <td class="num">$${(parseFloat(i.quantity) * parseFloat(i.cost_price || "0")).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
     </tr>`).join("\n")}
     <tr class="total">
       <td colspan="4" style="text-align:right">COSTO TOTAL</td>
@@ -562,7 +562,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
               <Label className="text-xs">Porciones</Label>
               <Input type="number" min={0.1} step="0.5" value={imPorciones} onChange={e => setImPorciones(e.target.value)} data-testid="input-im-porciones" />
             </div>
-            <Button size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
+            <Button permission="operate" size="sm" onClick={loadFromRecipe} disabled={!imRecipeId || imRecipeLoading} data-testid="btn-load-recipe">
               {imRecipeLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Utensils className="h-4 w-4 mr-1" />}
               Cargar ingredientes
             </Button>
@@ -574,7 +574,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label>Artículos a descargar</Label>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
+          <Button permission="operate" variant="outline" size="sm" className="h-7 text-xs" onClick={addImItem} data-testid="btn-add-im-item">
             <Plus className="h-3 w-3 mr-1" />Agregar ítem
           </Button>
         </div>
@@ -718,6 +718,8 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
 }
 
 export default function InventoryPage() {
+  const canCost = useInventoryPermission("cost");
+  const canOperate = useInventoryPermission("operate");
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
   const [movementTab, setMovementTab] = useState("movements");
@@ -819,7 +821,7 @@ export default function InventoryPage() {
   const refreshInventory = () => { queryClient.invalidateQueries({queryKey:["/api/inventory/items"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/movements"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/warehouse-stock"]}); };
   const editArticle = (item:InventoryItem) => {setEditingArticle(item);setArticleName(item.name);setArticleSku(item.sku || "");setArticleMin(String(item.minStock || "0"));setArticleCost(String(item.costPrice || "0"));setArticleActive(item.isActive !== "false");};
   const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
-  const editArticleMutation = useMutation({mutationFn:async()=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,{name:articleName.trim(),sku:articleSku.trim() || null,minStock:articleMin,costPrice:articleCost,isActive:articleActive?"true":"false"});},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const editArticleMutation = useMutation({mutationFn:async()=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,{name:articleName.trim(),sku:articleSku.trim() || null,minStock:articleMin,...(canCost ? {costPrice:articleCost} : {}),isActive:articleActive?"true":"false"});},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
   const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [expandedMovements, setExpandedMovements] = useState<Set<string>>(new Set());
@@ -1189,7 +1191,7 @@ export default function InventoryPage() {
               Proveedores
             </Button>
           </Link>
-          <Button onClick={() => setIsNewItemDialogOpen(true)} data-testid="button-add-item">
+          <Button permission="catalog" onClick={() => setIsNewItemDialogOpen(true)} data-testid="button-add-item">
             <Plus className="h-4 w-4 mr-2" />
             Nuevo Artículo
           </Button>
@@ -1240,13 +1242,13 @@ export default function InventoryPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              ${totalValue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+              {canCost ? `$${totalValue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "Sin acceso a costos"}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <InventoryPendingConsumptions />
+      <InventoryPendingConsumptions readOnly={!canOperate} />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Secciones de inventario">
           <TabsTrigger value="items" data-testid="tab-items">
@@ -1368,7 +1370,7 @@ export default function InventoryPage() {
                 <Package className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">Sin articulos</h3>
                 <p className="text-muted-foreground mb-4">Agrega articulos al inventario</p>
-                <Button onClick={() => setIsNewItemDialogOpen(true)}>
+                <Button permission="catalog" onClick={() => setIsNewItemDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-2" />
                   Agregar Articulo
                 </Button>
@@ -1433,9 +1435,9 @@ export default function InventoryPage() {
                         {item.minStock}
                       </td>
                       <td className="p-3 text-right">
-                        ${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        {canCost ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-2"><div className="flex justify-end"><Button variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(item)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(item)}><Pencil className="h-4 w-4" /></Button><Button permission="catalog" variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
@@ -1677,7 +1679,7 @@ export default function InventoryPage() {
                         <td className="p-3 text-right font-mono text-sm text-muted-foreground">{movement.previousStock}</td>
                         <td className="p-3 text-right font-mono text-sm">{movement.newStock}</td>
                         <td className="p-3 text-sm text-muted-foreground truncate max-w-48">{movement.notes || "-"}</td>
-                        <td className="p-2"><div className="flex">{((movement.sourceType === "manual" && !movement.sourceId) || movement.sourceType === "movement_correction") && movement.movementType !== "transferencia" && movement.notes !== "Stock inicial" && !movement.annulled && <><Button variant="ghost" size="icon" aria-label={`Corregir movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"corregir",id:movement.id,name:movement.item?.name || "Artículo",quantity:String(movement.quantity),notes:movement.notes || ""})}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Anular movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"anular",id:movement.id,name:movement.item?.name || "Artículo"})}><Trash2 className="h-4 w-4" /></Button></>}<Button variant="ghost" size="icon" aria-label={`Ver detalle del movimiento ${movement.id}`} aria-expanded={expandedMovements.has(movement.id)} onClick={() => toggleExpanded(movement.id, setExpandedMovements)}>{expandedMovements.has(movement.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                        <td className="p-2"><div className="flex">{((movement.sourceType === "manual" && !movement.sourceId) || movement.sourceType === "movement_correction") && movement.movementType !== "transferencia" && movement.notes !== "Stock inicial" && !movement.annulled && <><Button permission="adjust" variant="ghost" size="icon" aria-label={`Corregir movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"corregir",id:movement.id,name:movement.item?.name || "Artículo",quantity:String(movement.quantity),notes:movement.notes || ""})}><Pencil className="h-4 w-4" /></Button><Button permission="adjust" variant="ghost" size="icon" aria-label={`Anular movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"anular",id:movement.id,name:movement.item?.name || "Artículo"})}><Trash2 className="h-4 w-4" /></Button></>}<Button variant="ghost" size="icon" aria-label={`Ver detalle del movimiento ${movement.id}`} aria-expanded={expandedMovements.has(movement.id)} onClick={() => toggleExpanded(movement.id, setExpandedMovements)}>{expandedMovements.has(movement.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                       </tr>
                       {expandedMovements.has(movement.id) && <tr><td colSpan={8} className="p-4 bg-muted/20"><InventoryMovementDetail movement={movement} warehouses={warehouses} /><InventorySourceReversal sourceType={movement.sourceType} sourceId={movement.sourceId}/></td></tr>}</Fragment>
                     ))}
@@ -1723,12 +1725,12 @@ export default function InventoryPage() {
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-sm font-semibold">{cat.name}</CardTitle>
                       <div className="flex gap-1 shrink-0">
-                        <Button variant="ghost" size="icon" className="h-7 w-7"
+                        <Button permission="catalog" variant="ghost" size="icon" className="h-7 w-7"
                           onClick={() => isLeaf ? openCategoryDialog(cat) : openGroupDialog(cat)}
                           data-testid={`btn-edit-cat-${cat.id}`}>
                           <Pencil className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                        <Button permission="catalog" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => deleteCategoryMutation.mutate(cat.id)}
                           disabled={!canDelete}
                           title={!canDelete ? (isLeaf ? "Tiene artículos asociados" : "Tiene categorías asociadas") : ""}
@@ -1776,7 +1778,7 @@ export default function InventoryPage() {
                       <h3 className="font-semibold text-sm">Agrupamientos</h3>
                       <Badge variant="secondary" className="text-xs">{groups.length}</Badge>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => openGroupDialog()} data-testid="btn-new-group">
+                    <Button permission="catalog" size="sm" variant="outline" onClick={() => openGroupDialog()} data-testid="btn-new-group">
                       <Plus className="h-3.5 w-3.5 mr-1.5" /> Nuevo Agrupamiento
                     </Button>
                   </div>
@@ -1800,7 +1802,7 @@ export default function InventoryPage() {
                       <h3 className="font-semibold text-sm">Categorías</h3>
                       <Badge variant="secondary" className="text-xs">{leafCats.length}</Badge>
                     </div>
-                    <Button size="sm" onClick={() => openCategoryDialog()} data-testid="btn-new-category">
+                    <Button permission="catalog" size="sm" onClick={() => openCategoryDialog()} data-testid="btn-new-category">
                       <Plus className="h-3.5 w-3.5 mr-1.5" /> Nueva Categoría
                     </Button>
                   </div>
@@ -1891,14 +1893,14 @@ export default function InventoryPage() {
                                 className="h-8"
                                 data-testid={`input-edit-brand-${b.id}`}
                               />
-                              <Button
+                              <Button permission="catalog"
                                 size="sm"
                                 disabled={!editingBrandName.trim() || updateBrandMutation.isPending}
                                 onClick={() => updateBrandMutation.mutate({ id: b.id, data: { name: editingBrandName.trim() } })}
                               >
                                 Guardar
                               </Button>
-                              <Button size="sm" variant="outline" onClick={() => setEditingBrandId(null)}>
+                              <Button permission="catalog" size="sm" variant="outline" onClick={() => setEditingBrandId(null)}>
                                 Cancelar
                               </Button>
                             </div>
@@ -1914,7 +1916,7 @@ export default function InventoryPage() {
                         <TableCell className="text-right space-x-1">
                           {editingBrandId !== b.id && (
                             <>
-                              <Button
+                              <Button permission="catalog"
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => { setEditingBrandId(b.id); setEditingBrandName(b.name); }}
@@ -1922,7 +1924,7 @@ export default function InventoryPage() {
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
-                              <Button
+                              <Button permission="catalog"
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => updateBrandMutation.mutate({ id: b.id, data: { isActive: b.isActive !== "false" ? "false" : "true" } })}
@@ -1930,7 +1932,7 @@ export default function InventoryPage() {
                               >
                                 {b.isActive !== "false" ? "Desactivar" : "Activar"}
                               </Button>
-                              <Button
+                              <Button permission="catalog"
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => deleteBrandMutation.mutate(b.id)}
@@ -1975,7 +1977,7 @@ export default function InventoryPage() {
 </head><body><h1>Reporte de Consumos</h1><p>Período: ${consumoFrom} al ${consumoTo}</p>
 <table><thead><tr><th>Artículo</th><th>Unidad</th><th>Cant. Consumida</th><th>Órdenes</th><th>Costo Unit.</th><th>Costo Total</th></tr></thead><tbody>
 ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}</td><td>${parseFloat(r.total_consumed).toLocaleString("es-AR",{minimumFractionDigits:3})}</td><td>${r.orders_count}</td><td>$${parseFloat(r.cost_price||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td><td>$${parseFloat(r.total_cost||"0").toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>`).join("")}
-<tr class="total"><td colspan="5">COSTO TOTAL DEL PERÍODO</td><td>$${consumoReport.totalCosto.toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
+<tr class="total"><td colspan="5">COSTO TOTAL DEL PERÍODO</td><td>$${(consumoReport.totalCosto ?? 0).toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>
 </tbody></table><script>window.onload=function(){window.print();}<\/script></body></html>`;
                     const w = window.open("", "_blank"); if (w) { w.document.write(html); w.document.close(); }
                   }} data-testid="btn-print-consumo">
@@ -1990,7 +1992,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 <>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm text-muted-foreground">{consumoReport.items.length} artículos consumidos</p>
-                    <p className="font-semibold">Costo total: ${consumoReport.totalCosto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
+                    <p className="font-semibold">Costo total: ${(consumoReport.totalCosto ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                   </div>
                   <Table>
                     <TableHeader>
@@ -2016,7 +2018,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                       ))}
                       <TableRow className="font-bold border-t-2">
                         <TableCell colSpan={5} className="text-right">COSTO TOTAL DEL PERÍODO</TableCell>
-                        <TableCell className="text-right">${consumoReport.totalCosto.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-right">${(consumoReport.totalCosto ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>
@@ -2038,11 +2040,11 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               Gestión de Depósitos
             </h3>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setIsTransferDialogOpen(true)} data-testid="btn-transfer">
+              <Button permission="operate" size="sm" variant="outline" onClick={() => setIsTransferDialogOpen(true)} data-testid="btn-transfer">
                 <ArrowLeftRight className="h-4 w-4 mr-2" />
                 Transferir
               </Button>
-              <Button size="sm" onClick={() => openWarehouseForm()} data-testid="btn-new-warehouse">
+              <Button permission="catalog" size="sm" onClick={() => openWarehouseForm()} data-testid="btn-new-warehouse">
                 <Plus className="h-4 w-4 mr-2" />
                 Nuevo Depósito
               </Button>
@@ -2065,7 +2067,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <div className="flex items-start justify-between">
                       <CardTitle className="text-base">{ws.warehouse_name}</CardTitle>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); const wh = warehouses.find(w => w.id === ws.warehouse_id); if (wh) openWarehouseForm(wh); }} data-testid={`btn-edit-wh-${ws.warehouse_id}`}>
+                        <Button permission="catalog" variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); const wh = warehouses.find(w => w.id === ws.warehouse_id); if (wh) openWarehouseForm(wh); }} data-testid={`btn-edit-wh-${ws.warehouse_id}`}>
                           <Pencil className="h-3 w-3" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Desactivar el depósito "${ws.warehouse_name}"?`)) deleteWarehouseMutation.mutate(ws.warehouse_id); }} data-testid={`btn-del-wh-${ws.warehouse_id}`}>
@@ -2163,14 +2165,14 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                               {stock.toLocaleString("es-AR", { minimumFractionDigits: 3 })}
                             </TableCell>
                             <TableCell className="text-sm">{row.unit}</TableCell>
-                            <TableCell className="text-right">${cost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
-                            <TableCell className="text-right font-semibold">${(stock * cost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell className="text-right">{canCost ? `$${cost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}</TableCell>
+                            <TableCell className="text-right font-semibold">{canCost ? `$${(stock * cost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}</TableCell>
                             <TableCell>
                               <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Historial de precios" onClick={() => { setPriceHistoryItemId(row.item_id); setPriceHistoryItemName(row.item_name); setIsPriceHistoryOpen(true); }} data-testid={`btn-price-history-${row.item_id}`}>
+                                <Button permission="cost" variant="ghost" size="icon" className="h-7 w-7" title="Historial de precios" onClick={() => { setPriceHistoryItemId(row.item_id); setPriceHistoryItemName(row.item_name); setIsPriceHistoryOpen(true); }} data-testid={`btn-price-history-${row.item_id}`}>
                                   <DollarSign className="h-3 w-3" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-7 w-7" title="Transferir" onClick={() => { setSelectedWarehouseItem(row); setIsTransferDialogOpen(true); }} data-testid={`btn-transfer-item-${row.item_id}`}>
+                                <Button permission="operate" variant="ghost" size="icon" className="h-7 w-7" title="Transferir" onClick={() => { setSelectedWarehouseItem(row); setIsTransferDialogOpen(true); }} data-testid={`btn-transfer-item-${row.item_id}`}>
                                   <ArrowLeftRight className="h-3 w-3" />
                                 </Button>
                               </div>
@@ -2196,7 +2198,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     Registrá el stock real contado para detectar diferencias con el sistema.
                   </p>
                 </div>
-                <Button onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }} data-testid="btn-new-count">
+                <Button permission="operate" onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }} data-testid="btn-new-count">
                   <Plus className="h-4 w-4 mr-2" />
                   Nueva Toma
                 </Button>
@@ -2208,7 +2210,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <ClipboardList className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-semibold mb-2">Sin tomas registradas</h3>
                     <p className="text-muted-foreground mb-4">Creá la primera toma de inventario para controlar el stock real</p>
-                    <Button onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }}>
+                    <Button permission="operate" onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }}>
                       <Plus className="h-4 w-4 mr-2" />
                       Nueva Toma
                     </Button>
@@ -2278,7 +2280,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 )}
                 {selectedCount?.status === "borrador" && (
                   <div className="flex gap-2">
-                    <Button
+                    <Button permission="operate"
                       size="sm" variant="outline"
                       onClick={() => saveCountItemsMutation.mutate(countItemEdits)}
                       disabled={saveCountItemsMutation.isPending || closeCountMutation.isPending || Object.keys(countItemEdits).length === 0}
@@ -2287,7 +2289,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                       {saveCountItemsMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
                       Guardar
                     </Button>
-                    <Button
+                    <Button permission="adjust"
                       size="sm"
                       onClick={() => closeCountMutation.mutate()}
                       disabled={closeCountMutation.isPending || saveCountItemsMutation.isPending}
@@ -2387,7 +2389,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Label className="text-sm whitespace-nowrap">Hasta:</Label>
                     <Input type="date" value={internosTo} onChange={e => setInternosTo(e.target.value)} className="w-36 h-8 text-sm" />
                   </div>
-                  <Button size="sm" onClick={openInternalMov} data-testid="btn-new-internal-mov">
+                  <Button permission="operate" size="sm" onClick={openInternalMov} data-testid="btn-new-internal-mov">
                     <Plus className="h-4 w-4 mr-1" />
                     Nuevo Movimiento
                   </Button>
@@ -2404,7 +2406,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm font-medium">Resumen por Artículo</CardTitle>
-                  <span className="font-semibold text-sm">Costo total: ${internosReport.totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
+                  <span className="font-semibold text-sm">Costo total: ${(internosReport.totalCost ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -2432,7 +2434,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     ))}
                     <TableRow className="font-bold border-t-2">
                       <TableCell colSpan={4} className="text-right">COSTO TOTAL DEL PERÍODO</TableCell>
-                      <TableCell className="text-right">${internosReport.totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-right">${(internosReport.totalCost ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
                       <TableCell />
                     </TableRow>
                   </TableBody>
@@ -2450,7 +2452,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 <ArrowDownToLine className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">Sin movimientos internos</h3>
                 <p className="text-muted-foreground mb-4">Registrá descargas de mercadería para desayunos, eventos o desperdicios</p>
-                <Button onClick={openInternalMov}><Plus className="h-4 w-4 mr-2" />Nuevo Movimiento</Button>
+                <Button permission="operate" onClick={openInternalMov}><Plus className="h-4 w-4 mr-2" />Nuevo Movimiento</Button>
               </CardContent>
             </Card>
           ) : (
@@ -2534,7 +2536,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsWarehouseFormOpen(false)}>Cancelar</Button>
-            <Button onClick={() => saveWarehouseMutation.mutate({ name: whName.trim(), description: whDescription.trim(), area: whArea })} disabled={saveWarehouseMutation.isPending || !whName.trim()} data-testid="btn-save-warehouse">
+            <Button permission="catalog" onClick={() => saveWarehouseMutation.mutate({ name: whName.trim(), description: whDescription.trim(), area: whArea })} disabled={saveWarehouseMutation.isPending || !whName.trim()} data-testid="btn-save-warehouse">
               {saveWarehouseMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Guardar
             </Button>
@@ -2599,8 +2601,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsNewCountDialogOpen(false)}>Cancelar</Button>
-            <Button
+            <Button permission="operate" variant="outline" onClick={() => setIsNewCountDialogOpen(false)}>Cancelar</Button>
+            <Button permission="operate"
               disabled={!newCountDate || createCountMutation.isPending}
               onClick={() => createCountMutation.mutate({ date: newCountDate, area: newCountArea || undefined, notes: newCountNotes || undefined })}
               data-testid="btn-confirm-new-count"
@@ -2679,11 +2681,11 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           <Label htmlFor="article-name">Nombre</Label><Input id="article-name" value={articleName} onChange={e=>setArticleName(e.target.value)}/>
           <Label htmlFor="article-sku">SKU</Label><Input id="article-sku" value={articleSku} onChange={e=>setArticleSku(e.target.value)}/>
           <Label htmlFor="article-min">Stock mínimo</Label><Input id="article-min" type="number" min="0" step="0.001" value={articleMin} onChange={e=>setArticleMin(e.target.value)}/>
-          <Label htmlFor="article-cost">Costo unitario</Label><Input id="article-cost" type="number" min="0" step="0.01" value={articleCost} onChange={e=>setArticleCost(e.target.value)}/>
+          {canCost && <><Label htmlFor="article-cost">Costo unitario</Label><Input id="article-cost" type="number" min="0" step="0.01" value={articleCost} onChange={e=>setArticleCost(e.target.value)}/></>}
           <label className="flex gap-2"><input type="checkbox" disabled={editingArticle?.isActive !== "false"} checked={articleActive} onChange={e=>setArticleActive(e.target.checked)}/>Artículo activo</label>
           <p className="text-sm text-muted-foreground">Las cantidades se corrigen desde movimientos. El historial se conserva.</p>
           {editingArticle && <InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/>}
-          <DialogFooter><Button disabled={editArticleMutation.isPending || !articleName.trim() || articleMin === "" || articleCost === "" || Number(articleMin)<0 || Number(articleCost)<0} onClick={()=>editArticleMutation.mutate()}>Guardar artículo</Button></DialogFooter>
+          <DialogFooter><Button permission="catalog" disabled={editArticleMutation.isPending || !articleName.trim() || articleMin === "" || articleCost === "" || Number(articleMin)<0 || Number(articleCost)<0} onClick={()=>editArticleMutation.mutate()}>Guardar artículo</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={!!inventoryAction} onOpenChange={open=>{if(!open && !inventoryActionMutation.isPending)setInventoryAction(null);}}>
@@ -2795,7 +2797,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>Cancelar</Button>
-            <Button
+            <Button permission="catalog"
               onClick={() => saveCategoryMutation.mutate({
                 name: catName.trim(),
                 area: catArea,
@@ -2863,7 +2865,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsGroupDialogOpen(false)}>Cancelar</Button>
-            <Button
+            <Button permission="catalog"
               onClick={() => saveGroupMutation.mutate({
                 name: groupName.trim(),
                 area: groupArea,
@@ -3064,7 +3066,7 @@ export function NewItemForm({
                 placeholder="Nombre de la marca"
                 data-testid="input-new-brand-name"
               />
-              <Button
+              <Button permission="catalog"
                 type="button"
                 size="sm"
                 disabled={!newBrandName.trim() || createBrandMutation.isPending}
@@ -3524,7 +3526,7 @@ function MovimientoInternoDetail({ movId }: { movId: string }) {
     return <div className="px-4 pb-4 text-sm text-muted-foreground">Sin artículos registrados.</div>;
   }
 
-  const totalCost = data.items.reduce((s, i) => s + parseFloat(i.quantity) * parseFloat(i.cost_price), 0);
+  const totalCost = data.items.reduce((s, i) => s + parseFloat(i.quantity) * parseFloat(i.cost_price || "0"), 0);
 
   return (
     <div className="px-4 pb-4 border-t">
@@ -3546,8 +3548,8 @@ function MovimientoInternoDetail({ movId }: { movId: string }) {
               <td className="py-1.5">{item.warehouse_name || item.warehouse_id || "Sin origen registrado"}</td>
               <td className="py-1.5 text-right">{parseFloat(item.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
               <td className="py-1.5 pl-2 text-muted-foreground">{item.unit}</td>
-              <td className="py-1.5 text-right">${parseFloat(item.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-              <td className="py-1.5 text-right font-semibold">${(parseFloat(item.quantity) * parseFloat(item.cost_price)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+              <td className="py-1.5 text-right">${parseFloat(item.cost_price || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+              <td className="py-1.5 text-right font-semibold">${(parseFloat(item.quantity) * parseFloat(item.cost_price || "0")).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
             </tr>
           ))}
           <tr className="border-t font-bold text-xs">

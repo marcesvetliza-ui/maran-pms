@@ -48,4 +48,18 @@ suite('Etapa 2: formularios y operaciones reales aisladas',()=>{
   expect(Number((await pool!.query('SELECT current_stock FROM inventory_items WHERE id=$1',[item])).rows[0].current_stock)).toBe(5);
  });
  it('un usuario sin permiso no puede reintentar, revertir ni cambiar equivalencias',async()=>{role='sin_permiso';for(const [method,path,body] of [['POST','/api/inventory/source-stock-reversals',{sourceType:'restaurant_order',sourceId:order,reason:'Prueba'}],['POST','/api/inventory/pending-consumptions/x/retry',{}],['PUT',`/api/inventory/items/${item}/unit-conversions`,{conversions:[]}]] as const)expect((await request(method,path,body)).status).toBe(403);});
+ it('Restaurant consulta sin costos y opera, pero no modifica catálogo ni anula; SPA solo consulta',async()=>{
+  role='restaurant';
+  const list=await request('GET','/api/inventory/items');expect(list.status).toBe(200);expect(list.body.find((i:any)=>i.id===item).costPrice).toBeNull();
+  expect((await request('POST','/api/inventory/categories',{name:'No autorizado'})).status).toBe(403);
+  expect((await request('POST','/api/inventory/source-stock-reversals',{sourceType:'restaurant_order',sourceId:'x',reason:'No autorizado'})).status).toBe(403);
+  expect((await request('POST',`/api/inventory/warehouses/${warehouse}/movements`,{itemId:item,movementType:'entrada',quantity:1})).status).toBe(201);
+  expect((await request('POST',`/api/inventory/warehouses/${warehouse}/movements`,{itemId:item,movementType:'ajuste',quantity:1})).status).toBe(403);
+  expect((await request('POST',`/api/inventory/warehouses/${warehouse}/movements`,{itemId:item,movementType:'entrada',quantity:1,unitCost:100})).status).toBe(403);
+  expect((await request('GET',`/api/inventory/items/${item}/price-history`)).status).toBe(403);
+  role='spa';expect((await request('GET','/api/inventory/items')).status).toBe(200);
+  expect((await request('POST',`/api/inventory/warehouses/${warehouse}/movements`,{itemId:item,movementType:'entrada',quantity:1})).status).toBe(403);
+  role='resp_deposito';expect((await request('GET','/api/inventory/items')).body.find((i:any)=>i.id===item).costPrice).toBe('100.00');
+ });
+
 });

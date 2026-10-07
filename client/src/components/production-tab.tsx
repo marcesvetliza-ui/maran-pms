@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getArgentinaToday } from "@/lib/date-utils";
-import { Button } from "@/components/ui/button";
+import { InventoryButton as Button, useInventoryPermission } from "./inventory-access";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -62,11 +62,13 @@ const UNIT_LABELS: Record<string, string> = {
   ml: "Mililitros", caja: "Cajas", paquete: "Paquetes", docena: "Docenas",
 };
 
-function fmtMoney(n: number) {
+function fmtMoney(n: number | null) {
+  if(n == null) return "—";
   return `$${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function RegisterRunTab() {
+  const canCost = useInventoryPermission("cost");
   const { toast } = useToast();
   const [date, setDate] = useState(getArgentinaToday());
   const [recipeId, setRecipeId] = useState<string>("");
@@ -251,13 +253,13 @@ function RegisterRunTab() {
           <p className="text-xs text-muted-foreground">Al guardar se calculará el costo con las cantidades convertidas y los costos vigentes del stock consumido.</p>
           <Card className="bg-muted/30">
             <CardContent className="pt-4 flex flex-wrap gap-x-8 gap-y-1 text-sm">
-              <div>Costo total estimado: <strong>{fmtMoney(totalCost)}</strong></div>
-              <div>Costo unitario estimado: <strong>{fmtMoney(unitCostResult)}</strong> / {formula.outputUnit}</div>
+              <div>Costo total estimado: <strong>{fmtMoney(canCost ? totalCost : null)}</strong></div>
+              <div>Costo unitario estimado: <strong>{fmtMoney(canCost ? unitCostResult : null)}</strong> / {formula.outputUnit}</div>
               <div>Stock actual de {formula.outputItemName}: <strong>{formula.outputCurrentStock.toLocaleString("es-AR")} {formula.outputUnit}</strong></div>
             </CardContent>
           </Card>
 
-          <Button
+          <Button permission="operate"
             onClick={() => registerMutation.mutate()}
             disabled={registerMutation.isPending || outQty <= 0 || !outputWarehouseId || formula.lines.some(line=>!inputWarehouses[line.recipeIngredientId])}
             data-testid="button-register-production"
@@ -379,7 +381,7 @@ function FormulasTab() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button
+                      <Button permission="catalog"
                         onClick={() => linkNewMutation.mutate()}
                         disabled={linkNewMutation.isPending || !newItemName.trim()}
                         data-testid="button-confirm-link-new"
@@ -401,7 +403,7 @@ function FormulasTab() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button
+                      <Button permission="catalog"
                         onClick={() => linkExistingMutation.mutate()}
                         disabled={linkExistingMutation.isPending || !existingItemId}
                         data-testid="button-confirm-link-existing"
@@ -433,7 +435,7 @@ function FormulasTab() {
                     {" · "}Costo actual: <strong>{fmtMoney(f.outputCostPrice)}</strong> / {f.outputUnit}
                   </div>
                 </div>
-                <Button
+                <Button permission="catalog"
                   variant="ghost" size="sm"
                   onClick={() => unlinkMutation.mutate(f.recipeId)}
                   disabled={unlinkMutation.isPending}

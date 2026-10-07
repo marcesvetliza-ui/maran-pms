@@ -1,3 +1,4 @@
+import {inventoryAccess,inventoryWritePermission} from "../inventoryAccess";
 import { catalogLock, validateCategory, validateItemClassification, protectCategoryDeletion } from "../inventoryCatalog";
 import {registerInventoryStage2Routes} from "../inventoryStage2Routes";
 import { consumeInventoryInternally, internalConsumptionOrigins } from "../inventoryInternalConsumption";
@@ -14,6 +15,7 @@ import { requireAuth, requirePermission } from "../auth";
 const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 
 export function registerInventoryRoutes(app: Express) {
+  app.use("/api/inventory", requireAuth, inventoryAccess);
   registerInventoryStage2Routes(app);
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
@@ -29,7 +31,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/categories", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/categories", inventoryWritePermission, async (req, res) => {
     try {
       const category = await withDatabaseTransaction(async () => { await catalogLock(); const data = await validateCategory(req.body); return storage.createItemCategory(data); });
       res.status(201).json(category);
@@ -38,7 +40,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/categories/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/categories/:id", inventoryWritePermission, async (req, res) => {
     try {
       const category = await withDatabaseTransaction(async () => { await catalogLock(); const data = await validateCategory(req.body, req.params.id); return storage.updateItemCategory(req.params.id, data); });
       if (!category) return res.status(404).json({ error: "Category not found" });
@@ -48,7 +50,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/categories/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.delete("/api/inventory/categories/:id", inventoryWritePermission, async (req, res) => {
     try {
       await withDatabaseTransaction(async () => { await catalogLock(); await protectCategoryDeletion(req.params.id); await storage.deleteItemCategory(req.params.id); });
       res.status(204).send();
@@ -67,7 +69,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/brands", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/brands", inventoryWritePermission, async (req, res) => {
     try {
       const brand = await storage.createBrand(req.body);
       res.status(201).json(brand);
@@ -76,7 +78,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/brands/:id", inventoryWritePermission, async (req, res) => {
     try {
       const brand = await withDatabaseTransaction(async () => { await catalogLock(); return storage.updateBrand(req.params.id, req.body); });
       if (!brand) return res.status(404).json({ error: "Brand not found" });
@@ -86,7 +88,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/brands/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.delete("/api/inventory/brands/:id", inventoryWritePermission, async (req, res) => {
     try {
       await withDatabaseTransaction(async () => { await catalogLock(); await storage.deleteBrand(req.params.id); });
       res.status(204).send();
@@ -130,7 +132,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/items", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async(req,res)=>{
+  app.post("/api/inventory/items", requireAuth, inventoryWritePermission, async(req,res)=>{
     try{
       const {warehouseId,...body}=req.body,quantity=stockUnits(body.currentStock ?? 0);
       if(quantity&&!warehouseId)return res.status(400).json({error:'El stock inicial necesita depósito de destino'});
@@ -145,7 +147,7 @@ export function registerInventoryRoutes(app: Express) {
     }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
   });
 
-  app.patch("/api/inventory/items/:id", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/items/:id", requireAuth, inventoryWritePermission, async (req, res) => {
     try {
       if(req.body.currentStock!==undefined)return res.status(409).json({error:"Las cantidades se corrigen con movimientos de stock por depósito."});
       const item = await withDatabaseTransaction(async () => { await catalogLock(); await validateItemClassification(req.body, req.params.id); return storage.updateInventoryItem(req.params.id, req.body); });
@@ -157,26 +159,26 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/items/:id", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), (_req,res) => {
+  app.delete("/api/inventory/items/:id", requireAuth, inventoryWritePermission, (_req,res) => {
     res.status(405).json({error:"Los artículos se dan de baja con motivo y conservan su historial. Usá la acción de baja."});
   });
 
-  app.patch("/api/inventory/items/:id/metadata", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async(req,res) => {
+  app.patch("/api/inventory/items/:id/metadata", requireAuth, inventoryWritePermission, async(req,res) => {
     try {
       const {name,sku,minStock,costPrice,isActive}=req.body;
-      if (typeof name !== "string" || !name.trim() || !Number.isFinite(Number(minStock)) || Number(minStock)<0 || !Number.isFinite(Number(costPrice)) || Number(costPrice)<0) return res.status(400).json({error:"Revisá el nombre, stock mínimo y costo"});
+      if (typeof name !== "string" || !name.trim() || !Number.isFinite(Number(minStock)) || Number(minStock)<0 || (costPrice !== undefined && (!Number.isFinite(Number(costPrice)) || Number(costPrice)<0))) return res.status(400).json({error:"Revisá el nombre, stock mínimo y costo"});
       const item = await withDatabaseTransaction(async()=>{
         await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
         const before=await storage.getInventoryItem(req.params.id); if(!before)return null;
         if(before.isActive !== "false" && isActive === "false") throw Object.assign(new Error("Usá dar de baja e indicá el motivo"),{statusCode:400});
-        const after=await storage.updateInventoryItem(req.params.id,{name:name.trim(),sku:typeof sku === "string" ? sku.trim() || null : null,minStock:String(minStock),costPrice:String(costPrice),isActive:isActive === "true" ? "true" : before.isActive});
+        const after=await storage.updateInventoryItem(req.params.id,{name:name.trim(),sku:typeof sku === "string" ? sku.trim() || null : null,minStock:String(minStock),...(costPrice !== undefined ? {costPrice:String(costPrice)} : {}),isActive:isActive === "true" ? "true" : before.isActive});
         await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);return after;
       });
       if(!item)return res.status(404).json({error:"Artículo no encontrado"});res.json(item);
     }catch(error:any){res.status(error.statusCode || 500).json({error:error.message || "No se pudo editar el artículo"});}
   });
 
-  app.post("/api/inventory/items/:id/deactivate", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req,res) => {
+  app.post("/api/inventory/items/:id/deactivate", requireAuth, inventoryWritePermission, async (req,res) => {
     try {
       if (!String(req.body.reason || "").trim()) return res.status(400).json({error:"Indicá el motivo de la baja"});
       const item = await withDatabaseTransaction(async () => {
@@ -192,7 +194,7 @@ export function registerInventoryRoutes(app: Express) {
     } catch { res.status(500).json({error:"No se pudo dar de baja el artículo"}); }
   });
   for (const action of ["anular","corregir"] as const) {
-    app.post(`/api/inventory/movements/:id/${action}`, requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async(req,res) => {
+    app.post(`/api/inventory/movements/:id/${action}`, requireAuth, inventoryWritePermission, async(req,res) => {
       try { res.json(await correctInventoryMovement(req.params.id,String(req.body.reason || ""),req.user!.id,action === "corregir" ? {quantity:String(req.body.quantity),notes:req.body.notes ? String(req.body.notes) : undefined}:undefined)); }
       catch(error:any) {res.status(error.statusCode || 500).json({error:error.message || "No se pudo corregir el movimiento"});}
     });
@@ -209,7 +211,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/movements", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req,res)=>{
+  app.post("/api/inventory/movements", requireAuth, inventoryWritePermission, async (req,res)=>{
     try {
       if(!req.body.warehouseId)return res.status(400).json({error:'Elegí el depósito del movimiento; no se modifica solo el stock global'});
       const result=await safeWarehouseMovement(String(req.body.warehouseId),req.body,req.user!.id);
@@ -263,7 +265,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/warehouses", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/warehouses", inventoryWritePermission, async (req, res) => {
     try {
       const { name, description, area } = req.body;
       const rows = await db.execute(sql`
@@ -277,7 +279,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/warehouses/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/warehouses/:id", inventoryWritePermission, async (req, res) => {
     try {
       const { name, description, area, isActive } = req.body;
       const rows = await db.execute(sql`
@@ -296,7 +298,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/inventory/warehouses/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.delete("/api/inventory/warehouses/:id", inventoryWritePermission, async (req, res) => {
     try {
       await db.execute(sql`UPDATE inventory_warehouses SET is_active = 'false' WHERE id = ${req.params.id}`);
       res.status(204).send();
@@ -343,7 +345,7 @@ export function registerInventoryRoutes(app: Express) {
   // Accepts one or more items for the same origin/destination pair; all of
   // them move (or none do) inside a single transaction so a mid-batch stock
   // shortfall never leaves some items moved and others not.
-  app.post("/api/inventory/transfer", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/transfer", inventoryWritePermission, async (req, res) => {
     try {
       const { fromWarehouseId, toWarehouseId, notes } = req.body;
       const items: { itemId: string; quantity: number }[] = Array.isArray(req.body.items)
@@ -370,7 +372,7 @@ export function registerInventoryRoutes(app: Express) {
   });
 
   // Warehouse stock movement (entrada/salida within a specific warehouse)
-  app.post("/api/inventory/warehouses/:warehouseId/movements", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async(req,res)=>{
+  app.post("/api/inventory/warehouses/:warehouseId/movements", requireAuth, inventoryWritePermission, async(req,res)=>{
     try{res.status(201).json(await safeWarehouseMovement(req.params.warehouseId,req.body,req.user!.id));}
     catch(error:any){res.status(error.statusCode || 500).json({error:error.message || "No se pudo registrar el movimiento"});}
   });
@@ -397,7 +399,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/counts", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/counts", inventoryWritePermission, async (req, res) => {
     try {
       const user = (req as any).user;
       const count = await storage.createInventoryCount({ ...req.body, createdBy: user?.username });
@@ -417,7 +419,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/inventory/counts/:id/items/:itemId", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/counts/:id/items/:itemId", inventoryWritePermission, async (req, res) => {
     try {
       const { actualStock, notes } = req.body;
       await storage.updateInventoryCountItem(
@@ -432,7 +434,7 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/counts/:id/close", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/counts/:id/close", inventoryWritePermission, async (req, res) => {
     try {
       const user = (req as any).user;
       const result = await storage.closeInventoryCount(req.params.id, user?.username ?? "sistema");
@@ -534,7 +536,7 @@ export function registerInventoryRoutes(app: Express) {
     catch { res.status(500).json({error:"No se pudieron consultar los depósitos de origen"}); }
   });
 
-  app.post("/api/inventory/internal-movements", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/internal-movements", requireAuth, inventoryWritePermission, async (req, res) => {
     try { res.status(201).json(await consumeInventoryInternally(req.body, req.user!.id)); }
     catch (error: any) { res.status(error.statusCode || 500).json({error: error.message || "Error registrando consumo interno"}); }
   });
