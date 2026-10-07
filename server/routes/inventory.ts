@@ -21,6 +21,25 @@ export function registerInventoryRoutes(app: Express) {
   registerInventoryStage2Routes(app);
   registerInventoryLocationRoutes(app);
   registerInventoryHistoryRoutes(app);
+  app.get("/api/inventory/price-history-comparison", requirePermission('api:inventory:cost'), async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT l.id, l.item_id, l.item_name, l.item_sku, l.quantity, l.input_unit,
+          l.stock_quantity, l.stock_unit, l.unit_price, l.vat_rate,
+          p.id AS invoice_id, p.numero_comprobante, p.tipo_comprobante,
+          p.fecha_emision, p.created_at, COALESCE(s.razon_social,p.proveedor_nombre,'Sin proveedor') AS supplier,
+          c.area, c.name AS category, g.name AS grouping
+        FROM purchase_invoice_lines l JOIN purchase_invoices p ON p.id=l.invoice_id
+        JOIN inventory_items i ON i.id=l.item_id
+        LEFT JOIN item_categories c ON c.id=i.category_id
+        LEFT JOIN item_categories g ON g.id=c.parent_id
+        LEFT JOIN accounting_suppliers s ON s.id=p.supplier_id
+        WHERE p.tipo_comprobante IN ('FACT-A','FACT-B','FACT-C') AND p.estado <> 'anulado'
+        ORDER BY p.created_at, p.id, l.line_number
+      `);
+      res.json(result.rows);
+    } catch (error) { res.status(500).json({error:'No se pudo consultar el historial de compras'}); }
+  });
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
     try {

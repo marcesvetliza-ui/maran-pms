@@ -1,3 +1,4 @@
+import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
 import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
 import {InventoryPreparation} from "@/components/inventory-preparation";
 import {INVENTORY_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
@@ -1287,8 +1288,10 @@ export default function InventoryPage() {
             <ClipboardList className="h-4 w-4 mr-2" />
             Toma de Inventario
           </TabsTrigger>
+          {canCost && <TabsTrigger value="prices">Comparación de precios</TabsTrigger>}
         </TabsList>
 
+        {canCost && <TabsContent value="prices"><InventoryPriceComparison /></TabsContent>}
         <InventoryTabPanels movementTab={movementTab} onMovementTabChange={setMovementTab}>
         <TabsContent value="items" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">

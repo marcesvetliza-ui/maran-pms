@@ -5,11 +5,12 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../auth", () => ({
-  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (req: any, _res: any, next: () => void) => { req.user={id:"purchase-test",role:"admin"}; next(); },
   requireRole: (_roles: string[]) => (_req: any, _res: any, next: () => void) => next(),
   requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
+vi.mock("../permissions", async (original) => ({...await original<typeof import("../permissions")>(),hasPermission:()=>true}));
 
 const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
@@ -23,7 +24,9 @@ async function request(method: string, path: string, body?: unknown) {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: response.status, body: await response.json() as any };
+  const text=await response.text();
+  if(!text.startsWith("{")&&!text.startsWith("[")) throw new Error(text.slice(0,2000));
+  return { status: response.status, body: JSON.parse(text) as any };
 }
 
 suite("PostgreSQL real: factura de compra y stock atómicos", () => {
@@ -134,6 +137,9 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
     const itemId = item.rows[0].id;
     const supplierId = supplier.rows[0].id;
     const numero = `STOCK-${suffix}`;
+    const recipeId=randomUUID(),ingredientId=randomUUID();
+    await pool.query("INSERT INTO recipes(id,name,is_base) VALUES($1,'Receta costo compra prueba',false)",[recipeId]);
+    await pool.query("INSERT INTO recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,unit_cost) VALUES($1,$2,$3,'Insumo',1,'unidad',9)",[ingredientId,recipeId,itemId]);
     const warehouse=(await pool.query("INSERT INTO inventory_warehouses(name) VALUES('Entrada prueba') RETURNING id")).rows[0].id;
     await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,3)",[itemId,warehouse]);
     const payload = {
@@ -182,6 +188,22 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       expect((await request("DELETE", `/api/purchase-invoices/${created.body.id}`)).status).toBe(409);
       expect((await pool.query("SELECT estado FROM purchase_invoices WHERE id = $1", [created.body.id])).rows[0].estado).toBe("pendiente");
 
+      const free = await request("POST", "/api/purchase-invoices", {
+        ...payload, numeroComprobante: numero+'-REGALO', stockItems: [{...payload.stockItems[0],unitCost:'0'}],
+      });
+      expect(free.status).toBe(201);
+      const afterFree=(await pool.query("SELECT cost_price,current_stock FROM inventory_items WHERE id=$1",[itemId])).rows[0];
+      expect(Number(afterFree.cost_price)).toBe(15);
+      expect(Number((await pool.query("SELECT unit_cost FROM recipe_ingredients WHERE id=$1",[ingredientId])).rows[0].unit_cost)).toBe(15);
+      expect(Number(afterFree.current_stock)).toBe(7);
+      const comparison=await request('GET','/api/inventory/price-history-comparison');
+      expect(comparison.status).toBe(200);
+      expect(comparison.body.filter((r:any)=>r.item_id===itemId).map((r:any)=>Number(r.unit_price))).toEqual([15,0]);
+      expect(Number((await pool.query("SELECT unit_price FROM purchase_invoice_lines WHERE invoice_id=$1",[free.body.id])).rows[0].unit_price)).toBe(0);
+      await pool.query("DELETE FROM stock_movements WHERE source_type='purchase_invoice' AND source_id=$1",[String(free.body.id)]);
+      await pool.query("DELETE FROM accounting_entry_lines WHERE entry_id=$1",[free.body.asiento_id]);
+      await pool.query("DELETE FROM accounting_entries WHERE id=$1",[free.body.asiento_id]);
+      await pool.query("DELETE FROM purchase_invoices WHERE id=$1",[free.body.id]);
       await pool.query("DELETE FROM stock_movements WHERE source_type = 'purchase_invoice' AND source_id = $1", [String(created.body.id)]);
       await pool.query("DELETE FROM item_price_history WHERE item_id = $1", [itemId]);
       await pool.query("DELETE FROM inventory_item_suppliers WHERE item_id = $1", [itemId]);
@@ -189,6 +211,14 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       await pool.query("DELETE FROM accounting_entries WHERE id = $1", [created.body.asiento_id]);
       await pool.query("DELETE FROM purchase_invoices WHERE id = $1", [created.body.id]);
     } finally {
+      await pool.query("DELETE FROM recipe_ingredients WHERE id=$1",[ingredientId]);
+      await pool.query("DELETE FROM recipes WHERE id=$1",[recipeId]);
+      await pool.query("DELETE FROM stock_movements WHERE item_id=$1",[itemId]);
+      await pool.query("DELETE FROM item_price_history WHERE item_id=$1",[itemId]);
+      await pool.query("DELETE FROM inventory_item_suppliers WHERE item_id=$1",[itemId]);
+      await pool.query("DELETE FROM accounting_entry_lines WHERE entry_id IN (SELECT asiento_id FROM purchase_invoices WHERE supplier_id=$1)",[supplierId]);
+      await pool.query("DELETE FROM accounting_entries WHERE id IN (SELECT asiento_id FROM purchase_invoices WHERE supplier_id=$1)",[supplierId]);
+      await pool.query("DELETE FROM purchase_invoices WHERE supplier_id=$1",[supplierId]);
       await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[itemId]);
       await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouse]);
       await pool.query("DELETE FROM inventory_items WHERE id = $1", [itemId]);
