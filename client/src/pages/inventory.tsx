@@ -1,3 +1,4 @@
+import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
 import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
 import {InventoryPendingConsumptions} from "@/components/inventory-pending-consumptions";
@@ -156,6 +157,8 @@ type WarehouseStockRow = {
   unit: string;
   cost_price: string;
   min_stock: string;
+  expected?: boolean;
+  critical_stock?: string | null;
   category_name: string | null;
 };
 
@@ -729,6 +732,9 @@ export default function InventoryPage() {
   const [consumoTo, setConsumoTo] = useState(today);
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
   const [areaFilter, setAreaFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const {data: locationData = [], isLoading: locationsLoading, isError: locationsError} = useQuery<InventoryLocation[]>({queryKey:["/api/inventory/locations"],queryFn:async()=>(await apiRequest("GET","/api/inventory/locations")).json(),refetchInterval:30000});
+  const locations = Array.isArray(locationData) ? locationData : [];
 
   // Toma de Inventario state
   const [selectedCountId, setSelectedCountId] = useState<string | null>(null);
@@ -1128,7 +1134,8 @@ export default function InventoryPage() {
     ? categories.filter((c) => !c.isGroup && (areaFilter === "all" || c.area === areaFilter))
     : categories.filter((c) => !c.isGroup && String(c.parentId) === groupFilter && (areaFilter === "all" || c.area === areaFilter));
 
-  const filteredItems = items
+  const scopedItems = locationFilter === "all" ? items : items.filter(item => locations.some(l => l.itemId === item.id && l.warehouseId === locationFilter)).map(item => {const l=locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)!;return {...item,currentStock:Number(l.stock)};});
+  const filteredItems = scopedItems
     .filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1144,25 +1151,14 @@ export default function InventoryPage() {
   // Indicadores del dashboard: excluyen los "plato" (referencias internas que
   // el restaurante sincroniza desde el menú, no son artículos de inventario
   // reales) y respetan el filtro de área, igual que el listado de abajo.
-  const dashboardScopeItems = items.filter((item) => (item as any).itemKind !== "plato");
+  const dashboardScopeItems = scopedItems.filter((item) => item.isActive !== "false" && (item as any).itemKind !== "plato");
   const areaScopedDashboardItems = dashboardScopeItems.filter(
     (item) => areaFilter === "all" || (item.category as any)?.area === areaFilter
   );
-  const sinStockItems = areaScopedDashboardItems.filter((item) => Number(item.currentStock) <= 0);
-  // Stock Crítico es un umbral de ruptura propio, distinto del Stock Mínimo:
-  // un artículo por debajo del mínimo pero por encima del crítico está "Bajo"
-  // (reponer pronto); por debajo del crítico está "Crítico" (reponer ya).
-  const criticoItems = areaScopedDashboardItems.filter(
-    (item) => Number(item.currentStock) > 0
-      && item.criticalStock != null
-      && Number(item.currentStock) <= Number(item.criticalStock)
-  );
-  const criticoIds = new Set(criticoItems.map((item) => item.id));
-  const stockBajoItems = areaScopedDashboardItems.filter(
-    (item) => Number(item.currentStock) > 0
-      && Number(item.currentStock) < Number(item.minStock)
-      && !criticoIds.has(item.id)
-  );
+  const alertScope = locations.filter(l => (locationFilter === "all" || l.warehouseId === locationFilter) && (areaFilter === "all" || l.area === areaFilter));
+  const sinStockItems = alertScope.filter(l => l.status === "zero");
+  const criticoItems = alertScope.filter(l => l.status === "critical");
+  const stockBajoItems = alertScope.filter(l => l.status === "low");
 
   const totalValue = areaScopedDashboardItems.reduce(
     (sum, item) => sum + (item.currentStock * parseFloat(item.costPrice || "0")),
@@ -1214,7 +1210,7 @@ export default function InventoryPage() {
             <AlertTriangle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{sinStockItems.length}</div>
+            <div className="text-2xl font-bold text-red-600">{locationsLoading || locationsError ? "—" : sinStockItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1223,7 +1219,7 @@ export default function InventoryPage() {
             <AlertTriangle className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{criticoItems.length}</div>
+            <div className="text-2xl font-bold text-orange-600">{locationsLoading || locationsError ? "—" : criticoItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1232,7 +1228,7 @@ export default function InventoryPage() {
             <AlertTriangle className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{stockBajoItems.length}</div>
+            <div className="text-2xl font-bold text-yellow-600">{locationsLoading || locationsError ? "—" : stockBajoItems.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1248,6 +1244,7 @@ export default function InventoryPage() {
         </Card>
       </div>
 
+      <p className="text-sm text-muted-foreground">Cantidades: {locationFilter === "all" ? "stock global" : warehouses.find(w=>w.id===locationFilter)?.name}. Las alertas cuentan situaciones artículo–depósito configuradas. {locationsLoading ? "Cargando alertas…" : locationsError ? "No se pudieron consultar las alertas." : `${alertScope.filter(l=>l.status==='unconfigured').length} ubicaciones sin alerta configurada.`}</p>
       <InventoryPendingConsumptions readOnly={!canOperate} />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Secciones de inventario">
@@ -1257,7 +1254,7 @@ export default function InventoryPage() {
           </TabsTrigger>
           <TabsTrigger value="low-stock" data-testid="tab-low-stock">
             <AlertTriangle className="h-4 w-4 mr-2" />
-            Stock Bajo
+            Stock y alertas
           </TabsTrigger>
           <TabsTrigger value="movements" data-testid="tab-movements">
             <History className="h-4 w-4 mr-2" />
@@ -1284,6 +1281,11 @@ export default function InventoryPage() {
         <InventoryTabPanels movementTab={movementTab} onMovementTabChange={setMovementTab}>
         <TabsContent value="items" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
+            <Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+            <Button disabled={locationFilter!=="all" && (locationsLoading||locationsError)} onClick={()=>{
+              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
+              const url=URL.createObjectURL(new Blob([locationCsv(rows,canCost)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='articulos-filtrados.csv';a.click();URL.revokeObjectURL(url);
+            }}>Exportar artículos filtrados</Button>
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -1426,13 +1428,13 @@ export default function InventoryPage() {
                         </div>
                       </td>
                       <td className="p-3 text-right">
-                        <span className={Number(item.currentStock) < Number(item.minStock) ? "text-red-600 font-semibold" : ""}>
-                          {item.currentStock}
+                        <span className={locationFilter === "all" ? "" : ["zero","critical","low"].includes(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.status || "") ? "text-red-600 font-semibold" : ""}>
+                          {Number(item.currentStock).toLocaleString("es-AR",{maximumFractionDigits:3})}
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{item.unit}</span>
                       </td>
                       <td className="p-3 text-right text-muted-foreground">
-                        {item.minStock}
+                        {locationFilter === "all" ? Number(item.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}) : (locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock == null ? "—" : Number(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}))}
                       </td>
                       <td className="p-3 text-right">
                         {canCost ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
@@ -1451,121 +1453,7 @@ export default function InventoryPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="low-stock" className="space-y-6">
-          {sinStockItems.length === 0 && criticoItems.length === 0 && stockBajoItems.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                <TrendingUp className="h-12 w-12 text-green-500 mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Stock OK</h3>
-                <p className="text-muted-foreground">Todos los articulos tienen stock suficiente</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              {sinStockItems.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-red-600">Sin Stock ({sinStockItems.length})</h3>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {sinStockItems.map((item) => (
-                      <Card key={item.id} className="border-red-500/50" data-testid={`sin-stock-${item.id}`}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <CardTitle className="text-base">{item.name}</CardTitle>
-                            <Badge variant="destructive">Sin stock</Badge>
-                          </div>
-                          {(item.category as any)?.name && (
-                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
-                          )}
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock minimo:</span>
-                            <span>{item.minStock} {item.unit}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">A reponer:</span>
-                            <span className="font-semibold">{item.minStock} {item.unit}</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {criticoItems.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-orange-600">Stock Crítico ({criticoItems.length})</h3>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {criticoItems.map((item) => (
-                      <Card key={item.id} className="border-orange-500/50" data-testid={`critico-${item.id}`}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <CardTitle className="text-base">{item.name}</CardTitle>
-                            <Badge className="bg-orange-600 hover:bg-orange-600">Crítico</Badge>
-                          </div>
-                          {(item.category as any)?.name && (
-                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
-                          )}
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock actual:</span>
-                            <span className="font-semibold text-orange-600">{item.currentStock} {item.unit}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock crítico:</span>
-                            <span>{item.criticalStock} {item.unit}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock minimo:</span>
-                            <span>{item.minStock} {item.unit}</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {stockBajoItems.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-yellow-600">Stock Bajo ({stockBajoItems.length})</h3>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {stockBajoItems.map((item) => (
-                      <Card key={item.id} className="border-yellow-500/50" data-testid={`low-stock-${item.id}`}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <CardTitle className="text-base">{item.name}</CardTitle>
-                            <Badge variant="destructive">
-                              <TrendingDown className="h-3 w-3 mr-1" />
-                              Bajo
-                            </Badge>
-                          </div>
-                          {(item.category as any)?.name && (
-                            <p className="text-xs text-muted-foreground">{(item.category as any).name}</p>
-                          )}
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock actual:</span>
-                            <span className="font-semibold text-red-600">{item.currentStock} {item.unit}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Stock minimo:</span>
-                            <span>{item.minStock} {item.unit}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Faltante:</span>
-                            <span className="font-semibold">{(item.minStock - item.currentStock).toFixed(2)} {item.unit}</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </TabsContent>
+        <TabsContent value="low-stock" className="space-y-4"><InventoryLocations warehouses={warehouses} items={items}/></TabsContent>
 
         <TabsContent value="movements" className="space-y-4">
           {/* Filters */}
@@ -2150,8 +2038,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                         const stock = parseFloat(row.current_stock);
                         const minStock = parseFloat(row.min_stock || "0");
                         const cost = parseFloat(row.cost_price || "0");
-                        const isLow = stock <= minStock && stock > 0;
-                        const isZero = stock === 0;
+                        const isLow = row.expected === true && stock > 0 && (stock < minStock || (row.critical_stock != null && stock <= Number(row.critical_stock)));
+                        const isZero = row.expected === true && stock === 0;
                         return (
                           <TableRow key={row.id} data-testid={`wh-stock-row-${row.item_id}`} className={isZero ? "bg-red-50 dark:bg-red-950/20" : isLow ? "bg-yellow-50 dark:bg-yellow-950/20" : ""}>
                             <TableCell className="font-medium">
@@ -3315,11 +3203,13 @@ function TransferItemRow({
   );
 }
 
-function TransferForm({
+export function TransferForm({
   warehouses,
   items,
   preselectedItem,
   preselectedFromWarehouse,
+  preselectedToWarehouse,
+  preselectedQuantity,
   onSubmit,
   isPending,
   onCancel,
@@ -3328,15 +3218,17 @@ function TransferForm({
   items: InventoryItem[];
   preselectedItem: WarehouseStockRow | null;
   preselectedFromWarehouse: string | null;
+  preselectedToWarehouse?: string;
+  preselectedQuantity?: number;
   onSubmit: (data: { items: TransferRowData[]; fromWarehouseId: string; toWarehouseId: string; notes?: string }) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
   const [rows, setRows] = useState<TransferRowData[]>([
-    { itemId: preselectedItem?.item_id || "", quantity: 1 },
+    { itemId: preselectedItem?.item_id || "", quantity: preselectedQuantity ?? 1 },
   ]);
   const [fromWarehouseId, setFromWarehouseId] = useState(preselectedFromWarehouse || "");
-  const [toWarehouseId, setToWarehouseId] = useState("");
+  const [toWarehouseId, setToWarehouseId] = useState(preselectedToWarehouse || "");
   const [notes, setNotes] = useState("");
 
   const stockQueries = useQueries({
@@ -3371,7 +3263,7 @@ function TransferForm({
           <Select value={fromWarehouseId} onValueChange={setFromWarehouseId}>
             <SelectTrigger data-testid="select-from-warehouse"><SelectValue placeholder="Depósito origen..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.filter(w => w.id).map(w => (
+              {warehouses.filter(w => w.id && w.is_active !== "false").map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === toWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>
@@ -3382,7 +3274,7 @@ function TransferForm({
           <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
             <SelectTrigger data-testid="select-to-warehouse"><SelectValue placeholder="Depósito destino..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.filter(w => w.id).map(w => (
+              {warehouses.filter(w => w.id && w.is_active !== "false").map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === fromWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>

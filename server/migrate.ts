@@ -1,3 +1,4 @@
+import {ensureInventoryLocationSchema} from "./inventoryLocations";
 import {ensureInventoryStage2Schema} from "./inventoryStage2Schema";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } from "./reservationPaymentRequest";
@@ -4961,5 +4962,6 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     INSERT INTO resource_permission_seeds(resource_key) VALUES('inventory-granular-menu-20261007') ON CONFLICT DO NOTHING RETURNING resource_key
   ) INSERT INTO role_permissions(role,resource_key) SELECT 'restaurant','sidebar:/inventory' FROM applied ON CONFLICT DO NOTHING`);
   await ensureInventoryStage2Schema();
+  await ensureInventoryLocationSchema();
   logger.info("Migraciones incrementales completadas.");
 }

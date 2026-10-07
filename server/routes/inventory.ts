@@ -1,3 +1,4 @@
+import {registerInventoryLocationRoutes} from "../inventoryLocations";
 import {inventoryAccess,inventoryWritePermission} from "../inventoryAccess";
 import { catalogLock, validateCategory, validateItemClassification, protectCategoryDeletion } from "../inventoryCatalog";
 import {registerInventoryStage2Routes} from "../inventoryStage2Routes";
@@ -17,6 +18,7 @@ const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 export function registerInventoryRoutes(app: Express) {
   app.use("/api/inventory", requireAuth, inventoryAccess);
   registerInventoryStage2Routes(app);
+  registerInventoryLocationRoutes(app);
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
     try {
@@ -311,11 +313,12 @@ export function registerInventoryRoutes(app: Express) {
   app.get("/api/inventory/warehouses/:id/stock", async (req, res) => {
     try {
       const rows = await db.execute(sql`
-        SELECT ws.*, ii.name as item_name, ii.sku, ii.unit, ii.cost_price, ii.min_stock, ii.is_active as item_active,
+        SELECT ws.*, ii.name as item_name, ii.sku, ii.unit, ii.cost_price, lp.min_stock, lp.critical_stock, COALESCE(lp.is_expected,false) AS expected, ii.is_active as item_active,
                ic.name as category_name
         FROM warehouse_stock ws
         JOIN inventory_items ii ON ws.item_id = ii.id
         LEFT JOIN item_categories ic ON ii.category_id = ic.id
+        LEFT JOIN inventory_location_policies lp ON lp.warehouse_id=ws.warehouse_id AND lp.item_id=ws.item_id
         WHERE ws.warehouse_id = ${req.params.id}
         ORDER BY ii.name ASC
       `);
@@ -448,20 +451,19 @@ export function registerInventoryRoutes(app: Express) {
   app.get("/api/inventory/warehouses-summary", async (req, res) => {
     try {
       const rows = await db.execute(sql`
-        SELECT
-          iw.id as warehouse_id,
-          iw.name as warehouse_name,
-          iw.area,
-          COUNT(DISTINCT ws.item_id) as item_count,
-          SUM(ws.current_stock::numeric * COALESCE(ii.cost_price::numeric, 0)) as total_value,
-          COUNT(CASE WHEN ws.current_stock::numeric <= COALESCE(ii.min_stock::numeric, 0) AND ws.current_stock::numeric > 0 THEN 1 END) as low_stock_count,
-          COUNT(CASE WHEN ws.current_stock::numeric = 0 THEN 1 END) as zero_stock_count
+        WITH pairs AS (SELECT warehouse_id,item_id FROM warehouse_stock UNION SELECT warehouse_id,item_id FROM inventory_location_policies)
+        SELECT iw.id as warehouse_id,iw.name as warehouse_name,iw.area,
+          COUNT(DISTINCT ii.id) as item_count,
+          COALESCE(SUM(COALESCE(ws.current_stock,0)*COALESCE(ii.cost_price,0)),0) as total_value,
+          COUNT(CASE WHEN lp.is_expected AND COALESCE(ws.current_stock,0)>0 AND (COALESCE(ws.current_stock,0)<lp.min_stock OR (lp.critical_stock IS NOT NULL AND COALESCE(ws.current_stock,0)<=lp.critical_stock)) THEN 1 END) as low_stock_count,
+          COUNT(CASE WHEN lp.is_expected AND COALESCE(ws.current_stock,0)<=0 THEN 1 END) as zero_stock_count
         FROM inventory_warehouses iw
-        LEFT JOIN warehouse_stock ws ON iw.id = ws.warehouse_id
-        LEFT JOIN inventory_items ii ON ws.item_id = ii.id
-        WHERE iw.is_active = 'true'
-        GROUP BY iw.id, iw.name, iw.area
-        ORDER BY iw.created_at ASC
+        LEFT JOIN pairs p ON iw.id=p.warehouse_id
+        LEFT JOIN inventory_items ii ON ii.id=p.item_id AND ii.is_active='true' AND ii.item_kind<>'plato'
+        LEFT JOIN warehouse_stock ws ON ws.warehouse_id=iw.id AND ws.item_id=ii.id
+        LEFT JOIN inventory_location_policies lp ON lp.warehouse_id=iw.id AND lp.item_id=ii.id
+        WHERE iw.is_active='true'
+        GROUP BY iw.id,iw.name,iw.area ORDER BY iw.created_at ASC
       `);
       res.json(rows.rows);
     } catch (error: any) {

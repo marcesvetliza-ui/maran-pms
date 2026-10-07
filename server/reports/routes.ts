@@ -1153,11 +1153,12 @@ export function registerReportsRoutes(app: Express) {
       const [valorizacion, bajoMinimo, porTipoMovimiento, sinMovimiento, topValor] = await Promise.all([
         db.execute(sql`SELECT COALESCE(SUM(current_stock::numeric * cost_price::numeric), 0) AS total FROM inventory_items WHERE is_active = 'true'`),
         db.execute(sql`
-          SELECT id, sku, name, current_stock, min_stock, unit
-          FROM inventory_items
-          WHERE is_active = 'true' AND current_stock::numeric <= min_stock::numeric
-          ORDER BY (current_stock::numeric - min_stock::numeric) ASC
-          LIMIT 20
+          SELECT COUNT(*) OVER() AS total_alerts,i.id,i.sku,i.name,COALESCE(ws.current_stock,0) AS current_stock,p.min_stock,i.unit,w.id AS warehouse_id,w.name AS warehouse_name
+          FROM inventory_location_policies p JOIN inventory_items i ON i.id=p.item_id JOIN inventory_warehouses w ON w.id=p.warehouse_id
+          LEFT JOIN warehouse_stock ws ON ws.warehouse_id=p.warehouse_id AND ws.item_id=p.item_id
+          WHERE p.is_expected AND i.is_active='true' AND i.item_kind<>'plato' AND w.is_active='true'
+            AND (COALESCE(ws.current_stock,0)<=0 OR COALESCE(ws.current_stock,0)<p.min_stock OR (p.critical_stock IS NOT NULL AND COALESCE(ws.current_stock,0)<=p.critical_stock))
+          ORDER BY (COALESCE(ws.current_stock,0)-p.min_stock) ASC,w.name,i.name LIMIT 20
         `),
         db.execute(sql`
           SELECT movement_type, COUNT(*) AS cantidad, COALESCE(SUM(quantity::numeric), 0) AS cantidad_total
@@ -1187,8 +1188,9 @@ export function registerReportsRoutes(app: Express) {
       res.json({
         periodo,
         valorTotalStock: $n((valorizacion.rows[0] as any)?.total),
+        totalSituacionesAlerta: $n((bajoMinimo.rows[0] as any)?.total_alerts),
         itemsBajoMinimo: (bajoMinimo.rows as any[]).map(r => ({
-          id: r.id, sku: r.sku, nombre: r.name, stockActual: $n(r.current_stock), stockMinimo: $n(r.min_stock), unidad: r.unit,
+          id: r.id, sku: r.sku, nombre: r.name, stockActual: $n(r.current_stock), stockMinimo: $n(r.min_stock), unidad: r.unit, depositoId:r.warehouse_id, deposito:r.warehouse_name,
         })),
         porTipoMovimiento: (porTipoMovimiento.rows as any[]).map(r => ({
           tipo: r.movement_type, cantidad: $n(r.cantidad), cantidadTotal: $n(r.cantidad_total),

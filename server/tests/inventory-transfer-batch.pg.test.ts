@@ -32,6 +32,8 @@ async function startApp() {
   const { registerRoutes } = await import("../routes");
   const app = express();
   app.use(express.json());
+  await (await import("../permissions")).loadRolePermissionsCache();
+  app.use((req,_res,next)=>{req.user={id:"transfer-test",role:"admin"} as any;next();});
 
   httpServer = http.createServer(app);
   await registerRoutes(httpServer, app);

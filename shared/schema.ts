@@ -3737,3 +3737,12 @@ export const inventoryProductionRequests = pgTable("inventory_production_request
   runId: varchar("run_id").references(() => productionRuns.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const inventoryLocationPolicies = pgTable("inventory_location_policies", {
+  warehouseId: varchar("warehouse_id").notNull().references(() => inventoryWarehouses.id),
+  itemId: varchar("item_id").notNull().references(() => inventoryItems.id),
+  minStock: decimal("min_stock", {precision:10,scale:3}).notNull(),
+  criticalStock: decimal("critical_stock", {precision:10,scale:3}),
+  isExpected: boolean("is_expected").notNull().default(true),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, table => ({pairPrimary: primaryKey({columns:[table.warehouseId,table.itemId]})}));

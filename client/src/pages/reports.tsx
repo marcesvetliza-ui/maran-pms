@@ -360,7 +360,8 @@ export default function ReportsPage() {
 
   type InventoryReportData = {
     valorTotalStock: number;
-    itemsBajoMinimo: { id: string; sku: string; nombre: string; stockActual: number; stockMinimo: number; unidad: string }[];
+    itemsBajoMinimo: { id: string; sku: string; nombre: string; stockActual: number; stockMinimo: number; unidad: string; depositoId?:string; deposito?:string }[];
+    totalSituacionesAlerta?:number;
     porTipoMovimiento: { tipo: string; cantidad: number; cantidadTotal: number }[];
     itemsSinMovimiento: { id: string; sku: string; nombre: string; stockActual: number; unidad: string }[];
     topValorStock: { sku: string; nombre: string; stockActual: number; costoUnitario: number; valorTotal: number }[];
@@ -2154,25 +2155,26 @@ export default function ReportsPage() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Valor total del stock</p><p className="text-xl font-bold" data-testid="text-inventory-valor">{formatARS(inventoryReport.data.valorTotalStock)}</p></CardContent></Card>
-                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ítems bajo stock mínimo</p><p className="text-xl font-bold text-destructive">{inventoryReport.data.itemsBajoMinimo.length}</p></CardContent></Card>
+                <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Situaciones artículo–depósito con alerta</p><p className="text-xl font-bold text-destructive">{inventoryReport.data.totalSituacionesAlerta ?? inventoryReport.data.itemsBajoMinimo.length}</p></CardContent></Card>
               </div>
               <Card>
-                <CardHeader><CardTitle>Ítems Bajo Stock Mínimo</CardTitle></CardHeader>
+                <CardHeader><CardTitle>Alertas por depósito (hasta 20)</CardTitle></CardHeader>
                 <CardContent>
                   <div className="overflow-auto">
                     <Table data-testid="table-inventory-bajo-minimo">
-                      <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Nombre</TableHead><TableHead className="text-right">Stock Actual</TableHead><TableHead className="text-right">Stock Mínimo</TableHead><TableHead>Unidad</TableHead></TableRow></TableHeader>
+                      <TableHeader><TableRow><TableHead>SKU</TableHead><TableHead>Nombre</TableHead><TableHead>Depósito</TableHead><TableHead className="text-right">Stock Actual</TableHead><TableHead className="text-right">Stock Mínimo</TableHead><TableHead>Unidad</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {inventoryReport.data.itemsBajoMinimo.map((r) => (
-                          <TableRow key={r.id} data-testid={`row-inventory-low-${r.id}`}>
+                          <TableRow key={`${r.id}:${r.depositoId}`} data-testid={`row-inventory-low-${r.id}`}>
                             <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                             <TableCell>{r.nombre}</TableCell>
+                            <TableCell>{r.deposito || "—"}</TableCell>
                             <TableCell className="text-right text-destructive font-bold">{r.stockActual}</TableCell>
                             <TableCell className="text-right">{r.stockMinimo}</TableCell>
                             <TableCell>{r.unidad}</TableCell>
                           </TableRow>
                         ))}
-                        {inventoryReport.data.itemsBajoMinimo.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">Ningún ítem bajo el mínimo</TableCell></TableRow>}
+                        {inventoryReport.data.itemsBajoMinimo.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No hay alertas en las ubicaciones configuradas</TableCell></TableRow>}
                       </TableBody>
                     </Table>
                   </div>

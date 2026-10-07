@@ -48,6 +48,7 @@ function renderInventory() {
     },
   });
   client.setQueryData(["/api/inventory/pending-consumptions","all"],[]);
+  client.setQueryData(["/api/inventory/locations"],[]);
   render(<QueryClientProvider client={client}><InventoryPage /></QueryClientProvider>);
   return { client, fetchMock };
 }
