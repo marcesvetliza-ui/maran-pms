@@ -39,6 +39,24 @@ function renderPage() {
 }
 
 describe("EmitirComprobantePage — selección Área / Operación / Tipo", () => {
+  it("un turno SPA abre venta sin tipo seleccionado y permite elegir su comprobante", async () => {
+    mockRole="admin";
+    window.history.replaceState({},'', '/operaciones/emitir-comprobante?spaAccountId=spa-test');
+    sessionStorage.setItem('spa-receipt-spa-test',JSON.stringify({accountId:'spa-test',initialValues:{razonSocial:'Cliente SPA',items:[{descripcion:'Masaje',precioUnitario:100}]}}));
+    try {
+      renderPage();
+      expect(screen.getByTestId('select-area')).toHaveTextContent('Spa');
+      expect(screen.getByTestId('select-operacion')).toHaveTextContent('Venta');
+      expect(screen.getByTestId('select-tipo')).toHaveTextContent('Elegir tipo');
+      await userEvent.setup().click(screen.getByTestId('select-tipo'));
+      expect(screen.getByRole('option',{name:'Voucher SPA'})).toBeInTheDocument();
+      expect(screen.queryByRole('option',{name:'Nota de Crédito A'})).not.toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole('option',{name:'Factura B'}));
+      expect(screen.getByDisplayValue('Masaje')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Cliente SPA')).toBeInTheDocument();
+    } finally {sessionStorage.removeItem('spa-receipt-spa-test');window.history.replaceState({},'', '/');}
+  });
+
   it("admin ve las seis áreas y puede armar Venta > Recepción > Factura B", async () => {
     mockRole = "admin";
     const user = userEvent.setup();

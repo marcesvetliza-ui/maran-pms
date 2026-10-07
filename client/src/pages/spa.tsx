@@ -1,3 +1,4 @@
+import {useLocation} from "wouter";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -878,6 +879,7 @@ export default function SpaPage() {
     }
   }, [isFolioOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [, navigateToReceipt] = useLocation();
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: AppointmentFormValues) => {
       const treatment = treatments.find((t) => t.id === data.treatmentId);
@@ -901,13 +903,7 @@ export default function SpaPage() {
           resourceReservations: selectedTreatment?.isCircuit
             ? circuitBookings.map(({ templateResourceId, cabinId, resourceTreatmentId, startTime }) => ({ templateResourceId, cabinId, resourceTreatmentId, startTime }))
             : [],
-          ...(newAppointmentSettlement === "room_charge"
-            ? { settlement: { type: "room_charge", reservationId: newAppointmentRoomId } }
-            : newAppointmentSettlement === "voucher"
-              ? { settlement: { type: "voucher", paymentMethod: newAppointmentVoucherMethod } }
-              : newAppointmentSettlement === "already_sold" && generatingFromSale
-                ? { settlement: { type: "already_sold", soldTreatmentSaleId: generatingFromSale.id } }
-                : {}),
+          ...(generatingFromSale ? { settlement: { type: "already_sold", soldTreatmentSaleId: generatingFromSale.id } } : {}),
         }),
       });
       
@@ -931,14 +927,14 @@ export default function SpaPage() {
       } else if (createdApt.settlementType === "already_sold") {
         queryClient.invalidateQueries({ queryKey: ["/api/spa/treatment-sales"] });
         toast({ title: "Turno agendado — ya estaba pagado, no se volvió a cobrar" });
-      } else if (newAppointmentSettlement === "invoice") {
+      } else if (!createdApt.settlementType) {
         toast({ title: "Turno creado", description: "Completá la factura y la forma de pago." });
       } else {
         toast({ title: "Turno creado — imprimiendo comanda..." });
       }
       setGeneratingFromSale(null);
 
-      if (newAppointmentSettlement === "invoice" && createdApt.accountId) {
+      if (!createdApt.settlementType && createdApt.accountId) {
         const linkedReservation = variables.reservationId
           ? allReservations.find((reservation) => reservation.id === variables.reservationId)
           : null;
@@ -955,7 +951,7 @@ export default function SpaPage() {
           || spaGuest?.razonSocial
           || fullName;
 
-        setPendingSpaInvoice({
+        const receiptContext: PendingSpaInvoice = {
           accountId: createdApt.accountId,
           initialValues: {
             razonSocial: recipientName,
@@ -980,7 +976,13 @@ export default function SpaPage() {
                   lastName: reservationGuest.lastName,
                 }
               : undefined,
-        });
+        };
+        try {
+          sessionStorage.setItem('spa-receipt-'+createdApt.accountId, JSON.stringify(receiptContext));
+          navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(createdApt.accountId));
+        } catch {
+          setPendingSpaInvoice(receiptContext);
+        }
       }
 
       setIsNewDialogOpen(false);
@@ -1721,14 +1723,6 @@ export default function SpaPage() {
     if (isEditMode && editingAppointmentId) {
       editAppointmentMutation.mutate({ ...data, id: editingAppointmentId });
     } else {
-      if (newAppointmentSettlement === "room_charge" && !newAppointmentRoomId) {
-        toast({ title: "Seleccioná una habitación ocupada", variant: "destructive" });
-        return;
-      }
-      if (newAppointmentSettlement === "voucher" && !newAppointmentVoucherMethod) {
-        toast({ title: "Seleccioná la forma de pago del voucher", variant: "destructive" });
-        return;
-      }
       createAppointmentMutation.mutate(data);
     }
   };
@@ -3107,119 +3101,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </FormItem>
               )} />
 
-              {!isEditMode && !generatingFromSale && (
-                <div className="rounded-lg border bg-muted/20 p-4 space-y-3" data-testid="appointment-settlement-section">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <Label>Cobro al crear el turno (opcional)</Label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Si no elegís una opción, el folio SPA queda abierto para cobrarlo después.
-                      </p>
-                    </div>
-                    {newAppointmentSettlement && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => {
-                          setNewAppointmentSettlement("");
-                          setNewAppointmentRoomId("");
-                          setNewAppointmentVoucherMethod("");
-                        }}
-                        data-testid="button-clear-appointment-settlement"
-                      >
-                        Dejar abierto
-                      </Button>
-                    )}
-                  </div>
-                  <Select
-                    value={newAppointmentSettlement || undefined}
-                    onValueChange={(value: NewAppointmentSettlement) => {
-                      setNewAppointmentSettlement(value);
-                      if (value === "room_charge") {
-                        setNewAppointmentRoomId(form.getValues("reservationId") || "");
-                      } else {
-                        setNewAppointmentRoomId("");
-                      }
-                      if (value !== "voucher") setNewAppointmentVoucherMethod("");
-                    }}
-                  >
-                    <SelectTrigger data-testid="select-appointment-settlement">
-                      <SelectValue placeholder="Seleccionar una opción de cobro" />
-                    </SelectTrigger>
-                     <SelectContent position="item-aligned" collisionPadding={8}>
-                      <SelectItem value="room_charge">Cargo a habitación</SelectItem>
-                      <SelectItem value="invoice">Factura</SelectItem>
-                      <SelectItem value="voucher">Voucher SPA — no fiscal</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {newAppointmentSettlement === "room_charge" && (
-                    <div className="space-y-1.5">
-                      <Label>Habitación ocupada</Label>
-                      <Select
-                        value={newAppointmentRoomId || undefined}
-                        onValueChange={(reservationId) => {
-                          setNewAppointmentRoomId(reservationId);
-                          form.setValue("reservationId", reservationId);
-                          handleReservationAutoFill(reservationId);
-                        }}
-                      >
-                        <SelectTrigger data-testid="select-appointment-room-charge">
-                          <SelectValue placeholder="Seleccionar habitación y huésped" />
-                        </SelectTrigger>
-                        <SelectContent position="item-aligned" collisionPadding={8}>
-                          {[...checkedInReservations]
-                            .filter((reservation) => reservation.id)
-                            .sort((a, b) => {
-                              const roomComparison = (parseInt(a.room?.roomNumber || "0") || 0)
-                                - (parseInt(b.room?.roomNumber || "0") || 0);
-                              if (roomComparison !== 0) return roomComparison;
-                              return `${a.guest?.lastName || ""} ${a.guest?.firstName || ""}`
-                                .localeCompare(`${b.guest?.lastName || ""} ${b.guest?.firstName || ""}`, "es");
-                            })
-                            .map((reservation) => (
-                              <SelectItem key={reservation.id} value={reservation.id}>
-                                Hab. {reservation.room?.roomNumber} — {reservation.guest?.lastName} {reservation.guest?.firstName}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Se agrega al folio de la habitación y no genera efectivo en Caja SPA.
-                      </p>
-                    </div>
-                  )}
-
-                  {newAppointmentSettlement === "invoice" && (
-                    <div className="rounded-md border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300">
-                      Después de crear el turno se abrirá Emitir Comprobante con los datos del huésped, el servicio y el importe precargados.
-                    </div>
-                  )}
-
-                  {newAppointmentSettlement === "voucher" && (
-                    <div className="space-y-1.5">
-                      <Label>Forma de pago</Label>
-                      <Select value={newAppointmentVoucherMethod || undefined} onValueChange={setNewAppointmentVoucherMethod}>
-                        <SelectTrigger data-testid="select-appointment-voucher-payment">
-                          <SelectValue placeholder="Seleccionar forma de pago" />
-                        </SelectTrigger>
-                        <SelectContent position="item-aligned" collisionPadding={8}>
-                          <SelectItem value="cash">Efectivo</SelectItem>
-                          <SelectItem value="debit_card">Tarjeta Débito</SelectItem>
-                          <SelectItem value="credit_card">Tarjeta Crédito</SelectItem>
-                          <SelectItem value="transfer">Transferencia</SelectItem>
-                          <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Se cerrará el folio, se registrará en Caja SPA y se imprimirá un comprobante no fiscal.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => { setIsNewDialogOpen(false); setIsEditMode(false); }}>Cancelar</Button>

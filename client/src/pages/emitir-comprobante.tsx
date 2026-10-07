@@ -226,6 +226,11 @@ function tiposParaSeleccion(operacion: Operacion, area: AreaId | ""): { value: s
 
 export default function EmitirComprobantePage() {
   const { hasPermission } = useAuth();
+  const [spaContext,setSpaContext] = useState<any>(() => {
+    const id=new URLSearchParams(window.location.search).get('spaAccountId');
+    if(!id)return null;
+    try { const context=JSON.parse(sessionStorage.getItem('spa-receipt-'+id)||'null'); return context?.accountId===id?context:null; } catch { return null; }
+  });
 
   // Mismas queries que ya usan EmitirComprobanteButton (config de venta) y
   // PurchaseInvoicesPage (proveedores/cuentas contables para compra) — no se
@@ -251,8 +256,8 @@ export default function EmitirComprobantePage() {
     [hasPermission],
   );
 
-  const [area, setArea] = useState<AreaId | "">(areasPermitidas.length === 1 ? areasPermitidas[0].id : "");
-  const [operacion, setOperacion] = useState<Operacion | "">("");
+  const [area, setArea] = useState<AreaId | "">(spaContext && areasPermitidas.some(a=>a.id==='spa') ? "spa" : areasPermitidas.length === 1 ? areasPermitidas[0].id : "");
+  const [operacion, setOperacion] = useState<Operacion | "">(spaContext ? "venta" : "");
   const [tipo, setTipo] = useState<string>("");
   // Registrar: cargar un comprobante que ya se emitió afuera del sistema (no
   // llama a ARCA), a diferencia de emitirlo ahora — ver RegistrarComprobanteVenta.
@@ -264,11 +269,11 @@ export default function EmitirComprobantePage() {
   );
 
   const tipos = useMemo(
-    () => (operacion ? tiposParaSeleccion(operacion, area) : []),
-    [operacion, area],
+    () => (operacion ? tiposParaSeleccion(operacion, area).filter(t=>!spaContext || (!NC_ND_TIPOS.has(t.value) && t.value!=="FT")) : []),
+    [operacion, area, spaContext],
   );
 
-  const areaFija = areasPermitidas.length === 1;
+  const areaFija = areasPermitidas.length === 1 || !!spaContext;
   const seleccionCompleta = !!area && !!operacion && !!tipo;
 
   const resetSeleccion = () => {
@@ -365,7 +370,7 @@ export default function EmitirComprobantePage() {
                 <Badge>{tipos.find((t) => t.value === tipo)?.label}</Badge>
               </div>
 
-              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && (
+              {operacion === "venta" && !NC_ND_TIPOS.has(tipo) && !spaContext && (
                 <div className="flex rounded-md border overflow-hidden text-sm w-fit">
                   <button
                     type="button"
@@ -398,6 +403,24 @@ export default function EmitirComprobantePage() {
                   config={billingConfig}
                   allowedTipos={[tipo]}
                   cashArea={area}
+                  initialValues={area==='spa' && spaContext ? spaContext.initialValues : undefined}
+                  spaAccountId={area==='spa' ? spaContext?.accountId : undefined}
+                  billingEntityType={area==='spa' ? spaContext?.billingEntityType : undefined}
+                  billingEntityId={area==='spa' ? spaContext?.billingEntityId : undefined}
+                  recipientProfile={area==='spa' ? spaContext?.recipientProfile : undefined}
+                  lockItems={area==='spa' && !!spaContext}
+                  hideAddItems={area==='spa' && !!spaContext}
+                  allowCuentaCorriente={!spaContext}
+                  requiresEmission={!!spaContext}
+                  onSuccess={() => {
+                    if (spaContext && area==='spa') {
+                      sessionStorage.removeItem('spa-receipt-'+spaContext.accountId);
+                      setSpaContext(null);
+                      resetSeleccion();
+                      queryClient.invalidateQueries({queryKey:['/api/spa/accounts']});
+                      queryClient.invalidateQueries({queryKey:['/api/spa/appointments']});
+                    }
+                  }}
                   showPaymentMethod
                   // Las facturas fiscales (FA/FB/FM/FMB) sí deben salir de una
                   // ficha registrada. Los comprobantes no fiscales (vouchers
