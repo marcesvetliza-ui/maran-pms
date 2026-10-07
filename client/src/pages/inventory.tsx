@@ -1,3 +1,4 @@
+import {InventoryPreparation} from "@/components/inventory-preparation";
 import {INVENTORY_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
@@ -1246,6 +1247,7 @@ export default function InventoryPage() {
       </div>
 
       <p className="text-sm text-muted-foreground">Cantidades: {locationFilter === "all" ? "stock global" : warehouses.find(w=>w.id===locationFilter)?.name}. Las alertas cuentan situaciones artículo–depósito configuradas. {locationsLoading ? "Cargando alertas…" : locationsError ? "No se pudieron consultar las alertas." : `${alertScope.filter(l=>l.status==='unconfigured').length} ubicaciones sin alerta configurada.`}</p>
+      <InventoryPreparation />
       <InventoryPendingConsumptions readOnly={!canOperate} />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Secciones de inventario">
