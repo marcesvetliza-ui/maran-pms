@@ -1,6 +1,7 @@
 import type { Express } from "express";
+import { voidSpaPayment } from "../spaCancellation";
 import { storage } from "../db-storage";
-import { db, pool } from "../db";
+import { db, pool, withDatabaseTransaction } from "../db";
 import {
   spaPayments,
   spaProfessionals,
@@ -1059,6 +1060,10 @@ export function registerSpaRoutes(app: Express) {
           soldTreatmentSaleId: soldSale?.id || null,
         }).returning();
 
+        await tx.insert(auditLogs).values({ userId: (req.user as any)?.id, userName: (req.user as any)?.fullName || (req.user as any)?.username,
+          action: "create", module: "spa", entityType: "spa_appointment", entityId: createdAppointment.id,
+          description: "Turno SPA creado", details: JSON.stringify({ after: createdAppointment }), ipAddress: req.ip, timestamp: new Date() });
+
         if (soldSale) {
           await syncLinkedGiftVoucherStatus(
             tx, soldSale.id, "reservado",
@@ -1260,8 +1265,9 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/spa/appointments/:id", requireAuth, async (req, res) => {
+  app.patch("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
+      if (req.body.status === "cancelled" && !String(req.body?.motivoAnulacion || "").trim()) return res.status(400).json({ error: "Indicá el motivo de cancelación" });
       if (req.body.status !== undefined && !isValidSpaStatus(req.body.status)) {
         return res.status(400).json({ error: "El estado del turno no es válido" });
       }
@@ -1394,6 +1400,13 @@ export function registerSpaRoutes(app: Express) {
           .where(eq(spaAppointments.id, current.id))
           .returning();
 
+        await tx.insert(auditLogs).values({
+          userId: (req.user as any)?.id, userName: (req.user as any)?.fullName || (req.user as any)?.username,
+          action: "update", module: "spa", entityType: status === "cancelled" && current.status !== "cancelled" ? "spa_appointment_cancelled" : "spa_appointment",
+          entityId: current.id, description: status === "cancelled" ? `Turno cancelado: ${req.body.motivoAnulacion || ""}` : "Turno SPA actualizado",
+          details: JSON.stringify({ before: current, after: updated, reason: req.body.motivoAnulacion || null }), ipAddress: req.ip, timestamp: new Date(),
+        });
+
         // Cierra el círculo de "Turnos vendidos": si este turno viene de una
         // venta anticipada, avisarle que ya se prestó. Mismo patrón atómico
         // que el reclamo original (condición en el WHERE, no solo el valor
@@ -1442,21 +1455,23 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  // Ningún botón de la app llama a este borrado duro — cancelar un turno pasa
-  // por PATCH status=cancelled, que preserva el registro. Este endpoint queda
-  // para una corrección administrativa puntual (p.ej. un turno de prueba), así
-  // que solo debe estar al alcance de quien ya administra Spa, no de cualquier
-  // sesión autenticada en el hotel.
-  app.delete("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.delete("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), (_req, res) => {
+    res.status(409).json({ error: "Los turnos no se borran. Cancelá el turno con un motivo para conservar el historial." });
+  });
+
+  app.get("/api/spa/appointments/cancellations/in-shift", requireAuth, async (req, res) => {
     try {
-      await db.transaction(async (tx) => {
-        await tx.delete(spaAppointmentResources).where(eq(spaAppointmentResources.appointmentId, req.params.id));
-        await tx.delete(spaAppointments).where(eq(spaAppointments.id, req.params.id));
-      });
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting appointment" });
-    }
+      if (req.query.today === "true") {
+        const today = getArgentinaOperationalDate();
+        const result = await db.execute(sql`SELECT a.* FROM audit_logs a WHERE a.module='spa' AND a.entity_type='spa_appointment_cancelled'
+          AND (a.timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date=${today}::date ORDER BY a.timestamp DESC`);
+        return res.json(result.rows);
+      }
+      const result = await db.execute(sql`SELECT a.* FROM audit_logs a JOIN cash_shifts s ON s.id=${String(req.query.shiftId || "")}
+        WHERE s.area='spa' AND a.module='spa' AND a.entity_type='spa_appointment_cancelled'
+        AND a.timestamp >= s.opened_at AND a.timestamp <= COALESCE(s.closed_at, now()) ORDER BY a.timestamp DESC`);
+      res.json(result.rows);
+    } catch { res.status(500).json({error:"No se pudo consultar el historial de cancelaciones"}); }
   });
 
   // SPA Accounts
@@ -1628,7 +1643,7 @@ export function registerSpaRoutes(app: Express) {
       if (!accountData) return res.status(404).json({ error: "Account not found" });
 
       const totalAmount = accountData.items.reduce((sum: number, item: any) => sum + parseFloat(item.subtotal), 0);
-      const totalPaid = accountData.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+      const totalPaid = accountData.payments.filter((p: any) => p.status !== "anulado").reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
 
       if (totalPaid < totalAmount) {
         return res.status(400).json({
@@ -1973,172 +1988,89 @@ export function registerSpaRoutes(app: Express) {
 
   app.post("/api/spa/accounts/:id/payments", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const { amount, method, isAdvance, appointmentId, reservationId, notes, voucherId } = req.body;
+      const payment = await withDatabaseTransaction(async () => {
+        const account = await db.execute(sql`SELECT status FROM spa_accounts WHERE id=${req.params.id} FOR UPDATE`);
+        if (!account.rows.length || (account.rows[0] as any).status !== "open") throw Object.assign(new Error("La cuenta debe estar abierta para registrar un pago"), { statusCode: 409 });
+        const { amount, method, isAdvance, appointmentId, reservationId, notes, voucherId } = req.body;
 
-      if (!amount || !method) {
-        return res.status(400).json({ error: "amount and method are required" });
-      }
-
-      // Igual que en reservas: se aplica el voucher ANTES de registrar el
-      // pago, para no dejar un pago "cubierto" por un voucher que en
-      // realidad no se pudo reservar (ya usado, vencido, etc.).
-      if (method === "gift_voucher") {
-        if (!voucherId) return res.status(400).json({ error: "voucherId es requerido para pagar con voucher de regalo" });
-        try {
-          await storage.applyGiftVoucher(
-            voucherId, "spa_account", req.params.id, parseFloat(String(amount)),
-            (req as any).user?.username || "sistema",
-          );
-        } catch (e: any) {
-          return res.status(400).json({ error: e?.message || "Error al aplicar el voucher de regalo" });
+        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !["cash", "debit_card", "credit_card", "transfer", "mercadopago", "room_charge", "cuenta_corriente", "gift_voucher"].includes(method)) {
+          throw Object.assign(new Error("amount and method are required"), { statusCode: 400 });
         }
-      }
 
-      const payment = await storage.createSpaPayment({
-        accountId: req.params.id,
-        amount,
-        method,
-        isAdvance: isAdvance ? "true" : "false",
-        appointmentId: appointmentId || null,
-        reservationId: reservationId || null,
-        voucherId: method === "gift_voucher" ? voucherId : null,
-        notes: notes || null,
-        createdAt: new Date(),
-      });
+        // Igual que en reservas: se aplica el voucher ANTES de registrar el
+        // pago, para no dejar un pago "cubierto" por un voucher que en
+        // realidad no se pudo reservar (ya usado, vencido, etc.).
+        if (method === "gift_voucher") {
+          if (!voucherId) throw Object.assign(new Error("voucherId es requerido para pagar con voucher de regalo"), { statusCode: 400 });
+          try {
+            await storage.applyGiftVoucher(
+              voucherId, "spa_account", req.params.id, parseFloat(String(amount)),
+              (req as any).user?.username || "sistema",
+            );
+          } catch (e: any) {
+            throw Object.assign(new Error(e?.message || "Error al aplicar el voucher de regalo"), { statusCode: 400 });
+          }
+        }
 
-      if (method === "room_charge" && reservationId) {
-        await storage.createCharge({
-          reservationId,
-          category: "spa" as const,
-          description: `SPA - Pago ${isAdvance ? "(Seña)" : ""}`,
-          amount: amount,
-          date: getArgentinaOperationalDate(),
-          createdBy: null,
+        const payment = await storage.createSpaPayment({
+          accountId: req.params.id,
+          amount,
+          method,
+          isAdvance: isAdvance ? "true" : "false",
+          appointmentId: appointmentId || null,
+          reservationId: reservationId || null,
+          voucherId: method === "gift_voucher" ? voucherId : null,
+          notes: notes || null,
+          createdAt: new Date(),
         });
-      }
 
-      try {
-        if (method !== "room_charge") {
-          const label = `SPA - Pago ${isAdvance ? "(Seña)" : ""} - Cuenta ${req.params.id}`;
-          await storage.registerCashMovement(
-            "spa", "spa_account", req.params.id, label,
-            method, String(amount), "income"
-          );
+        if (method === "room_charge" && reservationId) {
+          await storage.createCharge({
+            reservationId,
+            category: "spa" as const,
+            description: `SPA - Pago ${isAdvance ? "(Seña)" : ""}`,
+            amount: amount,
+            date: getArgentinaOperationalDate(),
+            createdBy: null,
+          });
         }
-      } catch (e) {
-        console.error("Error registrando movimiento de caja:", e);
-      }
 
-      // Motor financiero: escribir al folio de la cuenta SPA
-      storage.addFolioPayment(
-        "spa_account", req.params.id,
-        parseFloat(String(amount)),
-        `SPA - Pago${isAdvance ? " (Seña)" : ""}`,
-        method, "spa_payment", payment.id,
-        undefined, (req as any).user?.username,
-      ).catch(e => console.error("[Folio] Error SPA pago:", e));
+        try {
+          if (method !== "room_charge") {
+            const label = `SPA - Pago ${isAdvance ? "(Seña)" : ""} - Cuenta ${req.params.id}`;
+            await storage.registerCashMovement(
+              "spa", "spa_account", req.params.id, label,
+              method, String(amount), "income", (req.user as any)?.username, undefined, payment.id
+            );
+          }
+        } catch (e) {
+          throw e;
+        }
 
+        // Motor financiero: escribir al folio de la cuenta SPA
+        await storage.addFolioPayment(
+          "spa_account", req.params.id,
+          parseFloat(String(amount)),
+          `SPA - Pago${isAdvance ? " (Seña)" : ""}`,
+          method, "spa_payment", payment.id,
+          undefined, (req as any).user?.username,
+        );
+
+        return payment;
+      });
       res.status(201).json(payment);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating payment" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.message || "Error creating payment" });
     }
   });
 
   app.patch("/api/spa/payments/:id/anular", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
-    try {
-      const { motivoAnulacion } = req.body;
-      if (!motivoAnulacion?.trim()) return res.status(400).json({ error: "El motivo de anulación es requerido" });
-      const [pay] = await db.select().from(spaPayments).where(eq(spaPayments.id, req.params.id));
-      if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
-      if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
-      const account = await storage.getSpaAccount(pay.accountId);
-      if (account?.status === "closed") return res.status(403).json({ error: "No se puede anular pagos de una cuenta cerrada" });
-      const [updated] = await db.update(spaPayments)
-        .set({ status: "anulado", motivoAnulacion, anuladoAt: new Date() })
-        .where(eq(spaPayments.id, req.params.id))
-        .returning();
-
-      const operator = (req as any).user?.username || "sistema";
-
-      // Anular el pago acá adentro (spa_payments) no tocaba Caja ni el folio
-      // de la cuenta: el movimiento de caja original quedaba "vivo" y
-      // total_payments del folio nunca bajaba, aunque el pago ya no contara
-      // — exactamente el mismo gap que ya se corrigió para Restaurant.
-      if (pay.method !== "room_charge") {
-        try {
-          const candidates = await db.execute(sql`
-            SELECT id FROM cash_movements
-            WHERE source_type = 'spa_account' AND source_id = ${pay.accountId}
-              AND payment_method = ${pay.method} AND amount::numeric = ${pay.amount}::numeric
-              AND anulado = false
-            LIMIT 2
-          `);
-          if (candidates.rows.length === 1) {
-            const movementId = (candidates.rows[0] as any).id;
-            await db.execute(sql`
-              UPDATE cash_movements
-              SET anulado = true, motivo_anulacion = ${motivoAnulacion}, anulado_por = ${operator}, anulado_at = NOW()
-              WHERE id = ${movementId}
-            `);
-          } else {
-            console.warn(`[SPA] No se encontró un movimiento de caja unívoco para el pago ${pay.id} (candidatos: ${candidates.rows.length})`);
-          }
-        } catch (e) {
-          console.error("[SPA] Error anulando movimiento de caja:", e);
-        }
-      }
-
-      try {
-        const folioRows = await db.execute(sql`
-          SELECT id FROM folios WHERE entity_type = 'spa_account' AND entity_id = ${pay.accountId} LIMIT 1
-        `);
-        const folio = folioRows.rows?.[0] as any;
-        if (folio) {
-          const originalRows = await db.execute(sql`
-            SELECT id FROM folio_movements
-            WHERE folio_id = ${folio.id} AND type = 'payment' AND source_type = 'spa_payment' AND source_id = ${pay.id}
-          `);
-          if (originalRows.rows.length === 1) {
-            await storage.addFolioAdjustment(
-              folio.id, "void", -parseFloat(pay.amount),
-              `Anulación pago SPA — ${motivoAnulacion}`,
-              operator, (originalRows.rows[0] as any).id, motivoAnulacion,
-            );
-          }
-        }
-      } catch (e) {
-        console.error("[SPA] Error anulando folio de la cuenta:", e);
-      }
-
-      if (pay.method === "gift_voucher" && pay.voucherId) {
-        try {
-          const applications = await storage.getGiftVoucherApplicationsForTarget("spa_account", pay.accountId);
-          const application = applications.find(a => a.voucherId === pay.voucherId);
-          if (application) {
-            await storage.releaseGiftVoucherApplication(
-              application.id, (req as any).user?.username || "sistema",
-              `Se anuló el pago: ${motivoAnulacion}`,
-            );
-          }
-        } catch (e) {
-          console.error("[GiftVoucher] Error liberando voucher al anular pago SPA:", e);
-        }
-      }
-
-      res.json(updated);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
+    try { res.json(await voidSpaPayment(req.params.id, req.body.motivoAnulacion, req.user, req.ip)); }
+    catch (e: any) { res.status(e.statusCode || 500).json({ error: e.message }); }
   });
 
-  app.delete("/api/spa/payments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
-    console.warn(`[DEPRECADO] DELETE /api/spa/payments/${req.params.id} — usar PATCH /anular`);
-    try {
-      await storage.deleteSpaPayment(req.params.id);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting payment" });
-    }
+  app.delete("/api/spa/payments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), (_req, res) => {
+    res.status(409).json({ error: "Los pagos no se borran. Usá la anulación con motivo para conservar el pago y su movimiento de caja." });
   });
 
   // SPA Account Items

@@ -72,7 +72,8 @@ async function deductOne(
     return;
   }
 
-  const [invItem] = await executor.select().from(inventoryItems).where(eq(inventoryItems.id, ingredient.inventoryItemId));
+  const [invItem] = await executor.select().from(inventoryItems)
+    .where(eq(inventoryItems.id, ingredient.inventoryItemId)).for("update");
   if (!invItem) {
     result.skipped.push({ ingredientName: ingredient.ingredientName, reason: "Ítem de inventario no encontrado" });
     return;

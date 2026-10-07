@@ -2,11 +2,13 @@ import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { requireAuth } from "../auth";
-import { calendarMonth, calendarMonthEnd } from "./roomPreventiveSchema";
+import { calendarPeriod, completedInPeriod, roomIntervals } from "./roomPreventiveSchema";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 
 export function registerRoomPreventiveRoutes(app: Express) {
   app.post("/api/maintenance/preventive/rooms", requireAuth, async (req, res) => {
+    const intervalMonths = req.body?.intervalMonths ?? 1;
+    if (!roomIntervals.includes(intervalMonths)) return res.status(400).json({ error: "Elegí 1, 2, 3, 6 o 12 meses" });
     const name = String(req.body?.name ?? "").trim();
     if (!name || name.length > 255) return res.status(400).json({ error: "Ingresá un nombre de hasta 255 caracteres" });
     try {
@@ -24,8 +26,8 @@ export function registerRoomPreventiveRoutes(app: Express) {
         if (!rooms.rows.length) throw new Error("No hay habitaciones activas para esta preventiva");
         const today = getArgentinaOperationalDate();
         const task = await tx.execute(sql`
-          INSERT INTO preventive_tasks (name, description, frequency, frequency_days, next_due_at, assigned_to)
-          VALUES (${name}, ${req.body?.description || null}, 'monthly', 30, ${calendarMonthEnd(today)}, ${req.body?.assignedTo || null}) RETURNING *
+          INSERT INTO preventive_tasks (name, description, frequency, frequency_days, next_due_at, assigned_to, room_interval_months)
+          VALUES (${name}, ${req.body?.description || null}, 'monthly', 30, ${calendarPeriod(today, intervalMonths).end}, ${req.body?.assignedTo || null}, ${intervalMonths}) RETURNING *
         `);
         const id = (task.rows[0] as any).id as string;
         await tx.execute(sql`
@@ -42,6 +44,8 @@ export function registerRoomPreventiveRoutes(app: Express) {
   app.patch("/api/maintenance/preventive/:id/rooms", requireAuth, async (req, res) => {
     const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
     const description = req.body?.description;
+    const intervalMonths = req.body?.intervalMonths;
+    if (intervalMonths !== undefined && !roomIntervals.includes(intervalMonths)) return res.status(400).json({ error: "Elegí 1, 2, 3, 6 o 12 meses" });
     if (!name || name.length > 255 || (description != null && typeof description !== "string")) {
       return res.status(400).json({ error: "Ingresá un nombre válido y una descripción de texto" });
     }
@@ -49,7 +53,7 @@ export function registerRoomPreventiveRoutes(app: Express) {
       const outcome = await db.transaction(async tx => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${name.toLowerCase()}))`);
         const existing = await tx.execute(sql`
-          SELECT p.id FROM preventive_tasks p WHERE p.id = ${req.params.id} AND p.active = true
+          SELECT p.id, p.room_interval_months, p.next_due_at::text FROM preventive_tasks p WHERE p.id = ${req.params.id} AND p.active = true
           AND EXISTS (SELECT 1 FROM preventive_room_slots s WHERE s.task_id = p.id) FOR UPDATE
         `);
         if (!existing.rows.length) return { status: "missing" };
@@ -59,8 +63,17 @@ export function registerRoomPreventiveRoutes(app: Express) {
           AND EXISTS (SELECT 1 FROM preventive_room_slots s WHERE s.task_id = p.id) LIMIT 1
         `);
         if (duplicate.rows.length) return { status: "duplicate" };
+        const months = intervalMonths ?? (existing.rows[0] as any).room_interval_months;
+        const today = getArgentinaOperationalDate();
+        const progress = await tx.execute(sql`SELECT count(*)::int AS total,
+          count(*) FILTER (WHERE ${completedInPeriod(req.params.id, sql`s.room_id`, today, months)})::int AS completed
+          FROM preventive_room_slots s WHERE s.task_id = ${req.params.id}`);
+        const { total, completed } = progress.rows[0] as any;
+        const due = months === (existing.rows[0] as any).room_interval_months
+          ? (existing.rows[0] as any).next_due_at
+          : calendarPeriod(today, months, total > 0 && total === completed).end;
         const updated = await tx.execute(sql`
-          UPDATE preventive_tasks SET name = ${name}, description = ${description?.trim() || null}, updated_at = now()
+          UPDATE preventive_tasks SET name = ${name}, description = ${description?.trim() || null}, room_interval_months = ${months}, next_due_at = ${due}, updated_at = now()
           WHERE id = ${req.params.id} RETURNING *
         `);
         return { status: "updated", task: updated.rows[0] };
@@ -92,12 +105,16 @@ export function registerRoomPreventiveRoutes(app: Express) {
           latest.performed_at AS last_done_at, latest.notes AS last_note,
           current_done.performed_at AS done_at_current_month
         FROM preventive_room_slots s JOIN rooms r ON r.id = s.room_id
+        JOIN preventive_tasks p ON p.id = s.task_id
         LEFT JOIN LATERAL (
           SELECT performed_at, notes FROM preventive_room_completions c
           WHERE c.task_id = s.task_id AND c.room_id = s.room_id ORDER BY performed_at DESC, created_at DESC LIMIT 1
         ) latest ON true
-        LEFT JOIN preventive_room_completions current_done ON current_done.task_id = s.task_id
-          AND current_done.room_id = s.room_id AND current_done.period = ${calendarMonth(getArgentinaOperationalDate())}::date
+        LEFT JOIN LATERAL (SELECT max(c.performed_at) AS performed_at FROM preventive_room_completions c
+          WHERE c.task_id = s.task_id AND c.room_id = s.room_id
+          AND c.performed_at >= make_date(extract(year from ${getArgentinaOperationalDate()}::date)::int,
+            (floor((extract(month from ${getArgentinaOperationalDate()}::date)::int - 1) / p.room_interval_months::numeric) * p.room_interval_months + 1)::int, 1)
+          AND c.performed_at <= ${getArgentinaOperationalDate()}::date) current_done ON true
         WHERE s.task_id = ${req.params.id}
         ORDER BY length(r.room_number), r.room_number
       `);
@@ -119,14 +136,17 @@ export function registerRoomPreventiveRoutes(app: Express) {
   app.post("/api/maintenance/preventive/:id/rooms/:roomId/done", requireAuth, async (req, res) => {
     try {
       const outcome = await db.transaction(async tx => {
-        const parent = await tx.execute(sql`SELECT id, active FROM preventive_tasks WHERE id = ${req.params.id} FOR UPDATE`);
+        const parent = await tx.execute(sql`SELECT id, active, room_interval_months FROM preventive_tasks WHERE id = ${req.params.id} FOR UPDATE`);
         if (!parent.rows.length || !(parent.rows[0] as any).active) return "missing";
         const slot = await tx.execute(sql`
           SELECT 1 FROM preventive_room_slots WHERE task_id = ${req.params.id} AND room_id = ${req.params.roomId}
         `);
         if (!slot.rows.length) return "missing";
         const today = getArgentinaOperationalDate();
-        const period = calendarMonth(today);
+        const months = (parent.rows[0] as any).room_interval_months;
+        const period = calendarPeriod(today, months).start;
+        const already = await tx.execute(sql`SELECT ${completedInPeriod(req.params.id, req.params.roomId, today, months)} AS done`);
+        if ((already.rows[0] as any).done) return "duplicate";
         const inserted = await tx.execute(sql`
           INSERT INTO preventive_room_completions (task_id, room_id, period, performed_at, performed_by, notes)
           VALUES (${req.params.id}, ${req.params.roomId}, ${period}, ${today}, ${String((req.user as any)?.id ?? "") || null}, ${String(req.body?.notes ?? "").trim() || null})
@@ -135,21 +155,21 @@ export function registerRoomPreventiveRoutes(app: Express) {
         if (!inserted.rows.length) return "duplicate";
         const progress = await tx.execute(sql`
           SELECT count(*)::int AS total,
-            count(c.id)::int AS completed FROM preventive_room_slots s
-          LEFT JOIN preventive_room_completions c ON c.task_id = s.task_id AND c.room_id = s.room_id AND c.period = ${period}::date
+            count(*) FILTER (WHERE ${completedInPeriod(req.params.id, sql`s.room_id`, today, months)})::int AS completed
+          FROM preventive_room_slots s
           WHERE s.task_id = ${req.params.id}
         `);
         const { total, completed } = progress.rows[0] as any;
         if (total && total === completed) {
           await tx.execute(sql`
-            UPDATE preventive_tasks SET last_done_at = ${today}, next_due_at = ${calendarMonthEnd(today, true)}, updated_at = now()
+            UPDATE preventive_tasks SET last_done_at = ${today}, next_due_at = ${calendarPeriod(today, months, true).end}, updated_at = now()
             WHERE id = ${req.params.id}
           `);
         }
         return { total, completed, completed_at: today };
       });
       if (outcome === "missing") return res.status(404).json({ error: "Habitación o preventiva inexistente" });
-      if (outcome === "duplicate") return res.status(409).json({ error: "La habitación ya fue registrada este mes" });
+      if (outcome === "duplicate") return res.status(409).json({ error: "La habitación ya fue registrada este período" });
       res.status(201).json(outcome);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });

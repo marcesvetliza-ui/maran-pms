@@ -10,7 +10,7 @@ const storage = {
   generateReservationCode: vi.fn(() => "RES-ZERO"),
   checkOverbooking: vi.fn(async () => false),
   evaluateReservationInventory: vi.fn(async () => null),
-  createReservation: vi.fn(async (data: any) => ({ id: "reservation-zero", ...data })),
+  createReservation: vi.fn(async (data: any, beforeCommit?: (r: any) => Promise<void>) => { const created = { id: "reservation-zero", ...data }; await beforeCommit?.(created); return created; }),
   getReservation: vi.fn(async () => state.reservation),
   updateReservation: vi.fn(async (_id: string, patch: any) => {
     state.reservation = { ...state.reservation, ...patch };
@@ -36,6 +36,7 @@ vi.mock("../db", () => ({
 }));
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requirePermission: () => (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
 }));
 vi.mock("../billing/invoiceService", () => ({
@@ -101,6 +102,7 @@ const baseReservation = {
 };
 
 beforeEach(() => {
+  storage.getRoom.mockResolvedValue({ id: "room-1", isActive: true });
   vi.clearAllMocks();
   state.reservation = { ...baseReservation };
 });
@@ -207,7 +209,7 @@ describe("reservation zero-rate API guard", () => {
       expect(storage.createReservation).toHaveBeenCalledWith(expect.objectContaining({
         specialRateReason: "Cortesía gerencia",
         notes: "[Tarifa $0: Cortesía gerencia] Observación",
-      }));
+      }), expect.any(Function));
 
       const patch = await request(baseUrl, "PATCH", {
         finalRatePerNight: "0",

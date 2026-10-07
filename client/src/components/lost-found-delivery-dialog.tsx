@@ -1,3 +1,4 @@
+import { PrintShippingLabelButton } from "./print-shipping-label-button";
 import { useEffect, useState } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { Button } from "@/components/ui/button";
@@ -142,6 +143,7 @@ export function DeliveryDialog({
                   </SelectContent>
                 </Select>
               </div>
+              <PrintShippingLabelButton shipping={shipping} />
             </section>
           )}
 

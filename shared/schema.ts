@@ -491,6 +491,7 @@ export type RoomWithType = Room & {
 export type PlanningCellStatus = "available" | "booked" | "web_checkin" | "checkin_today" | "checked_in" | "checkout_today" | "maintenance" | "cleaning" | "dirty" | "group_blocked" | "early_blocked" | "late_blocked" | "inspected" | "checked_out" | "limpia_ocupada" | "no_molestar";
 
 export type PlanningData = {
+  visibilityWarnings?: Array<{ reservationId: string; reservationCode: string; reason: "missing_room" | "inactive_room" }>;
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
@@ -3215,6 +3216,7 @@ export const preventiveTasks = pgTable("preventive_tasks", {
   description: text("description"),
   frequency: text("frequency").$type<PreventiveFrequency>().notNull().default("monthly"),
   frequencyDays: integer("frequency_days").notNull().default(30),
+  roomIntervalMonths: integer("room_interval_months").notNull().default(1),
   lastDoneAt: date("last_done_at"),
   nextDueAt: date("next_due_at").notNull(),
   assignedTo: varchar("assigned_to", { length: 255 }),

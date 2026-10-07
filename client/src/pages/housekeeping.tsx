@@ -1,3 +1,4 @@
+import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
 import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
@@ -463,6 +464,7 @@ function LostFoundCard({
           )}
           {item.status === "entregado" && item.deliveryType === "envio" && item.shippingDetails && (
             <div className="mt-1 text-xs text-muted-foreground" data-testid={`shipping-details-${item.id}`}>
+              <PrintShippingLabelButton shipping={item.shippingDetails} />
               <p>Envío a: {item.shippingDetails.fullName} · {item.shippingDetails.address}, {item.shippingDetails.city}, {item.shippingDetails.province} {item.shippingDetails.postalCode}, {item.shippingDetails.country}</p>
               <p>Pago: <span className={item.shippingDetails.paymentStatus === "pagado" ? "font-medium text-green-600 dark:text-green-400" : "font-medium"}>{item.shippingDetails.paymentStatus === "pagado" ? "Pagado" : "No pagado"}</span></p>
             </div>

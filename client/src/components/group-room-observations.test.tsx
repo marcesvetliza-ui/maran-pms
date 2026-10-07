@@ -7,11 +7,11 @@ describe("observaciones de habitaciones grupales", () => {
     const { rerender } = render(
       <GroupRoomObservations groupNotes="Llegan en combi" roomNotes="Cama extra" />,
     );
-    expect(screen.getByTestId("group-room-observations-group")).toHaveTextContent("Grupo: Llegan en combi");
+    expect(screen.getByTestId("group-room-observations-group")).toHaveTextContent(/^Llegan en combi$/);
     expect(screen.getByTestId("group-room-observations-room")).toHaveTextContent("Habitación: Cama extra");
 
     rerender(<GroupRoomObservations groupNotes="Llegan a las 18 hs" roomNotes="Cama extra" />);
-    expect(screen.getByTestId("group-room-observations-group")).toHaveTextContent("Grupo: Llegan a las 18 hs");
+    expect(screen.getByTestId("group-room-observations-group")).toHaveTextContent(/^Llegan a las 18 hs$/);
     expect(screen.getByTestId("group-room-observations-room")).toHaveTextContent("Habitación: Cama extra");
   });
 

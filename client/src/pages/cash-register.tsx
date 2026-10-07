@@ -229,6 +229,26 @@ const TURNO_TIPO_OPTIONS = [
 ];
 const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
 
+function SpaCancellationHistory({ shiftId = "", today = false }: { shiftId?: string; today?: boolean }) {
+  const { data = [], isError, isLoading } = useQuery<any[]>({
+    queryKey: ["/api/spa/appointments/cancellations/in-shift", shiftId, today],
+    queryFn: async () => {
+      const res = await fetch(`/api/spa/appointments/cancellations/in-shift?${today ? "today=true" : `shiftId=${encodeURIComponent(shiftId)}`}`, { credentials: "include" });
+      if (!res.ok) throw new Error("No se pudo consultar el historial");
+      return res.json();
+    }, refetchInterval: 30000,
+  });
+  return <Card className="mt-4"><CardHeader><CardTitle className="text-base">{today ? "Turnos SPA cancelados hoy" : "Turnos SPA cancelados en esta caja"}</CardTitle></CardHeader><CardContent>
+    <p className="text-sm text-muted-foreground mb-3">Historial de cancelaciones. No modifica los cobros ni los totales de caja.</p>
+    {isLoading ? <p>Cargando cancelaciones…</p> : isError ? <p className="text-destructive">No se pudo cargar el historial de cancelaciones.</p> : data.length ? data.map(entry => {
+      let details: any = {}; try { details = JSON.parse(entry.details || "{}"); } catch {}
+      const appointment = details.before || {};
+      return <div key={entry.id} className="border-b py-2 text-sm"><Badge variant="destructive">Cancelado</Badge> {appointment.guestName} {appointment.guestLastName || ""} · {appointment.appointmentDate} {appointment.startTime}
+        <p>{details.reason || entry.description}</p><p className="text-muted-foreground">{entry.user_name || "Sistema"} · {formatDateTime(entry.timestamp)}</p></div>;
+    }) : <p className="text-sm text-muted-foreground">No hay cancelaciones registradas en este período.</p>}
+  </CardContent></Card>;
+}
+
 function formatShiftLabel(shift: CashShift): string {
   const d = new Date(shift.openedAt);
   const weekday = new Intl.DateTimeFormat("es-AR", {
@@ -980,6 +1000,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
         </CardContent>
       </Card>
 
+      {area === "spa" && <SpaCancellationHistory today />}
       {currentShift && (
         <>
           <Card>
@@ -2020,6 +2041,7 @@ function HistorialTab() {
           <DialogHeader>
             <DialogTitle>Detalle del Turno</DialogTitle>
           </DialogHeader>
+          {shiftDetail?.shift.area === "spa" && detailShiftId && <SpaCancellationHistory shiftId={detailShiftId} />}
           {detailLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => (

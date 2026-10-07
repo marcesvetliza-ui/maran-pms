@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
+import { restaurantPaymentTransaction, afterRestaurantPaymentCommit } from "../restaurantPaymentTransaction";
 import { db, pool } from "../db";
-import { restaurantOrders, orderItems, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
+import { restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
@@ -54,8 +55,36 @@ async function chargeReservationForRestaurant(
     );
   } catch (e) {
     console.error("[Folio] Error registrando cargo a habitación (restaurant):", e);
+    throw e;
   }
   return charge;
+}
+
+function paymentCents(value: unknown): number | null {
+  if ((typeof value !== "string" && typeof value !== "number") || value === "") return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  // Match the two-decimal amounts actually persisted by the payment routes.
+  const cents = Math.round(Number(amount.toFixed(2)) * 100);
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+async function validRestaurantRoomReservation(id: unknown): Promise<boolean> {
+  if (typeof id !== "string" || !id.trim()) return false;
+  const reservation = await storage.getReservation(id);
+  return !!reservation && reservation.status === "checked_in";
+}
+
+function queueRestaurantInvoice(data: Parameters<typeof emitirFactura>[0]): void {
+  afterRestaurantPaymentCommit(async () => {
+    try {
+      const invoice = await emitirFactura(data);
+      return { invoiceId: invoice.id };
+    } catch (error) {
+      console.error("[Billing] Error emitiendo factura restaurant:", error);
+      return {};
+    }
+  });
 }
 
 export function registerRestaurantRoutes(app: Express) {
@@ -415,7 +444,7 @@ export function registerRestaurantRoutes(app: Express) {
   });
 
   // Close order and optionally charge to room
-  app.post("/api/restaurant/orders/:id/close", async (req, res) => {
+  app.post("/api/restaurant/orders/:id/close", restaurantPaymentTransaction(async (req, res) => {
     try {
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
@@ -437,7 +466,7 @@ export function registerRestaurantRoutes(app: Express) {
       const effectiveReservationId = reservationId || roomReservationId;
       const primarySplit = Array.isArray(paymentSplits) && paymentSplits.length > 0 ? paymentSplits[0] : null;
       const effectivePrimaryMethod = primarySplit ? primarySplit.method : (paymentMethod || "cash");
-      const hasRoomChargeSplits = Array.isArray(paymentSplits) && paymentSplits.some((s: any) => s.method === "cuenta_habitacion");
+      const hasRoomChargeSplits = Array.isArray(paymentSplits) && paymentSplits.some((s: any) => s?.method === "cuenta_habitacion");
       const isRoomCharge = chargeToRoom || receiptType === "cuenta_habitacion" || effectivePrimaryMethod === "cuenta_habitacion" || hasRoomChargeSplits;
       const effectivePaymentMethod = isRoomCharge && effectivePrimaryMethod === "cuenta_habitacion" ? "room_charge" : effectivePrimaryMethod;
       if (effectivePrimaryMethod === "cuenta_corriente") assertFinancialSchemaReady();
@@ -458,6 +487,34 @@ export function registerRestaurantRoutes(app: Express) {
       if (advanceCredit > 0) {
         finalTotal = Math.max(0, finalTotal - advanceCredit);
       }
+
+      // Validate all tenders before closing the order, consuming a voucher or
+      // writing any cash/room movement. Compare persisted amounts in cents.
+      const totalCents = paymentCents(finalTotal);
+      if (totalCents === null) return res.status(400).json({ error: "Total a cobrar inválido" });
+      if (paymentSplits !== undefined) {
+        if (!Array.isArray(paymentSplits) || paymentSplits.length === 0) {
+          return res.status(400).json({ error: "Formas de pago inválidas" });
+        }
+        const amounts = paymentSplits.map((split: any) => split && paymentCents(split.amount));
+        if (amounts.some((amount: any) => amount === null || amount === undefined)
+          || paymentSplits.some((split: any) => typeof split?.method !== "string" || !split.method.trim())
+          || amounts.reduce((sum: number, amount: number) => sum + amount, 0) !== totalCents) {
+          return res.status(400).json({ error: "Las formas de pago deben sumar exactamente el total a cobrar" });
+        }
+        for (const split of paymentSplits) {
+          if (split.method === "cuenta_habitacion" && !await validRestaurantRoomReservation(split.roomReservationId || effectiveReservationId)) {
+            return res.status(400).json({ error: "Seleccioná una reserva alojada válida para el cargo a habitación" });
+          }
+        }
+      }
+      if (isRoomCharge && (!Array.isArray(paymentSplits) || paymentSplits.length <= 1)
+        && !await validRestaurantRoomReservation(primarySplit?.roomReservationId || effectiveReservationId)) {
+        return res.status(400).json({ error: "Seleccioná una reserva alojada válida para el cargo a habitación" });
+      }
+
+      const singleRoomReservationId = primarySplit?.roomReservationId || effectiveReservationId;
+      const folioChargeTotal = Math.max(0, parseFloat(order.total || "0") - discountAmount);
 
       // Aplicar y consumir el voucher de regalo ANTES de cerrar el pedido: si
       // no está disponible (ya usado, vencido, área equivocada), el pedido no
@@ -501,9 +558,9 @@ export function registerRestaurantRoutes(app: Express) {
       if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
         // Multi-split: handle room charges per split
         for (const split of paymentSplits) {
-          if (split.method === "cuenta_habitacion" && split.roomReservationId) {
+          if (split.method === "cuenta_habitacion") {
             await chargeReservationForRestaurant(
-              split.roomReservationId,
+              split.roomReservationId || effectiveReservationId,
               `${orderLabel} — $${parseFloat(split.amount || "0").toFixed(2)}`,
               String(parseFloat(split.amount || "0").toFixed(2)),
               today,
@@ -511,9 +568,9 @@ export function registerRestaurantRoutes(app: Express) {
             );
           }
         }
-      } else if (isRoomCharge && effectiveReservationId) {
+      } else if (isRoomCharge && singleRoomReservationId) {
         await chargeReservationForRestaurant(
-          effectiveReservationId,
+          singleRoomReservationId,
           orderLabel,
           String(finalTotal.toFixed(2)),
           today,
@@ -541,6 +598,7 @@ export function registerRestaurantRoutes(app: Express) {
             );
           } catch (e) {
             console.error("Error registrando movimiento de caja (split):", e);
+            throw e;
           }
         }
       } else {
@@ -554,6 +612,7 @@ export function registerRestaurantRoutes(app: Express) {
           );
         } catch (e) {
           console.error("Error registrando movimiento de caja:", e);
+          throw e;
         }
       }
 
@@ -562,39 +621,39 @@ export function registerRestaurantRoutes(app: Express) {
         const ordLabel = `Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
         if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
           // Multi-split: one charge + one payment per split
-          storage.addFolioCharge(
+          await storage.addFolioCharge(
             "restaurant_order", req.params.id,
-            parseFloat(order.total || "0"),
+            folioChargeTotal,
             ordLabel,
             "restaurant_order", req.params.id,
             (req as any).user?.username,
-          ).then(async () => {
-            for (const split of paymentSplits) {
-              const splitAmt = parseFloat(split.amount || "0");
-              if (splitAmt <= 0) continue;
-              await storage.addFolioPayment(
-                "restaurant_order", req.params.id,
-                splitAmt,
-                `Cobro — ${split.method}`,
-                split.method, "restaurant_payment", req.params.id,
-                undefined, (req as any).user?.username, receiptType,
-              );
-            }
-          }).catch(e => console.error("[Folio] Error restaurant multi-split:", e));
+          );
+          for (const [index, split] of paymentSplits.entries()) {
+            const splitAmt = parseFloat(split.amount || "0");
+            if (splitAmt <= 0) continue;
+            await storage.addFolioPayment(
+              "restaurant_order", req.params.id,
+              splitAmt,
+              `Cobro ${index + 1} — ${split.method}`,
+              split.method, "restaurant_payment", req.params.id,
+              undefined, (req as any).user?.username, receiptType,
+            );
+          }
         } else {
-          storage.addFolioCharge(
+          await storage.addFolioCharge(
             "restaurant_order", req.params.id,
-            parseFloat(order.total || "0"),
+            folioChargeTotal,
             ordLabel,
             "restaurant_order", req.params.id,
             (req as any).user?.username,
-          ).then(() => storage.addFolioPayment(
+          );
+          await storage.addFolioPayment(
             "restaurant_order", req.params.id,
             finalTotal,
             `Cobro — ${effectivePaymentMethod}`,
             effectivePaymentMethod, "restaurant_payment", req.params.id,
             undefined, (req as any).user?.username, receiptType,
-          )).catch(e => console.error("[Folio] Error restaurant:", e));
+          );
         }
       }
 
@@ -635,6 +694,7 @@ export function registerRestaurantRoutes(app: Express) {
           }
         } catch (e) {
           console.error("[Advances] Error aplicando adelantos al cierre:", e);
+          throw e;
         }
       }
 
@@ -725,7 +785,7 @@ export function registerRestaurantRoutes(app: Express) {
             invoiceItems.push({ descripcion: `Seña / Anticipo reserva`, cantidad: 1, precioUnitario: -netAdv, alicuotaIva: "21" as const, subtotalNeto: -netAdv, subtotal: -parseFloat(advanceCredit.toFixed(2)) });
           }
 
-          const invoice = await emitirFactura({
+          queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -738,7 +798,6 @@ export function registerRestaurantRoutes(app: Express) {
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
-          invoiceId = invoice.id;
         } catch (e) {
           console.error("[Billing] Error emitiendo factura restaurant:", e);
         }
@@ -752,6 +811,7 @@ export function registerRestaurantRoutes(app: Express) {
           await storage.consumeGiftVoucherApplication(giftVoucherApplicationId, (req as any).user?.username || "sistema");
         } catch (e) {
           console.error("[GiftVoucher] Error al consumir la aplicación del voucher:", e);
+          throw e;
         }
       }
 
@@ -766,14 +826,14 @@ export function registerRestaurantRoutes(app: Express) {
         return res.json({ ...updatedOrder, stockDeducted: stockResult.deducted, stockWarnings: stockResult.warnings, invoiceId, cfGuestId });
       } catch (stockError) {
         console.error("[Stock] Error en descuento automático:", stockError);
-        return res.json({ ...updatedOrder, invoiceId, cfGuestId });
+        throw stockError;
       }
     } catch (error) {
       res.status((error as { statusCode?: number })?.statusCode || 500).json({
         error: (error as Error)?.message || "Error closing order",
       });
     }
-  });
+  }));
 
   // Order Items
   app.post("/api/restaurant/orders/:orderId/items", async (req, res) => {
@@ -1034,27 +1094,42 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/restaurant/orders/:id/split/:splitId", async (req, res) => {
+  app.patch("/api/restaurant/orders/:id/split/:splitId", restaurantPaymentTransaction(async (req, res) => {
     try {
       const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
 
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      if (["closed", "cancelled"].includes(order.status)) return res.status(409).json({ error: "El pedido ya fue cerrado" });
+      const currentSplits = await storage.getOrderSplits(req.params.id);
+      const currentSplit = currentSplits.find((split) => split.id === req.params.splitId);
+      if (!currentSplit) return res.status(404).json({ error: "Split not found" });
+      if (currentSplit.isPaid === "true") return res.status(409).json({ error: "Esta parte ya fue cobrada" });
+
       // Allow updating just the amount (without paying)
       if (amount !== undefined && !method) {
+        if (paymentCents(amount) === null) return res.status(400).json({ error: "Importe inválido" });
         const split = await storage.updateOrderSplit(req.params.splitId, { amount: parseFloat(amount).toFixed(2) });
         return res.json(split);
       }
 
       if (!method) return res.status(400).json({ error: "Método de pago requerido" });
 
-      const split = await storage.updateOrderSplit(req.params.splitId, {
+      if (currentSplits.some((split) => paymentCents(split.amount) === null)
+        || currentSplits.reduce((sum, split) => sum + paymentCents(split.amount)!, 0) !== paymentCents(order.total)) {
+        return res.status(400).json({ error: "Las partes deben sumar exactamente el total del pedido" });
+      }
+      if (method === "cuenta_habitacion" && !await validRestaurantRoomReservation(roomReservationId)) {
+        return res.status(400).json({ error: "Seleccioná una reserva alojada válida para el cargo a habitación" });
+      }
+
+      const [split] = await db.update(orderSplits).set({
         method,
         receiptType: receiptType || null,
         isPaid: "true",
         paidAt: new Date(),
-      });
-      if (!split) return res.status(404).json({ error: "Split not found" });
-
-      const order = await storage.getRestaurantOrder(req.params.id);
+      }).where(and(eq(orderSplits.id, req.params.splitId), eq(orderSplits.orderId, req.params.id), eq(orderSplits.isPaid, "false"))).returning();
+      if (!split) return res.status(409).json({ error: "Esta parte ya fue cobrada" });
 
       // If charging to room, create the charge on the reservation (+ folio)
       if (method === "cuenta_habitacion" && roomReservationId) {
@@ -1068,6 +1143,7 @@ export function registerRestaurantRoutes(app: Express) {
           );
         } catch (e) {
           console.error("Error creando cargo a habitación en split:", e);
+          throw e;
         }
       } else {
         // Antes ningún split pagado en efectivo/tarjeta/etc. generaba
@@ -1082,7 +1158,16 @@ export function registerRestaurantRoutes(app: Express) {
           );
         } catch (e) {
           console.error("[split] Error registrando movimiento de caja:", e);
+          throw e;
         }
+      }
+
+      if (method !== "consumo_interno") {
+        await storage.recordRestaurantPartialPayment(
+          req.params.id, `split:${split.id}`, Number(split.amount),
+          `Pedido ${order.orderNumber} — Parte ${split.splitNumber}`, method,
+          (req as any).user?.username, receiptType,
+        );
       }
 
       // Emitir factura AFIP si se solicitó — nunca cuando el pago va a habitación
@@ -1092,7 +1177,7 @@ export function registerRestaurantRoutes(app: Express) {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
           const splitOrder = order;
-          const invoice = await emitirFactura({
+          queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -1110,7 +1195,6 @@ export function registerRestaurantRoutes(app: Express) {
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
-          invoiceId = invoice.id;
         } catch (e) {
           console.error("[Billing] Error emitiendo factura split restaurant:", e);
         }
@@ -1147,6 +1231,7 @@ export function registerRestaurantRoutes(app: Express) {
             }
           } catch (stockError) {
             console.error("[Stock] Error en descuento automático (split):", stockError);
+            throw stockError;
           }
         }
       }
@@ -1155,7 +1240,7 @@ export function registerRestaurantRoutes(app: Express) {
     } catch (error) {
       res.status(500).json({ error: "Error paying split" });
     }
-  });
+  }));
 
   app.delete("/api/restaurant/orders/:id/split", async (req, res) => {
     try {
@@ -1195,7 +1280,7 @@ export function registerRestaurantRoutes(app: Express) {
   });
 
   // Pay selected items (partial payment)
-  app.post("/api/restaurant/orders/:id/pay-items", async (req, res) => {
+  app.post("/api/restaurant/orders/:id/pay-items", restaurantPaymentTransaction(async (req, res) => {
     try {
       const {
         itemIds, method, receiptType, roomReservationId,
@@ -1220,6 +1305,10 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(400).json({ error: "Los ítems seleccionados ya fueron cobrados o no existen" });
       }
 
+      if (method === "cuenta_habitacion" && !await validRestaurantRoomReservation(roomReservationId)) {
+        return res.status(400).json({ error: "Seleccioná una reserva alojada válida para el cargo a habitación" });
+      }
+
       // Calculate amount with optional discount
       let subtotal = selectedItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
       if (discount) {
@@ -1228,6 +1317,7 @@ export function registerRestaurantRoutes(app: Express) {
         subtotal = Math.max(0, subtotal - discAmount);
       }
       const amount = subtotal.toFixed(2);
+      if (paymentCents(amount) === null) return res.status(400).json({ error: "Importe a cobrar inválido" });
 
       // Mark selected items as paid
       for (const item of selectedItems) {
@@ -1245,6 +1335,7 @@ export function registerRestaurantRoutes(app: Express) {
           );
         } catch (e) {
           console.error("[pay-items] caja:", e);
+          throw e;
         }
       }
 
@@ -1275,7 +1366,16 @@ export function registerRestaurantRoutes(app: Express) {
           );
         } catch (e) {
           console.error("[pay-items] room charge:", e);
+          throw e;
         }
+      }
+
+      if (method !== "consumo_interno") {
+        await storage.recordRestaurantPartialPayment(
+          req.params.id, `items:${selectedItems.map((item) => item.id).sort().join(",")}`, Number(amount),
+          `Pedido ${order.orderNumber} — ${selectedItems.length} ítem(s)`, method,
+          (req as any).user?.username, receiptType,
+        );
       }
 
       // Emit AFIP invoice if requested
@@ -1304,7 +1404,7 @@ export function registerRestaurantRoutes(app: Express) {
               subtotal: parseFloat(i.subtotal),
             };
           }));
-          const invoice = await emitirFactura({
+          queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -1315,7 +1415,6 @@ export function registerRestaurantRoutes(app: Express) {
             operador: (req as any).user?.fullName || (req as any).user?.username,
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
-          invoiceId = invoice.id;
         } catch (e) {
           console.error("[pay-items] AFIP invoice:", e);
         }
@@ -1357,6 +1456,7 @@ export function registerRestaurantRoutes(app: Express) {
             }
           } catch (stockError) {
             console.error("[Stock] Error en descuento automático (pay-items):", stockError);
+            throw stockError;
           }
         }
       } else {
@@ -1374,7 +1474,7 @@ export function registerRestaurantRoutes(app: Express) {
         error: (error as Error)?.message || "Error al procesar pago por ítems",
       });
     }
-  });
+  }));
 
   // Transfer items between orders
   app.post("/api/restaurant/orders/:id/transfer-items", async (req, res) => {

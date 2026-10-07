@@ -9,7 +9,7 @@ export function GroupRoomObservations({
     <>
       {groupNotes?.trim() && (
         <div className="whitespace-pre-wrap break-words" data-testid="group-room-observations-group">
-          <span className="font-medium">Grupo:</span> {groupNotes}
+          {groupNotes}
         </div>
       )}
       {roomNotes?.trim() && (

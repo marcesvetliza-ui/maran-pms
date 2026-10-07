@@ -181,6 +181,8 @@ type SpaPayment = {
   isAdvance: string | null;
   appointmentId: string | null;
   reservationId: string | null;
+  status?: string;
+  motivoAnulacion?: string | null;
   notes: string | null;
   createdAt: string;
 };
@@ -542,6 +544,9 @@ export default function SpaPage() {
   const [pendingSpaInvoice, setPendingSpaInvoice] = useState<PendingSpaInvoice | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
+  const [voidPaymentId, setVoidPaymentId] = useState<string | null>(null);
+  const [voidPaymentReason, setVoidPaymentReason] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isFolioOpen, setIsFolioOpen] = useState(false);
   const [isAddChargeOpen, setIsAddChargeOpen] = useState(false);
@@ -1055,16 +1060,27 @@ export default function SpaPage() {
     },
   });
 
+  const voidSpaPaymentMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", `/api/spa/payments/${voidPaymentId}/anular`, { motivoAnulacion: voidPaymentReason }),
+    onSuccess: () => {
+      refetchAccount(); queryClient.invalidateQueries({ queryKey: ["/api/folios"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
+      setVoidPaymentId(null); setVoidPaymentReason(""); toast({ title: "Pago anulado", description: "El pago y su movimiento permanecen en el historial." });
+    },
+    onError: (e: Error) => toast({ title: "No se pudo anular", description: parseApiError(e), variant: "destructive" }),
+  });
+
   const updateAppointmentMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      return apiRequest("PATCH", `/api/spa/appointments/${id}`, { status });
+    mutationFn: async ({ id, status, motivoAnulacion }: { id: string; status: string; motivoAnulacion?: string }) => {
+      return apiRequest("PATCH", `/api/spa/appointments/${id}`, { status, motivoAnulacion });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments/cancellations/in-shift"] });
       toast({ title: "Turno actualizado" });
     },
-    onError: () => {
-      toast({ title: "Error al actualizar el turno", variant: "destructive" });
+    onError: (e: Error) => {
+      toast({ title: "Error al actualizar el turno", description: parseApiError(e), variant: "destructive" });
     },
   });
 
@@ -1635,7 +1651,8 @@ export default function SpaPage() {
 
   const handleCancelAppointment = () => {
     if (selectedAppointment) {
-      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "cancelled" });
+      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "cancelled", motivoAnulacion: cancelReason.trim() });
+      setCancelReason("");
       setIsCancelConfirmOpen(false);
       setSelectedAppointment(null);
     }
@@ -1654,6 +1671,7 @@ export default function SpaPage() {
   const getAppointmentForSlot = (cabinId: string, slotTime: string): SpaAppointment | null => {
     const slotMinutes = timeToMinutes(slotTime);
     for (const apt of appointments) {
+      if (apt.status === "cancelled") continue;
       if (apt.appointmentDate.slice(0, 10) !== dateStr) continue;
       if (apt.cabinId === cabinId) {
         const startMinutes = timeToMinutes(apt.startTime);
@@ -1726,7 +1744,7 @@ export default function SpaPage() {
 
   const accountPaid = useMemo(() => {
     if (!selectedAccount) return 0;
-    return selectedAccount.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    return selectedAccount.payments.filter(p => p.status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0);
   }, [selectedAccount]);
 
   const accountBalance = accountTotal - accountPaid;
@@ -2026,6 +2044,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </Button>
             </div>
           </div>
+
+          {appointments.some(apt => apt.status === "cancelled") && <Card className="mb-3"><CardHeader className="py-2"><CardTitle className="text-sm">Turnos cancelados del día · historial conservado</CardTitle></CardHeader><CardContent className="flex flex-wrap gap-2 pb-3">
+            {appointments.filter(apt => apt.status === "cancelled").map(apt => <Button key={apt.id} variant="outline" size="sm" onClick={() => setSelectedAppointment(apt)}>{apt.startTime} · {apt.guestName} {apt.guestLastName || ""} · Cancelado</Button>)}
+          </CardContent></Card>}
 
           {viewMode === "daily" ? (
             <Card className="flex-1 flex flex-col overflow-hidden">
@@ -3548,6 +3570,13 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       </Dialog>
 
 
+      <Dialog open={!!voidPaymentId} onOpenChange={open => { if (!open) setVoidPaymentId(null); }}>
+        <DialogContent><DialogHeader><DialogTitle>Anular pago SPA</DialogTitle><DialogDescription>El pago y su movimiento de caja se conservarán como anulados. La anulación no ejecuta un reembolso bancario.</DialogDescription></DialogHeader>
+          <Label>Motivo *</Label><Textarea value={voidPaymentReason} onChange={e => setVoidPaymentReason(e.target.value)} />
+          <DialogFooter><Button variant="outline" onClick={() => setVoidPaymentId(null)}>Volver</Button><Button variant="destructive" disabled={!voidPaymentReason.trim() || voidSpaPaymentMutation.isPending} onClick={() => voidSpaPaymentMutation.mutate()}>Confirmar anulación</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Cancel Confirmation Dialog */}
       <Dialog open={isCancelConfirmOpen} onOpenChange={setIsCancelConfirmOpen}>
         <DialogContent className="max-w-sm">
@@ -3560,11 +3589,12 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           {selectedAppointment && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                ¿Estás seguro que querés cancelar el turno de <strong>{selectedAppointment.guestName} {selectedAppointment.guestLastName || ""}</strong> el {format(parseISO(selectedAppointment.appointmentDate), "d 'de' MMMM", { locale: es })} a las {selectedAppointment.startTime} en <strong>{cabins.find(c => c.id === selectedAppointment.cabinId)?.name}</strong>? Esta acción no se puede deshacer.
+                ¿Estás seguro que querés cancelar el turno de <strong>{selectedAppointment.guestName} {selectedAppointment.guestLastName || ""}</strong> el {format(parseISO(selectedAppointment.appointmentDate), "d 'de' MMMM", { locale: es })} a las {selectedAppointment.startTime} en <strong>{cabins.find(c => c.id === selectedAppointment.cabinId)?.name}</strong>? El turno y su historial se conservan. Cancelar el turno no anula ni devuelve sus cobros.
               </p>
+              <Label>Motivo de cancelación *</Label><Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="Indicá por qué se cancela el turno" />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCancelConfirmOpen(false)}>Volver</Button>
-                <Button variant="destructive" onClick={handleCancelAppointment} disabled={updateAppointmentMutation.isPending} data-testid="button-confirm-cancel">
+                <Button variant="destructive" onClick={handleCancelAppointment} disabled={updateAppointmentMutation.isPending || !cancelReason.trim()} data-testid="button-confirm-cancel">
                   Sí, cancelar turno
                 </Button>
               </DialogFooter>
@@ -3673,7 +3703,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             </div>
                             {payment.notes && <p className="text-xs text-muted-foreground">{payment.notes}</p>}
                           </div>
-                          <span className="font-medium text-green-600">${parseFloat(payment.amount).toLocaleString()}</span>
+                          <div className="flex items-center gap-2"><span className={payment.status === "anulado" ? "line-through text-muted-foreground" : "font-medium text-green-600"}>${parseFloat(payment.amount).toLocaleString()}</span>
+                            {payment.status === "anulado" ? <Badge variant="destructive" title={payment.motivoAnulacion || ""}>Anulado</Badge> : selectedAccount.status === "open" && <Button size="sm" variant="outline" onClick={() => { setVoidPaymentId(payment.id); setVoidPaymentReason(""); }}>Anular</Button>}
+                          </div>
                         </div>
                       ))}
                       {spaFolioVoidMovements.map((mov: any) => (
@@ -4491,7 +4523,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           <DialogHeader>
             <DialogTitle>Eliminar Tratamiento</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">¿Estás seguro de eliminar "{deletingTreatment?.name}"? Esta acción no se puede deshacer.</p>
+          <p className="text-sm text-muted-foreground">¿Estás seguro de eliminar "{deletingTreatment?.name}"? El turno y su historial se conservan. Cancelar el turno no anula ni devuelve sus cobros.</p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeletingTreatment(null)}>Cancelar</Button>
             <Button variant="destructive" disabled={deleteTreatmentMutation.isPending} onClick={() => deletingTreatment && deleteTreatmentMutation.mutate(deletingTreatment.id)} data-testid="button-confirm-delete-treatment">

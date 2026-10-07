@@ -4,6 +4,7 @@ import { requireAuth } from "../auth";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { addArgentinaOperationalDays, getArgentinaOperationalDate } from "../utils/argentinaDateTime";
+import { completedInPeriod } from "../maintenance/roomPreventiveSchema";
 import { registerRoomPreventiveRoutes } from "../maintenance/roomPreventiveRoutes";
 
 export function registerMaintenanceRoutes(app: Express) {
@@ -271,14 +272,12 @@ export function registerMaintenanceRoutes(app: Express) {
   app.get("/api/maintenance/preventive", requireAuth, async (_req, res) => {
     try {
       const today = getArgentinaOperationalDate();
-      const period = `${today.slice(0, 7)}-01`;
       const result = await db.execute(sql`
         SELECT p.*, COALESCE(progress.room_count, 0)::int AS room_count,
           COALESCE(progress.completed_count, 0)::int AS completed_count
         FROM preventive_tasks p LEFT JOIN LATERAL (
-          SELECT count(*)::int AS room_count, count(c.id)::int AS completed_count
-          FROM preventive_room_slots s LEFT JOIN preventive_room_completions c
-            ON c.task_id = s.task_id AND c.room_id = s.room_id AND c.period = ${period}::date
+          SELECT count(*)::int AS room_count, count(*) FILTER (WHERE ${completedInPeriod(sql`p.id`, sql`s.room_id`, today, sql`p.room_interval_months`)})::int AS completed_count
+          FROM preventive_room_slots s
           WHERE s.task_id = p.id
         ) progress ON true
         WHERE p.active = true ORDER BY p.next_due_at ASC

@@ -17,6 +17,8 @@ vi.mock("../db-storage", () => ({
   getArgentinaToday: () => "2026-09-01",
 }));
 
+vi.mock("../db", () => ({ db: {}, withDatabaseTransaction: vi.fn() }));
+
 const permissionsState = vi.hoisted(() => ({ granted: new Set<string>() }));
 vi.mock("../permissions", () => ({
   hasPermission: (role: string, resourceKey: string) => permissionsState.granted.has(`${role}:${resourceKey}`),
@@ -75,4 +77,13 @@ describe("inventory write routes — migradas a requirePermission(api:inventory:
     });
     expect(response.status).toBe(403);
   });
+  it("rechaza movimientos de depósito sin permiso de escritura", async () => {
+    app = await startApp("reception");
+    const response = await fetch(`${app.baseUrl}/api/inventory/warehouses/warehouse-1/movements`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({itemId:"item-1",movementType:"entrada",quantity:1}),
+    });
+    expect(response.status).toBe(403);
+  });
+
 });

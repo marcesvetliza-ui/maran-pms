@@ -22,6 +22,7 @@ const PURCHASE_INVOICES_WRITE_RESOURCE_KEY = "api:purchase-invoices:write";
 const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
+import { voidSpaPayment } from "./spaCancellation";
 import { db } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
@@ -2353,6 +2354,14 @@ export async function registerRoutes(
         }
       }
 
+      if (mov.area === "spa" && mov.paymentId) {
+        const payment = await voidSpaPayment(mov.paymentId, motivoAnulacion, req.user, req.ip);
+        return res.json({ ...payment, movementId: mov.id });
+      }
+      if (mov.area === "spa" && ["spa_account", "comprobante"].includes(mov.sourceType)) {
+        return res.status(409).json({ error: "Anulá este cobro desde el folio SPA para verificar su pago de origen." });
+      }
+
       const user = req.user as any;
       const operator = anuladoPor || user?.username || "sistema";
       if (mov.paymentId && mov.sourceType === "reservation") {
@@ -2461,7 +2470,7 @@ export async function registerRoutes(
 
       res.json({ ok: true });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -2593,66 +2602,8 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/clean-data", requirePermission("api:admin:clean-data"), async (req, res) => {
-    try {
-      // Esta ruta borra reservas, huéspedes, turnos de SPA, pedidos de
-      // Restaurant, caja, eventos y más — de forma irreversible, y hasta
-      // borra audit_logs, así que no quedaba rastro de quién la disparó. El
-      // permiso de admin ya la protege de otros roles, pero una sesión admin
-      // válida sola no debería alcanzar para esto: hace falta tipear a
-      // propósito la frase de confirmación.
-      if (req.body?.confirm !== "ELIMINAR TODOS LOS DATOS") {
-        return res.status(400).json({
-          error: "Confirmación requerida. Esta acción borra reservas, huéspedes, turnos de SPA, pedidos de Restaurant, caja y más — sin forma de deshacerla. Enviá confirm: \"ELIMINAR TODOS LOS DATOS\" para continuar.",
-        });
-      }
-      const { sql } = await import("drizzle-orm");
-      await db.execute(sql`DELETE FROM cash_movements`);
-      await db.execute(sql`DELETE FROM cash_closing_summaries`);
-      await db.execute(sql`DELETE FROM cash_shifts`);
-      await db.execute(sql`DELETE FROM order_items`);
-      await db.execute(sql`DELETE FROM restaurant_orders`);
-      await db.execute(sql`DELETE FROM spa_payments`);
-      await db.execute(sql`DELETE FROM spa_account_items`);
-      await db.execute(sql`DELETE FROM spa_accounts`);
-      await db.execute(sql`DELETE FROM spa_appointments`);
-      await db.execute(sql`DELETE FROM event_table_payments`);
-      await db.execute(sql`DELETE FROM event_table_charges`);
-      await db.execute(sql`DELETE FROM event_tables`);
-      await db.execute(sql`DELETE FROM event_charges`);
-      await db.execute(sql`DELETE FROM event_payments`);
-      await db.execute(sql`DELETE FROM events`);
-      await db.execute(sql`DELETE FROM housekeeping_tasks`);
-      await db.execute(sql`DELETE FROM work_orders`);
-      await db.execute(sql`DELETE FROM web_checkins`);
-      await db.execute(sql`DELETE FROM stay_notes`);
-      await db.execute(sql`DELETE FROM guest_preferences`);
-      await db.execute(sql`DELETE FROM hospitality_alerts`);
-      await db.execute(sql`DELETE FROM charges`);
-      await db.execute(sql`DELETE FROM payments`);
-      await db.execute(sql`DELETE FROM group_reservation_links`);
-      await db.execute(sql`DELETE FROM group_room_blocks`);
-      await db.execute(sql`DELETE FROM groups`);
-      await db.execute(sql`DELETE FROM reservations`);
-      await db.execute(sql`DELETE FROM audit_logs`);
-      await db.execute(sql`DELETE FROM system_notifications`);
-      await db.execute(sql`DELETE FROM guests`);
-      await db.execute(sql`DELETE FROM companies`);
-      await db.execute(sql`UPDATE rooms SET status = 'available'`);
-      await db.execute(sql`UPDATE restaurant_tables SET status = 'available'`);
-      // audit_logs quedó vacía recién arriba — dejar esta fila es lo único
-      // que va a sobrevivir para decir quién disparó el borrado y cuándo.
-      const user = req.user as any;
-      await db.execute(sql`
-        INSERT INTO audit_logs (id, user_id, user_name, action, module, description, ip_address, timestamp)
-        VALUES (gen_random_uuid(), ${user?.id || null}, ${user?.username || "desconocido"}, 'delete', 'admin',
-          'Limpieza total de datos (POST /api/admin/clean-data)', ${req.ip || req.socket?.remoteAddress || null}, NOW())
-      `);
-      res.json({ success: true, message: "Datos de prueba eliminados correctamente" });
-    } catch (error: any) {
-      console.error("Error cleaning data:", error);
-      res.status(500).json({ error: error.message || "Error al limpiar datos" });
-    }
+  app.post("/api/admin/clean-data", requirePermission("api:admin:clean-data"), (_req, res) => {
+    res.status(409).json({ error: "La limpieza general está deshabilitada para preservar los turnos, pagos y auditoría del hotel." });
   });
 
   // ── BACKUP ────────────────────────────────────────────────────────────────

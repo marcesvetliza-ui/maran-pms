@@ -1,3 +1,4 @@
+import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
 import { deductIngredientsAtMultiplier } from "./recipeStockDeduction";
@@ -43,7 +44,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 }
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
-import { db, pool } from "./db";
+import { db, pool, withDatabaseTransaction } from "./db";
 import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
   type User, type InsertUser,
@@ -1121,8 +1122,8 @@ export class DatabaseStorage implements IStorage {
     return this.enrichReservations(allRes);
   }
 
-  async createReservation(reservation: InsertReservation): Promise<Reservation> {
-    return this.withInventoryMutationLock(async () => {
+  async createReservation(reservation: InsertReservation, beforeCommit?: (created: Reservation) => Promise<void>): Promise<Reservation> {
+    return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       const insertData = { ...(reservation as any) };
       const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
       const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
@@ -1170,8 +1171,12 @@ export class DatabaseStorage implements IStorage {
       }
     }
     const [created] = await db.insert(reservations).values({ ...insertData, id } as any).returning();
+    await db.insert(auditLogs).values({ userId: created.lastModifiedBy || null, userName: created.lastModifiedBy || "Sistema",
+      action: "create", module: "reservations", entityType: "reservation", entityId: created.id,
+      description: `Reserva creada: ${created.reservationCode}`, details: JSON.stringify({ after: created }), timestamp: new Date() });
+    await beforeCommit?.(created);
     return created;
-    });
+    }));
   }
 
   async evaluateReservationInventory(input: {
@@ -1263,7 +1268,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
-    return this.withInventoryMutationLock(async () => {
+    return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       const existing = await this.getReservation(id);
       if (!existing) return undefined;
       const finalRoomId = (reservation as any).roomId || existing.roomId;
@@ -1304,7 +1309,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
       return this.updateReservationUnlocked(id, safeReservation);
-    });
+    }));
   }
 
   private async updateReservationUnlocked(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
@@ -1321,10 +1326,7 @@ export class DatabaseStorage implements IStorage {
     }
     if (Object.keys(safeData).length === 0) return undefined;
 
-    const needsVoucherSync = "status" in safeData || "voucherId" in safeData;
-    const before = needsVoucherSync
-      ? (await db.select().from(reservations).where(eq(reservations.id, id)))[0]
-      : undefined;
+    const before = (await db.select().from(reservations).where(eq(reservations.id, id)))[0];
 
     // Igual que en createReservation: aplicar ANTES de commitear el update.
     // Si el voucher ya no está disponible, el PATCH entero falla en vez de
@@ -1350,17 +1352,10 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db.update(reservations).set(safeData).where(eq(reservations.id, id)).returning();
     if (!updated) return updated;
 
-    if (before) {
-      // A diferencia del apply de arriba, esto reacciona a una transición de
-      // estado ya decidida (check-out, cancelación) — no debe bloquearla por
-      // un problema de sincronización del voucher, así que se atrapa acá y
-      // queda logueado para revisar a mano.
-      try {
-        await this.syncGiftVoucherStatusTransition(before, updated);
-      } catch (e) {
-        console.error("[GiftVoucher] Error sincronizando estado del voucher con la reserva:", e);
-      }
-    }
+    if (before) await this.syncGiftVoucherStatusTransition(before, updated);
+    await db.insert(auditLogs).values({ userId: updated.lastModifiedBy || null, userName: updated.lastModifiedBy || "Sistema",
+      action: "update", module: "reservations", entityType: "reservation", entityId: id,
+      description: `Reserva actualizada: ${updated.reservationCode}`, details: JSON.stringify({ before, after: updated }), timestamp: new Date() });
     return updated;
   }
 
@@ -1390,9 +1385,37 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async deleteReservation(id: string): Promise<boolean> {
-    const result = await db.delete(reservations).where(eq(reservations.id, id));
-    return (result.rowCount ?? 0) > 0;
+  async deleteReservation(_id: string): Promise<boolean> {
+    throw Object.assign(new Error("Las reservas no se borran: deben anularse con historial"), { statusCode: 405 });
+  }
+
+  async cancelReservationWithHistory(id: string, reason: string, actor: { id?: string; name?: string; ip?: string }): Promise<Reservation> {
+    if (!reason.trim()) throw Object.assign(new Error("Debe indicar un motivo de anulación"), { statusCode: 400 });
+    return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
+      const [locked] = await db.select().from(reservations).where(eq(reservations.id, id)).for("update");
+      if (!locked) throw Object.assign(new Error("Reserva no encontrada"), { statusCode: 404 });
+      if (["cancelled", "checked_out"].includes(locked.status)) throw Object.assign(new Error("La reserva ya está anulada o finalizada"), { statusCode: 409 });
+      const before = await this.getReservation(id);
+      const [after] = await db.update(reservations).set({ status: "cancelled", lastModifiedBy: actor.id || "Sistema" }).where(eq(reservations.id, id)).returning();
+      await this.syncGiftVoucherStatusTransition(locked, after);
+      await db.insert(cancelledReservationLogs).values({ reservationId: id, reservationCode: locked.reservationCode,
+        guestName: before?.guest ? `${before.guest.firstName} ${before.guest.lastName}` : "Sin huésped",
+        roomNumber: before?.room?.roomNumber || locked.roomId, checkInDate: locked.checkInDate, checkOutDate: locked.checkOutDate,
+        cancellationDate: new Date(), cancelledBy: actor.name || actor.id || "Sistema", reason: reason.trim(), totalAmount: String(locked.totalRoomAmount || "0") });
+      const [link] = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.reservationId, id));
+      if (link) {
+        const [block] = await db.select().from(groupRoomBlocks).where(and(eq(groupRoomBlocks.groupId, link.groupId), eq(groupRoomBlocks.roomTypeId, locked.roomTypeId || before?.room?.roomTypeId || ""))).for("update");
+        if (block?.quantity && block.quantity > 1) await db.update(groupRoomBlocks).set({ quantity: block.quantity - 1 }).where(eq(groupRoomBlocks.id, block.id));
+        else if (block) await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, block.id));
+        await db.delete(groupReservationLinks).where(eq(groupReservationLinks.reservationId, id));
+      }
+      if (locked.status === "checked_in" && before?.room?.status === "occupied") await db.update(rooms).set({ status: "dirty" }).where(eq(rooms.id, locked.roomId));
+      await db.insert(reservationChangelog).values({ reservationId: id, operador: actor.name || actor.id || "Sistema", tipo: "anulacion", descripcion: reason.trim() });
+      await db.insert(auditLogs).values({ userId: actor.id || null, userName: actor.name || actor.id || "Sistema", action: "update", module: "reservations",
+        entityType: "reservation", entityId: id, description: `Anulación: ${locked.reservationCode} — Motivo: ${reason.trim()}`,
+        details: JSON.stringify({ before, after, reason: reason.trim() }), ipAddress: actor.ip || null, timestamp: new Date() });
+      return after;
+    }));
   }
 
   generateReservationCode(): string {
@@ -2377,17 +2400,15 @@ export class DatabaseStorage implements IStorage {
       for (const day of days) {
         // Only block cells when there is a date-range maintenance block (created from Maintenance module)
         // Rooms with status "maintenance" from Housekeeping show the wrench icon but are NOT blocked
+        const matchingReservations = allReservations.filter(r => r.roomId === room.id && day >= r.checkInDate && day < r.checkOutDate);
+        const reservation = matchingReservations.find(r => !["checked_out", "no_show"].includes(r.status)) || matchingReservations[0];
         const isBlockedForDay = roomBlocks.some(b => day >= b.blockFrom && day <= b.blockTo);
-        if (isBlockedForDay) {
+        // A later maintenance block must not hide a reservation already stored.
+        if (isBlockedForDay && !reservation) {
           occupancy[room.id].push("maintenance");
           continue;
         }
-        // dirty, cleaning, inspected, maintenance: show status badge in room column but DON'T block cells
-
-        const reservation = allReservations.find(r => {
-          if (r.roomId !== room.id) return false;
-          return day >= r.checkInDate && day < r.checkOutDate;
-        });
+        // Room condition badges do not hide the reservation occupying a cell.
 
         if (reservation) {
           cellReservations[room.id][day] = reservation.id;
@@ -2490,7 +2511,17 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    const planningRooms = new Map(allRooms.map(room => [room.id, room]));
+    const visibilityWarnings: NonNullable<PlanningData["visibilityWarnings"]> = [];
+    for (const reservation of allReservations) {
+      if (["checked_out", "no_show"].includes(reservation.status)) continue;
+      const room = planningRooms.get(reservation.roomId);
+      if (!room || room.isActive === false) visibilityWarnings.push({ reservationId: reservation.id, reservationCode: reservation.reservationCode,
+        reason: room ? "inactive_room" : "missing_room" });
+    }
+
     return {
+      visibilityWarnings,
       rooms: allRooms,
       days,
       occupancy,
@@ -5488,7 +5519,9 @@ export class DatabaseStorage implements IStorage {
     }
     const items = await db.select().from(inventoryItems);
     const itemsMap = new Map(items.map(i => [i.id, i]));
-    return movements.map(m => ({ ...m, item: itemsMap.get(m.itemId)! }));
+    const reversals = await db.select({sourceId: stockMovements.sourceId}).from(stockMovements).where(eq(stockMovements.sourceType,"movement_reversal"));
+    const cancelledIds = new Set(reversals.map(r => r.sourceId));
+    return movements.map(m => ({ ...m, annulled: cancelledIds.has(m.id), item: itemsMap.get(m.itemId)! }));
   }
 
   async createStockMovement(movement: InsertStockMovement): Promise<StockMovement> {
@@ -5759,10 +5792,8 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async deleteSpaAppointment(id: string): Promise<boolean> {
-    await db.delete(spaAppointmentResources).where(eq(spaAppointmentResources.appointmentId, id));
-    const result = await db.delete(spaAppointments).where(eq(spaAppointments.id, id));
-    return (result.rowCount ?? 0) > 0;
+  async deleteSpaAppointment(_id: string): Promise<boolean> {
+    throw Object.assign(new Error("Los turnos SPA no se borran: deben cancelarse con motivo"), { statusCode: 409 });
   }
 
   async getSpaAccounts(status?: SpaAccountStatus): Promise<SpaAccountWithItems[]> {
@@ -5989,7 +6020,7 @@ export class DatabaseStorage implements IStorage {
     const items = await db.select().from(spaAccountItems).where(eq(spaAccountItems.accountId, id));
     const total = items.reduce((sum, item) => sum + parseFloat(item.subtotal), 0);
     const pmts = await db.select().from(spaPayments).where(eq(spaPayments.accountId, id));
-    const totalPaid = pmts.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    const totalPaid = pmts.filter(p => p.status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0);
 
     const [updated] = await db.update(spaAccounts).set({
       status: "closed",
@@ -6047,9 +6078,8 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async deleteSpaPayment(id: string): Promise<boolean> {
-    const result = await db.delete(spaPayments).where(eq(spaPayments.id, id));
-    return (result.rowCount ?? 0) > 0;
+  async deleteSpaPayment(_id: string): Promise<boolean> {
+    throw Object.assign(new Error("Los pagos SPA no se borran: deben anularse con motivo"), { statusCode: 409 });
   }
 
   // Treatment Supplies
@@ -8200,23 +8230,35 @@ export class DatabaseStorage implements IStorage {
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
     // Resolver ambos alias y conservar el área del turno elegido.
     area = normalizeCashShiftArea(area);
-    const turno = await this.getOrCreateActiveTurno(area);
-    const [movement] = await db.insert(cashMovements).values({
-      id: randomUUID(),
-      shiftId: turno.id,
-      area: turno.area,
-      sourceType,
-      sourceId,
-      sourceLabel,
-      paymentMethod,
-      amount,
-      movementType,
-      registeredBy: registeredBy || null,
-      receiptType: receiptType || null,
-      paymentId: paymentId || null,
-      receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
-    }).returning();
-    return movement;
+    for (;;) {
+      const turno = await this.getOrCreateActiveTurno(area);
+      const movement = await db.transaction(async (tx) => {
+        // Use the same row lock as closeShift and keep it until the movement
+        // commits. A closing shift must include this receipt in its summary.
+        const [lockedShift] = await tx.select().from(cashShifts)
+          .where(eq(cashShifts.id, turno.id)).for("update");
+        // Closure may have won between selecting the shift and locking it.
+        // Retry outside the transaction to resolve its committed successor.
+        if (!lockedShift || lockedShift.status !== "open") return undefined;
+        const [created] = await tx.insert(cashMovements).values({
+          id: randomUUID(),
+          shiftId: lockedShift.id,
+          area: lockedShift.area,
+          sourceType,
+          sourceId,
+          sourceLabel,
+          paymentMethod,
+          amount,
+          movementType,
+          registeredBy: registeredBy || null,
+          receiptType: receiptType || null,
+          paymentId: paymentId || null,
+          receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
+        }).returning();
+        return created;
+      });
+      if (movement) return movement;
+    }
   }
 
   async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
@@ -8791,6 +8833,38 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async recordRestaurantPartialPayment(
+    orderId: string, paymentKey: string, amount: number, description: string,
+    paymentMethod: string, registeredBy?: string, receiptType?: string,
+  ): Promise<void> {
+    const folio = await this.getOrCreateFolio("restaurant_order", orderId);
+    await db.transaction(async (tx) => {
+      // Serialize the paired ledger entries and their cached totals. Equal
+      // amounts/methods on different installments must remain distinct.
+      await tx.select().from(folios).where(eq(folios.id, folio.id)).for("update");
+      const sourceId = `${orderId}:${paymentKey}`;
+      const [existing] = await tx.select().from(folioMovements).where(and(
+        eq(folioMovements.folioId, folio.id), eq(folioMovements.type, "charge"),
+        eq(folioMovements.sourceType, "restaurant_partial"), eq(folioMovements.sourceId, sourceId),
+      )).limit(1);
+      if (existing) return;
+      await tx.insert(folioMovements).values([
+        { folioId: folio.id, type: "charge", amount: amount.toFixed(2), description,
+          sourceType: "restaurant_partial", sourceId, registeredBy: registeredBy ?? null },
+        { folioId: folio.id, type: "payment", amount: amount.toFixed(2), description: `Cobro — ${description}`,
+          paymentMethod, sourceType: "restaurant_payment", sourceId: orderId,
+          registeredBy: registeredBy ?? null, receiptType: receiptType ?? null },
+      ]);
+      const [totals] = await tx.select({
+        charges: sql<string>`COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('charge', 'transfer_in')), 0)`,
+        payments: sql<string>`COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('payment', 'advance', 'discount', 'transfer_out', 'void')), 0)`,
+      }).from(folioMovements).where(eq(folioMovements.folioId, folio.id));
+      const charges = Number(totals.charges), payments = Number(totals.payments);
+      await tx.update(folios).set({ totalCharges: charges.toFixed(2), totalPayments: payments.toFixed(2),
+        balance: (charges - payments).toFixed(2) }).where(eq(folios.id, folio.id));
+    });
+  }
+
   async addFolioCharge(
     entityType: FolioEntityType,
     entityId: string,
@@ -9318,6 +9392,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createInventoryCount(data: { date: string; area?: string; notes?: string; createdBy?: string }): Promise<any> {
+    return withDatabaseTransaction(async () => {
     const countResult = await db.execute(sql`
       INSERT INTO inventory_counts (date, area, notes, created_by)
       VALUES (${data.date}, ${data.area || null}, ${data.notes || null}, ${data.createdBy || null})
@@ -9347,6 +9422,7 @@ export class DatabaseStorage implements IStorage {
       `);
     }
     return count;
+    });
   }
 
   async getInventoryCountWithItems(id: string): Promise<any | null> {
@@ -9365,47 +9441,46 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateInventoryCountItem(countId: string, itemId: string, actualStock: number | null, notes?: string): Promise<void> {
-    await db.execute(sql`
-      UPDATE inventory_count_items
-      SET actual_stock = ${actualStock}, notes = ${notes ?? null}
-      WHERE count_id = ${countId} AND item_id = ${itemId}
-    `);
+    if(actualStock !== null)stockUnits(actualStock);
+    await withDatabaseTransaction(async()=>{
+      const result=await db.execute(sql`SELECT status FROM inventory_counts WHERE id=${countId} FOR UPDATE`);
+      if(!result.rows[0])throw Object.assign(new Error("Toma no encontrada"),{statusCode:404});
+      if(result.rows[0].status !== 'borrador')throw Object.assign(new Error("Una toma cerrada no se puede editar"),{statusCode:409});
+      const updated=await db.execute(sql`UPDATE inventory_count_items SET actual_stock=${actualStock},notes=${notes ?? null} WHERE count_id=${countId} AND item_id=${itemId} RETURNING id`);
+      if(!updated.rows.length)throw Object.assign(new Error("El artículo no pertenece a esta toma"),{statusCode:404});
+    });
   }
 
-  async closeInventoryCount(id: string, closedBy: string): Promise<{ adjustments: number }> {
-    const itemsResult = await db.execute(sql`
-      SELECT * FROM inventory_count_items
-      WHERE count_id = ${id} AND actual_stock IS NOT NULL
-    `);
-
-    let adjustments = 0;
-    for (const item of itemsResult.rows as any[]) {
-      const expected = parseFloat(item.expected_stock);
-      const actual = parseFloat(item.actual_stock);
-      const diff = actual - expected;
-      if (Math.abs(diff) < 0.001) continue;
-
-      const curResult = await db.execute(sql`SELECT current_stock FROM inventory_items WHERE id = ${item.item_id}`);
-      const current = parseFloat((curResult.rows[0] as any)?.current_stock ?? "0");
-      const newStock = Math.max(0, current + diff);
-
-      await db.execute(sql`
-        INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, created_at, created_by, source_type, source_id)
-        VALUES (
-          ${item.item_id}, 'ajuste', ${Math.abs(diff)}, ${current}, ${newStock},
-          ${'Ajuste por toma de inventario'}, now(), ${closedBy}, 'inventory_count', ${id}
-        )
-      `);
-      await db.execute(sql`UPDATE inventory_items SET current_stock = ${newStock} WHERE id = ${item.item_id}`);
-      adjustments++;
-    }
-
-    await db.execute(sql`
-      UPDATE inventory_counts SET status = 'cerrado', closed_at = now(), closed_by = ${closedBy}
-      WHERE id = ${id}
-    `);
-    return { adjustments };
+  async closeInventoryCount(id: string, closedBy: string): Promise<{ adjustments: number; alreadyClosed?: boolean }> {
+    return withDatabaseTransaction(async()=>{
+      const counts=await db.execute(sql`SELECT * FROM inventory_counts WHERE id=${id} FOR UPDATE`);
+      const count:any=counts.rows[0];
+      if(!count)throw Object.assign(new Error("Toma no encontrada"),{statusCode:404});
+      if(count.status === 'cerrado')return {adjustments:0,alreadyClosed:true};
+      if(count.status !== 'borrador')throw Object.assign(new Error("La toma no está en borrador"),{statusCode:409});
+      const rows=await db.execute(sql`SELECT * FROM inventory_count_items WHERE count_id=${id} AND actual_stock IS NOT NULL ORDER BY item_id FOR UPDATE`);
+      if(!rows.rows.length)throw Object.assign(new Error("Registrá al menos un artículo contado antes de cerrar"),{statusCode:400});
+      let adjustments=0;
+      for(const item of rows.rows as any[]){
+        const currentRows=await db.execute(sql`SELECT current_stock FROM inventory_items WHERE id=${item.item_id} FOR UPDATE`);
+        if(!currentRows.rows[0])throw Object.assign(new Error("Un artículo de la toma ya no existe"),{statusCode:409});
+        const changed=await db.execute(sql`SELECT id FROM stock_movements WHERE item_id=${item.item_id} AND created_at >= ${count.created_at} LIMIT 1`);
+        const current=stockUnits(currentRows.rows[0].current_stock ?? 0),expected=stockUnits(item.expected_stock),actual=stockUnits(item.actual_stock);
+        if(changed.rows.length || current !== expected)throw Object.assign(new Error("El stock cambió durante el conteo. Iniciá una nueva toma con el saldo actualizado."),{statusCode:409});
+        const diff=actual-expected;
+        if(!diff)continue;
+        await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,created_at,created_by,source_type,source_id)
+          VALUES(${item.item_id},'ajuste',${(Math.abs(diff)/1000).toFixed(3)},${(current/1000).toFixed(3)},${(actual/1000).toFixed(3)},${'Ajuste por toma de inventario '+id},now(),${closedBy},'inventory_count',${id})`);
+        await db.execute(sql`UPDATE inventory_items SET current_stock=${(actual/1000).toFixed(3)} WHERE id=${item.item_id}`);
+        adjustments++;
+      }
+      await db.execute(sql`UPDATE inventory_counts SET status='cerrado',closed_at=now(),closed_by=${closedBy} WHERE id=${id}`);
+      await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
+        VALUES(${closedBy},${closedBy},'update','inventory','inventory_count',${id},'Cierre de toma de inventario',${JSON.stringify({adjustments,countedItems:rows.rows.length})},now())`);
+      return {adjustments};
+    });
   }
+
 }
 
 export const storage = new DatabaseStorage();

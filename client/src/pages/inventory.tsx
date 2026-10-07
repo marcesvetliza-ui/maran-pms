@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { InventoryMovementDetail } from "@/components/inventory-movement-detail";
+import { Fragment, useState, useEffect } from "react";
 import { Link } from "wouter";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -124,6 +125,11 @@ type StockMovement = {
   notes: string | null;
   createdAt: string;
   createdBy: string | null;
+  annulled?: boolean;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  warehouseId?: string | null;
+  toWarehouseId?: string | null;
   item?: InventoryItem;
 };
 
@@ -174,6 +180,8 @@ type InternalMovementItem = {
   movement_id: string;
   item_id: string;
   item_name: string;
+  warehouse_id?: string;
+  warehouse_name?: string;
   unit: string;
   quantity: string;
   cost_price: string;
@@ -380,7 +388,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
   const [imDescripcion, setImDescripcion] = useState("");
   const [imNotes, setImNotes] = useState("");
   const emptyImRow = () => ({ itemId: "", quantity: "1", notes: "" });
-  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string }>>([emptyImRow()]);
+  const [imItems, setImItems] = useState<Array<{ itemId: string; quantity: string; notes: string; warehouseId?: string }>>([emptyImRow()]);
   const [showRecipeLoader, setShowRecipeLoader] = useState(false);
   const [imRecipeId, setImRecipeId] = useState("");
   const [imPorciones, setImPorciones] = useState("1");
@@ -408,6 +416,15 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
     queryKey: ["/api/inventory/items"],
   });
 
+  const { data: origins = [], isLoading: originsLoading, isError: originsError } = useQuery<Array<{itemId:string;warehouseId:string|null;warehouseName:string|null;active:string|null;stock:string}>>({
+    queryKey: ["/api/inventory/internal-consumption-origins"], enabled: open, staleTime: 0,
+  });
+  const { data: consumptionWarehouses = [] } = useQuery<Array<{id:string;name:string;isActive:string}>>({queryKey:["/api/inventory/warehouses"],enabled:open});
+  const originFor = (row: {itemId:string;warehouseId?:string}) => row.warehouseId ?? (() => {
+    const origin = origins.find(o=>o.itemId===row.itemId);
+    return origin?.active === "true" ? origin.warehouseId || "" : "";
+  })();
+
   const { data: allRecipes = [] } = useQuery<RecipeForIM[]>({
     queryKey: ["/api/restaurant/recipes"],
     enabled: open,
@@ -415,8 +432,8 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
 
   const addImItem = () => setImItems(prev => [...prev, { itemId: "", quantity: "1", notes: "" }]);
   const removeImItem = (idx: number) => setImItems(prev => prev.filter((_, i) => i !== idx));
-  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes", value: string) =>
-    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+  const updateImItem = (idx: number, field: "itemId" | "quantity" | "notes" | "warehouseId", value: string) =>
+    setImItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value, ...(field === "itemId" ? {warehouseId: undefined} : {}) } : it));
 
   const loadFromRecipe = async () => {
     if (!imRecipeId) return;
@@ -424,7 +441,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
     try {
       const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
       const porciones = parseFloat(imPorciones) || 1;
-      const newRows: Array<{ itemId: string; quantity: string; notes: string }> = [];
+      const newRows: Array<{ itemId: string; quantity: string; notes: string; warehouseId?: string }> = [];
       for (const ing of ingredients) {
         if (!ing.inventoryItemId) continue;
         const merma = parseFloat(ing.merma || "0");
@@ -464,13 +481,15 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
   };
 
   const createInternalMovMutation = useMutation({
-    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string }> }) => {
+    mutationFn: async (data: { date: string; motivo: string; descripcion?: string; notes?: string; items: Array<{ itemId: string; quantity: number; notes?: string; warehouseId: string }> }) => {
       const res = await apiRequest("POST", "/api/inventory/internal-movements", data);
       return res.json();
     },
     onSuccess: (movement) => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-consumption-origins"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/warehouses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/internal-movements"] });
       onClose();
       printInternalVoucher(movement);
@@ -480,7 +499,11 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
   });
 
   const confirmInternalMov = () => {
-    const validItems = imItems.filter(it => it.itemId && parseFloat(it.quantity) > 0);
+    if (originsLoading || originsError || createInternalMovMutation.isPending) return;
+    const validItems = imItems.filter(it => it.itemId);
+    if (validItems.some(it => !originFor(it) || !Number.isFinite(Number(it.quantity)) || Number(it.quantity)<=0)) {
+      toast({title:"Revisá las cantidades y elegí el depósito de cada artículo",variant:"destructive"}); return;
+    }
     if (validItems.length === 0) {
       toast({ title: "Agregá al menos un artículo con cantidad", variant: "destructive" });
       return;
@@ -490,7 +513,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
       motivo: imMotivo,
       descripcion: imDescripcion || undefined,
       notes: imNotes || undefined,
-      items: validItems.map(it => ({ itemId: it.itemId, quantity: parseFloat(it.quantity), notes: it.notes || undefined })),
+      items: validItems.map(it => ({ itemId: it.itemId, quantity: Number(it.quantity), warehouseId: originFor(it), notes: it.notes || undefined })),
     });
   };
 
@@ -574,11 +597,12 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
             Usá "Cargar desde receta" o "Agregar ítem" para agregar artículos
           </div>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
                   <th className="p-2 text-left font-medium">Artículo</th>
+                  <th className="p-2 text-left font-medium">Depósito de origen</th>
                   <th className="p-2 text-right font-medium w-28">Cantidad</th>
                   <th className="p-2 text-left font-medium">Nota (opcional)</th>
                   <th className="p-2 w-8" />
@@ -597,6 +621,16 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
                           testId={`select-im-item-${idx}`}
                           className="h-8 text-xs"
                         />
+                      </td>
+                      <td className="p-1.5 min-w-40">
+                        <Select value={originFor(row) || "__choose__"} onValueChange={v=>updateImItem(idx,"warehouseId",v === "__choose__" ? "" : v)} disabled={!row.itemId || createInternalMovMutation.isPending}>
+                          <SelectTrigger aria-label={`Depósito de origen ${idx+1}`} data-testid={`select-im-warehouse-${idx}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__choose__">Elegir depósito</SelectItem>
+                            {consumptionWarehouses.filter(w=>w.isActive === "true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        {row.itemId && <p className="text-xs text-muted-foreground">{originsLoading ? "Consultando último destino…" : originsError ? "No se pudo consultar el origen" : !originFor(row) ? "Elegí un depósito activo" : row.warehouseId === undefined ? `Última transferencia · Disponible: ${origins.find(o=>o.itemId===row.itemId)?.stock || "0"}` : "Depósito elegido manualmente"}</p>}
                       </td>
                       <td className="p-1.5">
                         <div className="flex items-center gap-1">
@@ -656,7 +690,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
       <Button variant="outline" onClick={onClose}>Cancelar</Button>
       <Button
         onClick={confirmInternalMov}
-        disabled={createInternalMovMutation.isPending || imItems.filter(it => it.itemId).length === 0}
+        disabled={createInternalMovMutation.isPending || originsLoading || originsError || imItems.filter(it => it.itemId).length === 0 || imItems.some(it=>it.itemId && !originFor(it))}
         data-testid="btn-confirm-internal-mov"
       >
         {createInternalMovMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -784,7 +818,25 @@ export default function InventoryPage() {
     queryKey: ["/api/inventory/items"],
   });
 
-  const { data: movements = [] } = useQuery<StockMovement[]>({
+  const [editingArticle, setEditingArticle] = useState<InventoryItem | null>(null);
+  const [articleName, setArticleName] = useState("");
+  const [articleSku, setArticleSku] = useState("");
+  const [articleMin, setArticleMin] = useState("");
+  const [articleCost, setArticleCost] = useState("");
+  const [articleActive, setArticleActive] = useState(true);
+  const [inventoryAction, setInventoryAction] = useState<{kind:"deactivate"|"anular"|"corregir"; id:string; name:string; quantity?:string; notes?:string} | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionQuantity, setActionQuantity] = useState("");
+  const [actionNotes, setActionNotes] = useState("");
+  const refreshInventory = () => { queryClient.invalidateQueries({queryKey:["/api/inventory/items"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/movements"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/warehouse-stock"]}); };
+  const editArticle = (item:InventoryItem) => {setEditingArticle(item);setArticleName(item.name);setArticleSku(item.sku || "");setArticleMin(String(item.minStock || "0"));setArticleCost(String(item.costPrice || "0"));setArticleActive(item.isActive !== "false");};
+  const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
+  const editArticleMutation = useMutation({mutationFn:async()=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,{name:articleName.trim(),sku:articleSku.trim() || null,minStock:articleMin,costPrice:articleCost,isActive:articleActive?"true":"false"});},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [expandedMovements, setExpandedMovements] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string, setter: React.Dispatch<React.SetStateAction<Set<string>>>) => setter(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const { data: movements = [], isLoading: movementsLoading, isError: movementsError } = useQuery<StockMovement[]>({
     queryKey: ["/api/inventory/movements"],
   });
 
@@ -1331,22 +1383,22 @@ export default function InventoryPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="border rounded-md overflow-hidden">
-              <table className="w-full">
+            <div className="border rounded-md overflow-x-auto">
+              <table className="w-full table-fixed min-w-[680px]">
                 <thead className="bg-muted/50">
                   <tr className="text-left">
-                    <th className="p-3 font-medium">Articulo</th>
-                    <th className="p-3 font-medium">Categoria</th>
+                    <th className="p-3 font-medium w-[28%]">Articulo</th>
+                    <th className="p-3 font-medium w-[23%]">Categoria</th>
                     <th className="p-3 font-medium text-right">Stock</th>
                     <th className="p-3 font-medium text-right">Min</th>
-                    <th className="p-3 font-medium text-right">Costo</th>
+                    <th className="p-3 font-medium text-right">Costo</th><th className="p-2 w-32"><span className="sr-only">Detalle</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => (
-                    <tr key={item.id} className="border-t" data-testid={`row-item-${item.id}`}>
+                    <Fragment key={item.id}><tr className="border-t" data-testid={`row-item-${item.id}`}>
                       <td className="p-3">
-                        <div className="font-medium">{item.name}</div>
+                        <div className="font-medium break-words">{item.name}</div>
                         {item.sku && (
                           <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>
                         )}
@@ -1391,7 +1443,13 @@ export default function InventoryPage() {
                       <td className="p-3 text-right">
                         ${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </td>
+                      <td className="p-2"><div className="flex justify-end"><Button variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(item)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
+                    {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
+                      <h4 className="font-medium mb-3">Historial de {item.name}</h4>
+                      {movementsLoading ? <p>Cargando movimientos...</p> : movementsError ? <p>No se pudo cargar el historial. Volvé a intentar.</p> : movements.filter(m => m.itemId === item.id).length === 0 ? <p>No hay movimientos registrados para este artículo. El stock inicial puede haber sido cargado sin historial.</p> :
+                        <div className="space-y-3">{movements.filter(m => m.itemId === item.id).map(m => <details key={m.id} className="border rounded p-3"><summary className="cursor-pointer">{formatHotelDateTime(m.createdAt, {includeYear: false})} · {movementTypeLabels[m.movementType]} · {m.previousStock} → {m.newStock} {item.unit}</summary><div className="mt-3"><InventoryMovementDetail movement={m} warehouses={warehouses} /></div></details>)}</div>}
+                    </td></tr>}</Fragment>
                   ))}
                 </tbody>
               </table>
@@ -1591,7 +1649,7 @@ export default function InventoryPage() {
             }
 
             return (
-              <div className="border rounded-md overflow-hidden">
+              <div className="border rounded-md overflow-x-auto">
                 <div className="flex items-center justify-between px-3 py-2 bg-muted/30 text-xs text-muted-foreground border-b">
                   <span>{filtered.length} movimiento{filtered.length !== 1 ? "s" : ""}{filtered.length < movements.length ? ` de ${movements.length}` : ""}</span>
                 </div>
@@ -1604,12 +1662,12 @@ export default function InventoryPage() {
                       <th className="p-3 font-medium text-right">Cantidad</th>
                       <th className="p-3 font-medium text-right">Stock Ant.</th>
                       <th className="p-3 font-medium text-right">Stock Nuevo</th>
-                      <th className="p-3 font-medium">Notas</th>
+                      <th className="p-3 font-medium">Notas</th><th className="p-2"><span className="sr-only">Detalle</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.slice(0, 200).map((movement) => (
-                      <tr key={movement.id} className="border-t" data-testid={`movement-${movement.id}`}>
+                      <Fragment key={movement.id}><tr className="border-t" data-testid={`movement-${movement.id}`}>
                         <td className="p-3 text-sm">
                           {formatHotelDateTime(movement.createdAt, { includeYear: false })}
                         </td>
@@ -1617,17 +1675,19 @@ export default function InventoryPage() {
                         <td className="p-3">
                           <Badge variant={movement.movementType === "entrada" ? "default" : "secondary"}>
                             {movementTypeLabels[movement.movementType]}
-                          </Badge>
+                          </Badge>{movement.annulled && <Badge variant="outline" className="ml-1">Anulado</Badge>}
                         </td>
                         <td className="p-3 text-right font-mono text-sm">
                           <span className={movement.movementType === "entrada" ? "text-green-600" : "text-orange-600"}>
-                            {movement.movementType === "entrada" ? "+" : "-"}{movement.quantity}
+                            {Number(movement.newStock) - Number(movement.previousStock) >= 0 ? "+" : "-"}{Math.abs(Number(movement.newStock) - Number(movement.previousStock)).toFixed(3)}
                           </span>
                         </td>
                         <td className="p-3 text-right font-mono text-sm text-muted-foreground">{movement.previousStock}</td>
                         <td className="p-3 text-right font-mono text-sm">{movement.newStock}</td>
                         <td className="p-3 text-sm text-muted-foreground truncate max-w-48">{movement.notes || "-"}</td>
+                        <td className="p-2"><div className="flex">{((movement.sourceType === "manual" && !movement.sourceId) || movement.sourceType === "movement_correction") && movement.movementType !== "transferencia" && movement.notes !== "Stock inicial" && !movement.annulled && <><Button variant="ghost" size="icon" aria-label={`Corregir movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"corregir",id:movement.id,name:movement.item?.name || "Artículo",quantity:String(movement.quantity),notes:movement.notes || ""})}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Anular movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"anular",id:movement.id,name:movement.item?.name || "Artículo"})}><Trash2 className="h-4 w-4" /></Button></>}<Button variant="ghost" size="icon" aria-label={`Ver detalle del movimiento ${movement.id}`} aria-expanded={expandedMovements.has(movement.id)} onClick={() => toggleExpanded(movement.id, setExpandedMovements)}>{expandedMovements.has(movement.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                       </tr>
+                      {expandedMovements.has(movement.id) && <tr><td colSpan={8} className="p-4 bg-muted/20"><InventoryMovementDetail movement={movement} warehouses={warehouses} /></td></tr>}</Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -2229,7 +2289,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Button
                       size="sm" variant="outline"
                       onClick={() => saveCountItemsMutation.mutate(countItemEdits)}
-                      disabled={saveCountItemsMutation.isPending || Object.keys(countItemEdits).length === 0}
+                      disabled={saveCountItemsMutation.isPending || closeCountMutation.isPending || Object.keys(countItemEdits).length === 0}
                       data-testid="btn-save-count"
                     >
                       {saveCountItemsMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
@@ -2238,7 +2298,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Button
                       size="sm"
                       onClick={() => closeCountMutation.mutate()}
-                      disabled={closeCountMutation.isPending}
+                      disabled={closeCountMutation.isPending || saveCountItemsMutation.isPending}
                       data-testid="btn-close-count"
                     >
                       {closeCountMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
@@ -2619,6 +2679,26 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPriceHistoryOpen(false)}>Cerrar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingArticle} onOpenChange={open=>{if(!open && !editArticleMutation.isPending)setEditingArticle(null);}}>
+        <DialogContent><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
+          <Label htmlFor="article-name">Nombre</Label><Input id="article-name" value={articleName} onChange={e=>setArticleName(e.target.value)}/>
+          <Label htmlFor="article-sku">SKU</Label><Input id="article-sku" value={articleSku} onChange={e=>setArticleSku(e.target.value)}/>
+          <Label htmlFor="article-min">Stock mínimo</Label><Input id="article-min" type="number" min="0" step="0.001" value={articleMin} onChange={e=>setArticleMin(e.target.value)}/>
+          <Label htmlFor="article-cost">Costo unitario</Label><Input id="article-cost" type="number" min="0" step="0.01" value={articleCost} onChange={e=>setArticleCost(e.target.value)}/>
+          <label className="flex gap-2"><input type="checkbox" disabled={editingArticle?.isActive !== "false"} checked={articleActive} onChange={e=>setArticleActive(e.target.checked)}/>Artículo activo</label>
+          <p className="text-sm text-muted-foreground">Las cantidades se corrigen desde movimientos. El historial se conserva.</p>
+          <DialogFooter><Button disabled={editArticleMutation.isPending || !articleName.trim() || articleMin === "" || articleCost === "" || Number(articleMin)<0 || Number(articleCost)<0} onClick={()=>editArticleMutation.mutate()}>Guardar artículo</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!inventoryAction} onOpenChange={open=>{if(!open && !inventoryActionMutation.isPending)setInventoryAction(null);}}>
+        <DialogContent><DialogHeader><DialogTitle>{inventoryAction?.kind === "deactivate" ? "Dar de baja artículo" : inventoryAction?.kind === "corregir" ? "Corregir movimiento" : "Anular movimiento"}</DialogTitle></DialogHeader>
+          <p>{inventoryAction?.name}</p><p className="text-sm text-muted-foreground">{inventoryAction?.kind === "deactivate" ? "El artículo quedará inactivo. Se conservarán el stock y su historial." : "Se conservará el original y se registrará la reversión del stock. La operación exige un motivo."}</p>
+          {inventoryAction?.kind === "corregir" && <><Label htmlFor="correction-quantity">Cantidad corregida</Label><Input id="correction-quantity" type="number" min="0" step="0.001" value={actionQuantity} onChange={e=>setActionQuantity(e.target.value)}/><Label htmlFor="correction-notes">Notas</Label><Textarea id="correction-notes" value={actionNotes} onChange={e=>setActionNotes(e.target.value)}/></>}
+          <Label htmlFor="inventory-action-reason">Motivo obligatorio</Label><Textarea id="inventory-action-reason" value={actionReason} onChange={e=>setActionReason(e.target.value)}/>
+          <DialogFooter><Button variant="outline" disabled={inventoryActionMutation.isPending} onClick={()=>setInventoryAction(null)}>Cancelar</Button><Button disabled={inventoryActionMutation.isPending || !actionReason.trim() || (inventoryAction?.kind === "corregir" && !actionQuantity)} onClick={()=>inventoryActionMutation.mutate()}>Confirmar operación</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -3447,6 +3527,7 @@ function MovimientoInternoDetail({ movId }: { movId: string }) {
         <thead>
           <tr className="text-muted-foreground text-xs">
             <th className="text-left pb-1 font-medium">Artículo</th>
+            <th className="text-left pb-1 font-medium">Depósito</th>
             <th className="text-right pb-1 font-medium">Cantidad</th>
             <th className="text-left pb-1 font-medium pl-2">Unidad</th>
             <th className="text-right pb-1 font-medium">Costo Unit.</th>
@@ -3457,6 +3538,7 @@ function MovimientoInternoDetail({ movId }: { movId: string }) {
           {data.items.map((item, i) => (
             <tr key={i} className="border-t border-muted/40">
               <td className="py-1.5 font-medium">{item.item_name}</td>
+              <td className="py-1.5">{item.warehouse_name || item.warehouse_id || "Sin origen registrado"}</td>
               <td className="py-1.5 text-right">{parseFloat(item.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
               <td className="py-1.5 pl-2 text-muted-foreground">{item.unit}</td>
               <td className="py-1.5 text-right">${parseFloat(item.cost_price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
@@ -3464,7 +3546,7 @@ function MovimientoInternoDetail({ movId }: { movId: string }) {
             </tr>
           ))}
           <tr className="border-t font-bold text-xs">
-            <td colSpan={4} className="py-1.5 text-right">TOTAL</td>
+            <td colSpan={5} className="py-1.5 text-right">TOTAL</td>
             <td className="py-1.5 text-right">${totalCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
           </tr>
         </tbody>

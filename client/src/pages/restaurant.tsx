@@ -6607,6 +6607,14 @@ export default function RestaurantPage() {
                     const _splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
                     const _excess = Math.round((_splitTotal - _finalTotal) * 100) / 100;
                     const _hasRoomChargeSplit = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
+                    if (closePaymentSplits.filter(s => parseFloat(s.amount || "0") > 0).length > 1 && _excess !== 0) {
+                      toast({
+                        title: "Revisá las formas de pago",
+                        description: `Las formas de pago deben sumar exactamente $${_finalTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}.`,
+                        variant: "destructive",
+                      });
+                      return;
+                    }
                     if (_excess > 0 && _hasRoomChargeSplit) {
                       // Bloqueo duro: no se puede transferir más de lo que se debe a una habitación
                       toast({

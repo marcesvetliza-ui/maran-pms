@@ -39,6 +39,10 @@ async function cleanTestData() {
     process.exit(1);
   }
 
+  const host = new URL(process.env.DATABASE_URL || "").hostname;
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_LOCAL_TEST_DATA_CLEANUP !== "true" || !["127.0.0.1", "localhost", "::1", "[::1]"].includes(host)) {
+    throw new Error("La limpieza solo está habilitada explícitamente para bases locales de prueba");
+  }
   console.log("Iniciando limpieza de datos de prueba...");
 
   console.log("Borrando movimientos de caja...");

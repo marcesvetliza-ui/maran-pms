@@ -2743,6 +2743,13 @@ export default function PurchaseInvoices() {
     queryKey: ["/api/purchase-invoices"],
   });
   const invoices = rawInvoices.map(camelInvoice);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("invoiceId");
+    if (!id) return;
+    const invoice = rawInvoices.map(camelInvoice).find(i => String(i.id) === id);
+    if (invoice) setDetailInvoice(invoice);
+  }, [rawInvoices]);
+
 
   const { data: rawSuppliers = [] } = useQuery<any[]>({
     queryKey: ["/api/accounting-suppliers"],

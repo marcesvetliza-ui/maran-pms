@@ -12,7 +12,7 @@ import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
-import { requireAuth, requireRole } from "../auth";
+import { requireAuth, requireRole, requirePermission } from "../auth";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
@@ -286,7 +286,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/reservations", async (req, res) => {
+  app.post("/api/reservations", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
       const contextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
@@ -310,7 +310,8 @@ export function registerReservationsRoutes(app: Express) {
       const data = {
         ...req.body,
         reservationCode: req.body.reservationCode || storage.generateReservationCode(),
-        createdAt: req.body.createdAt ? new Date(req.body.createdAt) : new Date(),
+        createdAt: new Date(),
+        lastModifiedBy: (req.user as any)?.id || null,
       };
       const rateError = getReservationRateValidationError(data.finalRatePerNight, data.specialRateReason);
       if (rateError) return res.status(400).json({ error: rateError });
@@ -318,6 +319,9 @@ export function registerReservationsRoutes(app: Express) {
         data.specialRateReason = String(data.specialRateReason).trim();
       }
       data.notes = normalizeZeroRateNotes(data.notes, data.finalRatePerNight, data.specialRateReason);
+
+      const selectedRoom = data.roomId ? await storage.getRoom(data.roomId) : null;
+      if (!selectedRoom || selectedRoom.isActive === false) return res.status(400).json({ error: "Seleccioná una habitación existente y activa para guardar la reserva." });
 
       // Date integrity check — checkout must be strictly after checkin
       if (data.checkInDate && data.checkOutDate && data.checkOutDate <= data.checkInDate) {
@@ -348,28 +352,46 @@ export function registerReservationsRoutes(app: Express) {
         });
       }
 
-      const reservation = await storage.createReservation(data);
+      const reservation = await storage.createReservation(data, async (reservation) => {
 
-      // Keep the durable reservation history as the source for rate chronology.
-      // Only record an initial assignment when the create request supplied a
-      // real rate; imports with no rate do not get a misleading event.
-      const initialRateEvent = getReservationRateAuditEvent(
-        null, data.finalRatePerNight, true,
-      );
-      if (initialRateEvent) {
-        const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
-        try {
+        // Keep the durable reservation history as the source for rate chronology.
+        // Only record an initial assignment when the create request supplied a
+        // real rate; imports with no rate do not get a misleading event.
+        const initialRateEvent = getReservationRateAuditEvent(
+          null, data.finalRatePerNight, true,
+        );
+        if (initialRateEvent) {
+          const operador = (req as any).user?.fullName || (req as any).user?.username || "Sistema";
           await db.insert(reservationChangelog).values({
             reservationId: reservation.id,
             operador,
             tipo: initialRateEvent.tipo,
             descripcion: initialRateEvent.descripcion,
           });
-        } catch (clErr: any) {
-          console.warn("[changelog] initial rate insert failed (non-fatal):", clErr?.message);
-        }
-      }
 
+        }
+
+        const today = new Date().toISOString().split("T")[0];
+        if (data.earlyCheckIn && data.earlyCheckInCharge && parseFloat(data.earlyCheckInCharge) > 0) {
+          await storage.createCharge({
+            reservationId: reservation.id,
+            description: `Early Check-in ${data.earlyCheckInTime || ""}`.trim(),
+            amount: data.earlyCheckInCharge,
+            date: today,
+            category: "otros",
+          });
+        }
+        if (data.lateCheckOut && data.lateCheckOutCharge && parseFloat(data.lateCheckOutCharge) > 0) {
+          await storage.createCharge({
+            reservationId: reservation.id,
+            description: `Late Check-out ${data.lateCheckOutTime || ""}`.trim(),
+            amount: data.lateCheckOutCharge,
+            date: today,
+            category: "otros",
+          });
+        }
+
+      });
       // Fire confirmation email if created as "confirmed"
       if (data.status === "confirmed") {
         sendConfirmationEmail(reservation.id).catch(e => console.error("[email] create confirmation trigger:", e));
@@ -385,26 +407,6 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
-      const today = new Date().toISOString().split("T")[0];
-      if (data.earlyCheckIn && data.earlyCheckInCharge && parseFloat(data.earlyCheckInCharge) > 0) {
-        await storage.createCharge({
-          reservationId: reservation.id,
-          description: `Early Check-in ${data.earlyCheckInTime || ""}`.trim(),
-          amount: data.earlyCheckInCharge,
-          date: today,
-          category: "otros",
-        });
-      }
-      if (data.lateCheckOut && data.lateCheckOutCharge && parseFloat(data.lateCheckOutCharge) > 0) {
-        await storage.createCharge({
-          reservationId: reservation.id,
-          description: `Late Check-out ${data.lateCheckOutTime || ""}`.trim(),
-          amount: data.lateCheckOutCharge,
-          date: today,
-          category: "otros",
-        });
-      }
-
       res.status(201).json(reservation);
     } catch (error: any) {
       const detail = error?.message || String(error);
@@ -413,7 +415,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/reservations/:id", requireAuth, async (req, res) => {
+  app.patch("/api/reservations/:id", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
@@ -456,6 +458,7 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(403).json({ error: "No se puede modificar una reserva cerrada de días anteriores" });
       }
 
+      req.body.lastModifiedBy = (req.user as any)?.id || null;
       delete req.body.createdAt;
       delete req.body.id;
 
@@ -1719,72 +1722,15 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Cancel reservation endpoint
-  app.post("/api/reservations/:id/cancel", async (req, res) => {
+  app.post("/api/reservations/:id/cancel", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
+    if (typeof req.body.reason !== "string" || !req.body.reason.trim()) return res.status(400).json({error:"El motivo de anulación es obligatorio"});
     try {
-      const reservation = await storage.getReservation(req.params.id);
-      if (!reservation) {
-        return res.status(404).json({ error: "Reservation not found" });
-      }
-      if (isReservationLocked(reservation)) {
-        return res.status(403).json({ error: "No se puede anular una reserva cerrada de días anteriores" });
-      }
-
-      await storage.createCancelledReservationLog({
-        reservationCode: reservation.reservationCode,
-        guestName: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
-        roomNumber: reservation.room?.roomNumber || "",
-        checkInDate: reservation.checkInDate,
-        checkOutDate: reservation.checkOutDate,
-        cancellationDate: new Date(),
-        cancelledBy: req.body.cancelledBy || null,
-        reason: req.body.reason || null,
-        reservationId: reservation.id,
-        totalAmount: reservation.totalRoomAmount || "0",
-      });
-
-      await storage.updateReservation(req.params.id, { status: "cancelled" });
-
-      // Auto-adjust group block quantity: if this reservation belonged to a group,
-      // decrement the corresponding block so its ghost disappears from the planning.
-      try {
-        const [groupLink] = await db.select().from(groupReservationLinks)
-          .where(eq(groupReservationLinks.reservationId, req.params.id));
-        if (groupLink) {
-          const blocks = await db.select().from(groupRoomBlocks)
-            .where(eq(groupRoomBlocks.groupId, groupLink.groupId));
-          const matchingBlock = blocks.find(b => b.roomTypeId === reservation.roomTypeId);
-          if (matchingBlock) {
-            if (matchingBlock.quantity <= 1) {
-              await db.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, matchingBlock.id));
-            } else {
-              await db.update(groupRoomBlocks)
-                .set({ quantity: matchingBlock.quantity - 1 })
-                .where(eq(groupRoomBlocks.id, matchingBlock.id));
-            }
-          }
-          // Remove the group link so the slot is no longer counted
-          await db.delete(groupReservationLinks)
-            .where(eq(groupReservationLinks.reservationId, req.params.id));
-        }
-      } catch (e) {
-        console.error("[cancel] Error ajustando bloque de grupo:", e);
-      }
-
-      if (reservation.room?.status === "occupied") {
-        await storage.updateRoom(reservation.roomId, { status: "dirty" });
-      }
-
-      await audit(req, "update", "reservations",
-        `Anulación: ${reservation.reservationCode} — Motivo: ${req.body.reason || "Sin motivo"}`,
-        { entityType: "reservation", entityId: req.params.id }
-      );
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Error cancelling reservation" });
-    }
+      const user = req.user as any;
+      await storage.cancelReservationWithHistory(req.params.id, req.body.reason, {id:user?.id, name:user?.fullName || user?.username, ip:req.ip});
+      res.json({success:true});
+    } catch (error: any) { res.status(error.statusCode || 500).json({error:error.message || "Error al anular la reserva"}); }
   });
 
-  // Restore a cancelled reservation back to "confirmed"
   app.post("/api/reservations/:id/restore", requireAuth, async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.id);

@@ -920,6 +920,11 @@ export default function PlanningPage() {
         )}
       </div>
 
+      {!!data?.visibilityWarnings?.length && <Card className="border-amber-500 mb-3"><CardHeader className="py-3"><CardTitle className="text-base">Reservas guardadas que requieren revisar la habitación</CardTitle></CardHeader><CardContent>
+        <p className="text-sm mb-2">Estas reservas siguen guardadas, pero su habitación está inactiva o ya no existe y no puede mostrarse en la grilla.</p>
+        <div className="flex flex-wrap gap-2">{data.visibilityWarnings.map(warning => <Button key={warning.reservationId} variant="outline" size="sm" onClick={() => { setSelectedReservationId(warning.reservationId); setReservationDetailOpen(true); }}>{warning.reservationCode} · {warning.reason === "inactive_room" ? "Habitación inactiva" : "Habitación inexistente"}</Button>)}</div>
+      </CardContent></Card>}
+
       <Card className="flex-1 min-h-0 flex flex-col">
         <CardHeader className="py-3 px-4 border-b shrink-0">
           <CardTitle className="text-base font-medium flex items-center justify-between gap-2 flex-wrap">
