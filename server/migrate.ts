@@ -4057,9 +4057,21 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   // One-time cutover from the fictitious company current-account ledger to
   // the externally reconciled balances dated 18/09/2026. The audit marker
   // makes reruns a no-op; any ambiguous company match aborts the transaction
-  // before existing movements are removed.
-  await importCompanyOpeningBalances20260918();
-  await reallocateCurrentAccountOpeningBalances20260918();
+  // before existing movements are removed. This one-time historical check
+  // must never block the rest of runMigrations() (and therefore the whole
+  // app) from starting — e.g. if a new "company" record happens to collide
+  // with one of the names already reallocated to an agency. A failure here
+  // only means Cobros Maestros/Cuenta Corriente stay disabled until fixed,
+  // same as any other non-fatal startup step below.
+  try {
+    await importCompanyOpeningBalances20260918();
+    await reallocateCurrentAccountOpeningBalances20260918();
+  } catch (err: any) {
+    logger.error(
+      "[migrate] Reasignación de saldos de Cuenta Corriente (18/09/2026) no pudo verificarse — Cobros Maestros y Cuenta Corriente quedan deshabilitados hasta corregirlo. El resto de la aplicación sigue funcionando normalmente.",
+      err,
+    );
+  }
 
   // Channex (channel manager) — fase 1: conexión (demo primero), mapeo de
   // catálogo Channex -> PMS y bandeja de reservas. Ninguna acción de esta

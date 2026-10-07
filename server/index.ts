@@ -215,17 +215,12 @@ app.use((req, res, next) => {
       const { loadRolePermissionsCache } = await import("./permissions");
       await loadRolePermissionsCache();
     } catch (err: any) {
-      logger.error(
-        "[startup] Cobros maestros y Cuenta Corriente deshabilitados por un esquema incompleto.",
-        err,
-      );
-      if (
-        err?.code === "COMPANY_OPENING_BALANCE_IMPORT_FAILED"
-        || err?.code === "CURRENT_ACCOUNT_REALLOCATION_FAILED"
-      ) {
-        logger.error("[startup] La importación obligatoria de saldos falló; se detiene el proceso sin servir la aplicación.");
-        process.exit(1);
-      }
+      // Un error acá (migraciones, esquema de gastos de proveedor, esquema
+      // preventivo de habitaciones, o cache de permisos) nunca debe tumbar
+      // el proceso entero — eso deja TODO el hotel sin sistema por una falla
+      // que, en la práctica, suele afectar a una sola función puntual. Se
+      // loguea y la app sigue levantando con lo que sí pudo inicializarse.
+      logger.error("[startup] Falló un paso de inicialización — la aplicación sigue levantando igual.", err);
       return;
     }
     startupReady = true;
