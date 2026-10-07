@@ -65,6 +65,10 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
     );
     const { verifyFinancialSchema } = await import("../migrate");
     expect((await verifyFinancialSchema()).ready).toBe(true);
+    // Match server/index.ts: migrations run in a separate CI process, so
+    // this API process must load its own permission snapshot before serving.
+    const { loadRolePermissionsCache } = await import("../permissions");
+    await loadRolePermissionsCache();
     const app = express();
     app.use(express.json());
     setupAuth(app);
