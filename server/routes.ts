@@ -1,3 +1,4 @@
+import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import path from "path";
@@ -3158,7 +3159,7 @@ export async function registerRoutes(
         });
         return res.status(201).json(result.rows[0]);
       }
-      const body = normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante);
+      const body = applyPurchaseDiscount(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante));
       if (isSupplierPayableDocument(body.tipoComprobante) && hasPurchaseRetentions(body)) {
         return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
       }
@@ -3281,7 +3282,7 @@ export async function registerRoutes(
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
           percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
           retencion_suss, retencion_municipal, monotributo_comp_bc,
-          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente, descuento
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
@@ -3292,7 +3293,7 @@ export async function registerRoutes(
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
           ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null},
-          ${estado === "pendiente" ? montoTotal : 0}
+          ${estado === "pendiente" ? montoTotal : 0}, ${body.descuento?JSON.stringify(body.descuento):null}::jsonb
         )
         RETURNING *
       `);
@@ -3405,7 +3406,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const existing = await db.execute(sql`
-        SELECT estado, tipo_comprobante, retencion_iibb AS "retencionIibb",
+        SELECT estado, tipo_comprobante, descuento, retencion_iibb AS "retencionIibb",
           retencion_ganancias AS "retencionGanancias", retencion_iva AS "retencionIva",
           retencion_suss AS "retencionSuss", retencion_municipal AS "retencionMunicipal"
         FROM purchase_invoices WHERE id = ${id}
@@ -3415,7 +3416,8 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
-      const body = normalizeReceivedRetentionAmounts(req.body, tipoComprobante);
+      if((existing.rows[0] as any).descuento && req.body.descuentoTipo===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar o modificar el descuento de este comprobante.'});
+      const body = applyPurchaseDiscount({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante});
       // Las correcciones de comprobantes históricos conservan sus retenciones;
       // uno que nunca las tuvo no puede incorporarlas desde este formulario.
       if (isSupplierPayableDocument(tipoComprobante) &&
@@ -3440,6 +3442,9 @@ export async function registerRoutes(
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
       const updatedInvoice = await db.transaction(async (tx) => {
+        const locked=(await tx.execute(sql`SELECT estado,descuento FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
+        if(!locked||locked.estado!=='pendiente')throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
+        if(locked.descuento&&req.body.descuentoTipo===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el descuento del comprobante'),{statusCode:409});
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET
             monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
@@ -3452,8 +3457,11 @@ export async function registerRoutes(
             retencion_iibb = ${n("retencionIibb")}, retencion_ganancias = ${n("retencionGanancias")},
             retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
             retencion_municipal = ${n("retencionMunicipal")},
-            monto_total = ${montoTotal}, cuenta_contable_id = ${body.cuentaContableId||null},
+            monto_total = ${montoTotal},
+            saldo_pendiente = CASE WHEN ${isSupplierPayableDocument(tipoComprobante)} THEN ${montoTotal} ELSE saldo_pendiente END,
+            cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
+            descuento = ${body.descuento?JSON.stringify(body.descuento):null}::jsonb,
             subtipo_retencion = ${body.subtipoRetencion||null},
             updated_at = NOW()
           WHERE id = ${id}

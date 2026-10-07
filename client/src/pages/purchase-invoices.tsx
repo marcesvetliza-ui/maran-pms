@@ -1,3 +1,4 @@
+import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -59,6 +60,7 @@ interface Invoice {
   fechaEmision: string;
   periodo?: string;
   condicionPago: string;
+  descuento?: PurchaseDiscount | null;
   montoNeto: string;
   montoIva21: string;
   montoIva105: string;
@@ -256,6 +258,7 @@ function camelInvoice(r: any): Invoice {
     periodo: r.periodo,
     condicionPago: r.condicion_pago,
     ...mapPurchaseInvoiceAmountFields(r),
+    descuento: r.descuento,
     estado: r.estado,
     centroCosto: r.centro_costo,
     observaciones: r.observaciones,
@@ -303,6 +306,10 @@ const emptyForm = () => ({
   impuestosInternos: "",
   ley25413: "",
   cuentaContableId: "",
+  descuentoDescripcion: "",
+  descuentoTipo: "importe",
+  descuentoPorcentaje: "",
+  descuentoImporte: "",
   observaciones: "",
   subtipoRetencion: "",
 });
@@ -500,7 +507,7 @@ export function InvoiceDialog({
 
   const isEditing = !!editingInvoice;
 
-  const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+  const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v, ...(k==="tipoComprobante"?{descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:""}:{}) }));
 
   // Si se abandona una liquidación antes de guardar, sus retenciones no deben
   // quedar ocultas en otro tipo de comprobante y alterar el total enviado.
@@ -546,8 +553,13 @@ export function InvoiceDialog({
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
         observaciones: editingInvoice.observaciones || "",
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
+        ...(editingInvoice.descuento?.originales||{}),
+        descuentoDescripcion: editingInvoice.descuento?.descripcion||'',
+        descuentoTipo: editingInvoice.descuento?.tipo||'importe',
+        descuentoPorcentaje: editingInvoice.descuento?.porcentaje||'',
+        descuentoImporte: editingInvoice.descuento?.importe||'',
       });
-      setNetoLines(linesFromInvoice(editingInvoice));
+      setNetoLines(linesFromInvoice(restorePurchaseDiscount(editingInvoice)));
       setAutomaticNetos(false);
       setStep(1);
     } else if (open && !editingInvoice) {
@@ -660,9 +672,9 @@ export function InvoiceDialog({
     }
   }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
-  const total = useMemo(() => {
-    return calculatePurchaseInvoiceTotal(form);
-  }, [form]);
+  const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseDiscount(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
+  const total=discountPreview.total;
+
 
   // El desglose "IVA desagregado por alícuota" solo aporta algo cuando hay
   // más de una alícuota en juego — con una sola, repite exactamente lo que
@@ -834,12 +846,14 @@ export function InvoiceDialog({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       resetDialog();
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       toast({ title: "Comprobante actualizado correctamente" });
     },
     onError: (e: any) => toast({ title: "Error al actualizar", description: e.message, variant: "destructive" }),
   });
 
   const handleSubmit = () => {
+    if(discountPreview.error){toast({title:discountPreview.error,variant:"destructive"});return;}
     if (form.tipoComprobante === "RETENCION" && !form.subtipoRetencion) {
       toast({ title: "Seleccioná el tipo de retención recibida", variant: "destructive" });
       setStep(0);
@@ -891,6 +905,9 @@ export function InvoiceDialog({
         : [],
     });
   };
+
+  const discountDetails=('descuento' in discountPreview.invoice?discountPreview.invoice.descuento:null) as PurchaseDiscount|null;
+  const discountSection=['FACT-A','FACT-B','FACT-C'].includes(form.tipoComprobante)?<section className="col-span-2 space-y-3 rounded-xl border bg-muted/20 p-4"><div><h3 className="font-semibold">Descuentos</h3><p className="text-xs text-muted-foreground">{form.tipoComprobante==='FACT-B'?'Ingresá el descuento final informado por el proveedor.':'Se aplica sobre el subtotal antes de impuestos y percepciones; el IVA de Factura A se ajusta proporcionalmente.'} Los costos de los artículos no cambian.</p></div><div className="grid gap-3 sm:grid-cols-3"><label className="text-sm sm:col-span-3">Descripción<Input aria-label="Descripción del descuento" value={form.descuentoDescripcion} onChange={e=>f('descuentoDescripcion',e.target.value)} placeholder="Ej.: Bonificación comercial"/></label>{form.tipoComprobante!=='FACT-B'&&<label className="text-sm">Calcular por<select aria-label="Tipo de descuento" className="h-9 w-full rounded-md border bg-background px-3" value={form.descuentoTipo} onChange={e=>f('descuentoTipo',e.target.value)}><option value="importe">Importe</option><option value="porcentaje">Porcentaje</option></select></label>}{form.tipoComprobante!=='FACT-B'&&form.descuentoTipo==='porcentaje'&&<label className="text-sm">Porcentaje<Input aria-label="Porcentaje de descuento" type="number" min="0" max="100" step="0.01" value={form.descuentoPorcentaje} onChange={e=>f('descuentoPorcentaje',e.target.value)}/></label>}<label className="text-sm">Importe descontado<Input aria-label="Importe de descuento" type="number" min="0" step="0.01" value={form.descuentoTipo==='porcentaje'?(discountDetails?.importe||''):form.descuentoImporte} onChange={e=>{f('descuentoTipo','importe');f('descuentoPorcentaje','');f('descuentoImporte',e.target.value);}}/></label></div>{discountPreview.error&&<p role="alert" className="text-sm text-destructive">{discountPreview.error}</p>}{discountDetails&&<div className="space-y-1 rounded-lg bg-background p-3 text-sm"><p>{form.tipoComprobante==='FACT-B'?'Importe previo al descuento':'Subtotal antes de impuestos'}: <strong>${fmt(discountDetails.base)}</strong></p><p>Descuento: <strong>−${fmt(discountDetails.importe)}</strong></p><p>{form.tipoComprobante==='FACT-B'?'Importe después del descuento':'Subtotal después del descuento'}: <strong>${fmt(Number(discountDetails.base)-Number(discountDetails.importe))}</strong></p>{form.tipoComprobante==='FACT-A'&&<p>IVA después del descuento: <strong>${fmt(['montoIva21','montoIva105','montoIva27','montoIva5','montoIva25'].reduce((n,k)=>n+$n((discountPreview.invoice as any)[k]),0))}</strong></p>}</div>}</section>:null;
 
   const steps = isEditing
     ? ["Encabezado", "Montos", "Retenciones", "Clasificación"]
@@ -967,7 +984,7 @@ export function InvoiceDialog({
                       setForm((p) => ({
                         ...p,
                         ...clearCardRetentions(p, v),
-                        tipoComprobante: v,
+                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
@@ -978,7 +995,7 @@ export function InvoiceDialog({
                       // cargado antes de cambiar de tipo para no enviarlo oculto.
                       setForm((p) => ({
                         ...p,
-                        tipoComprobante: v,
+                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         montoNeto: "",
                         montoExento: "",
                         montoNoGravado: "",
@@ -1003,7 +1020,7 @@ export function InvoiceDialog({
                         { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
                       ]);
                     } else {
-                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -1453,6 +1470,7 @@ export function InvoiceDialog({
               {historicalRetentionsNote}
                 </>
               )}
+                {discountSection}
                 <div className="col-span-2">
                   <Label>Observaciones</Label>
                   <Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} data-testid="input-observaciones" />
@@ -1498,14 +1516,14 @@ export function InvoiceDialog({
                       setForm((p) => ({
                         ...p,
                         ...clearCardRetentions(p, v),
-                        tipoComprobante: v,
+                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
                         ...ALL_IVA_FIELDS,
                       }));
                     } else {
-                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v }));
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -1848,6 +1866,7 @@ export function InvoiceDialog({
                       : 'Esta es la cuenta que determina el departamento en el reporte "Costos por Departamento". Se sugiere sola según la categoría de los artículos cargados.'}
                   </p>
                 </div>
+                {discountSection}
                 <div className="col-span-2">
                   <Label>Observaciones</Label>
                   <Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} data-testid="input-observaciones" />
@@ -2069,6 +2088,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ["Cuenta contable", account ? `${account.codigo} — ${account.nombre}` : "—"],
   ];
   const montos: [string, string][] = [
+    ...(invoice.descuento?[["Descuento — "+invoice.descuento.descripcion,"−"+fmt2(invoice.descuento.importe)] as [string,string]]:[]),
     [isRetencion ? "Importe final" : "Monto Neto (gravado)", fmt2(invoice.montoNeto)],
     ["IVA 21%", fmt2(invoice.montoIva21)],
     ["IVA 10.5%", fmt2(invoice.montoIva105)],

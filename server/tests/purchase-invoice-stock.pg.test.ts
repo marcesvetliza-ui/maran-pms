@@ -15,6 +15,7 @@ const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
 let server: http.Server;
 let baseUrl: string;
+let vatAccountCreated: number | undefined;
 
 async function request(method: string, path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -27,6 +28,7 @@ async function request(method: string, path: string, body?: unknown) {
 
 suite("PostgreSQL real: factura de compra y stock atómicos", () => {
   beforeAll(async () => {
+    if (pool) vatAccountCreated=(await pool.query("INSERT INTO accounting_accounts(codigo,nombre,tipo) VALUES('1.1.4.07.01','IVA crédito prueba','activo') ON CONFLICT(codigo) DO NOTHING RETURNING id")).rows[0]?.id;
     const { registerRoutes } = await import("../routes");
     const app = express();
     app.use(express.json());
@@ -40,7 +42,25 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (pool && vatAccountCreated) await pool.query("DELETE FROM accounting_accounts WHERE id=$1",[vatAccountCreated]);
     await pool?.end();
+  });
+
+  it.each(["FACT-A","FACT-B","FACT-C"])("descuento %s conserva trazabilidad al editar y reduce deuda y asiento",async tipo=>{
+    if(!pool)return;const suffix=randomUUID();const supplier=(await pool.query("INSERT INTO accounting_suppliers(razon_social,cuit,condicion_iva) VALUES($1,$2,'responsable_inscripto') RETURNING id",['Descuento '+suffix,'30'+suffix.replaceAll('-','').slice(0,9)])).rows[0].id;
+    let invoiceId:number|undefined;
+    try{
+      const expenseAccount=(await pool.query("SELECT id FROM accounting_accounts WHERE codigo='2.1.1.01'")).rows[0].id;
+      const input={cuentaContableId:expenseAccount,tipoComprobante:tipo,supplierId:supplier,numeroComprobante:'DESC-'+suffix,fechaEmision:'2026-10-07',montoNeto:tipo==='FACT-B'?'121':'100',montoIva21:tipo==='FACT-A'?'21':'0',descuentoDescripcion:'Bonificación',descuentoTipo:tipo==='FACT-B'?'importe':'porcentaje',descuentoImporte:tipo==='FACT-B'?'12.10':'',descuentoPorcentaje:tipo==='FACT-B'?'':'10'};
+      const created=await request('POST','/api/purchase-invoices',input);expect(created.status).toBe(201);invoiceId=created.body.id;expect(Number(created.body.monto_total)).toBe(tipo==='FACT-C'?90:108.9);expect(created.body.descuento.originales.montoNeto).toBe(tipo==='FACT-B'?'121.00':'100.00');
+      const same=await request('PATCH',`/api/purchase-invoices/${invoiceId}`,input);expect(same.status).toBe(200);expect(same.body.monto_total).toBe(created.body.monto_total);
+      const updated=await request('PATCH',`/api/purchase-invoices/${invoiceId}`,{...input,descuentoImporte:tipo==='FACT-B'?'24.20':'',descuentoPorcentaje:tipo==='FACT-B'?'':'20'});expect(updated.status).toBe(200);const total=tipo==='FACT-C'?80:96.8;expect(Number(updated.body.monto_total)).toBe(total);expect(Number(updated.body.saldo_pendiente)).toBe(total);
+      const ledger=(await pool.query("SELECT COALESCE(sum(debe),0) AS debe,COALESCE(sum(haber),0) AS haber FROM accounting_entry_lines WHERE entry_id=$1",[updated.body.asiento_id])).rows[0];expect(Number(ledger.debe)).toBe(total);expect(Number(ledger.haber)).toBe(total);
+      const detail=await request('GET',`/api/purchase-invoices/${invoiceId}`);expect(detail.body.descuento.importe).toBe(tipo==='FACT-B'?'24.20':'20.00');
+    }finally{
+      if(invoiceId){await pool.query("DELETE FROM accounting_entry_lines WHERE entry_id IN (SELECT id FROM accounting_entries WHERE origen_tipo='purchase_invoice' AND origen_id=$1)",[invoiceId]);await pool.query("DELETE FROM accounting_entries WHERE origen_tipo='purchase_invoice' AND origen_id=$1",[invoiceId]);await pool.query("DELETE FROM purchase_invoices WHERE id=$1",[invoiceId]);}
+      await pool.query("DELETE FROM accounting_suppliers WHERE id=$1",[supplier]);
+    }
   });
 
   it("carga una factura como deuda aunque un cliente antiguo envíe contado, y la cancela recién con una OP", async () => {
@@ -138,10 +158,15 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       expect(Number(stock.rows[0].cost_price)).toBe(9);
 
       const created = await request("POST", "/api/purchase-invoices", {
-        ...payload, stockItems: [payload.stockItems[0]],
+        ...payload, montoIva21:"21", descuentoDescripcion:"Bonificación", descuentoTipo:"porcentaje", descuentoPorcentaje:"10", stockItems: [payload.stockItems[0]],
       });
       expect(created.status).toBe(201);
       expect(created.body.asiento_id).toBeTruthy();
+      expect(created.body).toMatchObject({monto_neto:"90.00",monto_iva21:"18.90",monto_total:"108.90",saldo_pendiente:"108.90",descuento:{importe:"10.00",base:"100.00",descripcion:"Bonificación"}});
+      expect(Number((await pool.query("SELECT cost_price FROM inventory_items WHERE id=$1",[itemId])).rows[0].cost_price)).toBe(15);
+      const payable=await pool.query("SELECT haber FROM accounting_entry_lines l JOIN accounting_accounts a ON a.id=l.account_id WHERE l.entry_id=$1 AND a.codigo='2.1.1.01'",[created.body.asiento_id]);expect(Number(payable.rows[0].haber)).toBe(108.9);
+      expect((await request("PATCH",`/api/purchase-invoices/${created.body.id}`,{montoNeto:"100"})).status).toBe(409);
+      expect((await request("PATCH",`/api/purchase-invoices/${created.body.id}`,{montoNeto:"100",descuentoTipo:"importe",descuentoImporte:"101",descuentoDescripcion:"Excesivo"})).status).toBe(400);
       const lines = await pool.query("SELECT line_number, quantity, unit_price, vat_rate, line_total FROM purchase_invoice_lines WHERE invoice_id = $1", [created.body.id]);
       expect(lines.rows).toMatchObject([{ line_number: 1, quantity: "2.000", unit_price: "15.00", vat_rate: "21", line_total: "30.00" }]);
       const detail = await request("GET", `/api/purchase-invoices/${created.body.id}`);

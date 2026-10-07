@@ -2781,6 +2781,7 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   // ver server/paymentOrder.ts.
   saldoPendiente: numeric("saldo_pendiente", { precision: 14, scale: 2 }).notNull().default("0"),
   asientoId: integer("asiento_id"),
+  descuento: jsonb("descuento"),
   observaciones: text("observaciones"),
   subtipoRetencion: text("subtipo_retencion"),
   createdAt: timestamp("created_at").defaultNow(),
