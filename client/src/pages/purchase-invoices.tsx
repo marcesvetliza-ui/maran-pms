@@ -2138,7 +2138,46 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               </div>
             </div>
           </div>
-          {!!detail?.articleLines?.length && <div className="space-y-2"><h3 className="font-semibold">Ingreso de artículos</h3>{detail.articleLines.map((line:any)=><div key={line.id} className="border rounded p-2 text-sm"><p>{line.item_name}</p><p>Comprobante: {Number(line.quantity).toLocaleString('es-AR')} {line.input_unit || ''} · Costo: {fmt2(line.unit_price)}</p>{line.stock_quantity!==null && <p>Ingreso al stock: {Number(line.stock_quantity).toLocaleString('es-AR')} {line.stock_unit}</p>}<p className="text-muted-foreground">Depósito: {line.warehouse_name || line.warehouse_id || 'No registrado'}</p></div>)}</div>}
+          {!!detail?.articleLines?.length && (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold">Productos comprados</h3>
+                <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+                  {detail.articleLines.length} {detail.articleLines.length === 1 ? 'artículo' : 'artículos'}
+                </span>
+              </div>
+              {detail.articleLines.map((line: any) => {
+                const quantity = Number(line.quantity).toLocaleString('es-AR', { maximumFractionDigits: 3 });
+                const unit = line.input_unit || 'Unidad no registrada';
+                const converted = line.stock_quantity != null && (
+                  Number(line.stock_quantity) !== Number(line.quantity) || line.stock_unit !== line.input_unit
+                );
+                return (
+                  <article key={line.id} className="overflow-hidden rounded-xl border bg-muted/10">
+                    <div className="flex flex-wrap items-start justify-between gap-2 border-b bg-muted/30 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold">{line.item_name}</p>
+                        {line.item_sku && <p className="mt-0.5 text-xs text-muted-foreground">SKU: {line.item_sku}</p>}
+                      </div>
+                      {line.vat_rate != null && line.vat_rate !== '' && (
+                        <span className="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">IVA {line.vat_rate}%</span>
+                      )}
+                    </div>
+                    <dl className="grid grid-cols-1 gap-3 px-4 py-3 min-[480px]:grid-cols-3">
+                      <div><dt className="text-xs text-muted-foreground">Cantidad comprada</dt><dd className="mt-1 text-sm font-medium tabular-nums">{quantity} {unit}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Precio unitario</dt><dd className="mt-1 text-sm font-medium tabular-nums">{fmt2(line.unit_price)}</dd></div>
+                      <div><dt className="text-xs text-muted-foreground">Subtotal del artículo</dt><dd className="mt-1 text-sm font-semibold tabular-nums">{fmt2(line.line_total)}</dd></div>
+                    </dl>
+                    <div className="space-y-1 border-t px-4 py-2.5 text-xs text-muted-foreground">
+                      <p>Depósito de ingreso: <span className="font-medium text-foreground">{line.warehouse_name || 'No registrado'}</span></p>
+                      {converted && <p>Ingreso al stock: <span className="font-medium text-foreground">{Number(line.stock_quantity).toLocaleString('es-AR', { maximumFractionDigits: 3 })} {line.stock_unit || 'Unidad no registrada'}</span></p>}
+                    </div>
+                  </article>
+                );
+              })}
+              {invoice.descuento && <p className="text-xs text-muted-foreground">El descuento general se muestra en el desglose del comprobante. Los precios de estos artículos se conservan sin ese descuento.</p>}
+            </section>
+          )}
           {invoice.estado === "pagado" && (
             <>
               <Separator />
