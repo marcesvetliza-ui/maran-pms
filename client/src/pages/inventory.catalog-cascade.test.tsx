@@ -14,9 +14,22 @@ it('encadena área y agrupamiento y limpia la categoría al cambiar de área',as
  expect(screen.queryByRole('option',{name:'Sub Restaurant'})).toBeNull();expect(screen.queryByRole('option',{name:'Inactiva'})).toBeNull();
  await user.click(screen.getByRole('option',{name:'Sub SPA'}));
  await user.click(screen.getByTestId('select-item-area'));await user.click(screen.getByRole('option',{name:'Restaurante'}));
- expect(screen.getByTestId('select-category')).toHaveTextContent('Seleccionar categoría');
+ expect(screen.getByTestId('select-category')).toHaveTextContent('Seleccionar subagrupamiento');
  expect(screen.getByTestId('select-item-group')).toHaveTextContent('Todos los agrupamientos');
  await user.click(screen.getByTestId('select-category'));await user.click(screen.getByRole('option',{name:'Sub Restaurant'}));
  await user.type(screen.getByTestId('input-item-name'),'Artículo');await user.click(screen.getByTestId('button-save-item'));
  expect(submit).toHaveBeenCalledWith(expect.objectContaining({categoryId:'r'}));
+});
+
+it('ofrece Eventos y conserva la clave de Comunicación al asignar un subagrupamiento',async()=>{
+ const user=userEvent.setup();const submit=vi.fn();
+ const categories=[{id:'legacy-marketing',name:'Varios comunicación',area:'marketing',isGroup:false,isActive:'true'}];
+ render(<QueryClientProvider client={new QueryClient()}><NewItemForm categories={categories as any} brands={[]} suppliers={[]} existingItems={[]} onSubmit={submit} isPending={false} onCancel={()=>{}}/></QueryClientProvider>);
+ await user.click(screen.getByTestId('select-item-area'));
+ expect(screen.getByRole('option',{name:'Eventos'})).toBeVisible();
+ expect(screen.queryByRole('option',{name:'Marketing'})).toBeNull();
+ await user.click(screen.getByRole('option',{name:'Comunicación'}));
+ await user.click(screen.getByTestId('select-category'));await user.click(screen.getByRole('option',{name:'Varios comunicación'}));
+ await user.type(screen.getByTestId('input-item-name'),'Artículo comunicación');await user.click(screen.getByTestId('button-save-item'));
+ expect(submit).toHaveBeenCalledWith(expect.objectContaining({categoryId:'legacy-marketing'}));
 });

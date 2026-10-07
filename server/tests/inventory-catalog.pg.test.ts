@@ -12,6 +12,8 @@ run('Catálogo: relaciones y conservación del historial',()=>{
   const rollback=new Error('rollback fixture');
   await expect(withDatabaseTransaction(async()=>{
    await catalogLock();
+   await expect(validateCategory({name:'Eventos',area:'events'})).resolves.toMatchObject({area:'events'});
+   await expect(validateCategory({name:'Comunicación',area:'marketing'})).resolves.toMatchObject({area:'marketing'});
    await db.execute(sql`INSERT INTO item_categories(id,name,area,is_group) VALUES(${group},'Grupo','spa',true)`);
    await db.execute(sql`INSERT INTO item_categories(id,name,area,parent_id) VALUES(${leaf},'Categoría','spa',${group})`);
    await db.execute(sql`INSERT INTO brands(id,name,is_active) VALUES(${brand},'Marca','false')`);
@@ -25,7 +27,7 @@ run('Catálogo: relaciones y conservación del historial',()=>{
    await expect(validateItemClassification({categoryId:group})).rejects.toThrow(/no un agrupamiento/);
    await expect(validateItemClassification({brandId:brand})).rejects.toThrow(/marca activa/);
    await db.execute(sql`UPDATE item_categories SET is_active='false' WHERE id=${leaf}`);
-   await expect(validateItemClassification({categoryId:leaf})).rejects.toThrow(/activa/);
+   await expect(validateItemClassification({categoryId:leaf})).rejects.toThrow(/activo/);
    await expect(validateItemClassification({categoryId:leaf,brandId:brand},item)).resolves.toBeUndefined();
    await expect(validateCategory({name:'Renombrada'},leaf)).resolves.toMatchObject({name:'Renombrada'});
    throw rollback;

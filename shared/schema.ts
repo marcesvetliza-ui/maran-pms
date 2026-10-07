@@ -1,3 +1,4 @@
+import type {InventoryAreaKey} from "./inventoryAreas";
 import type { LostFoundShippingDetails } from "./lostFoundDelivery";
 import { sql } from "drizzle-orm";
 import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index, check, unique } from "drizzle-orm/pg-core";
@@ -1537,7 +1538,7 @@ export type ProductionRun = typeof productionRuns.$inferSelect;
 // ==================== INVENTORY MODULE ====================
 
 // Item Categories (for inventory)
-export type InventoryArea = "general" | "spa" | "restaurant" | "housekeeping" | "maintenance" | "admin" | "marketing" | "hotel";
+export type InventoryArea = InventoryAreaKey;
 
 export const itemCategories = pgTable("item_categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -1,3 +1,4 @@
+import {INVENTORY_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
 import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
@@ -1058,9 +1059,9 @@ export default function InventoryPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
       setIsCategoryDialogOpen(false);
-      toast({ title: editingCategory ? "Categoría actualizada" : "Categoría creada" });
+      toast({ title: editingCategory ? "Subagrupamiento actualizado" : "Subagrupamiento creado" });
     },
-    onError: (e: any) => toast({ title: "Error al guardar categoría", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Error al guardar subagrupamiento", description: e.message, variant: "destructive" }),
   });
 
   const saveGroupMutation = useMutation({
@@ -1086,7 +1087,7 @@ export default function InventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/categories"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      toast({ title: "Categoría eliminada" });
+      toast({ title: "Subagrupamiento eliminado" });
     },
     onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
   });
@@ -1262,7 +1263,7 @@ export default function InventoryPage() {
           </TabsTrigger>
           <TabsTrigger value="categorias" data-testid="tab-categorias">
             <Tag className="h-4 w-4 mr-2" />
-            Categorías
+            Subagrupamientos
           </TabsTrigger>
           <TabsTrigger value="marcas" data-testid="tab-marcas">
             <Tag className="h-4 w-4 mr-2" />
@@ -1321,10 +1322,10 @@ export default function InventoryPage() {
             )}
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
-                <SelectValue placeholder="Todas las categorías" />
+                <SelectValue placeholder="Todos los subagrupamientos" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas las categorías</SelectItem>
+                <SelectItem value="all">Todos los subagrupamientos</SelectItem>
                 {[...categoriesForFilter]
                   .filter(cat => cat.id)
                   .sort((a, b) => a.name.localeCompare(b.name, "es"))
@@ -1348,7 +1349,8 @@ export default function InventoryPage() {
                 <SelectItem value="hotel">Hotel</SelectItem>
                 <SelectItem value="maintenance">Mantenimiento</SelectItem>
                 <SelectItem value="admin">Administración</SelectItem>
-                <SelectItem value="marketing">Marketing</SelectItem>
+                <SelectItem value="events">Eventos</SelectItem>
+                  <SelectItem value="marketing">Comunicación</SelectItem>
               </SelectContent>
             </Select>
             <Select value={kindFilter} onValueChange={setKindFilter}>
@@ -1384,7 +1386,7 @@ export default function InventoryPage() {
                 <thead className="bg-muted/50">
                   <tr className="text-left">
                     <th className="p-3 font-medium w-[28%]">Articulo</th>
-                    <th className="p-3 font-medium w-[23%]">Categoria</th>
+                    <th className="p-3 font-medium w-[23%]">Subagrupamiento</th>
                     <th className="p-3 font-medium text-right">Stock</th>
                     <th className="p-3 font-medium text-right">Min</th>
                     <th className="p-3 font-medium text-right">Costo</th><th className="p-2 w-32"><span className="sr-only">Detalle</span></th>
@@ -1406,7 +1408,7 @@ export default function InventoryPage() {
                         <div>{item.category?.name || "-"}</div>
                         <div className="flex flex-wrap gap-1 mt-0.5">
                           {item.category?.area && item.category.area !== "general" && (
-                            <Badge variant="secondary" className="text-[10px]">{(item.category as any).area.toUpperCase()}</Badge>
+                            <Badge variant="secondary" className="text-[10px]">{inventoryAreaLabel((item.category as any).area).toUpperCase()}</Badge>
                           )}
                           {(item as any).itemKind && (
                             <Badge
@@ -1585,15 +1587,10 @@ export default function InventoryPage() {
 
         <TabsContent value="categorias" className="space-y-6">
           {(() => {
-            const areaLabels: Record<string, string> = {
-              general: "General", spa: "SPA", restaurant: "Restaurante",
-              housekeeping: "Housekeeping", maintenance: "Mantenimiento",
-              admin: "Administración", marketing: "Marketing", hotel: "Hotel",
-            };
             const areaColors: Record<string, string> = {
               general: "secondary", spa: "default", restaurant: "destructive",
               housekeeping: "outline", maintenance: "outline",
-              admin: "outline", marketing: "outline", hotel: "outline",
+              admin: "outline", events:"outline", marketing: "outline", hotel: "outline",
             };
             const skuPrefix = (area: string) =>
               area === "spa" ? "SPA" : area === "restaurant" ? "RST" : area === "housekeeping" ? "HSK" :
@@ -1621,7 +1618,7 @@ export default function InventoryPage() {
                         <Button permission="catalog" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => deleteCategoryMutation.mutate(cat.id)}
                           disabled={!canDelete}
-                          title={!canDelete ? (isLeaf ? "Tiene artículos asociados" : "Tiene categorías asociadas") : ""}
+                          title={!canDelete ? (isLeaf ? "Tiene artículos asociados" : "Tiene subagrupamientos asociadas") : ""}
                           data-testid={`btn-delete-cat-${cat.id}`}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -1630,14 +1627,14 @@ export default function InventoryPage() {
                   </CardHeader>
                   <CardContent className="text-sm space-y-1 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant={areaColors[cat.area] as any} className="text-xs">{areaLabels[cat.area] ?? cat.area}</Badge>
+                      <Badge variant={areaColors[cat.area] as any} className="text-xs">{inventoryAreaLabel(cat.area)}</Badge>
                       {isLeaf && <span className="text-muted-foreground text-xs">SKU: {skuPrefix(cat.area)}-####</span>}
                     </div>
                     {cat.description && <p className="text-muted-foreground text-xs">{cat.description}</p>}
                     <p className="text-xs text-muted-foreground">
                       {isLeaf
                         ? `${itemCount} artículo${itemCount !== 1 ? "s" : ""}`
-                        : `${childCount} categoría${childCount !== 1 ? "s" : ""}`}
+                        : `${childCount} subagrupamiento${childCount !== 1 ? "s" : ""}`}
                     </p>
                   </CardContent>
                 </Card>
@@ -1673,7 +1670,7 @@ export default function InventoryPage() {
                   {groups.length === 0 ? (
                     <div className="border rounded-lg p-6 text-center text-sm text-muted-foreground bg-muted/20">
                       <Layers className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      <p>Sin agrupamientos todavía. Creá uno para organizar tus categorías.</p>
+                      <p>Sin agrupamientos todavía. Creá uno para organizar tus subagrupamientos.</p>
                     </div>
                   ) : (
                     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -1682,27 +1679,27 @@ export default function InventoryPage() {
                   )}
                 </div>
 
-                {/* ── Categorías ─────────────────────────────────── */}
+                {/* ── Subagrupamientos ─────────────────────────────────── */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Tag className="h-4 w-4 text-muted-foreground" />
-                      <h3 className="font-semibold text-sm">Categorías</h3>
+                      <h3 className="font-semibold text-sm">Subagrupamientos</h3>
                       <Badge variant="secondary" className="text-xs">{leafCats.length}</Badge>
                     </div>
                     <Button permission="catalog" size="sm" onClick={() => openCategoryDialog()} data-testid="btn-new-category">
-                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Nueva Categoría
+                      <Plus className="h-3.5 w-3.5 mr-1.5" /> Nuevo Subagrupamiento
                     </Button>
                   </div>
 
                   {leafCats.length === 0 ? (
                     <div className="border rounded-lg p-6 text-center text-sm text-muted-foreground bg-muted/20">
                       <Tag className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                      <p>Sin categorías todavía.</p>
+                      <p>Sin subagrupamientos todavía.</p>
                     </div>
                   ) : (
                     <div className="space-y-5">
-                      {/* Categorías agrupadas bajo su agrupamiento */}
+                      {/* Subagrupamientos agrupados bajo su agrupamiento */}
                       {groups.map(g => {
                         const children = catsByGroup[g.id] || [];
                         if (children.length === 0) return null;
@@ -1718,7 +1715,7 @@ export default function InventoryPage() {
                           </div>
                         );
                       })}
-                      {/* Categorías sin agrupamiento */}
+                      {/* Subagrupamientos sin agrupamiento */}
                       {catsWithoutGroup.length > 0 && (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
@@ -2024,7 +2021,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <TableHeader>
                       <TableRow>
                         <TableHead>Artículo</TableHead>
-                        <TableHead>Categoría</TableHead>
+                        <TableHead>Subagrupamiento</TableHead>
                         <TableHead>SKU</TableHead>
                         <TableHead className="text-right">Stock</TableHead>
                         <TableHead>Unidad</TableHead>
@@ -2159,7 +2156,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <div className="flex items-center gap-2 flex-1">
                     <h2 className="font-semibold">
                       Toma del {new Date((selectedCount.date || "") + "T12:00:00").toLocaleDateString("es-AR")}
-                      {selectedCount.area ? ` — ${selectedCount.area}` : " — Todos los artículos"}
+                      {selectedCount.area ? ` — ${inventoryAreaLabel(selectedCount.area)}` : " — Todos los artículos"}
                     </h2>
                     <Badge variant={selectedCount.status === "cerrado" ? "secondary" : "default"}>
                       {selectedCount.status === "cerrado" ? "Cerrado" : "Borrador"}
@@ -2413,7 +2410,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
+                  <SelectItem value="events">Eventos</SelectItem>
+                  <SelectItem value="marketing">Comunicación</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2602,11 +2600,11 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
         </DialogContent>
       </Dialog>
 
-      {/* ── Diálogo: Nueva / Editar Categoría ─────────────── */}
+      {/* ── Diálogo: Nuevo / Editar Subagrupamiento ─────────────── */}
       <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{editingCategory ? "Editar Categoría" : "Nueva Categoría"}</DialogTitle>
+            <DialogTitle>{editingCategory ? "Editar Subagrupamiento" : "Nuevo Subagrupamiento"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
@@ -2632,7 +2630,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="hotel">Hotel (HTL)</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento (MNT)</SelectItem>
                   <SelectItem value="admin">Administración (ADM)</SelectItem>
-                  <SelectItem value="marketing">Marketing (MKT)</SelectItem>
+                  <SelectItem value="events">Eventos</SelectItem>
+                  <SelectItem value="marketing">Comunicación (MKT)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2679,7 +2678,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-1">
-                Se sugiere automáticamente al cargar una compra con artículos de esta categoría.
+                Se sugiere automáticamente al cargar una compra con artículos de este subagrupamiento.
               </p>
             </div>
           </div>
@@ -2737,7 +2736,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
+                  <SelectItem value="events">Eventos</SelectItem>
+                  <SelectItem value="marketing">Comunicación</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2841,7 +2841,7 @@ export function NewItemForm({
           placeholder="Nombre del artículo"
           data-testid="input-item-name"
         />
-        <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área de la categoría (ej: SPA-0001, RST-0042).</p>
+        <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área del subagrupamiento (ej: SPA-0001, RST-0042).</p>
         {duplicateMatches.length > 0 && (
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-2 text-xs text-amber-800 dark:text-amber-400" data-testid="warning-duplicate-item-name">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -2857,17 +2857,17 @@ export function NewItemForm({
           <Label>Área</Label>
           <Select value={newItemArea} onValueChange={v => { setNewItemArea(v); setNewItemGroup("all"); setCategoryId(""); }}>
             <SelectTrigger data-testid="select-item-area"><SelectValue /></SelectTrigger>
-            <SelectContent>{["general","spa","restaurant","housekeeping","maintenance","admin","marketing","hotel"].map(a => <SelectItem key={a} value={a}>{({general:"General",spa:"SPA",restaurant:"Restaurante",housekeeping:"Housekeeping",maintenance:"Mantenimiento",admin:"Administración",marketing:"Marketing",hotel:"Hotel"} as Record<string,string>)[a]}</SelectItem>)}</SelectContent>
+            <SelectContent>{INVENTORY_AREAS.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent>
           </Select>
           <Label>Agrupamiento</Label>
           <Select value={newItemGroup} onValueChange={v => { setNewItemGroup(v); setCategoryId(""); }}>
             <SelectTrigger data-testid="select-item-group"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">Todos los agrupamientos</SelectItem>{categories.filter(c => c.isGroup && c.area === newItemArea && c.isActive !== "false").map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
-          <Label>Subagrupamiento / categoría</Label>
+          <Label>Subagrupamiento</Label>
           <Select value={categoryId} onValueChange={setCategoryId}>
             <SelectTrigger data-testid="select-category">
-              <SelectValue placeholder="Seleccionar categoría" />
+              <SelectValue placeholder="Seleccionar subagrupamiento" />
             </SelectTrigger>
             <SelectContent>
               {(() => {
