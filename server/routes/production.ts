@@ -1,3 +1,7 @@
+import {savePreparation} from "../productionPreparations";
+import {submitProduction,retryProduction,cancelPendingProduction} from "../productionPending";
+import {db} from "../db";
+import {sql} from "drizzle-orm";
 import {inventoryAccess} from "../inventoryAccess";
 import {requireAuth,requirePermission} from "../auth";
 import type { Express } from "express";
@@ -9,6 +13,8 @@ import {
 
 export function registerProductionRoutes(app: Express) {
   app.use("/api/production", requireAuth, inventoryAccess);
+  app.post('/api/production/preparations',requirePermission('api:inventory:catalog'),async(req,res)=>{try{res.status(201).json(await savePreparation(req.body,undefined,req.user!.id));}catch(e:any){res.status(400).json({error:e.message});}});
+  app.put('/api/production/preparations/:id',requirePermission('api:inventory:catalog'),async(req,res)=>{try{res.json(await savePreparation(req.body,req.params.id,req.user!.id));}catch(e:any){res.status(400).json({error:e.message});}});
   app.get("/api/production/formulas", requireAuth, async (req, res) => {
     try {
       const formulas = await getProducibleFormulas();
@@ -62,7 +68,7 @@ export function registerProductionRoutes(app: Express) {
       const { date, recipeId, outputQuantity, outputWarehouseId, requestId, lines, notes } = req.body;
       if(!requestId)return res.status(400).json({error:"Falta el identificador de la operación; actualizá la página y reintentá."});
       const user = (req as any).user?.fullName || (req as any).user?.username || null;
-      const result = await registerProductionRun({
+      const result = await submitProduction({
         date,
         recipeId,
         outputWarehouseId,
@@ -82,6 +88,9 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
+  app.get('/api/production/pending',async(_req,res)=>{try{res.json((await db.execute(sql`SELECT request_id,payload,error,registered_by,created_at FROM inventory_pending_productions WHERE status='pending' ORDER BY created_at DESC`)).rows);}catch{res.status(500).json({error:'No se pudieron consultar las producciones pendientes'});}});
+  app.post('/api/production/pending/:id/cancel',requirePermission('api:inventory:adjust'),async(req,res)=>{try{res.json(await cancelPendingProduction(req.params.id,req.body.reason,req.user!.id));}catch(e:any){res.status(409).json({error:e.message});}});
+  app.post('/api/production/pending/:id/retry',requirePermission('api:inventory:operate'),async(req,res)=>{try{res.json(await retryProduction(req.params.id,req.user!.id));}catch(e:any){res.status(409).json({error:e.message});}});
   app.get("/api/production/runs", requireAuth, async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;

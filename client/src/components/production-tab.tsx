@@ -1,3 +1,5 @@
+import {ProductionStock} from "./production-stock";
+import {ProductionPreparationEditor} from "./production-preparation-editor";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -73,6 +75,7 @@ function RegisterRunTab() {
   const [date, setDate] = useState(getArgentinaToday());
   const [recipeId, setRecipeId] = useState<string>("");
   const [outputQuantity, setOutputQuantity] = useState<string>("");
+  const [plannedBatches,setPlannedBatches]=useState("1");
   const [actuals, setActuals] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
@@ -85,6 +88,7 @@ function RegisterRunTab() {
 
   const pickFormula = (id: string) => {
     setRecipeId(id);
+    setPlannedBatches("1");
     setRequestId(crypto.randomUUID());
     const f = formulas.find(x => x.recipeId === id);
     if (!f) return;
@@ -121,8 +125,13 @@ function RegisterRunTab() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/production/formulas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/production/runs"] });
+      queryClient.invalidateQueries({queryKey:["/api/production/pending"]});
+      queryClient.invalidateQueries({queryKey:["/api/inventory/locations"]});
+      queryClient.invalidateQueries({queryKey:["/api/inventory/warehouses-summary"]});
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      if (data.warnings?.length) {
+      if(data.status==='pending'){
+        toast({title:"Producción guardada pendiente de stock",description:data.error});
+      } else if (data.warnings?.length) {
         toast({
           title: "Producción registrada — con avisos de stock",
           description: data.warnings.map((w: any) => `${w.itemName}: faltaron ${(w.required - w.available).toFixed(2)}`).join(" · "),
@@ -150,7 +159,7 @@ function RegisterRunTab() {
           <Factory className="h-10 w-10 text-muted-foreground mb-3 opacity-40" />
           <h3 className="text-base font-semibold mb-1">Sin fórmulas de producción</h3>
           <p className="text-sm text-muted-foreground">
-            Marcá una Elaboración Base como producible en la pestaña "Fórmulas" para empezar a registrar corridas.
+            Creá una preparación con sus ingredientes en la pestaña "Preparaciones" para empezar.
           </p>
         </CardContent>
       </Card>
@@ -166,9 +175,9 @@ function RegisterRunTab() {
           <p className="text-xs text-muted-foreground">Se puede elegir cualquier día pasado para cargar con atraso.</p>
         </div>
         <div className="space-y-1 min-w-64">
-          <Label>Fórmula</Label>
+          <Label>Preparación</Label>
           <Select value={recipeId} onValueChange={pickFormula}>
-            <SelectTrigger data-testid="select-production-formula"><SelectValue placeholder="Elegí una elaboración producible" /></SelectTrigger>
+            <SelectTrigger data-testid="select-production-formula"><SelectValue placeholder="Elegí una preparación" /></SelectTrigger>
             <SelectContent>
               {formulas.map(f => (
                 <SelectItem key={f.recipeId} value={f.recipeId}>
@@ -182,6 +191,7 @@ function RegisterRunTab() {
 
       {formula && (
         <>
+          <div className="max-w-xs space-y-2"><Label>Recetas planificadas</Label><Input aria-label="Recetas planificadas" type="number" min="0.001" step="0.001" value={plannedBatches} onChange={e=>{setPlannedBatches(e.target.value);const batches=Number(e.target.value);if(batches>0){setActuals(Object.fromEntries(formula.lines.map(l=>[l.recipeIngredientId,String(Math.round(l.grossQuantity*batches*1000)/1000)])));if(formula.productionUnit===formula.outputUnit)setOutputQuantity(String(Math.round(formula.productionYield*batches*1000)/1000));}}}/><p className="text-xs text-muted-foreground">Escala los insumos sugeridos. Después ajustá lo usado y lo obtenido realmente.</p></div>
           <Card>
             <CardContent className="pt-4">
               <p className="text-sm text-muted-foreground mb-3">
@@ -191,7 +201,7 @@ function RegisterRunTab() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Insumo</TableHead>
-                    <TableHead className="text-right">Teórico (1x)</TableHead>
+                    <TableHead className="text-right">Teórico por receta</TableHead>
                     <TableHead className="text-right">Cantidad real usada</TableHead>
                     <TableHead>Unidad</TableHead>
                   </TableRow>
@@ -273,185 +283,6 @@ function RegisterRunTab() {
   );
 }
 
-function FormulasTab() {
-  const { toast } = useToast();
-  const [linkRecipeId, setLinkRecipeId] = useState<string>("");
-  const [linkMode, setLinkMode] = useState<"existing" | "new">("new");
-  const [existingItemId, setExistingItemId] = useState<string>("");
-  const [newItemName, setNewItemName] = useState("");
-  const [newItemUnit, setNewItemUnit] = useState("unidad");
-
-  const { data: formulas = [] } = useQuery<Formula[]>({ queryKey: ["/api/production/formulas"] });
-  const { data: unlinked = [] } = useQuery<UnlinkedRecipe[]>({ queryKey: ["/api/production/formulas/unlinked"] });
-  const { data: inventoryItems = [] } = useQuery<InventoryItemLite[]>({ queryKey: ["/api/inventory/items"] });
-
-  const resetLinkForm = () => {
-    setLinkRecipeId(""); setLinkMode("new"); setExistingItemId(""); setNewItemName(""); setNewItemUnit("unidad");
-  };
-
-  const linkExistingMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", `/api/production/formulas/${linkRecipeId}/link`, { outputInventoryItemId: existingItemId });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas/unlinked"] });
-      toast({ title: "Elaboración marcada como producible" });
-      resetLinkForm();
-    },
-    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
-  });
-
-  const linkNewMutation = useMutation({
-    mutationFn: async () => {
-      await apiRequest("POST", `/api/production/formulas/${linkRecipeId}/link-new`, { name: newItemName, unit: newItemUnit });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas/unlinked"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      toast({ title: "Artículo creado y elaboración marcada como producible" });
-      resetLinkForm();
-    },
-    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
-  });
-
-  const unlinkMutation = useMutation({
-    mutationFn: async (recipeId: string) => {
-      await apiRequest("DELETE", `/api/production/formulas/${recipeId}/link`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/production/formulas/unlinked"] });
-      toast({ title: "Elaboración desvinculada de Producción" });
-    },
-    onError: (error: any) => toast({ title: "Error", description: error.message, variant: "destructive" }),
-  });
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Marcar una Elaboración Base como producible</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          {unlinked.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No hay Elaboraciones Base sin vincular. Creá una nueva en la pestaña "Elaboraciones Base" primero.
-            </p>
-          ) : (
-            <>
-              <div className="space-y-1 max-w-sm">
-                <Label className="text-xs">Elaboración Base</Label>
-                <Select value={linkRecipeId} onValueChange={setLinkRecipeId}>
-                  <SelectTrigger data-testid="select-link-recipe"><SelectValue placeholder="Elegí una elaboración" /></SelectTrigger>
-                  <SelectContent>
-                    {unlinked.map(r => (
-                      <SelectItem key={r.recipeId} value={r.recipeId}>{r.name} (rinde {r.productionYield} {r.productionUnit})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {linkRecipeId && (
-                <>
-                  <div className="flex rounded-md border p-1 w-fit">
-                    <button type="button"
-                      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${linkMode === "new" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
-                      onClick={() => setLinkMode("new")} data-testid="button-link-mode-new">
-                      Crear artículo nuevo
-                    </button>
-                    <button type="button"
-                      className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${linkMode === "existing" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
-                      onClick={() => setLinkMode("existing")} data-testid="button-link-mode-existing">
-                      Vincular artículo existente
-                    </button>
-                  </div>
-
-                  {linkMode === "new" ? (
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Nombre del artículo producido</Label>
-                        <Input value={newItemName} onChange={(e) => setNewItemName(e.target.value)} placeholder="Ej: Bife de chorizo porcionado" data-testid="input-new-output-item-name" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Unidad</Label>
-                        <Select value={newItemUnit} onValueChange={setNewItemUnit}>
-                          <SelectTrigger className="w-40" data-testid="select-new-output-item-unit"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(UNIT_LABELS).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button permission="catalog"
-                        onClick={() => linkNewMutation.mutate()}
-                        disabled={linkNewMutation.isPending || !newItemName.trim()}
-                        data-testid="button-confirm-link-new"
-                      >
-                        {linkNewMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        <Link2 className="h-4 w-4 mr-1" /> Crear y vincular
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="space-y-1 min-w-64">
-                        <Label className="text-xs">Artículo de Inventario</Label>
-                        <Select value={existingItemId} onValueChange={setExistingItemId}>
-                          <SelectTrigger data-testid="select-existing-output-item"><SelectValue placeholder="Elegí un artículo" /></SelectTrigger>
-                          <SelectContent>
-                            {inventoryItems.filter(i => i.isActive !== "false").map(i => (
-                              <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button permission="catalog"
-                        onClick={() => linkExistingMutation.mutate()}
-                        disabled={linkExistingMutation.isPending || !existingItemId}
-                        data-testid="button-confirm-link-existing"
-                      >
-                        {linkExistingMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        <Link2 className="h-4 w-4 mr-1" /> Vincular
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {formulas.length > 0 && (
-        <div className="space-y-2">
-          {formulas.map(f => (
-            <Card key={f.recipeId}>
-              <CardContent className="pt-4 pb-4 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <div className="font-medium flex items-center gap-2">
-                    <Factory className="h-4 w-4 text-amber-500" />
-                    {f.name} → {f.outputItemName}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    Stock actual: <strong>{f.outputCurrentStock.toLocaleString("es-AR")} {f.outputUnit}</strong>
-                    {" · "}Costo actual: <strong>{fmtMoney(f.outputCostPrice)}</strong> / {f.outputUnit}
-                  </div>
-                </div>
-                <Button permission="catalog"
-                  variant="ghost" size="sm"
-                  onClick={() => unlinkMutation.mutate(f.recipeId)}
-                  disabled={unlinkMutation.isPending}
-                  data-testid={`button-unlink-${f.recipeId}`}
-                >
-                  <Unlink className="h-4 w-4 mr-1 text-destructive" /> Desvincular
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function HistoryTab() {
   const { data: history = [], isLoading } = useQuery<HistoryRow[]>({ queryKey: ["/api/production/runs"] });
 
@@ -491,16 +322,10 @@ function HistoryTab() {
 }
 
 export function ProductionTab() {
-  return (
-    <Tabs defaultValue="registrar">
-      <TabsList>
-        <TabsTrigger value="registrar" data-testid="tab-production-registrar">Registrar</TabsTrigger>
-        <TabsTrigger value="formulas" data-testid="tab-production-formulas">Fórmulas</TabsTrigger>
-        <TabsTrigger value="historial" data-testid="tab-production-historial">Historial</TabsTrigger>
-      </TabsList>
-      <TabsContent value="registrar" className="mt-4"><RegisterRunTab /></TabsContent>
-      <TabsContent value="formulas" className="mt-4"><FormulasTab /></TabsContent>
-      <TabsContent value="historial" className="mt-4"><HistoryTab /></TabsContent>
-    </Tabs>
-  );
+ const [tab,setTab]=useState('stock');
+ const {data:formulas=[],isLoading,isError}=useQuery<Formula[]>({queryKey:['/api/production/formulas']});
+ return <Tabs value={tab} onValueChange={setTab}><TabsList className="flex h-auto flex-wrap justify-start"><TabsTrigger value="stock">Stock de preparaciones</TabsTrigger><TabsTrigger value="formulas" data-testid="tab-production-formulas">Preparaciones</TabsTrigger><TabsTrigger value="registrar" data-testid="tab-production-registrar">Registrar producción</TabsTrigger><TabsTrigger value="historial" data-testid="tab-production-historial">Historial</TabsTrigger></TabsList>
+ <TabsContent value="stock" className="mt-4">{isError?<p role="alert">No se pudieron consultar las preparaciones.</p>:isLoading?<p>Cargando preparaciones…</p>:<ProductionStock formulas={formulas} onProduce={()=>setTab('registrar')}/>}</TabsContent>
+ <TabsContent value="formulas" className="mt-4 space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Preparaciones con stock</h3><p className="text-sm text-muted-foreground">Creá la fórmula y registrá después cada producción real.</p></div><ProductionPreparationEditor formulas={formulas}/></div>{formulas.map(f=><Card key={f.recipeId}><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4"><div><h4 className="font-medium">{f.name}</h4><p className="text-sm text-muted-foreground">Rendimiento: {f.productionYield} {f.productionUnit} · {f.lines.length} ingredientes</p></div><ProductionPreparationEditor formula={f} formulas={formulas}/></CardContent></Card>)}</TabsContent>
+ <TabsContent value="registrar" className="mt-4"><RegisterRunTab/></TabsContent><TabsContent value="historial" className="mt-4"><HistoryTab/></TabsContent></Tabs>;
 }

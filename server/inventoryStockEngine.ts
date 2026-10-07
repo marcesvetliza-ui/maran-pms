@@ -22,7 +22,13 @@ export async function consumeStockLines(tx:any,lines:ConsumptionLine[],source:{t
   const qty=stockUnits(convertInventoryQuantity(line.quantity,factor));
   let warehouseId=line.warehouseId;
   if(!warehouseId&&!source.strictWarehouse){const r=await tx.execute(sql`SELECT to_warehouse_id FROM stock_movements WHERE item_id=${line.itemId} AND movement_type='transferencia' AND to_warehouse_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1`);warehouseId=r.rows[0]?.to_warehouse_id;}
-  if(!warehouseId)throw fail(`Elegí el depósito de ${item.name}; no hay último destino de transferencia`);
+  if(!warehouseId&&!source.strictWarehouse){
+   // A real transfer always takes precedence. Only completed, unreversed production
+   // establishes an initial origin for a preparation that has never been transferred.
+   const r=await tx.execute(sql`SELECT m.warehouse_id FROM stock_movements m JOIN production_runs p ON p.id=m.source_id AND p.output_inventory_item_id=m.item_id WHERE m.item_id=${line.itemId} AND m.source_type='production_run' AND m.movement_type='entrada' AND m.warehouse_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM inventory_source_reversals r WHERE r.source_type='production_run' AND r.source_id=m.source_id AND r.completed_at IS NOT NULL) ORDER BY m.created_at DESC,m.id DESC LIMIT 1`);
+   warehouseId=r.rows[0]?.warehouse_id;
+  }
+  if(!warehouseId)throw fail(`Elegí el depósito de ${item.name}; no hay transferencia ni producción registrada`);
   const key=line.itemId+'|'+warehouseId;const ex=aggregate.get(key);if(ex)ex.qty+=qty;else aggregate.set(key,{item,warehouseId,qty});
  }
  for(const id of [...new Set([...aggregate.values()].map(l=>l.warehouseId))].sort()){const r=await tx.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${id} AND is_active='true' FOR SHARE`);if(!r.rows.length)throw fail('Depósito inexistente o inactivo');}

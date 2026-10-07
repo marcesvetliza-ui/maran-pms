@@ -99,6 +99,7 @@ type Recipe = {
   name?: string | null;
   productionUnit?: string | null;
   productionYield?: string | null;
+  outputInventoryItemId?: string | null;
   menuItem?: MenuItem;
   ingredients: RecipeIngredient[];
 };
@@ -120,7 +121,7 @@ export default function RecetasCostosPage() {
   const [recipeCategoryFilter, setRecipeCategoryFilter] = useState("all");
 
   // Ingredient source toggle (inventory item vs elaboración base)
-  const [ingredientSourceType, setIngredientSourceType] = useState<"inventario" | "elaboracion">("inventario");
+  const [ingredientSourceType, setIngredientSourceType] = useState<"inventario" | "elaboracion" | "produccion">("inventario");
   const [newIngredientSubRecipeId, setNewIngredientSubRecipeId] = useState("");
 
   // Elaboraciones base dialog state
@@ -173,7 +174,7 @@ export default function RecetasCostosPage() {
   });
 
   const { data: inventoryItems = [] } = useQuery<any[]>({
-    queryKey: ["/api/inventory/items?itemKind=materia_prima,semielaborado"],
+    queryKey: ["/api/inventory/items?itemKind=materia_prima,venta_directa,semielaborado"],
     enabled: isRecipeDialogOpen || isBaseRecipeDialogOpen,
   });
 
@@ -426,7 +427,10 @@ export default function RecetasCostosPage() {
     : null;
 
   // Elaboraciones base = recipes where isBase=true
-  const baseRecipes = (recipes as Recipe[]).filter(r => r.isBase);
+  const baseRecipes = (recipes as Recipe[]).filter(r => r.isBase && !r.outputInventoryItemId);
+  const producedRecipes = (recipes as Recipe[]).filter(r => r.isBase && !!r.outputInventoryItemId);
+  const ingredientRecipes = ingredientSourceType === "produccion" ? producedRecipes : baseRecipes;
+  const ingredientUnit = (rec: Recipe) => rec.outputInventoryItemId ? inventoryItems.find(i=>i.id===rec.outputInventoryItemId)?.unit || rec.productionUnit || "g" : rec.productionUnit || "g";
 
   // Current elaboración (when editing via base recipe dialog)
   const currentBaseRecipe = selectedBaseRecipe
@@ -448,6 +452,7 @@ export default function RecetasCostosPage() {
     rec.ingredients.reduce((sum, ing) => sum + ingCostWithMerma(ing), 0);
 
   const baseRecipeCostPerUnit = (rec: Recipe) => {
+    if(rec.outputInventoryItemId) return Number(inventoryItems.find(i=>i.id===rec.outputInventoryItemId)?.costPrice || 0);
     const y = parseFloat(String(rec.productionYield || "0"));
     if (y <= 0) return 0;
     return baseRecipeTotalCost(rec) / y;
@@ -467,6 +472,7 @@ export default function RecetasCostosPage() {
     setIsBaseRecipeDialogOpen(true);
   };
 
+  const currentCostReady = !!currentRecipe?.ingredients.length && currentRecipe.ingredients.every(i=>Number(i.unitCost)>0 && (i.inventoryItemId || i.subRecipeId));
   const recipeCost = currentRecipe?.ingredients.reduce((sum, ing) => {
     return sum + ingCostWithMerma(ing);
   }, 0) || 0;
@@ -605,6 +611,7 @@ export default function RecetasCostosPage() {
               <TableBody>
                 {filteredItems.map((item) => {
                   const recipe = recipes.find(r => r.menuItemId === item.id);
+                  const costReady = !!recipe?.ingredients.length && recipe.ingredients.every(i=>Number(i.unitCost)>0 && (i.inventoryItemId || i.subRecipeId));
                   const cost = recipe?.ingredients.reduce((sum, ing) => {
                     const merma = parseFloat(ing.merma || "0");
                     const grossQty = merma > 0 ? parseFloat(ing.quantity) / (1 - merma / 100) : parseFloat(ing.quantity);
@@ -637,17 +644,17 @@ export default function RecetasCostosPage() {
                         ${price.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell className="text-right">
-                        {recipe ? `$${cost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "-"}
+                        {costReady ? `$${cost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "Costo pendiente"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {recipe ? (
+                        {costReady ? (
                           <span className={margin >= 0 ? "text-green-600" : "text-red-600"}>
                             ${margin.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                           </span>
                         ) : "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {recipe ? (
+                        {costReady ? (
                           <Badge variant={marginPct >= 50 ? "default" : marginPct >= 30 ? "secondary" : "destructive"}>
                             {marginPct.toFixed(1)}%
                           </Badge>
@@ -1223,7 +1230,8 @@ export default function RecetasCostosPage() {
               </Table>
             )}
 
-            {selectedRecipeItem && currentRecipe && (
+            {selectedRecipeItem && currentRecipe && !currentCostReady && <p className="rounded-md border p-3 text-sm text-muted-foreground">Costo pendiente: completá los ingredientes y sus costos para calcular el margen.</p>}
+            {selectedRecipeItem && currentRecipe && currentCostReady && (
               <div className="flex items-center gap-4 p-3 bg-muted rounded-md text-sm">
                 <div>Costo: <strong>${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
                 <div>Precio: <strong>${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
@@ -1265,6 +1273,7 @@ export default function RecetasCostosPage() {
                   <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
                   Elaboración Base
                 </button>
+                <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
               </div>
 
               {ingredientSourceType === "inventario" ? (
@@ -1312,9 +1321,9 @@ export default function RecetasCostosPage() {
                         <div className="max-h-52 overflow-y-auto">
                           {(() => {
                             const filtered = (inventoryItems as any[]).filter((i: any) =>
-                              !ingredientSearch ||
+                              i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
                               i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
-                              (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase()))
+                              (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase())))
                             );
                             if (filtered.length === 0) return (
                               <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>
@@ -1359,14 +1368,14 @@ export default function RecetasCostosPage() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Seleccionar elaboración base</Label>
-                  {baseRecipes.length === 0 ? (
+                  <Label className="text-xs text-muted-foreground">{ingredientSourceType === "produccion" ? "Seleccionar preparación con stock" : "Seleccionar elaboración base"}</Label>
+                  {ingredientRecipes.length === 0 ? (
                     <div className="border rounded-md p-4 text-sm text-muted-foreground text-center">
                       No hay elaboraciones creadas aún. Creá una en la pestaña "Elaboraciones".
                     </div>
                   ) : (
                     <div className="border rounded-md max-h-52 overflow-y-auto divide-y">
-                      {baseRecipes.map((br) => {
+                      {ingredientRecipes.map((br) => {
                         const cpUnit = baseRecipeCostPerUnit(br);
                         const isSelected = newIngredientSubRecipeId === br.id;
                         return (
@@ -1379,7 +1388,7 @@ export default function RecetasCostosPage() {
                               setNewIngredientSubRecipeId(br.id);
                               setNewIngredientInventoryId("");
                               setNewIngredientName(br.name || "Elaboración");
-                              setNewIngredientUnit(br.productionUnit || "g");
+                              setNewIngredientUnit(ingredientUnit(br));
                               setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
                             }}
                           >
@@ -1399,7 +1408,7 @@ export default function RecetasCostosPage() {
                     </div>
                   )}
                   {newIngredientSubRecipeId && (
-                    <p className="text-xs text-violet-600">✓ El stock se descontará por ingredientes de la elaboración al cerrar la orden</p>
+                    <p className="text-xs text-violet-600">{ingredientSourceType === "produccion" ? "✓ Se consumirá el producto preparado, sin repetir sus materias primas" : "✓ Se consumirán los ingredientes de la elaboración al cerrar la orden"}</p>
                   )}
                 </div>
               )}
@@ -1470,7 +1479,7 @@ export default function RecetasCostosPage() {
                     unit: newIngredientUnit,
                     unitCost: newIngredientCost || "0",
                     inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
-                    subRecipeId: ingredientSourceType === "elaboracion" ? (newIngredientSubRecipeId || null) : null,
+                    subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
                     merma: newIngredientMerma || null,
                   });
                 }}
@@ -1955,6 +1964,7 @@ export default function RecetasCostosPage() {
                     <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
                     Elaboración Base
                   </button>
+                  <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
                 </div>
 
                 {ingredientSourceType === "inventario" ? (
@@ -1993,7 +2003,7 @@ export default function RecetasCostosPage() {
                           <div className="max-h-48 overflow-y-auto">
                             {(() => {
                               const filtered = (inventoryItems as any[]).filter((i: any) =>
-                                !ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase())
+                                i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
                               );
                               if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>;
                               return filtered.map((item: any) => (
@@ -2024,13 +2034,13 @@ export default function RecetasCostosPage() {
                 ) : (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Seleccionar otra elaboración</Label>
-                    {baseRecipes.filter(br => br.id !== currentBaseRecipe.id).length === 0 ? (
+                    {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).length === 0 ? (
                       <div className="border rounded-md p-3 text-sm text-muted-foreground text-center">
                         No hay otras elaboraciones disponibles.
                       </div>
                     ) : (
                       <div className="border rounded-md max-h-40 overflow-y-auto divide-y">
-                        {baseRecipes.filter(br => br.id !== currentBaseRecipe.id).map((br) => {
+                        {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).map((br) => {
                           const cpUnit = baseRecipeCostPerUnit(br);
                           return (
                             <button key={br.id} type="button"
@@ -2040,7 +2050,7 @@ export default function RecetasCostosPage() {
                                 setNewIngredientSubRecipeId(br.id);
                                 setNewIngredientInventoryId("");
                                 setNewIngredientName(br.name || "Elaboración");
-                                setNewIngredientUnit(br.productionUnit || "g");
+                                setNewIngredientUnit(ingredientUnit(br));
                                 setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
                               }}
                             >
@@ -2099,7 +2109,7 @@ export default function RecetasCostosPage() {
                       unit: newIngredientUnit,
                       unitCost: newIngredientCost || "0",
                       inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
-                      subRecipeId: ingredientSourceType === "elaboracion" ? (newIngredientSubRecipeId || null) : null,
+                      subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
                       merma: newIngredientMerma || null,
                     });
                   }}

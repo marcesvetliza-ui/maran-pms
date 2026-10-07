@@ -48,6 +48,8 @@ export type ProducibleFormula = {
   outputUnit: string;
   outputCurrentStock: number;
   outputCostPrice: number;
+  notes: string | null;
+  categoryId: string | null;
   lines: ProducibleFormulaLine[];
 };
 
@@ -63,7 +65,7 @@ export async function getProducibleFormulas(): Promise<ProducibleFormula[]> {
   const result: ProducibleFormula[] = [];
   for (const recipe of producible) {
     const outputItem = outputItemById.get(recipe.outputInventoryItemId as string);
-    if (!outputItem) continue; // el artículo de salida fue borrado — no se ofrece para registrar corridas
+    if (!outputItem || outputItem.isActive !== "true") continue; // el artículo de salida fue borrado — no se ofrece para registrar corridas
     const ingredients = await db.select().from(recipeIngredients).where(eq(recipeIngredients.recipeId, recipe.id));
     result.push({
       recipeId: recipe.id,
@@ -75,6 +77,8 @@ export async function getProducibleFormulas(): Promise<ProducibleFormula[]> {
       outputUnit: outputItem.unit,
       outputCurrentStock: parseFloat(String(outputItem.currentStock ?? "0")),
       outputCostPrice: parseFloat(String(outputItem.costPrice ?? "0")),
+      notes: recipe.notes,
+      categoryId: outputItem.categoryId,
       lines: ingredients.map(ing => ({
         recipeIngredientId: ing.id,
         ingredientName: ing.ingredientName,
@@ -145,8 +149,12 @@ export async function createAndLinkOutputItem(
 }
 
 export async function unlinkRecipeOutput(recipeId: string): Promise<void> {
-  await assertBaseRecipe(recipeId);
-  await db.update(recipes).set({ outputInventoryItemId: null } as any).where(eq(recipes.id, recipeId));
+  await db.transaction(async tx=>{
+    const row=(await tx.execute(sql`SELECT output_inventory_item_id FROM recipes WHERE id=${recipeId} AND is_base=true FOR UPDATE`)).rows[0] as any;
+    if(!row)throw new Error('Preparación inexistente');
+    if(row.output_inventory_item_id){const used=(await tx.execute(sql`SELECT EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${row.output_inventory_item_id}) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE sub_recipe_id=${recipeId}) OR EXISTS(SELECT 1 FROM inventory_pending_productions WHERE status='pending' AND payload->>'recipeId'=${recipeId}) AS used`)).rows[0] as any;if(used.used)throw new Error('No se puede cambiar a elaboración al momento: tiene historial, recetas vinculadas o producción pendiente');}
+    await tx.update(recipes).set({outputInventoryItemId:null}).where(eq(recipes.id,recipeId));
+  });
 }
 
 export type ProductionRunInputLine = { recipeIngredientId: string; actualQuantity: number; warehouseId?: string };
@@ -239,12 +247,13 @@ export async function registerProductionRun(input: RegisterProductionRunInput): 
     if (!outputItem || outputItem.isActive!=="true") throw new Error("El artículo de salida de esta producción ya no existe");
     const prevStock = parseFloat(String(outputItem.currentStock ?? "0"));
     const newStock = prevStock + input.outputQuantity;
+    const stockUnitCost = prevStock > 0 ? (prevStock * Number(outputItem.costPrice || 0) + totalCost) / newStock : outputUnitCost;
 
     const previousWarehouse=await tx.execute(sql`SELECT current_stock FROM warehouse_stock WHERE item_id=${outputInventoryItemId} AND warehouse_id=${input.outputWarehouseId} FOR UPDATE`);
     const whPrev=Number(previousWarehouse.rows[0]?.current_stock ?? 0);
     await tx.execute(sql`INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock,updated_at) VALUES(${outputInventoryItemId},${input.outputWarehouseId},${input.outputQuantity},now()) ON CONFLICT(item_id,warehouse_id) DO UPDATE SET current_stock=warehouse_stock.current_stock+EXCLUDED.current_stock,updated_at=now()`);
     await tx.update(inventoryItems)
-      .set({ currentStock: String(newStock), costPrice: outputUnitCost.toFixed(4) } as any)
+      .set({ currentStock: String(newStock), costPrice: stockUnitCost.toFixed(4) } as any)
       .where(eq(inventoryItems.id, outputInventoryItemId));
 
     await tx.insert(stockMovements).values({
@@ -263,7 +272,7 @@ export async function registerProductionRun(input: RegisterProductionRunInput): 
       createdAt: new Date(),
     } as any);
 
-    await cascadeRecipeCostsFromInventoryItem(tx, outputInventoryItemId, outputUnitCost);
+    await cascadeRecipeCostsFromInventoryItem(tx, outputInventoryItemId, stockUnitCost);
 
     const inputsSnapshot = formulaIngredients.map(ing => {
       const actual = actualByIngredientId.get(ing.id)!;

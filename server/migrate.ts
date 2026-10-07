@@ -1,3 +1,4 @@
+import {ensureProductionPendingSchema} from "./productionPending";
 import {ensureAgreedInventoryTaxonomy} from "./inventoryTaxonomy";
 import {ensureInventoryLocationSchema} from "./inventoryLocations";
 import {ensureInventoryStage2Schema} from "./inventoryStage2Schema";
@@ -4964,6 +4965,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   ) INSERT INTO role_permissions(role,resource_key) SELECT 'restaurant','sidebar:/inventory' FROM applied ON CONFLICT DO NOTHING`);
   await ensureInventoryStage2Schema();
   await ensureInventoryLocationSchema();
+  await ensureProductionPendingSchema();
   try {
     await ensureAgreedInventoryTaxonomy();
   } catch (error) {
