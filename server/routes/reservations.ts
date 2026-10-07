@@ -44,15 +44,40 @@ import { GROUP_BLOCK_SHORTAGE_CODE, GROUP_BLOCK_WARNING_CODE } from "@shared/gro
 async function assertGroupInventoryForReservation(input: {
   roomTypeId: string; checkInDate: string; checkOutDate: string;
   excludeReservationId?: string; contextGroupId?: string; override?: boolean;
+  // Si el usuario ya eligió una habitación física puntual (y ese cuarto
+  // pasó el chequeo de choque de reservas de más arriba, checkOverbooking),
+  // esa habitación concreta es la fuente de verdad real — el conteo
+  // agregado por categoría solo existe para proteger reservas que TODAVÍA
+  // no tienen una habitación asignada (p.ej. de OTA). Por eso, en ese caso,
+  // un déficit de categoría (GROUP_BLOCK_SHORTAGE) deja de ser un bloqueo
+  // duro y pasa a ser un aviso que se puede confirmar, igual que ya
+  // funciona el "cupo blando" de un grupo tentativo.
+  hasSpecificRoom?: boolean;
 }) {
   const conflict = await storage.evaluateReservationInventory(input);
-  if (!conflict || (conflict.code === GROUP_BLOCK_WARNING_CODE && input.override)) return;
-  const error = conflict.code === GROUP_BLOCK_WARNING_CODE
-    ? "La operación invade el cupo blando de un grupo."
-    : "La demanda confirmada excede el inventario operativo.";
+  if (!conflict) return;
+  const isDowngradedShortage = conflict.code === GROUP_BLOCK_SHORTAGE_CODE && !!input.hasSpecificRoom;
+  const isOverridable = conflict.code === GROUP_BLOCK_WARNING_CODE || isDowngradedShortage;
+  if (isOverridable && input.override) return;
+  let error: string;
+  let warning: typeof conflict & { roomTypeName?: string } = conflict;
+  if (isDowngradedShortage) {
+    const roomType = await storage.getRoomType(input.roomTypeId);
+    error = `La categoría ${roomType?.name || input.roomTypeId} ya está al límite de su inventario operativo, pero la habitación elegida está libre.`;
+    warning = { ...conflict, roomTypeName: roomType?.name };
+  } else if (conflict.code === GROUP_BLOCK_WARNING_CODE) {
+    error = "La operación invade el cupo blando de un grupo.";
+  } else {
+    error = "La demanda confirmada excede el inventario operativo.";
+  }
   throw Object.assign(new Error(error), {
     statusCode: 409,
-    response: { error, code: conflict.code, warning: conflict, canOverride: conflict.code === GROUP_BLOCK_WARNING_CODE },
+    response: {
+      error,
+      code: isOverridable ? GROUP_BLOCK_WARNING_CODE : conflict.code,
+      warning,
+      canOverride: isOverridable,
+    },
   });
 }
 
@@ -345,6 +370,7 @@ export function registerReservationsRoutes(app: Express) {
           checkOutDate: data.checkOutDate,
           contextGroupId,
           override: overrideTentativeGroupWarning,
+          hasSpecificRoom: !!data.roomId,
         });
       }
 
@@ -544,6 +570,7 @@ export function registerReservationsRoutes(app: Express) {
           excludeReservationId: req.params.id,
           contextGroupId,
           override: overrideTentativeGroupWarning,
+          hasSpecificRoom: !!finalRoomId,
         });
       }
       if (contextGroupId) req.body._inventoryContextGroupId = contextGroupId;
@@ -763,6 +790,7 @@ export function registerReservationsRoutes(app: Express) {
         checkInDate: normalizedCheckIn,
         checkOutDate: normalizedCheckOut,
         override: req.body.overrideTentativeGroupWarning === true,
+        hasSpecificRoom: !!finalRoomId,
       });
 
       const newCode = storage.generateReservationCode();
