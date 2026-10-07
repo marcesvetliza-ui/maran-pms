@@ -63,6 +63,7 @@ suite("PostgreSQL real: Libro IVA Compras reparte el gravado por alícuota", () 
       [`Proveedor mixto ${suffix}`, `30${suffix.replaceAll("-", "").slice(0, 9)}`],
     );
     const supplierId = supplier.rows[0].id;
+    const warehouseId=(await pool.query("INSERT INTO inventory_warehouses(name) VALUES($1) RETURNING id",["Depósito IVA prueba "+suffix])).rows[0].id;
     const item21 = await pool.query<{ id: string }>(
       "INSERT INTO inventory_items (name, unit, current_stock, cost_price) VALUES ($1, 'unidad', 0, 100) RETURNING id",
       [`Artículo 21% ${suffix}`],
@@ -83,8 +84,8 @@ suite("PostgreSQL real: Libro IVA Compras reparte el gravado por alícuota", () 
         fechaEmision: "2026-09-19", periodo: "09/2026", condicionPago: "cuenta_corriente",
         montoNeto: "400.00", montoIva21: "21.00", montoIva105: "31.50", montoTotal: "452.50",
         stockItems: [
-          { itemId: item21.rows[0].id, quantity: "1", unitCost: "100", vatRate: "21", warehouseId: null },
-          { itemId: item105.rows[0].id, quantity: "1", unitCost: "300", vatRate: "10.5", warehouseId: null },
+          { itemId: item21.rows[0].id, quantity: "1", unitCost: "100", vatRate: "21", warehouseId, unit: "unidad" },
+          { itemId: item105.rows[0].id, quantity: "1", unitCost: "300", vatRate: "10.5", warehouseId, unit: "unidad" },
         ],
       });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -147,6 +148,8 @@ suite("PostgreSQL real: Libro IVA Compras reparte el gravado por alícuota", () 
       }
       await pool.query("DELETE FROM item_price_history WHERE item_id = ANY($1::text[])", [[item21.rows[0].id, item105.rows[0].id]]);
       await pool.query("DELETE FROM inventory_item_suppliers WHERE item_id = ANY($1::text[])", [[item21.rows[0].id, item105.rows[0].id]]);
+      await pool.query("DELETE FROM warehouse_stock WHERE warehouse_id=$1",[warehouseId]);
+      await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
       await pool.query("DELETE FROM inventory_items WHERE id = ANY($1::text[])", [[item21.rows[0].id, item105.rows[0].id]]);
       await pool.query("DELETE FROM accounting_suppliers WHERE id = $1", [supplierId]);
     }
