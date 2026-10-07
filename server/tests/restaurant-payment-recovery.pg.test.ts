@@ -42,17 +42,21 @@ async function money(id: string) {
 }
 
 suite("PostgreSQL: restaurant payment rollback and retry", () => {
+  const warehouseId=randomUUID();
   beforeAll(async () => {
     ({ storage } = await import("../db-storage"));
     categoryId = (await storage.createMenuCategory({ name: `Recovery-${randomUUID()}` })).id;
     menuId = (await storage.createMenuItem({ categoryId, name: "Recovery plate", price: "100.01" })).id;
     rawId = (await storage.createInventoryItem({ sku: randomUUID(), name: "Recovery ingredient", unit: "kg", costPrice: "10", currentStock: "100", itemKind: "materia_prima" })).id;
+    await pool!.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'Recovery warehouse')",[warehouseId]);
+    await pool!.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,100)",[rawId,warehouseId]);
+    await pool!.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,created_at) VALUES($1,'transferencia',100,0,100,$2,now())",[rawId,warehouseId]);
     recipeId = (await storage.createRecipe({ isBase: false, menuItemId: menuId })).id;
     await storage.createRecipeIngredient({ recipeId, inventoryItemId: rawId, ingredientName: "Recovery ingredient", quantity: "1", unit: "kg", unitCost: "10", merma: "0" });
     const { registerRestaurantRoutes } = await import("../routes/restaurant");
     const app = express();
     app.use(express.json());
-    app.use((req: any, _res, next) => { req.user = { username: "recovery-test", role: "admin" }; req.isAuthenticated = () => true; next(); });
+    app.use((req: any, _res, next) => { req.user = { id:"recovery-test",username: "recovery-test", role: "admin" }; req.isAuthenticated = () => true; next(); });
     registerRestaurantRoutes(app);
     server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -74,6 +78,11 @@ suite("PostgreSQL: restaurant payment rollback and retry", () => {
     await pool.query("DELETE FROM recipes WHERE id=$1", [recipeId]);
     await pool.query("DELETE FROM menu_items WHERE id=$1", [menuId]);
     await pool.query("DELETE FROM menu_categories WHERE id=$1", [categoryId]);
+    await pool.query("DELETE FROM inventory_consumption_jobs WHERE source_id=ANY($1::varchar[])",[orders]);
+    await pool.query("DELETE FROM stock_movements WHERE item_id=$1",[rawId]);
+    await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[rawId]);
+    await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
+    await pool.query("DELETE FROM audit_logs WHERE user_id='recovery-test'");
     await pool.query("DELETE FROM inventory_items WHERE id=$1", [rawId]);
     await pool.end();
   });

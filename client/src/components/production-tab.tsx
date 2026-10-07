@@ -73,15 +73,21 @@ function RegisterRunTab() {
   const [outputQuantity, setOutputQuantity] = useState<string>("");
   const [actuals, setActuals] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
+  const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
+  const [outputWarehouseId,setOutputWarehouseId]=useState("");
+  const [inputWarehouses,setInputWarehouses]=useState<Record<string,string>>({});
+  const {data: warehouses=[]}=useQuery<Array<{id:string;name:string;isActive:string}>>({queryKey:["/api/inventory/warehouses"]});
 
   const { data: formulas = [], isLoading } = useQuery<Formula[]>({ queryKey: ["/api/production/formulas"] });
   const formula = formulas.find(f => f.recipeId === recipeId) || null;
 
   const pickFormula = (id: string) => {
     setRecipeId(id);
+    setRequestId(crypto.randomUUID());
     const f = formulas.find(x => x.recipeId === id);
     if (!f) return;
-    setOutputQuantity(f.productionYield > 0 ? String(f.productionYield) : "");
+    setOutputQuantity(f.productionYield > 0 && f.productionUnit===f.outputUnit ? String(f.productionYield) : "");
+    setInputWarehouses({});
     const nextActuals: Record<string, string> = {};
     for (const line of f.lines) nextActuals[line.recipeIngredientId] = String(line.grossQuantity);
     setActuals(nextActuals);
@@ -99,9 +105,12 @@ function RegisterRunTab() {
         date,
         recipeId,
         outputQuantity: outQty,
+        outputWarehouseId,
+        requestId,
         notes: notes || null,
         lines: Object.entries(actuals).map(([recipeIngredientId, qty]) => ({
           recipeIngredientId,
+          warehouseId:inputWarehouses[recipeIngredientId],
           actualQuantity: parseFloat(qty || "0") || 0,
         })),
       });
@@ -119,6 +128,7 @@ function RegisterRunTab() {
       } else {
         toast({ title: "Producción registrada" });
       }
+      setRequestId(crypto.randomUUID());
       setRecipeId("");
       setOutputQuantity("");
       setActuals({});
@@ -208,6 +218,11 @@ function RegisterRunTab() {
             </CardContent>
           </Card>
 
+          <div className="space-y-2 border rounded p-3">
+            <Label>Depósito de destino de lo producido *</Label>
+            <Select value={outputWarehouseId || "__choose__"} onValueChange={v=>setOutputWarehouseId(v==="__choose__"?"":v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(w=>w.isActive==="true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+            {formula.lines.map(line=><div key={line.recipeIngredientId}><Label>Origen de {line.ingredientName} *</Label><Select value={inputWarehouses[line.recipeIngredientId] || "__choose__"} onValueChange={v=>setInputWarehouses({...inputWarehouses,[line.recipeIngredientId]:v==="__choose__"?"":v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(w=>w.isActive==="true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>)}
+          </div>
           <div className="flex flex-wrap items-end gap-4">
             <div className="space-y-1">
               <Label>Cantidad real producida ({formula.outputUnit})</Label>
@@ -233,17 +248,18 @@ function RegisterRunTab() {
             </div>
           </div>
 
+          <p className="text-xs text-muted-foreground">Al guardar se calculará el costo con las cantidades convertidas y los costos vigentes del stock consumido.</p>
           <Card className="bg-muted/30">
             <CardContent className="pt-4 flex flex-wrap gap-x-8 gap-y-1 text-sm">
-              <div>Costo total consumido: <strong>{fmtMoney(totalCost)}</strong></div>
-              <div>Costo unitario resultante: <strong>{fmtMoney(unitCostResult)}</strong> / {formula.outputUnit}</div>
+              <div>Costo total estimado: <strong>{fmtMoney(totalCost)}</strong></div>
+              <div>Costo unitario estimado: <strong>{fmtMoney(unitCostResult)}</strong> / {formula.outputUnit}</div>
               <div>Stock actual de {formula.outputItemName}: <strong>{formula.outputCurrentStock.toLocaleString("es-AR")} {formula.outputUnit}</strong></div>
             </CardContent>
           </Card>
 
           <Button
             onClick={() => registerMutation.mutate()}
-            disabled={registerMutation.isPending || outQty <= 0}
+            disabled={registerMutation.isPending || outQty <= 0 || !outputWarehouseId || formula.lines.some(line=>!inputWarehouses[line.recipeIngredientId])}
             data-testid="button-register-production"
           >
             {registerMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}

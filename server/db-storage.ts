@@ -1,7 +1,8 @@
 import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
-import { deductIngredientsAtMultiplier } from "./recipeStockDeduction";
+import { planIngredientsWithActualQuantities, grossQuantityFor } from "./recipeStockDeduction";
+import { queueAutomaticConsumption } from "./inventoryStockEngine";
 import { assertPaymentRequestMatches, type ReservationPaymentRequest } from "./reservationPaymentRequest";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
@@ -5454,7 +5455,14 @@ export class DatabaseStorage implements IStorage {
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
       throw new Error("La lista de proveedores contables es inválida");
     }
+    if(itemValues.currentStock!==undefined)throw Object.assign(new Error('El stock se modifica mediante movimientos por depósito'),{statusCode:409});
     const [updated] = await db.transaction(async (tx) => {
+      const current=await tx.execute(sql`SELECT unit FROM inventory_items WHERE id=${id} FOR UPDATE`);
+      if(itemValues.unit!==undefined && current.rows.length && itemValues.unit!==current.rows[0].unit){
+        const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
+        if(references.rows.length)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
+        await tx.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${id}`);
+      }
       const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
       if (!result) return [];
       if (itemValues.costPrice !== undefined) {
@@ -5529,30 +5537,25 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async deductStockFromOrder(orderId: string, orderItems: Array<{ menuItemId: string; quantity: number }>) {
-    const deducted: Array<{ itemName: string; quantity: number; unit: string }> = [];
-    const warnings: Array<{ itemName: string; required: number; available: number }> = [];
-    const skipped: Array<{ ingredientName: string; reason: string }> = [];
-
-    for (const orderItem of orderItems) {
-      const recipe = await this.getRecipeByMenuItem(orderItem.menuItemId);
-      if (!recipe || recipe.ingredients.length === 0) {
-        skipped.push({ ingredientName: orderItem.menuItemId, reason: "Sin receta configurada" });
+  async planStockFromOrder(orderItems: Array<{menuItemId:string;quantity:number}>) {
+    const planned: import('./inventoryStockEngine').ConsumptionLine[]=[];
+    for (const line of orderItems) {
+      const recipe=await this.getRecipeByMenuItem(line.menuItemId);
+      if(!recipe || !recipe.ingredients.length){
+        const menu=await this.getMenuItem(line.menuItemId);
+        const product=menu?.inventoryItemId ? await this.getInventoryItem(menu.inventoryItemId) : undefined;
+        if(product && product.itemKind!=='plato')planned.push({itemId:product.id,quantity:line.quantity,name:product.name});
+        else planned.push({itemId:null,quantity:line.quantity,name:'Plato sin receta: '+(menu?.name || line.menuItemId)});
         continue;
       }
-      const result = await deductIngredientsAtMultiplier(
-        db,
-        (id) => this.getRecipe(id),
-        recipe.ingredients,
-        orderItem.quantity,
-        { sourceType: "restaurant_order", sourceId: orderId, notes: `Consumo automático — Orden ${orderId}` },
-      );
-      deducted.push(...result.deducted);
-      warnings.push(...result.warnings);
-      skipped.push(...result.skipped);
+      try {planned.push(...await planIngredientsWithActualQuantities(id=>this.getRecipe(id),recipe.ingredients.map(ingredient=>({ingredient,actualGrossQuantity:grossQuantityFor(ingredient,line.quantity)}))));}
+      catch(e:any){planned.push({itemId:null,quantity:line.quantity,name:e.message});}
     }
-
-    return { deducted, warnings, skipped };
+    // An automatic sale uses the last transfer destination, never a stale recipe warehouse setting.
+    return planned.map(l=>({...l,warehouseId:null}));
+  }
+  async deductStockFromOrder(orderId:string,orderItems:Array<{menuItemId:string;quantity:number}>,actor?:string){
+    return queueAutomaticConsumption('restaurant_order',orderId,await this.planStockFromOrder(orderItems),actor);
   }
 
   async getSpaCabins(): Promise<SpaCabin[]> {
@@ -6059,14 +6062,40 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>): Promise<SpaAccountItem | undefined> {
-    const [updated] = await db.update(spaAccountItems).set(item as any).where(eq(spaAccountItems.id, id)).returning();
-    return updated;
+  async updateSpaAccountItem(id: string, item: Partial<InsertSpaAccountItem>,actor?:string): Promise<SpaAccountItem | undefined> {
+    return withDatabaseTransaction(async()=>{
+      const record=await db.execute(sql`SELECT * FROM spa_account_items WHERE id=${id} FOR UPDATE`);const before:any=record.rows[0];if(!before)return undefined;
+      const account=await db.execute(sql`SELECT status FROM spa_accounts WHERE id=${before.account_id} FOR UPDATE`);
+      if(!account.rows.length || account.rows[0].status!=='open')throw Object.assign(new Error('La cuenta debe estar abierta para modificar sus cargos'),{statusCode:409});
+      if(item.accountId!==undefined && item.accountId!==before.account_id)throw Object.assign(new Error('No se puede mover un cargo a otra cuenta'),{statusCode:409});
+      if((item.quantity!==undefined && Number(item.quantity)!==Number(before.quantity)) || (item.inventoryItemId!==undefined && item.inventoryItemId!==before.inventory_item_id)){
+        const job=await db.execute(sql`SELECT status FROM inventory_consumption_jobs WHERE source_type='spa_account_item' AND source_id=${id} FOR UPDATE`);
+        const moves=await db.execute(sql`SELECT id FROM stock_movements WHERE source_type='spa_account_item' AND source_id=${id} LIMIT 1`);
+        if(job.rows.some((j:any)=>j.status!=='cancelled') || moves.rows.length)throw Object.assign(new Error('El producto ya tiene un consumo asociado. Revertí el consumo desde Inventario y cargá un nuevo renglón.'),{statusCode:409});
+      }
+      const quantity=Number(item.quantity ?? before.quantity),price=Number(item.unitPrice ?? before.unit_price);
+      if(!Number.isSafeInteger(quantity)||quantity<=0||!Number.isFinite(price)||price<0)throw Object.assign(new Error('Cantidad o precio inválidos'),{statusCode:400});
+      const [updated]=await db.update(spaAccountItems).set({...item,subtotal:(quantity*price).toFixed(2)} as any).where(eq(spaAccountItems.id,id)).returning();
+      if(updated)await this.updateFolioMovementBySource('spa_item',id,{amount:Number(updated.subtotal),description:updated.description});
+      if(actor)await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${actor},'update','spa','spa_account_item',${id},'Cargo SPA editado',${JSON.stringify({before,after:updated})},now())`);
+      return updated;
+    });
   }
 
-  async deleteSpaAccountItem(id: string): Promise<boolean> {
-    const result = await db.delete(spaAccountItems).where(eq(spaAccountItems.id, id));
-    return (result.rowCount ?? 0) > 0;
+  async deleteSpaAccountItem(id: string,actor?:string): Promise<boolean> {
+    return withDatabaseTransaction(async()=>{
+      const record=await db.execute(sql`SELECT * FROM spa_account_items WHERE id=${id} FOR UPDATE`);const before:any=record.rows[0];if(!before)return false;
+      const account=await db.execute(sql`SELECT status FROM spa_accounts WHERE id=${before.account_id} FOR UPDATE`);
+      if(!account.rows.length || account.rows[0].status!=='open')throw Object.assign(new Error('La cuenta debe estar abierta para eliminar un cargo'),{statusCode:409});
+      const job=await db.execute(sql`SELECT status FROM inventory_consumption_jobs WHERE source_type='spa_account_item' AND source_id=${id} FOR UPDATE`);
+      const moves=await db.execute(sql`SELECT id FROM stock_movements WHERE source_type='spa_account_item' AND source_id=${id} LIMIT 1`);
+      const reversed=await db.execute(sql`SELECT id FROM inventory_source_reversals WHERE source_type='spa_account_item' AND source_id=${id} AND completed_at IS NOT NULL`);
+      if(job.rows.some((j:any)=>j.status!=='cancelled') || (moves.rows.length&&!reversed.rows.length))throw Object.assign(new Error('Revertí o cancelá primero el consumo desde Inventario; borrar el renglón no devuelve mercadería automáticamente.'),{statusCode:409});
+      const ledger=await db.select().from(folioMovements).where(and(eq(folioMovements.sourceType,'spa_item'),eq(folioMovements.sourceId,id)));
+      for(const movement of ledger)await this.addFolioAdjustment(movement.folioId,'void',Number(movement.amount),'Cargo SPA eliminado: '+before.description,actor,movement.id,'Cargo eliminado de una cuenta abierta');
+      if(actor)await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${actor},'delete','spa','spa_account_item',${id},'Cargo SPA eliminado',${JSON.stringify({before})},now())`);
+      const result=await db.delete(spaAccountItems).where(eq(spaAccountItems.id,id));return (result.rowCount ?? 0)>0;
+    });
   }
 
   async getSpaPayments(accountId: string): Promise<SpaPayment[]> {
@@ -6097,87 +6126,15 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async deductStockFromSpaAccount(accountId: string): Promise<void> {
-    try {
-      // Se puede disparar tanto al iniciar el turno como al cerrar la
-      // cuenta (o vincular una factura) — idempotente por cuenta para no
-      // descontar dos veces el mismo consumo.
-      const [alreadyDeducted] = await db.select({ id: stockMovements.id }).from(stockMovements)
-        .where(and(eq(stockMovements.sourceType, "spa_account"), eq(stockMovements.sourceId, accountId)))
-        .limit(1);
-      if (alreadyDeducted) return;
-
-      const accountData = await this.getSpaAccount(accountId);
-      if (!accountData || !accountData.appointmentId) return;
-
-      const [appointment] = await db.select().from(spaAppointments).where(eq(spaAppointments.id, accountData.appointmentId));
-      if (!appointment || !appointment.treatmentId) return;
-
-      const supplies = await this.getTreatmentSupplies(appointment.treatmentId);
-      if (!supplies.length) return;
-
-      for (const supply of supplies) {
-        try {
-          const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, supply.inventoryItemId));
-          if (!invItem) continue;
-
-          const prev = parseFloat(invItem.currentStock ?? "0");
-          const qty = parseFloat(supply.quantity);
-          const newStock = Math.max(0, prev - qty);
-
-          await db.update(inventoryItems)
-            .set({ currentStock: String(newStock) })
-            .where(eq(inventoryItems.id, supply.inventoryItemId));
-
-          await db.insert(stockMovements).values({
-            itemId: supply.inventoryItemId,
-            movementType: "salida",
-            quantity: String(qty),
-            previousStock: String(prev),
-            newStock: String(newStock),
-            notes: "Consumo SPA",
-            sourceType: "spa_account",
-            sourceId: accountId,
-            createdAt: new Date(),
-          });
-        } catch (err) {
-          console.warn(`[SPA] Error descounting stock for item ${supply.inventoryItemId}:`, err);
-        }
-      }
-    } catch (err) {
-      console.warn(`[SPA] Error in deductStockFromSpaAccount:`, err);
-    }
+  async deductStockFromSpaAccount(accountId:string,actor?:string):Promise<void>{
+    const account=await this.getSpaAccount(accountId);if(!account?.appointmentId)return;
+    const [appointment]=await db.select().from(spaAppointments).where(eq(spaAppointments.id,account.appointmentId));
+    if(!appointment?.treatmentId)return;
+    const supplies=await this.getTreatmentSupplies(appointment.treatmentId);if(!supplies.length)return;
+    await queueAutomaticConsumption('spa_account',accountId,supplies.map(s=>({itemId:s.inventoryItemId,quantity:Number(s.quantity),unit:s.unit})),actor);
   }
-
-  // Un producto que el SPA vende directamente (crema, bebida — venta_directa,
-  // a diferencia de un concepto como cochera) descuenta stock al agregarse al
-  // folio, no al iniciar el turno: el artículo sale del estante en ese momento.
-  async deductStockForSoldSpaProduct(inventoryItemId: string, quantity: number, accountItemId: string): Promise<void> {
-    try {
-      const [invItem] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, inventoryItemId));
-      if (!invItem) return;
-
-      const prev = parseFloat(invItem.currentStock ?? "0");
-      const newStock = Math.max(0, prev - quantity);
-
-      await db.update(inventoryItems)
-        .set({ currentStock: String(newStock) })
-        .where(eq(inventoryItems.id, inventoryItemId));
-
-      await db.insert(stockMovements).values({
-        itemId: inventoryItemId,
-        movementType: "salida",
-        quantity: String(quantity),
-        previousStock: String(prev),
-        newStock: String(newStock),
-        notes: "Venta SPA",
-        sourceType: "spa_account_item",
-        sourceId: accountItemId,
-        createdAt: new Date(),
-      });
-    } catch (err) {
-      console.warn(`[SPA] Error deducting stock for sold product ${inventoryItemId}:`, err);
-    }
+  async deductStockForSoldSpaProduct(inventoryItemId:string,quantity:number,accountItemId:string,actor?:string):Promise<void>{
+    await queueAutomaticConsumption('spa_account_item',accountItemId,[{itemId:inventoryItemId,quantity}],actor);
   }
 
   async getEventRooms(): Promise<EventRoom[]> {

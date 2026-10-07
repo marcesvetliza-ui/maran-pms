@@ -1,6 +1,8 @@
-import { eq } from "drizzle-orm";
+import {inventoryUnitFactor} from "./inventoryUnits";
+import {unitFactor} from "./inventoryStockEngine";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "./db";
-import { recipes, recipeIngredients } from "@shared/schema";
+import { recipes, recipeIngredients, inventoryItems } from "@shared/schema";
 
 type Executor = Omit<typeof db, "$client">;
 
@@ -65,18 +67,23 @@ export async function cascadeRecipeCostsFromInventoryItem(
 ): Promise<void> {
   if (!Number.isFinite(newCost) || newCost < 0) return;
 
-  const newCostStr = newCost.toFixed(4);
-  await executor
-    .update(recipeIngredients)
-    .set({ unitCost: newCostStr })
-    .where(eq(recipeIngredients.inventoryItemId, inventoryItemId));
+  const [stockItem]=await executor.select().from(inventoryItems).where(eq(inventoryItems.id,inventoryItemId));
+  if(!stockItem)return;
+  const ingredients=await executor.select().from(recipeIngredients).where(eq(recipeIngredients.inventoryItemId,inventoryItemId));
+  for(const ingredient of ingredients){
+    const factor=await unitFactor(executor,inventoryItemId,ingredient.unit,stockItem.unit);
+    await executor.update(recipeIngredients).set({unitCost:(newCost*factor).toFixed(4)}).where(eq(recipeIngredients.id,ingredient.id));
+  }
 
+  const producedRecipes=await executor.select({id:recipes.id}).from(recipes).where(eq(recipes.outputInventoryItemId,inventoryItemId));
+  const producedDependents=producedRecipes.length ? await executor.select().from(recipeIngredients).where(inArray(recipeIngredients.subRecipeId,producedRecipes.map(r=>r.id))) : [];
+  for(const dependent of producedDependents){const factor=await unitFactor(executor,inventoryItemId,dependent.unit,stockItem.unit);await executor.update(recipeIngredients).set({unitCost:(newCost*factor).toFixed(4)}).where(eq(recipeIngredients.id,dependent.id));}
   const directRows = await executor
     .select({ recipeId: recipeIngredients.recipeId })
     .from(recipeIngredients)
     .where(eq(recipeIngredients.inventoryItemId, inventoryItemId));
 
-  const dirty = new Set(directRows.map((r) => r.recipeId));
+  const dirty = new Set([...directRows.map((r) => r.recipeId),...producedDependents.map(r=>r.recipeId)]);
   const processed = new Set<string>();
 
   while (dirty.size > 0) {
@@ -95,7 +102,7 @@ export async function cascadeRecipeCostsFromInventoryItem(
     if (yieldQty <= 0) continue;
 
     const newCostPerUnit = await computeBaseRecipeCostPerUnit(executor, recipeId);
-    const newCostPerUnitStr = newCostPerUnit.toFixed(4);
+    const [producedItem]=recipe.outputInventoryItemId ? await executor.select().from(inventoryItems).where(eq(inventoryItems.id,recipe.outputInventoryItemId)) : [];
 
     const dependents = await executor
       .select()
@@ -103,14 +110,15 @@ export async function cascadeRecipeCostsFromInventoryItem(
       .where(eq(recipeIngredients.subRecipeId, recipeId));
 
     for (const dep of dependents) {
+      const perDependentUnit=producedItem ? Number(producedItem.costPrice || 0)*await unitFactor(executor,producedItem.id,dep.unit,producedItem.unit) : newCostPerUnit*inventoryUnitFactor(dep.unit,recipe.productionUnit || dep.unit);
       const prevCost = parseFloat(String(dep.unitCost || "0"));
       // Comparar redondeado a centavos: la columna es numeric(10,2), así que
       // una diferencia menor nunca se refleja y seguir propagando no aporta
       // nada (y en un ciclo mal armado, podría no terminar nunca).
-      if (Math.round(prevCost * 100) === Math.round(newCostPerUnit * 100)) continue;
+      if (Math.round(prevCost * 100) === Math.round(perDependentUnit * 100)) continue;
       await executor
         .update(recipeIngredients)
-        .set({ unitCost: newCostPerUnitStr })
+        .set({ unitCost: perDependentUnit.toFixed(4) })
         .where(eq(recipeIngredients.id, dep.id));
       dirty.add(dep.recipeId);
     }

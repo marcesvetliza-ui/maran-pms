@@ -59,10 +59,10 @@ describe("spa routes — migradas a requirePermission", () => {
       permissionsState.granted = new Set(["spa:api:spa:write"]);
     });
 
-    it("permite a un rol con el permiso", async () => {
+    it("permite acceder con el permiso y exige anular el pago en lugar de borrarlo", async () => {
       app = await startApp("spa");
       const response = await fetch(`${app.baseUrl}/api/spa/payments/pay-1`, { method: "DELETE" });
-      expect(response.status).toBe(204);
+      expect(response.status).toBe(409);
     });
 
     it("rechaza con 403 a un rol sin el permiso", async () => {

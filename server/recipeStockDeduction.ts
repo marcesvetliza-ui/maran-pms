@@ -1,137 +1,39 @@
-import { eq } from "drizzle-orm";
-import { randomUUID } from "crypto";
-import { db } from "./db";
-import { inventoryItems, stockMovements, type RecipeIngredient } from "@shared/schema";
-
-type Executor = Omit<typeof db, "$client">;
-
-export type RecipeLookupFn = (
-  recipeId: string,
-) => Promise<{ ingredients: RecipeIngredient[]; productionYield: string | number | null } | undefined>;
-
-export type DeductedLine = { itemName: string; quantity: number; unit: string };
-export type ShortfallWarning = { itemName: string; required: number; available: number };
-export type SkippedLine = { ingredientName: string; reason: string };
-
-export type StockDeductionResult = {
-  deducted: DeductedLine[];
-  warnings: ShortfallWarning[];
-  skipped: SkippedLine[];
-};
-
-export type DeductionSource = { sourceType: string; sourceId: string; notes: string };
-
-/** Cantidad bruta real (ya incluye merma) para un insumo a un multiplicador uniforme. */
-export function grossQuantityFor(ingredient: Pick<RecipeIngredient, "quantity" | "merma">, multiplier: number): number {
-  const merma = ingredient.merma ? parseFloat(String(ingredient.merma)) : 0;
-  const net = parseFloat(String(ingredient.quantity));
-  const gross = merma > 0 ? net / (1 - merma / 100) : net;
-  return gross * multiplier;
+import {inventoryUnitFactor} from './inventoryUnits';
+import {consumeStockLines,queueAutomaticConsumption,type ConsumptionLine} from './inventoryStockEngine';
+import type {RecipeIngredient} from '@shared/schema';
+export type RecipeLookupFn=(id:string)=>Promise<{ingredients:RecipeIngredient[];productionYield:string|number|null;productionUnit?:string|null;outputInventoryItemId?:string|null}|undefined>;
+export type DeductedLine={itemName:string;quantity:number;unit:string};
+export type ShortfallWarning={itemName:string;required:number;available:number};
+export type SkippedLine={ingredientName:string;reason:string};
+export type StockDeductionResult={deducted:DeductedLine[];warnings:ShortfallWarning[];skipped:SkippedLine[]};
+export type DeductionSource={sourceType:string;sourceId:string;notes:string;actor?:string};
+const fail=(message:string)=>Object.assign(new Error(message),{statusCode:409});
+export function grossQuantityFor(ingredient:Pick<RecipeIngredient,'quantity'|'merma'>,multiplier:number){
+ const waste=Number(ingredient.merma || 0),net=Number(ingredient.quantity);
+ if(!Number.isFinite(waste)||waste<0||waste>=100||!Number.isFinite(net)||net<0||!Number.isFinite(multiplier)||multiplier<0)throw fail('Cantidad, rendimiento o merma inválidos en la receta');
+ return net/(1-waste/100)*multiplier;
 }
-
-/**
- * Descuenta stock real para UN insumo de nivel superior por la cantidad
- * bruta ya resuelta para esta operación (grossQuantity). Si el insumo es una
- * sub-receta/elaboración, expande recursivamente sus propios ingredientes en
- * la proporción teórica de la fórmula (quantity/merma), igual que siempre se
- * hizo al vender un plato — la cantidad "real" editable solo existe en el
- * insumo de primer nivel que recibe esta función, nunca más abajo.
- */
-async function deductOne(
-  executor: Executor,
-  getRecipe: RecipeLookupFn,
-  ingredient: RecipeIngredient,
-  grossQuantity: number,
-  source: DeductionSource,
-  result: StockDeductionResult,
-  depth: number,
-): Promise<void> {
-  if (depth > 6) return; // guard de seguridad ante recursión infinita
-  const subRecipeId = (ingredient as any).subRecipeId as string | null;
-
-  if (subRecipeId) {
-    const subRecipe = await getRecipe(subRecipeId);
-    if (!subRecipe) {
-      result.skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta no encontrada" });
-      return;
-    }
-    const subYield = parseFloat(String(subRecipe.productionYield || "0"));
-    if (subYield <= 0) {
-      result.skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sub-receta sin rendimiento (productionYield) definido" });
-      return;
-    }
-    const ratio = grossQuantity / subYield;
-    for (const subIngredient of subRecipe.ingredients) {
-      await deductOne(executor, getRecipe, subIngredient, grossQuantityFor(subIngredient, ratio), source, result, depth + 1);
-    }
-    return;
-  }
-
-  if (!ingredient.inventoryItemId) {
-    result.skipped.push({ ingredientName: ingredient.ingredientName, reason: "Sin vínculo con inventario" });
-    return;
-  }
-
-  const [invItem] = await executor.select().from(inventoryItems)
-    .where(eq(inventoryItems.id, ingredient.inventoryItemId)).for("update");
-  if (!invItem) {
-    result.skipped.push({ ingredientName: ingredient.ingredientName, reason: "Ítem de inventario no encontrado" });
-    return;
-  }
-
-  const currentStock = parseFloat(String(invItem.currentStock ?? 0));
-  if (currentStock < grossQuantity) {
-    result.warnings.push({ itemName: invItem.name, required: grossQuantity, available: currentStock });
-  }
-  const actualDeduct = Math.min(grossQuantity, currentStock);
-  if (actualDeduct <= 0) return;
-
-  const newStock = Math.max(0, currentStock - actualDeduct);
-  await executor.update(inventoryItems)
-    .set({ currentStock: String(newStock) as any })
-    .where(eq(inventoryItems.id, ingredient.inventoryItemId));
-
-  await executor.insert(stockMovements).values({
-    id: randomUUID(),
-    itemId: ingredient.inventoryItemId,
-    movementType: "consumo",
-    quantity: String(actualDeduct),
-    previousStock: String(currentStock),
-    newStock: String(newStock),
-    notes: source.notes,
-    sourceType: source.sourceType,
-    sourceId: source.sourceId,
-    createdAt: new Date(),
-  } as any);
-
-  result.deducted.push({ itemName: invItem.name, quantity: actualDeduct, unit: invItem.unit });
+export async function planIngredientsWithActualQuantities(getRecipe:RecipeLookupFn,lines:Array<{ingredient:RecipeIngredient;actualGrossQuantity:number}>):Promise<ConsumptionLine[]>{
+ const result:ConsumptionLine[]=[];
+ async function visit(ingredient:RecipeIngredient,quantity:number,path:Set<string>){
+  if(!Number.isFinite(quantity)||quantity<0)throw fail('Cantidad de insumo inválida');
+  if(ingredient.subRecipeId){
+   if(path.has(ingredient.subRecipeId)||path.size>=20)throw fail('La receta tiene una referencia cíclica o demasiado profunda');
+   const sub=await getRecipe(ingredient.subRecipeId);if(!sub)throw fail('Sub-receta inexistente');
+   if(sub.outputInventoryItemId){result.push({itemId:sub.outputInventoryItemId,quantity,unit:ingredient.unit,warehouseId:ingredient.warehouseId,name:ingredient.ingredientName});return;}
+   const yieldQty=Number(sub.productionYield || 0);if(!Number.isFinite(yieldQty)||yieldQty<=0||!sub.productionUnit)throw fail('Sub-receta sin rendimiento o unidad de producción');
+   const ratio=quantity*inventoryUnitFactor(ingredient.unit,sub.productionUnit)/yieldQty;
+   const next=new Set(path);next.add(ingredient.subRecipeId);
+   for(const child of sub.ingredients)await visit({...child,warehouseId:ingredient.warehouseId || child.warehouseId},grossQuantityFor(child,ratio),next);
+  }else result.push({itemId:ingredient.inventoryItemId,quantity,unit:ingredient.unit,warehouseId:ingredient.warehouseId,name:ingredient.ingredientName});
+ }
+ for(const line of lines)await visit(line.ingredient,line.actualGrossQuantity,new Set());return result;
 }
-
-/** Descuenta todos los ingredientes de una receta a un multiplicador uniforme (ej. venta de N unidades de un plato). */
-export async function deductIngredientsAtMultiplier(
-  executor: Executor,
-  getRecipe: RecipeLookupFn,
-  ingredients: RecipeIngredient[],
-  multiplier: number,
-  source: DeductionSource,
-): Promise<StockDeductionResult> {
-  const result: StockDeductionResult = { deducted: [], warnings: [], skipped: [] };
-  for (const ingredient of ingredients) {
-    await deductOne(executor, getRecipe, ingredient, grossQuantityFor(ingredient, multiplier), source, result, 0);
-  }
-  return result;
+export async function deductIngredientsAtMultiplier(executor:any,getRecipe:RecipeLookupFn,ingredients:RecipeIngredient[],multiplier:number,source:DeductionSource):Promise<StockDeductionResult>{
+ const lines=await planIngredientsWithActualQuantities(getRecipe,ingredients.map(ingredient=>({ingredient,actualGrossQuantity:grossQuantityFor(ingredient,multiplier)})));
+ return queueAutomaticConsumption(source.sourceType,source.sourceId,lines,source.actor);
 }
-
-/** Descuenta insumos de nivel superior con una cantidad bruta real editable por insumo (ej. corrida de Producción). */
-export async function deductIngredientsWithActualQuantities(
-  executor: Executor,
-  getRecipe: RecipeLookupFn,
-  lines: Array<{ ingredient: RecipeIngredient; actualGrossQuantity: number }>,
-  source: DeductionSource,
-): Promise<StockDeductionResult> {
-  const result: StockDeductionResult = { deducted: [], warnings: [], skipped: [] };
-  for (const { ingredient, actualGrossQuantity } of lines) {
-    await deductOne(executor, getRecipe, ingredient, actualGrossQuantity, source, result, 0);
-  }
-  return result;
+export async function deductIngredientsWithActualQuantities(executor:any,getRecipe:RecipeLookupFn,lines:Array<{ingredient:RecipeIngredient;actualGrossQuantity:number}>,source:DeductionSource):Promise<StockDeductionResult>{
+ const planned=await planIngredientsWithActualQuantities(getRecipe,lines);
+ return {deducted:await consumeStockLines(executor,planned,{type:source.sourceType,id:source.sourceId,notes:source.notes,actor:source.actor,strictWarehouse:true}),warnings:[],skipped:[]};
 }

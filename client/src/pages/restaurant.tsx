@@ -1,3 +1,4 @@
+import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useCallback, useRef, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
 import { formatHotelDateTime, formatHotelTime } from "@/lib/hotelTime";
@@ -2600,6 +2601,7 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
+      <InventoryPendingConsumptions area="restaurant" readOnly/>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="floor" data-testid="tab-floor">

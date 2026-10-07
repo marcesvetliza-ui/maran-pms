@@ -111,6 +111,7 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
     const cabinId = `cabin-${suffix}`;
     const categoryId = `category-${suffix}`;
     const productId = `product-${suffix}`;
+    const warehouseId=`wh-${suffix}`;
     let appointmentId: string | null = null;
 
     try {
@@ -133,6 +134,9 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
         [productId, categoryId],
       );
 
+      await pool.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'SPA Test')",[warehouseId]);
+      await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,10)",[productId,warehouseId]);
+      await pool.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,created_at) VALUES($1,'transferencia',10,0,10,$2,now())",[productId,warehouseId]);
       const createResponse = await request("POST", "/api/spa/appointments", {
         cabinId, treatmentId, guestName: "Lucía Fernández",
         appointmentDate: "2026-10-06", startTime: "09:00", endTime: "10:00",
@@ -164,11 +168,11 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
       expect(stock.rows[0].current_stock).toBe("8.000");
 
       const movements = await pool.query(
-        "SELECT movement_type, notes, source_type, source_id FROM stock_movements WHERE item_id = $1",
+        "SELECT movement_type, notes, source_type, source_id FROM stock_movements WHERE item_id = $1 AND source_type='spa_account_item'",
         [productId],
       );
       expect(movements.rows).toEqual([{
-        movement_type: "salida", notes: "Venta SPA",
+        movement_type: "consumo", notes: "Consumo automático — spa_account_item",
         source_type: "spa_account_item", source_id: productCharge.body.id,
       }]);
 
@@ -210,6 +214,10 @@ runIfDatabaseIsConfigured("Agregar Cargo — productos vs. conceptos", () => {
         await pool.query("DELETE FROM spa_appointments WHERE id = $1", [appointmentId]);
       }
       await pool.query("DELETE FROM stock_movements WHERE item_id = $1", [productId]);
+      await pool.query("DELETE FROM inventory_consumption_jobs WHERE lines::text LIKE $1",['%'+productId+'%']);
+      await pool.query("DELETE FROM audit_logs WHERE user_id='spa-product-charge-pg'");
+      await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[productId]);
+      await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
       await pool.query("DELETE FROM inventory_items WHERE id = $1", [productId]);
       await pool.query("DELETE FROM item_categories WHERE id = $1", [categoryId]);
       await pool.query("DELETE FROM spa_cabins WHERE id = $1", [cabinId]);

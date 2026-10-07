@@ -1,3 +1,4 @@
+import {requireAuth,requirePermission} from "../auth";
 import type { Express } from "express";
 import {
   getProducibleFormulas, getUnlinkedBaseRecipes,
@@ -6,7 +7,7 @@ import {
 } from "../production";
 
 export function registerProductionRoutes(app: Express) {
-  app.get("/api/production/formulas", async (req, res) => {
+  app.get("/api/production/formulas", requireAuth, async (req, res) => {
     try {
       const formulas = await getProducibleFormulas();
       res.json(formulas);
@@ -15,7 +16,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.get("/api/production/formulas/unlinked", async (req, res) => {
+  app.get("/api/production/formulas/unlinked", requireAuth, async (req, res) => {
     try {
       const recipes = await getUnlinkedBaseRecipes();
       res.json(recipes);
@@ -24,7 +25,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/formulas/:recipeId/link", async (req, res) => {
+  app.post("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
     try {
       const { outputInventoryItemId } = req.body;
       if (!outputInventoryItemId) return res.status(400).json({ error: "Falta el artículo de inventario" });
@@ -35,7 +36,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/formulas/:recipeId/link-new", async (req, res) => {
+  app.post("/api/production/formulas/:recipeId/link-new", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
     try {
       const { name, unit, categoryId } = req.body;
       const id = await createAndLinkOutputItem(req.params.recipeId, { name, unit, categoryId });
@@ -45,7 +46,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/production/formulas/:recipeId/link", async (req, res) => {
+  app.delete("/api/production/formulas/:recipeId/link", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
     try {
       await unlinkRecipeOutput(req.params.recipeId);
       res.status(204).send();
@@ -54,17 +55,21 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.post("/api/production/runs", async (req, res) => {
+  app.post("/api/production/runs", requireAuth, requirePermission("api:inventory:write"), async (req, res) => {
     try {
-      const { date, recipeId, outputQuantity, lines, notes } = req.body;
+      const { date, recipeId, outputQuantity, outputWarehouseId, requestId, lines, notes } = req.body;
+      if(!requestId)return res.status(400).json({error:"Falta el identificador de la operación; actualizá la página y reintentá."});
       const user = (req as any).user?.fullName || (req as any).user?.username || null;
       const result = await registerProductionRun({
         date,
         recipeId,
+        outputWarehouseId,
+        requestId,
         outputQuantity: Number(outputQuantity),
         lines: Array.isArray(lines) ? lines.map((l: any) => ({
           recipeIngredientId: l.recipeIngredientId,
           actualQuantity: Number(l.actualQuantity),
+          warehouseId:l.warehouseId,
         })) : [],
         notes: notes || null,
         registeredBy: user,
@@ -75,7 +80,7 @@ export function registerProductionRoutes(app: Express) {
     }
   });
 
-  app.get("/api/production/runs", async (req, res) => {
+  app.get("/api/production/runs", requireAuth, async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
       const history = await getProductionRunHistory(limit && Number.isFinite(limit) ? limit : undefined);

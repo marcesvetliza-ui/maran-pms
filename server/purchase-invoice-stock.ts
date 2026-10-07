@@ -1,3 +1,6 @@
+import {stockUnits} from "./inventorySafety";
+import {unitFactor} from "./inventoryStockEngine";
+import {convertInventoryQuantity} from "./inventoryUnits";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
@@ -9,6 +12,7 @@ export type PurchaseStockRow = {
   warehouseId: string | null;
   quantity: number;
   unitCost: number;
+  unit?: string;
   vatRate: string | null;
 };
 
@@ -21,13 +25,14 @@ export function parsePurchaseStockRows(value: unknown): PurchaseStockRow[] {
     const quantity = Number(row?.quantity);
     const unitCost = Number(row?.unitCost);
     const vatRate = row?.vatRate == null || row.vatRate === "" ? null : String(row.vatRate);
-    if (!itemId || (warehouseId !== null && typeof warehouseId !== "string") ||
+    if (!itemId || !warehouseId || typeof warehouseId !== "string" || !warehouseId.trim() || (row?.unit != null && typeof row.unit !== "string") ||
       !Number.isFinite(quantity) || quantity <= 0 || quantity > 9999999 ||
       !Number.isFinite(unitCost) || unitCost < 0 || unitCost > 99999999 ||
       (vatRate !== null && !["2.5", "5", "10.5", "21", "27"].includes(vatRate))) {
       throw Object.assign(new Error(`Artículo ${index + 1}: comprobá artículo, depósito, cantidad y costo.`), { statusCode: 400 });
     }
-    return { itemId, warehouseId, quantity, unitCost, vatRate };
+    stockUnits(quantity);
+    return { itemId, warehouseId:warehouseId.trim(), quantity, unitCost, vatRate, unit: row.unit };
   });
 }
 
@@ -38,23 +43,32 @@ export async function enterPurchaseInvoiceStock(
   supplierId: number,
   rows: PurchaseStockRow[],
   reference: string,
+  actor?:string,
 ): Promise<void> {
+  for (const id of [...new Set(rows.map(r=>r.itemId))].sort()) await tx.execute(sql`SELECT id FROM inventory_items WHERE id=${id} FOR UPDATE`);
+  for (const id of [...new Set(rows.map(r=>r.warehouseId).filter((id):id is string=>!!id))].sort()) {
+    const r=await tx.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${id} AND is_active='true' FOR SHARE`);
+    if(!r.rows.length)throw Object.assign(new Error('El depósito de compra no existe o está inactivo'),{statusCode:400});
+  }
   for (const [index, row] of rows.entries()) {
     // Serialize updates to the same item, including repeated rows in this invoice.
     const itemResult = await tx.execute(sql`
-      SELECT id, sku, name, current_stock, cost_price FROM inventory_items
+      SELECT id, sku, name, unit, current_stock, cost_price FROM inventory_items
       WHERE id = ${row.itemId} AND is_active = 'true' FOR UPDATE
     `);
     if (!itemResult.rows.length) {
       throw Object.assign(new Error(`Artículo ${index + 1}: no existe o está inactivo.`), { statusCode: 400 });
     }
     const item = itemResult.rows[0] as any;
+    const factor=await unitFactor(tx,row.itemId,row.unit || item.unit,item.unit);
+    const stockQuantity=convertInventoryQuantity(row.quantity,factor),stockCost=row.unitCost/factor;
+    if(!Number.isFinite(stockCost)||stockCost>99999999)throw Object.assign(new Error("El costo convertido está fuera de rango"),{statusCode:400});
     await tx.execute(sql`
       INSERT INTO purchase_invoice_lines
-        (invoice_id, line_number, item_id, item_name, item_sku, quantity, unit_price, vat_rate, line_total, warehouse_id)
+        (invoice_id, line_number, item_id, item_name, item_sku, quantity, unit_price, vat_rate, line_total, warehouse_id, input_unit, stock_quantity, stock_unit)
       VALUES (${invoiceId}, ${index + 1}, ${row.itemId}, ${item.name}, ${item.sku},
         ${row.quantity}, ${row.unitCost}, ${row.vatRate},
-        ${Math.round((row.quantity * row.unitCost + Number.EPSILON) * 100) / 100}, ${row.warehouseId})
+        ${Math.round((row.quantity * row.unitCost + Number.EPSILON) * 100) / 100}, ${row.warehouseId}, ${row.unit || item.unit}, ${stockQuantity}, ${item.unit})
     `);
     const previousGlobal = Number(item.current_stock ?? 0);
     let previousStock = previousGlobal;
@@ -72,7 +86,7 @@ export async function enterPurchaseInvoiceStock(
       previousStock = Number((stock.rows[0] as any)?.current_stock ?? 0);
       await tx.execute(sql`
         INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
-        VALUES (${row.warehouseId}, ${row.itemId}, ${row.quantity}, now())
+        VALUES (${row.warehouseId}, ${row.itemId}, ${stockQuantity}, now())
         ON CONFLICT (warehouse_id, item_id) DO UPDATE SET
           current_stock = warehouse_stock.current_stock + EXCLUDED.current_stock, updated_at = now()
       `);
@@ -80,24 +94,24 @@ export async function enterPurchaseInvoiceStock(
     // Increase the global stock by the entry itself. Summing warehouse stocks here
     // would discard stock previously entered without a warehouse.
     await tx.execute(sql`
-      UPDATE inventory_items SET current_stock = COALESCE(current_stock, 0) + ${row.quantity}
+      UPDATE inventory_items SET current_stock = COALESCE(current_stock, 0) + ${stockQuantity}
       WHERE id = ${row.itemId}
     `);
     await tx.execute(sql`
       INSERT INTO stock_movements
         (item_id, movement_type, quantity, previous_stock, new_stock, unit_cost,
-         notes, source_type, source_id, created_at, warehouse_id)
-      VALUES (${row.itemId}, 'entrada', ${row.quantity}, ${previousStock},
-        ${previousStock + row.quantity}, ${row.unitCost || null}, ${reference},
-        'purchase_invoice', ${String(invoiceId)}, now(), ${row.warehouseId})
+         notes, source_type, source_id, created_at, warehouse_id,created_by)
+      VALUES (${row.itemId}, 'entrada', ${stockQuantity}, ${previousStock},
+        ${previousStock + stockQuantity}, ${stockCost || null}, ${reference},
+        'purchase_invoice', ${String(invoiceId)}, now(), ${row.warehouseId},${actor || null})
     `);
-    if (row.unitCost > 0 && row.unitCost !== Number(item.cost_price ?? 0)) {
+    if (row.unitCost > 0 && stockCost !== Number(item.cost_price ?? 0)) {
       await tx.execute(sql`
         INSERT INTO item_price_history (item_id, price, source, notes)
-        VALUES (${row.itemId}, ${row.unitCost}, 'entrada', ${reference})
+        VALUES (${row.itemId}, ${stockCost}, 'entrada', ${reference})
       `);
-      await tx.execute(sql`UPDATE inventory_items SET cost_price = ${row.unitCost} WHERE id = ${row.itemId}`);
-      await cascadeRecipeCostsFromInventoryItem(tx, row.itemId, row.unitCost);
+      await tx.execute(sql`UPDATE inventory_items SET cost_price = ${stockCost} WHERE id = ${row.itemId}`);
+      await cascadeRecipeCostsFromInventoryItem(tx, row.itemId, stockCost);
     }
     // Preserve an existing preferred supplier. Associate the invoice supplier
     // without replacing other supplier relationships or their preference.

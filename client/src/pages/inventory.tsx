@@ -1,3 +1,6 @@
+import {InventorySourceReversal} from '@/components/inventory-source-reversal';
+import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
+import {InventoryPendingConsumptions} from "@/components/inventory-pending-consumptions";
 import { InventoryMovementDetail } from "@/components/inventory-movement-detail";
 import { Fragment, useState, useEffect } from "react";
 import { Link } from "wouter";
@@ -439,23 +442,8 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
     if (!imRecipeId) return;
     setImRecipeLoading(true);
     try {
-      const ingredients = await fetch(`/api/restaurant/recipes/${imRecipeId}/ingredients`, { credentials: "include" }).then(r => r.json());
-      const porciones = parseFloat(imPorciones) || 1;
-      const newRows: Array<{ itemId: string; quantity: string; notes: string; warehouseId?: string }> = [];
-      for (const ing of ingredients) {
-        if (!ing.inventoryItemId) continue;
-        const merma = parseFloat(ing.merma || "0");
-        const baseQty = parseFloat(ing.quantity || "0");
-        const grossQty = merma > 0 ? baseQty / (1 - merma / 100) : baseQty;
-        const totalQty = (grossQty * porciones).toFixed(3);
-        // merge with existing row if same item
-        const existing = newRows.find(r => r.itemId === ing.inventoryItemId);
-        if (existing) {
-          existing.quantity = (parseFloat(existing.quantity) + parseFloat(totalQty)).toFixed(3);
-        } else {
-          newRows.push({ itemId: ing.inventoryItemId, quantity: totalQty, notes: "" });
-        }
-      }
+      const response=await apiRequest('POST','/api/inventory/recipe-stock-preview',{recipeId:imRecipeId,multiplier:Number(imPorciones)});
+      const newRows: Array<{ itemId:string;quantity:string;notes:string;warehouseId?:string }>=await response.json();
       // merge into imItems (append, dedup)
       setImItems(prev => {
         const merged = [...prev];
@@ -1255,6 +1243,7 @@ export default function InventoryPage() {
         </Card>
       </div>
 
+      <InventoryPendingConsumptions />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList aria-label="Secciones de inventario">
           <TabsTrigger value="items" data-testid="tab-items">
@@ -1448,7 +1437,7 @@ export default function InventoryPage() {
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
                       {movementsLoading ? <p>Cargando movimientos...</p> : movementsError ? <p>No se pudo cargar el historial. Volvé a intentar.</p> : movements.filter(m => m.itemId === item.id).length === 0 ? <p>No hay movimientos registrados para este artículo. El stock inicial puede haber sido cargado sin historial.</p> :
-                        <div className="space-y-3">{movements.filter(m => m.itemId === item.id).map(m => <details key={m.id} className="border rounded p-3"><summary className="cursor-pointer">{formatHotelDateTime(m.createdAt, {includeYear: false})} · {movementTypeLabels[m.movementType]} · {m.previousStock} → {m.newStock} {item.unit}</summary><div className="mt-3"><InventoryMovementDetail movement={m} warehouses={warehouses} /></div></details>)}</div>}
+                        <div className="space-y-3">{movements.filter(m => m.itemId === item.id).map(m => <details key={m.id} className="border rounded p-3"><summary className="cursor-pointer">{formatHotelDateTime(m.createdAt, {includeYear: false})} · {movementTypeLabels[m.movementType]} · {m.previousStock} → {m.newStock} {item.unit}</summary><div className="mt-3"><InventoryMovementDetail movement={m} warehouses={warehouses} /><InventorySourceReversal sourceType={m.sourceType} sourceId={m.sourceId}/></div></details>)}</div>}
                     </td></tr>}</Fragment>
                   ))}
                 </tbody>
@@ -1687,7 +1676,7 @@ export default function InventoryPage() {
                         <td className="p-3 text-sm text-muted-foreground truncate max-w-48">{movement.notes || "-"}</td>
                         <td className="p-2"><div className="flex">{((movement.sourceType === "manual" && !movement.sourceId) || movement.sourceType === "movement_correction") && movement.movementType !== "transferencia" && movement.notes !== "Stock inicial" && !movement.annulled && <><Button variant="ghost" size="icon" aria-label={`Corregir movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"corregir",id:movement.id,name:movement.item?.name || "Artículo",quantity:String(movement.quantity),notes:movement.notes || ""})}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Anular movimiento ${movement.id}`} onClick={()=>openInventoryAction({kind:"anular",id:movement.id,name:movement.item?.name || "Artículo"})}><Trash2 className="h-4 w-4" /></Button></>}<Button variant="ghost" size="icon" aria-label={`Ver detalle del movimiento ${movement.id}`} aria-expanded={expandedMovements.has(movement.id)} onClick={() => toggleExpanded(movement.id, setExpandedMovements)}>{expandedMovements.has(movement.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                       </tr>
-                      {expandedMovements.has(movement.id) && <tr><td colSpan={8} className="p-4 bg-muted/20"><InventoryMovementDetail movement={movement} warehouses={warehouses} /></td></tr>}</Fragment>
+                      {expandedMovements.has(movement.id) && <tr><td colSpan={8} className="p-4 bg-muted/20"><InventoryMovementDetail movement={movement} warehouses={warehouses} /><InventorySourceReversal sourceType={movement.sourceType} sourceId={movement.sourceId}/></td></tr>}</Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -2683,13 +2672,14 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       </Dialog>
 
       <Dialog open={!!editingArticle} onOpenChange={open=>{if(!open && !editArticleMutation.isPending)setEditingArticle(null);}}>
-        <DialogContent><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
+        <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
           <Label htmlFor="article-name">Nombre</Label><Input id="article-name" value={articleName} onChange={e=>setArticleName(e.target.value)}/>
           <Label htmlFor="article-sku">SKU</Label><Input id="article-sku" value={articleSku} onChange={e=>setArticleSku(e.target.value)}/>
           <Label htmlFor="article-min">Stock mínimo</Label><Input id="article-min" type="number" min="0" step="0.001" value={articleMin} onChange={e=>setArticleMin(e.target.value)}/>
           <Label htmlFor="article-cost">Costo unitario</Label><Input id="article-cost" type="number" min="0" step="0.01" value={articleCost} onChange={e=>setArticleCost(e.target.value)}/>
           <label className="flex gap-2"><input type="checkbox" disabled={editingArticle?.isActive !== "false"} checked={articleActive} onChange={e=>setArticleActive(e.target.checked)}/>Artículo activo</label>
           <p className="text-sm text-muted-foreground">Las cantidades se corrigen desde movimientos. El historial se conserva.</p>
+          {editingArticle && <InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/>}
           <DialogFooter><Button disabled={editArticleMutation.isPending || !articleName.trim() || articleMin === "" || articleCost === "" || Number(articleMin)<0 || Number(articleCost)<0} onClick={()=>editArticleMutation.mutate()}>Guardar artículo</Button></DialogFooter>
         </DialogContent>
       </Dialog>

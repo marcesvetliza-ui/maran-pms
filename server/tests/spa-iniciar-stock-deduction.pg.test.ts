@@ -68,7 +68,7 @@ async function waitUntilStockMovementExists(itemId: string) {
   if (!pool) throw new Error("DATABASE_URL no está configurado");
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
-    const result = await pool.query("SELECT id FROM stock_movements WHERE item_id = $1", [itemId]);
+    const result = await pool.query("SELECT id FROM stock_movements WHERE item_id = $1 AND source_type='spa_account'", [itemId]);
     if (result.rows.length > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -91,6 +91,7 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
     const treatmentId = `treatment-${suffix}`;
     const cabinId = `cabin-${suffix}`;
     const itemId = `item-${suffix}`;
+    const warehouseId=`wh-${suffix}`;
     let appointmentId: string | null = null;
 
     try {
@@ -107,6 +108,9 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
         `INSERT INTO inventory_items (id, name, unit, current_stock) VALUES ($1, 'Aceite de masaje', 'ml', '500.000')`,
         [itemId],
       );
+      await pool.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'SPA Test')",[warehouseId]);
+      await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,500)",[itemId,warehouseId]);
+      await pool.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,warehouse_id,created_at) VALUES($1,'transferencia',500,0,500,$2,$2,now())",[itemId,warehouseId]);
       await pool.query(
         `INSERT INTO treatment_supplies (id, treatment_id, inventory_item_id, quantity, unit)
          VALUES ($1, $2, $3, '20.000', 'ml')`,
@@ -135,11 +139,11 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
       expect(stockAfterStart.rows[0].current_stock).toBe("480.000");
 
       const movements = await pool.query(
-        "SELECT movement_type, notes, source_type, source_id FROM stock_movements WHERE item_id = $1",
+        "SELECT movement_type, notes, source_type, source_id FROM stock_movements WHERE item_id = $1 AND source_type='spa_account'",
         [itemId],
       );
       expect(movements.rows).toEqual([{
-        movement_type: "salida", notes: "Consumo SPA", source_type: "spa_account", source_id: accountId,
+        movement_type: "consumo", notes: "Consumo automático — spa_account", source_type: "spa_account", source_id: accountId,
       }]);
 
       // Un segundo disparo (p. ej. al cerrar la cuenta más tarde) no debe descontar de nuevo.
@@ -148,7 +152,7 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
 
       const stockAfterSecondCall = await pool.query("SELECT current_stock FROM inventory_items WHERE id = $1", [itemId]);
       expect(stockAfterSecondCall.rows[0].current_stock).toBe("480.000");
-      const movementsAfterSecondCall = await pool.query("SELECT id FROM stock_movements WHERE item_id = $1", [itemId]);
+      const movementsAfterSecondCall = await pool.query("SELECT id FROM stock_movements WHERE item_id = $1 AND source_type='spa_account'", [itemId]);
       expect(movementsAfterSecondCall.rows).toHaveLength(1);
     } finally {
       if (appointmentId) {
@@ -173,6 +177,10 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
         await pool.query("DELETE FROM spa_appointments WHERE id = $1", [appointmentId]);
       }
       await pool.query("DELETE FROM treatment_supplies WHERE treatment_id = $1", [treatmentId]);
+      await pool.query("DELETE FROM inventory_consumption_jobs WHERE lines::text LIKE $1",['%'+itemId+'%']);
+      await pool.query("DELETE FROM audit_logs WHERE user_id='spa-iniciar-pg'");
+      await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[itemId]);
+      await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
       await pool.query("DELETE FROM inventory_items WHERE id = $1", [itemId]);
       await pool.query("DELETE FROM spa_cabins WHERE id = $1", [cabinId]);
       await pool.query("DELETE FROM spa_treatments WHERE id = $1", [treatmentId]);

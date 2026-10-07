@@ -1,5 +1,6 @@
+import {registerInventoryStage2Routes} from "../inventoryStage2Routes";
 import { consumeInventoryInternally, internalConsumptionOrigins } from "../inventoryInternalConsumption";
-import { safeInventoryTransfer, safeWarehouseMovement } from "../inventorySafety";
+import { safeInventoryTransfer, safeWarehouseMovement, stockUnits } from "../inventorySafety";
 import { correctInventoryMovement } from "../inventoryMovementCorrection";
 import type { Express } from "express";
 import { storage } from "../db-storage";
@@ -12,6 +13,7 @@ import { requireAuth, requirePermission } from "../auth";
 const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 
 export function registerInventoryRoutes(app: Express) {
+  registerInventoryStage2Routes(app);
   // Item Categories
   app.get("/api/inventory/categories", async (req, res) => {
     try {
@@ -127,74 +129,29 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/items", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
-    try {
-      const body = { ...req.body };
-
-      // Auto-generate SKU if not provided
-      if (!body.sku) {
-        const areaPrefixes: Record<string, string> = {
-          spa: "SPA",
-          restaurant: "RST",
-          housekeeping: "HSK",
-          maintenance: "MNT",
-          admin: "ADM",
-          general: "GEN",
-          marketing: "MKT",
-        };
-        // Prefer category area over item area for SKU prefix
-        let area = body.area ?? "general";
-        if (body.categoryId) {
-          const cat = await storage.getItemCategory(body.categoryId);
-          if (cat?.area) area = cat.area;
-        }
-        const prefix = areaPrefixes[area as string] ?? "GEN";
-
-        // Find highest existing numeric suffix for this prefix
-        const allItems = await storage.getInventoryItems();
-        const pattern = new RegExp(`^${prefix}-(\\d+)$`);
-        let maxNum = 0;
-        for (const it of allItems) {
-          if (it.sku) {
-            const m = it.sku.match(pattern);
-            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
-          }
-        }
-        body.sku = `${prefix}-${String(maxNum + 1).padStart(4, "0")}`;
-      }
-
-      const item = await storage.createInventoryItem(body);
-
-      // If a warehouseId was provided and there's initial stock, seed warehouse_stock
-      const warehouseId = req.body.warehouseId;
-      const initialStock = parseFloat(String(body.currentStock ?? 0));
-      if (warehouseId && initialStock > 0) {
-        await db.execute(sql`
-          INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
-          VALUES (${warehouseId}, ${item.id}, ${initialStock}, now())
-          ON CONFLICT (warehouse_id, item_id) DO UPDATE SET current_stock = ${initialStock}, updated_at = now()
-        `);
-        await db.execute(sql`
-          INSERT INTO stock_movements (item_id, movement_type, quantity, previous_stock, new_stock, notes, source_type, created_at, warehouse_id)
-          VALUES (${item.id}, 'entrada', ${initialStock}, 0, ${initialStock}, 'Stock inicial', 'manual', now(), ${warehouseId})
-        `);
-      }
-
-      res.status(201).json(item);
-    } catch (error: any) {
-      const status = error?.message?.includes("proveedor") ? 400 : 500;
-      res.status(status).json({ error: status === 400 ? error.message : "Error creating inventory item" });
-    }
+  app.post("/api/inventory/items", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async(req,res)=>{
+    try{
+      const {warehouseId,...body}=req.body,quantity=stockUnits(body.currentStock ?? 0);
+      if(quantity&&!warehouseId)return res.status(400).json({error:'El stock inicial necesita depósito de destino'});
+      const item=await withDatabaseTransaction(async()=>{
+        if(quantity){const wh=await db.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${warehouseId} AND is_active='true' FOR SHARE`);if(!wh.rows.length)throw Object.assign(new Error('Depósito inexistente o inactivo'),{statusCode:400});}
+        const created=await storage.createInventoryItem({...body,currentStock:(quantity/1000).toFixed(3)});
+        if(quantity){await db.execute(sql`INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock,updated_at) VALUES(${warehouseId},${created.id},${quantity/1000},now())`);
+          await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,created_at,created_by,warehouse_id) VALUES(${created.id},'entrada',${quantity/1000},0,${quantity/1000},'Stock inicial','manual',now(),${req.user?.id || null},${warehouseId})`);
+        }return created;
+      });res.status(201).json(item);
+    }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
   });
 
-  app.patch("/api/inventory/items/:id", requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/inventory/items/:id", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
+      if(req.body.currentStock!==undefined)return res.status(409).json({error:"Las cantidades se corrigen con movimientos de stock por depósito."});
       const item = await storage.updateInventoryItem(req.params.id, req.body);
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
     } catch (error: any) {
-      const status = error?.message?.includes("proveedor") ? 400 : 500;
-      res.status(status).json({ error: status === 400 ? error.message : "Error updating inventory item" });
+      const status = error?.statusCode || (error?.message?.includes("proveedor") ? 400 : 500);
+      res.status(status).json({ error: status < 500 ? error.message : "Error updating inventory item" });
     }
   });
 
@@ -250,25 +207,12 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
-  app.post("/api/inventory/movements", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/inventory/movements", requireAuth, requirePermission(INVENTORY_WRITE_RESOURCE_KEY), async (req,res)=>{
     try {
-      const {itemId,movementType,quantity,notes}=req.body;
-      const qty=Number(quantity);
-      if (!['entrada','salida','consumo','ajuste'].includes(movementType) || !Number.isFinite(qty) || qty<0 || (movementType !== 'ajuste' && qty===0)) return res.status(400).json({error:"Tipo o cantidad inválida"});
-      const result=await withDatabaseTransaction(async()=>{
-        const locked=await db.execute(sql`SELECT id FROM inventory_items WHERE id=${itemId} FOR UPDATE`);
-        if (!locked.rows[0]) throw Object.assign(new Error("Artículo no encontrado"),{statusCode:404});
-        const item=await storage.getInventoryItem(itemId);
-        if(item!.isActive === "false")throw Object.assign(new Error("El artículo está inactivo"),{statusCode:409});
-        const previousStock=Number(item!.currentStock);
-        const newStock=Math.round((movementType==='ajuste' ? qty : previousStock+(movementType==='entrada'?qty:-qty))*1000)/1000;
-        if(newStock<0)throw Object.assign(new Error("Stock insuficiente"),{statusCode:409});
-        const movement=await storage.createStockMovement({itemId,movementType,quantity:String(qty),previousStock:String(previousStock),newStock:String(newStock),notes,sourceType:'manual',sourceId:null,createdAt:new Date(),createdBy:req.user!.id});
-        await storage.updateInventoryItem(itemId,{currentStock:String(newStock)});
-        return {movement,newStock,item:{...item,currentStock:newStock}};
-      });
-      res.status(201).json(result);
-    }catch(error:any){res.status(error.statusCode || 500).json({error:error.message || "No se pudo registrar el movimiento"});}
+      if(!req.body.warehouseId)return res.status(400).json({error:'Elegí el depósito del movimiento; no se modifica solo el stock global'});
+      const result=await safeWarehouseMovement(String(req.body.warehouseId),req.body,req.user!.id);
+      res.status(201).json({...result,newStock:result.newGlobalStock});
+    }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
   });
 
   app.get("/api/inventory/consumo-report", requireAuth, async (req, res) => {

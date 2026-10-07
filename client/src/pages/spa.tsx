@@ -1,3 +1,4 @@
+import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -1918,6 +1919,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
   return (
     <div className="flex flex-col h-full p-4 gap-4">
+      <InventoryPendingConsumptions area="spa" readOnly/>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">

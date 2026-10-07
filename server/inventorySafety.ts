@@ -35,6 +35,7 @@ export async function safeWarehouseMovement(warehouseId: string, data: {itemId:s
     if(data.movementType==='entrada' && cost !== null && cost>0 && cost !== Number(item.cost_price ?? 0)){
       await db.execute(sql`INSERT INTO item_price_history(item_id,price,source,notes) VALUES(${data.itemId},${cost},'entrada',${data.notes || null})`);
       await db.execute(sql`UPDATE inventory_items SET cost_price=${cost} WHERE id=${data.itemId}`);
+      await (await import("./recipeCostCascade")).cascadeRecipeCostsFromInventoryItem(db,data.itemId,cost);
     }
     await log(String(movement.rows[0].id),actor,'Movimiento de depósito',{warehouseId,itemId:data.itemId,previousStock:amount(previous),newStock:amount(next),previousGlobal:item.current_stock,newGlobal:amount(global)});
     return {success:true,newWarehouseStock:next/1000,newGlobalStock:global/1000};

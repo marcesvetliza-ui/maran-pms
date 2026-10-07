@@ -818,7 +818,7 @@ export function registerRestaurantRoutes(app: Express) {
       try {
         const stockResult = await storage.deductStockFromOrder(
           req.params.id,
-          orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity }))
+          orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity })), req.user!.id
         );
         if (stockResult.warnings.length > 0) {
           console.warn(`[Stock] Advertencias en orden ${req.params.id}:`, stockResult.warnings);
@@ -1224,7 +1224,7 @@ export function registerRestaurantRoutes(app: Express) {
             const orderItemsList = await storage.getOrderItems(req.params.id);
             const stockResult = await storage.deductStockFromOrder(
               req.params.id,
-              orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+              orderItemsList.map(i => ({ menuItemId: i.menuItemId, quantity: i.quantity })), req.user!.id,
             );
             if (stockResult.warnings.length > 0) {
               console.warn(`[Stock] Advertencias en orden ${req.params.id} (split):`, stockResult.warnings);
@@ -1449,7 +1449,7 @@ export function registerRestaurantRoutes(app: Express) {
           try {
             const stockResult = await storage.deductStockFromOrder(
               req.params.id,
-              freshItems.map((i: any) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+              freshItems.map((i: any) => ({ menuItemId: i.menuItemId, quantity: i.quantity })), req.user!.id,
             );
             if (stockResult.warnings.length > 0) {
               console.warn(`[Stock] Advertencias en orden ${req.params.id} (pay-items):`, stockResult.warnings);

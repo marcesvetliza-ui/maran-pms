@@ -1,6 +1,6 @@
 import type { LostFoundShippingDetails } from "./lostFoundDelivery";
 import { sql } from "drizzle-orm";
-import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index, check, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2804,6 +2804,9 @@ export const purchaseInvoiceLines = pgTable("purchase_invoice_lines", {
   vatRate: text("vat_rate"),
   lineTotal: numeric("line_total", { precision: 14, scale: 2 }).notNull(),
   warehouseId: varchar("warehouse_id"),
+  inputUnit: text("input_unit"),
+  stockQuantity: numeric("stock_quantity", {precision:10,scale:3}),
+  stockUnit: text("stock_unit"),
 });
 
 // Órdenes de Pago
@@ -3696,3 +3699,41 @@ export const internalMovementItems = pgTable("internal_movement_items", {
   notes: text("notes"),
 });
 export type InternalMovementItem = typeof internalMovementItems.$inferSelect;
+
+
+// Durable configuration and guards for Inventory stage 2. No legacy balances are migrated.
+export const inventoryUnitConversions = pgTable("inventory_unit_conversions", {
+  itemId: varchar("item_id").notNull().references(() => inventoryItems.id),
+  fromUnit: text("from_unit").notNull(),
+  factor: numeric("factor", {precision:18,scale:9}).notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, table => [primaryKey({columns:[table.itemId,table.fromUnit]}),check("inventory_unit_conversions_factor_check",sql`${table.factor}>0`)]);
+
+export const inventoryConsumptionJobs = pgTable("inventory_consumption_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceType: text("source_type").notNull(),
+  sourceId: varchar("source_id").notNull(),
+  status: text("status").$type<"pending"|"completed"|"cancelled">().notNull().default("pending"),
+  lines: jsonb("lines").notNull(),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  actor: varchar("actor"),
+}, table => [unique("inventory_consumption_jobs_source_type_source_id_key").on(table.sourceType,table.sourceId),index("inventory_consumption_jobs_pending_idx").on(table.status,table.createdAt),check("inventory_consumption_jobs_status_check",sql`${table.status} IN ('pending','completed','cancelled')`)]);
+
+export const inventorySourceReversals = pgTable("inventory_source_reversals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sourceType: text("source_type").notNull(),
+  sourceId: varchar("source_id").notNull(),
+  reason: text("reason").notNull(),
+  actor: varchar("actor").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, table => [unique("inventory_source_reversals_source_type_source_id_key").on(table.sourceType,table.sourceId)]);
+
+export const inventoryProductionRequests = pgTable("inventory_production_requests", {
+  requestId: varchar("request_id").primaryKey(),
+  payload: jsonb("payload").notNull(),
+  runId: varchar("run_id").references(() => productionRuns.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

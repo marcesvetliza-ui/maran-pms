@@ -988,7 +988,8 @@ export function registerSpaRoutes(app: Express) {
         ? await storage.getOrCreateActiveTurno("spa")
         : null;
 
-      const appointment = await db.transaction(async (tx) => {
+      const appointment = await withDatabaseTransaction(async () => {
+        const tx=db;
         // "Turnos vendidos": reclama la unidad ANTES de crear nada más, atómico
         // contra otro operador agendando la misma venta a la vez. La condición
         // en el WHERE (no solo el valor leído antes) es lo que hace la carrera
@@ -1237,6 +1238,7 @@ export function registerSpaRoutes(app: Express) {
           }).where(eq(spaAccounts.id, account.id));
         }
 
+        if(settlementPaymentId)await storage.deductStockFromSpaAccount(account.id,req.user!.id);
         return {
           ...createdAppointment,
           accountId: account.id,
@@ -1251,11 +1253,7 @@ export function registerSpaRoutes(app: Express) {
         };
       });
 
-      if (appointment.settlementPaymentId) {
-        storage.deductStockFromSpaAccount(appointment.accountId).catch((error: any) =>
-          console.warn("[SPA] Error deducting stock after initial settlement:", error)
-        );
-      }
+
 
       res.status(201).json(appointment);
     } catch (error: any) {
@@ -1276,7 +1274,8 @@ export function registerSpaRoutes(app: Express) {
         .some((field) => req.body[field] !== undefined)
         || resourceReservationsProvided;
 
-      const appointment = await db.transaction(async (tx) => {
+      const appointment = await withDatabaseTransaction(async () => {
+        const tx=db;
         await tx.execute(sql`SELECT id FROM spa_appointments WHERE id = ${req.params.id} FOR UPDATE`);
         const [current] = await tx.select().from(spaAppointments).where(eq(spaAppointments.id, req.params.id));
         if (!current) {
@@ -1429,6 +1428,7 @@ export function registerSpaRoutes(app: Express) {
           );
         }
 
+        if(enteringInProgress){const account=await storage.getSpaAccountByAppointment(updated.id);if(account)await storage.deductStockFromSpaAccount(account.id,req.user!.id);}
         return { ...updated, enteringInProgress };
       });
 
@@ -1437,14 +1437,7 @@ export function registerSpaRoutes(app: Express) {
       // es idempotente por cuenta, así que el cierre posterior no lo descuenta
       // dos veces.
       const { enteringInProgress, ...appointmentResponse } = appointment;
-      if (enteringInProgress) {
-        const account = await storage.getSpaAccountByAppointment(appointment.id);
-        if (account) {
-          storage.deductStockFromSpaAccount(account.id).catch((error: any) =>
-            console.warn("[SPA] Error deducting stock on iniciar:", error)
-          );
-        }
-      }
+
 
       res.json(appointmentResponse);
     } catch (error: any) {
@@ -1652,13 +1645,14 @@ export function registerSpaRoutes(app: Express) {
         });
       }
 
-      const account = await storage.closeSpaAccount(req.params.id, chargedTo, receiptType);
+      const account=await withDatabaseTransaction(async()=>{
+        const closed=await storage.closeSpaAccount(req.params.id,chargedTo,receiptType);
+        if(closed)await storage.deductStockFromSpaAccount(req.params.id,req.user!.id);
+        return closed;
+      });
       if (!account) return res.status(404).json({ error: "Account not found" });
 
-      // Descontar insumos del inventario (nunca bloquea el cierre)
-      storage.deductStockFromSpaAccount(req.params.id).catch((err: any) =>
-        console.warn("[SPA] Error deducting stock:", err)
-      );
+
 
       // Consumir cualquier voucher reservado contra esta cuenta — no debe
       // bloquear el cierre por un problema de sincronización del voucher.
@@ -1695,7 +1689,8 @@ export function registerSpaRoutes(app: Express) {
       if (!spaPaymentMethod) {
         return res.status(409).json({ error: "La factura no tiene una forma de pago SPA válida" });
       }
-      const linked = await db.transaction(async (tx) => {
+      const linked = await withDatabaseTransaction(async () => {
+        const tx=db;
         await tx.execute(sql`SELECT id FROM sales_invoices WHERE id = ${invoiceId} FOR UPDATE`);
         await tx.execute(sql`SELECT id FROM spa_accounts WHERE id = ${req.params.id} FOR UPDATE`);
         const [invoice] = await tx.select().from(salesInvoices).where(eq(salesInvoices.id, invoiceId));
@@ -1877,14 +1872,11 @@ export function registerSpaRoutes(app: Express) {
           closedBy: (req as any).user?.fullName || (req as any).user?.username || null,
         }).where(eq(spaAccounts.id, account.id)).returning();
 
+        await storage.deductStockFromSpaAccount(req.params.id,req.user!.id);
         return { account: closedAccount, payment, cashMovementId, alreadyLinked: false };
       });
 
-      if (!linked.alreadyLinked) {
-        storage.deductStockFromSpaAccount(req.params.id).catch((error: any) =>
-          console.warn("[SPA] Error deducting stock after invoice:", error)
-        );
-      }
+
 
       res.json(linked);
     } catch (error: any) {
@@ -2091,7 +2083,11 @@ export function registerSpaRoutes(app: Express) {
         return res.status(400).json({ error: "description and unitPrice are required" });
       }
 
-      const qty = quantity || 1;
+      const qty=quantity===undefined ? 1 : Number(quantity);
+      if(!Number.isSafeInteger(qty)||qty<=0||!Number.isFinite(Number(unitPrice))||Number(unitPrice)<0)return res.status(400).json({error:'Cantidad o precio inválidos'});
+      const item=await withDatabaseTransaction(async()=>{
+      const account=await db.execute(sql`SELECT status FROM spa_accounts WHERE id=${req.params.accountId} FOR UPDATE`);
+      if(!account.rows.length || account.rows[0].status!=='open')throw Object.assign(new Error('La cuenta debe estar abierta'),{statusCode:409});
       const subtotal = (parseFloat(unitPrice) * qty).toFixed(2);
 
       const item = await storage.createSpaAccountItem({
@@ -2110,42 +2106,42 @@ export function registerSpaRoutes(app: Express) {
       // depósito del SPA en el momento en que se vende, no cuando se inicia
       // el turno o se cierra la cuenta.
       if (inventoryItemId) {
-        storage.deductStockForSoldSpaProduct(inventoryItemId, qty, item.id).catch((err: any) =>
-          console.warn("[SPA] Error deducting stock for sold product:", err)
-        );
+        await storage.deductStockForSoldSpaProduct(inventoryItemId, qty, item.id,req.user!.id);
       }
 
       // Motor financiero: escribir cargo al folio de la cuenta SPA
-      storage.addFolioCharge(
+      await storage.addFolioCharge(
         "spa_account", req.params.accountId,
         parseFloat(subtotal),
         description,
         "spa_item", item.id,
         (req as any).user?.username,
-      ).catch(e => console.error("[Folio] Error SPA cargo:", e));
+      );
+      return item;
+      });
 
       res.status(201).json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating account item" });
+    } catch (error:any) {
+      res.status(error.statusCode || 500).json({ error: error.message || "Error creating account item" });
     }
   });
 
-  app.patch("/api/spa/account-items/:id", requireAuth, async (req, res) => {
+  app.patch("/api/spa/account-items/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const item = await storage.updateSpaAccountItem(req.params.id, req.body);
+      const item = await storage.updateSpaAccountItem(req.params.id, req.body,req.user!.id);
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating account item" });
+    } catch (error:any) {
+      res.status(error.statusCode || 500).json({ error: error.message || "Error updating account item" });
     }
   });
 
   app.delete("/api/spa/account-items/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      await storage.deleteSpaAccountItem(req.params.id);
+      await storage.deleteSpaAccountItem(req.params.id,req.user!.id);
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting account item" });
+    } catch (error:any) {
+      res.status(error.statusCode || 500).json({ error: error.message || "Error deleting account item" });
     }
   });
 

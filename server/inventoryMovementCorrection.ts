@@ -1,3 +1,4 @@
+import {stockUnits} from "./inventorySafety";
 import { sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "./db";
 const fail = (message: string, statusCode = 409) => Object.assign(new Error(message), {statusCode});
@@ -18,27 +19,30 @@ export async function correctInventoryMovement(id: string, reason: string, actor
     const delta = units(movement.new_stock) - units(movement.previous_stock);
     const current = units(item.current_stock); const reversed = current - delta;
     if (reversed < 0) throw fail("No se puede anular: el stock ya fue consumido y quedaría negativo");
-    let final = reversed;
-    let quantity = 0;
-    if (replacement) {
-      quantity = units(replacement.quantity);
-      if (quantity < 0 || (movement.movement_type !== 'ajuste' && quantity === 0)) throw fail("La cantidad debe ser positiva",400);
-      if (!['entrada','salida','consumo','ajuste'].includes(movement.movement_type)) throw fail("Tipo de movimiento no corregible");
-      final = movement.movement_type === 'ajuste' ? quantity : reversed + (movement.movement_type === 'entrada' ? quantity : -quantity);
-      if (final < 0) throw fail("La corrección dejaría stock negativo");
+    let previousWarehouse:number|null=null;
+    if(movement.warehouse_id){
+      const wh=await db.execute(sql`SELECT current_stock FROM warehouse_stock WHERE warehouse_id=${movement.warehouse_id} AND item_id=${itemId} FOR UPDATE`);
+      if(!wh.rows[0])throw fail('No se encontró el stock del depósito de origen');
+      previousWarehouse=units(wh.rows[0].current_stock);
     }
-    if (movement.warehouse_id) {
-      const wh = await db.execute(sql`SELECT current_stock FROM warehouse_stock WHERE warehouse_id=${movement.warehouse_id} AND item_id=${itemId} FOR UPDATE`);
-      if (!wh.rows[0]) throw fail("No se encontró el stock del depósito de origen");
-      const warehouseFinal = units(wh.rows[0].current_stock) + final - current;
-      if (warehouseFinal < 0) throw fail("La corrección dejaría stock negativo en el depósito");
-      await db.execute(sql`UPDATE warehouse_stock SET current_stock=${(warehouseFinal/1000).toFixed(3)}, updated_at=now() WHERE warehouse_id=${movement.warehouse_id} AND item_id=${itemId}`);
+    const basis=previousWarehouse ?? current,reversedBasis=basis-delta;
+    if(reversedBasis<0)throw fail('La anulación dejaría stock negativo en el depósito');
+    let finalBasis=reversedBasis,quantity=0;
+    if(replacement){
+      quantity=stockUnits(replacement.quantity);
+      if(movement.movement_type!=='ajuste'&&quantity===0)throw fail('La cantidad debe ser positiva',400);
+      if(!['entrada','salida','consumo','ajuste'].includes(movement.movement_type))throw fail('Tipo de movimiento no corregible');
+      finalBasis=movement.movement_type==='ajuste'?quantity:reversedBasis+(movement.movement_type==='entrada'?quantity:-quantity);
+      if(finalBasis<0)throw fail('La corrección dejaría stock negativo en el depósito');
     }
+    const final=current+finalBasis-basis;
+    if(final<0)throw fail('La corrección dejaría stock global negativo');
+    if(movement.warehouse_id)await db.execute(sql`UPDATE warehouse_stock SET current_stock=${(finalBasis/1000).toFixed(3)},updated_at=now() WHERE warehouse_id=${movement.warehouse_id} AND item_id=${itemId}`);
     await db.execute(sql`UPDATE inventory_items SET current_stock=${(final/1000).toFixed(3)} WHERE id=${itemId}`);
     await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,source_id,created_at,created_by,warehouse_id)
-      VALUES(${itemId},'ajuste',${Math.abs(delta)/1000},${current/1000},${reversed/1000},${'Anulación: '+reason.trim()},'movement_reversal',${id},now(),${actor},${movement.warehouse_id})`);
-    if (replacement) await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,source_id,created_at,created_by,warehouse_id)
-      VALUES(${itemId},${movement.movement_type},${quantity/1000},${reversed/1000},${final/1000},${replacement.notes || 'Corrección: '+reason.trim()},'movement_correction',${id},now(),${actor},${movement.warehouse_id})`);
+      VALUES(${itemId},'ajuste',${Math.abs(delta)/1000},${basis/1000},${reversedBasis/1000},${'Anulación: '+reason.trim()},'movement_reversal',${id},now(),${actor},${movement.warehouse_id})`);
+    if(replacement)await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,source_id,created_at,created_by,warehouse_id)
+      VALUES(${itemId},${movement.movement_type},${quantity/1000},${reversedBasis/1000},${finalBasis/1000},${replacement.notes || 'Corrección: '+reason.trim()},'movement_correction',${id},now(),${actor},${movement.warehouse_id})`);
     await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
       VALUES(${actor},${actor},'update','inventory','stock_movement',${id},${reason.trim()},${JSON.stringify({before:movement,afterStock:final/1000,replacement:replacement||null})},now())`);
     return {newStock:(final/1000).toFixed(3)};

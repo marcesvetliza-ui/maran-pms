@@ -7,6 +7,7 @@ export type InventoryMovementDetailData = {
   sourceType?: string | null; sourceId?: string | null; warehouseId?: string | null; toWarehouseId?: string | null;
 };
 const origins: Record<string, string> = {
+  production_run:"Producción",source_stock_reversal:"Reversión de stock del documento",
   manual: "Carga manual", purchase_invoice: "Comprobante de compra", restaurant_order: "Consumo de restaurant",
   internal_movement: "Movimiento interno", spa_account: "Cuenta SPA", spa_account_item: "Consumo SPA",
   movement_reversal: "Reversión por anulación", movement_correction: "Corrección de movimiento", transfer: "Transferencia", initial_stock: "Stock inicial",

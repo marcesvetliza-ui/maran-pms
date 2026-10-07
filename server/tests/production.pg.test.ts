@@ -9,8 +9,7 @@
  * use ese artículo producido como ingrediente — igual que un artículo
  * comprado normal.
  *
- * También cubre el caso de falta de stock: nunca bloquea, solo avisa y
- * descuenta lo disponible (mismo criterio que ya usa la venta de un plato).
+ * También cubre falta de stock: rechaza toda la corrida sin ingreso ficticio.
  */
 
 import pg from "pg";
@@ -28,21 +27,28 @@ suite("PostgreSQL real: Producción", () => {
   const cleanupMenuItemIds: string[] = [];
   const cleanupMenuCategoryIds: string[] = [];
   const cleanupRunIds: string[] = [];
+  const warehouseId=randomUUID();
+  const requestId=randomUUID();
 
   beforeAll(async () => {
     if (!pool) return;
     ({ storage } = await import("../db-storage"));
     production = await import("../production");
+    await pool.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'Producción test')",[warehouseId]);
   });
 
   afterAll(async () => {
     if (!pool) return;
+    await pool.query("DELETE FROM inventory_production_requests WHERE request_id=$1",[requestId]);
+    await pool.query("DELETE FROM audit_logs WHERE user_id='test-user'");
     for (const id of cleanupRunIds) await pool.query("DELETE FROM production_runs WHERE id = $1", [id]);
     for (const id of cleanupMenuItemIds) await pool.query("DELETE FROM menu_items WHERE id = $1", [id]);
     for (const id of cleanupMenuCategoryIds) await pool.query("DELETE FROM menu_categories WHERE id = $1", [id]);
     for (const recipeId of cleanupRecipeIds) await pool.query("DELETE FROM recipe_ingredients WHERE recipe_id = $1", [recipeId]);
     for (const recipeId of cleanupRecipeIds) await pool.query("DELETE FROM recipes WHERE id = $1", [recipeId]);
     for (const itemId of cleanupItemIds) await pool.query("DELETE FROM stock_movements WHERE item_id = $1", [itemId]);
+    for (const itemId of cleanupItemIds) await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[itemId]);
+    await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
     for (const itemId of cleanupItemIds) await pool.query("DELETE FROM inventory_items WHERE id = $1", [itemId]);
     await pool.end();
   });
@@ -61,6 +67,7 @@ suite("PostgreSQL real: Producción", () => {
       unit: "kg", costPrice: "200", currentStock: "100", itemKind: "materia_prima",
     } as any);
     cleanupItemIds.push(harina.id);
+    await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$3,100),($2,$3,100)",[carne.id,harina.id,warehouseId]);
 
     // Elaboración virtual (NO producible — sin outputInventoryItemId): rinde
     // 10kg, usa 2kg de harina por lote (costo/kg = 2*200/10 = 40).
@@ -116,14 +123,19 @@ suite("PostgreSQL real: Producción", () => {
       date: "2001-02-01",
       recipeId: formula.id,
       outputQuantity: 18,
+      outputWarehouseId:warehouseId,
+      requestId,
       lines: [
-        { recipeIngredientId: ingCarne.id, actualQuantity: 6 },
-        { recipeIngredientId: ingSalsa.id, actualQuantity: 1.2 },
+        { recipeIngredientId: ingCarne.id, actualQuantity: 6,warehouseId },
+        { recipeIngredientId: ingSalsa.id, actualQuantity: 1.2,warehouseId },
       ],
       notes: "Corrida de prueba",
       registeredBy: "test-user",
     });
     cleanupRunIds.push(result.run.id);
+    const repeated=await production.registerProductionRun({date:'2001-02-01',recipeId:formula.id,outputQuantity:18,outputWarehouseId:warehouseId,requestId,lines:[{recipeIngredientId:ingCarne.id,actualQuantity:6,warehouseId},{recipeIngredientId:ingSalsa.id,actualQuantity:1.2,warehouseId}],notes:'Corrida de prueba',registeredBy:'test-user'});
+    expect(repeated.run.id).toBe(result.run.id);
+    expect(repeated.deducted).toEqual([]);
 
     expect(result.warnings).toEqual([]);
     expect(result.skipped).toEqual([]);
@@ -165,7 +177,7 @@ suite("PostgreSQL real: Producción", () => {
     expect(Number(ingPlatoRow.rows[0].unit_cost)).toBeCloseTo(336, 4);
   });
 
-  it("no bloquea una corrida aunque falte stock del insumo — avisa y descuenta lo disponible, pero el costo usa la cantidad real informada", async () => {
+  it("rechaza toda la corrida cuando falta un insumo y no ingresa producción ficticia", async () => {
     if (!pool) return;
 
     const escaso = await storage.createInventoryItem({
@@ -173,6 +185,7 @@ suite("PostgreSQL real: Producción", () => {
       unit: "kg", costPrice: "500", currentStock: "2", itemKind: "materia_prima",
     } as any);
     cleanupItemIds.push(escaso.id);
+    await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,2)",[escaso.id,warehouseId]);
 
     const formula = await storage.createRecipe({
       isBase: true, name: "Elaboración Escasa Test Producción", productionUnit: "kg", productionYield: "1",
@@ -188,26 +201,13 @@ suite("PostgreSQL real: Producción", () => {
     });
     cleanupItemIds.push(outputItemId);
 
-    const result = await production.registerProductionRun({
-      date: "2001-02-02",
-      recipeId: formula.id,
-      outputQuantity: 1,
-      lines: [{ recipeIngredientId: ing.id, actualQuantity: 5 }],
-    });
-    cleanupRunIds.push(result.run.id);
-
-    expect(result.warnings).toEqual([{ itemName: "Insumo Escaso Test Producción", required: 5, available: 2 }]);
-
-    // Se descontó lo disponible (quedó en 0), nunca negativo.
-    const row = await pool.query("SELECT current_stock FROM inventory_items WHERE id = $1", [escaso.id]);
-    expect(Number(row.rows[0].current_stock)).toBe(0);
-
-    // El costo usa la cantidad REAL informada (5), no la clampeada (2):
-    // 5 * 500 = 2500, costo unitario = 2500 / 1 = 2500.
-    expect(result.run.totalCost).toBe("2500.00");
-    expect(Number(result.run.outputUnitCost)).toBeCloseTo(2500, 4);
-
-    const warningsRow = await pool.query("SELECT warnings FROM production_runs WHERE id = $1", [result.run.id]);
-    expect(warningsRow.rows[0].warnings.shortfalls).toEqual([{ itemName: "Insumo Escaso Test Producción", required: 5, available: 2 }]);
+    await expect(production.registerProductionRun({
+      date:'2001-02-02',recipeId:formula.id,outputQuantity:1,outputWarehouseId:warehouseId,
+      lines:[{recipeIngredientId:ing.id,actualQuantity:5,warehouseId}],
+    })).rejects.toThrow(/Stock insuficiente/);
+    expect(Number((await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1',[escaso.id])).rows[0].current_stock)).toBe(2);
+    expect(Number((await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1',[outputItemId])).rows[0].current_stock)).toBe(0);
+    expect((await pool.query('SELECT id FROM production_runs WHERE recipe_id=$1',[formula.id])).rows).toHaveLength(0);
+    expect((await pool.query('SELECT id FROM stock_movements WHERE item_id=$1',[escaso.id])).rows).toHaveLength(0);
   });
 });

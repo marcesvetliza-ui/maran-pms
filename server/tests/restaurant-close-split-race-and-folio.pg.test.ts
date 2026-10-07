@@ -83,6 +83,7 @@ async function cleanupOrder(orderId: string) {
   await pool!.query(`DELETE FROM folio_movements WHERE folio_id IN (SELECT id FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1)`, [orderId]);
   await pool!.query("DELETE FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1", [orderId]);
   await pool!.query("DELETE FROM stock_movements WHERE source_type = 'restaurant_order' AND source_id = $1", [orderId]);
+  await pool!.query("DELETE FROM inventory_consumption_jobs WHERE source_type='restaurant_order' AND source_id=$1",[orderId]);
   await pool!.query("DELETE FROM restaurant_orders WHERE id = $1", [orderId]);
 }
 
@@ -206,6 +207,10 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         sku: `TEST-SPLIT-${randomUUID().slice(0, 8)}`, name: "Materia Prima Split Test",
         unit: "un", costPrice: "10", currentStock: "50", itemKind: "materia_prima",
       } as any);
+      const warehouseId=randomUUID();
+      await pool.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'Restaurant Test')",[warehouseId]);
+      await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,50)",[rawMaterial.id,warehouseId]);
+      await pool.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,created_at) VALUES($1,'transferencia',50,0,50,$2,now())",[rawMaterial.id,warehouseId]);
       const category = await storage.createMenuCategory({ name: `Split Test Cat ${randomUUID().slice(0, 6)}` } as any);
       const menuItem = await storage.createMenuItem({ categoryId: category.id, name: "Plato Split Test", price: "300" } as any);
       const recipe = await storage.createRecipe({ isBase: false, menuItemId: menuItem.id } as any);
@@ -286,6 +291,9 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         await pool.query("DELETE FROM recipes WHERE id = $1", [recipe.id]);
         await pool.query("DELETE FROM menu_items WHERE id = $1", [menuItem.id]);
         await pool.query("DELETE FROM menu_categories WHERE id = $1", [category.id]);
+        await pool.query("DELETE FROM stock_movements WHERE item_id=$1",[rawMaterial.id]);
+        await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[rawMaterial.id]);
+        await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
         await pool.query("DELETE FROM inventory_items WHERE id = $1", [rawMaterial.id]);
       }
     });

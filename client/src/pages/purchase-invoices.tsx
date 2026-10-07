@@ -781,6 +781,7 @@ export function InvoiceDialog({
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
+      if(invItems.some(row=>row.existingItemId && !row.warehouseId))throw new Error('Elegí un depósito de ingreso para cada artículo.');
       const res = await apiRequest("POST", "/api/purchase-invoices", {
         ...data,
         // Un renglón sin artículo elegido (p. ej. el que arranca precargado
@@ -789,6 +790,7 @@ export function InvoiceDialog({
         stockItems: invItems.filter((row) => row.existingItemId).map((row) => ({
           itemId: row.existingItemId,
           warehouseId: row.warehouseId || null,
+          unit: row.unit,
           quantity: row.quantity,
           unitCost: row.costPrice,
           vatRate: row.vatRate || null,
@@ -1245,10 +1247,10 @@ export function InvoiceDialog({
                         <div>
                           <Label className="text-xs mb-1 block">Depósito destino</Label>
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
-                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Sin depósito (stock general)" /></SelectTrigger>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="__none__">— Sin depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id).map((wh: any) => (
+                              <SelectItem value="__none__">— Elegir depósito —</SelectItem>
+                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -1949,10 +1951,10 @@ export function InvoiceDialog({
                         <div>
                           <Label className="text-xs mb-1 block">Depósito destino</Label>
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
-                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Sin depósito (stock general)" /></SelectTrigger>
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="__none__">— Sin depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id).map((wh: any) => (
+                              <SelectItem value="__none__">— Elegir depósito —</SelectItem>
+                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -2039,7 +2041,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
   const { data: detail } = useQuery<any>({
     queryKey: ["/api/purchase-invoices", invoice?.id],
     queryFn: () => fetch(`/api/purchase-invoices/${invoice!.id}`, { credentials: "include" }).then((r) => r.json()),
-    enabled: !!invoice && invoice.estado === "pagado",
+    enabled: !!invoice,
   });
   if (!invoice) return null;
   const fmt2 = (v?: string | number) => {
@@ -2116,6 +2118,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               </div>
             </div>
           </div>
+          {!!detail?.articleLines?.length && <div className="space-y-2"><h3 className="font-semibold">Ingreso de artículos</h3>{detail.articleLines.map((line:any)=><div key={line.id} className="border rounded p-2 text-sm"><p>{line.item_name}</p><p>Comprobante: {Number(line.quantity).toLocaleString('es-AR')} {line.input_unit || ''} · Costo: {fmt2(line.unit_price)}</p>{line.stock_quantity!==null && <p>Ingreso al stock: {Number(line.stock_quantity).toLocaleString('es-AR')} {line.stock_unit}</p>}<p className="text-muted-foreground">Depósito: {line.warehouse_name || line.warehouse_id || 'No registrado'}</p></div>)}</div>}
           {invoice.estado === "pagado" && (
             <>
               <Separator />

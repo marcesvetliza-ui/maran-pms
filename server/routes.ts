@@ -3047,7 +3047,7 @@ export async function registerRoutes(
         ORDER BY po.fecha DESC, po.id DESC
       `);
       const articleLines = await db.execute(sql`
-        SELECT * FROM purchase_invoice_lines WHERE invoice_id = ${id} ORDER BY line_number
+        SELECT l.*,w.name AS warehouse_name FROM purchase_invoice_lines l LEFT JOIN inventory_warehouses w ON w.id=l.warehouse_id WHERE l.invoice_id = ${id} ORDER BY l.line_number
       `);
       res.json({ ...result.rows[0], asientoLines: entry.rows, ordenesPago: ordenesPago.rows, articleLines: articleLines.rows });
     } catch (e: any) {
@@ -3364,7 +3364,7 @@ export async function registerRoutes(
           `);
       }
       await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
-        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`);
+        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`,req.user?.id);
 
       // Si se eligió una forma de pago real (no Cuenta Corriente), generar
       // de una la Orden de Pago de esta factura para que quede pagada (total
@@ -3562,7 +3562,7 @@ export async function registerRoutes(
         if (!invoice.rows.length) return false;
         const movements = await tx.execute(sql`
           SELECT id FROM stock_movements
-          WHERE source_type = 'purchase_invoice' AND source_id = ${String(id)} LIMIT 1
+          WHERE source_type = 'purchase_invoice' AND source_id = ${String(id)} AND NOT EXISTS(SELECT 1 FROM inventory_source_reversals r WHERE r.source_type='purchase_invoice' AND r.source_id=${String(id)} AND r.completed_at IS NOT NULL) LIMIT 1
         `);
         if (movements.rows.length) {
           throw Object.assign(new Error("Este comprobante ingresó artículos al stock. La anulación requiere revertir primero esos movimientos."), { statusCode: 409 });

@@ -20,11 +20,13 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
   const cleanupRecipeIds: string[] = [];
   const cleanupMenuItemIds: string[] = [];
   const cleanupMenuCategoryIds: string[] = [];
-  const fakeOrderId = randomUUID();
+  let fakeOrderId = randomUUID();
+  const warehouseId=randomUUID();
 
   beforeAll(async () => {
     if (!pool) return;
     ({ storage } = await import("../db-storage"));
+    await pool.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'Restaurant Test')",[warehouseId]);
   });
 
   afterAll(async () => {
@@ -34,6 +36,8 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
     for (const id of cleanupMenuCategoryIds) await pool.query("DELETE FROM menu_categories WHERE id = $1", [id]);
     for (const recipeId of cleanupRecipeIds) await pool.query("DELETE FROM recipe_ingredients WHERE recipe_id = $1", [recipeId]);
     for (const recipeId of cleanupRecipeIds) await pool.query("DELETE FROM recipes WHERE id = $1", [recipeId]);
+    for (const itemId of cleanupItemIds){await pool.query("DELETE FROM inventory_consumption_jobs WHERE lines::text LIKE $1",['%'+itemId+'%']);await pool.query("DELETE FROM stock_movements WHERE item_id=$1",[itemId]);await pool.query("DELETE FROM warehouse_stock WHERE item_id=$1",[itemId]);}
+    await pool.query("DELETE FROM inventory_warehouses WHERE id=$1",[warehouseId]);
     for (const itemId of cleanupItemIds) await pool.query("DELETE FROM inventory_items WHERE id = $1", [itemId]);
     await pool.end();
   });
@@ -46,6 +50,9 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
       unit: "kg", costPrice: "100", currentStock: "100", itemKind: "materia_prima",
     } as any);
     cleanupItemIds.push(rawMaterial.id);
+    await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,$3)",[rawMaterial.id,warehouseId,100]);
+    await pool.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,warehouse_id,created_at) VALUES($1,'transferencia',$3,0,$3,$2,$2,now())",[rawMaterial.id,warehouseId,100]);
+    fakeOrderId=randomUUID();
 
     // Elaboración: rinde 10kg, usa 4kg de materia prima por lote con 20% de merma
     // (bruto teórico = 4 / 0.8 = 5kg por lote).
@@ -81,7 +88,7 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
 
     expect(result.skipped).toEqual([]);
     expect(result.warnings).toEqual([]);
-    expect(result.deducted).toEqual([{ itemName: "Materia Prima Test Descuento", quantity: 3, unit: "kg" }]);
+    expect(result.deducted).toEqual([{ itemName: "Materia Prima Test Descuento", quantity: 3, unit: "kg",unitCost:100,warehouseId }]);
 
     const row = await pool.query("SELECT current_stock FROM inventory_items WHERE id = $1", [rawMaterial.id]);
     expect(Number(row.rows[0].current_stock)).toBeCloseTo(97, 3);
@@ -104,6 +111,9 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
       unit: "kg", costPrice: "100", currentStock: "1", itemKind: "materia_prima",
     } as any);
     cleanupItemIds.push(scarce.id);
+    await pool.query("INSERT INTO warehouse_stock(item_id,warehouse_id,current_stock) VALUES($1,$2,$3)",[scarce.id,warehouseId,1]);
+    await pool.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,to_warehouse_id,warehouse_id,created_at) VALUES($1,'transferencia',$3,0,$3,$2,$2,now())",[scarce.id,warehouseId,1]);
+    fakeOrderId=randomUUID();
 
     const category = await storage.createMenuCategory({ name: `Test Descuento Escaso ${randomUUID().slice(0, 6)}` } as any);
     cleanupMenuCategoryIds.push(category.id);
@@ -122,8 +132,10 @@ suite("PostgreSQL real: descuento de stock al vender un plato (con sub-receta an
 
     const result = await storage.deductStockFromOrder(fakeOrderId, [{ menuItemId: menuItem.id, quantity: 1 }]);
 
-    expect(result.warnings).toEqual([{ itemName: "Materia Escasa Test Descuento", required: 5, available: 1 }]);
+    expect(result.status).toBe("pending");
+    expect(result.warnings[0].itemName).toMatch(/Stock insuficiente/);
+    expect((await pool.query("SELECT status FROM inventory_consumption_jobs WHERE source_id=$1",[fakeOrderId])).rows[0].status).toBe("pending");
     const row = await pool.query("SELECT current_stock FROM inventory_items WHERE id = $1", [scarce.id]);
-    expect(Number(row.rows[0].current_stock)).toBe(0);
+    expect(Number(row.rows[0].current_stock)).toBe(1);
   });
 });
