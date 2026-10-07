@@ -3,10 +3,18 @@ import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
 import { lostFoundItems, reservations, safeBoxOpenings, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
-import { requireAuth } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
+import {hasPermission} from "../permissions";
+import {hideInventoryCosts} from "../inventoryAccess";
 import { eq, desc, like, and, or, ilike, type SQL } from "drizzle-orm";
 
 export function registerHousekeepingRoutes(app: Express) {
+  app.get("/api/housekeeping/inventory", requireAuth, requirePermission('sidebar:/housekeeping'), async (req,res) => {
+    try {
+      const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping');
+      res.json(hasPermission(req.user!.role,'api:inventory:cost')?items:hideInventoryCosts(items));
+    } catch { res.status(500).json({error:'No se pudo consultar el inventario de Housekeeping'}); }
+  });
   // Housekeeping Tasks
   app.get("/api/housekeeping", async (req, res) => {
     try {

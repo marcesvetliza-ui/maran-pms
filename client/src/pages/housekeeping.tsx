@@ -1,3 +1,4 @@
+import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
 import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -1901,7 +1902,10 @@ export default function Housekeeping() {
               </Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
 
         <TabsContent value="rooms">
           <div className="space-y-6 mt-2">
