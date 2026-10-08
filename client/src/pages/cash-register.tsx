@@ -67,7 +67,7 @@ import {
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { parseNightAuditDetail } from "@shared/nightAudit";
+import { parseNightAuditDetail, partitionNightAuditInHouse } from "@shared/nightAudit";
 import { receiptTypeLabel } from "@shared/receiptTypes";
 import type { DuplicateCashPaymentLinkGroup } from "@shared/schema";
 import { cleanCashMovementLabel } from "@/lib/account-movement-display";
@@ -2456,7 +2456,8 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
   const indicators: any = parsed.indicators ?? snapshot.indicators ?? {};
   const inHouse = (Array.isArray(detail.inHouse) ? detail.inHouse : []).slice().sort((a: any, b: any) => nightAuditRoomSort(a?.roomNumber) - nightAuditRoomSort(b?.roomNumber));
   const arrivals = (Array.isArray(detail.arrivals) ? detail.arrivals : []).slice().sort((a: any, b: any) => nightAuditRoomSort(a?.roomNumber) - nightAuditRoomSort(b?.roomNumber));
-  const conSaldo = inHouse.filter((r: any) => r.hasBalance);
+  const {regular: regularInHouse, deferredDespegar} = partitionNightAuditInHouse<any>(inHouse);
+  const conSaldo = regularInHouse.filter((r: any) => r.hasBalance);
   const fmt = (n: unknown) => nightAuditNumber(n).toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 0 });
   const exceptionGroups = [
     ["No-shows", indicators.noShows?.reservations],
@@ -2540,11 +2541,11 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
             </section>
           )}
 
-          {inHouse.length > 0 && (
+          {regularInHouse.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold mb-2 flex items-center gap-1">
                 <CheckCircle className="h-4 w-4 text-green-600" />
-                Habitaciones en casa ({inHouse.length})
+                Habitaciones en casa ({regularInHouse.length})
               </h4>
               <div className="rounded border overflow-hidden">
                 <Table>
@@ -2559,7 +2560,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {inHouse.map((r: any) => (
+                    {regularInHouse.map((r: any) => (
                       <TableRow key={r.reservationId} className={r.hasBalance ? "bg-amber-50 dark:bg-amber-950/20" : ""}>
                         <TableCell className="text-sm font-medium">{nightAuditText(r.roomNumber)}</TableCell>
                         <TableCell><div className="text-xs">{nightAuditText(r.guestName, "Sin huésped")}</div><div className="font-mono text-[10px] text-muted-foreground">{nightAuditText(r.reservationCode)}</div><div className="text-[10px] text-muted-foreground">{[r.companyName, r.agencyName].filter(Boolean).join(" · ")}</div></TableCell>
@@ -2612,6 +2613,29 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                 </Table>
               </div>
             </div>
+          )}
+
+          {deferredDespegar.length > 0 && (
+            <section className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900 dark:bg-indigo-950/20">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold">Despegar — pendientes de liquidación</h4>
+                <Badge variant="outline">{deferredDespegar.length}</Badge>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">Cuenta corriente con importe cero. Importe pendiente de liquidación mensual en USD. Estas habitaciones están incluidas en los totales de ocupación.</p>
+              <div className="overflow-x-auto rounded-md border bg-background">
+                <Table>
+                  <TableHeader><TableRow><TableHead>Hab.</TableHead><TableHead>Huésped / Reserva</TableHead><TableHead>Check-out</TableHead><TableHead>Estado</TableHead></TableRow></TableHeader>
+                  <TableBody>{deferredDespegar.map((r:any)=>(
+                    <TableRow key={r.reservationId}>
+                      <TableCell className="font-medium">{nightAuditText(r.roomNumber)}</TableCell>
+                      <TableCell><div className="text-xs">{nightAuditText(r.guestName,"Sin huésped")}</div><div className="font-mono text-[10px] text-muted-foreground">{nightAuditText(r.reservationCode)}</div></TableCell>
+                      <TableCell className="text-xs">{nightAuditText(r.checkOutDate)}</TableCell>
+                      <TableCell className="text-xs">Pendiente de liquidación{r.hasBalance && <div className="text-amber-600">Otros cargos pendientes: {fmt(r.balance)}</div>}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+              </div>
+            </section>
           )}
 
           {inHouse.length === 0 && arrivals.length === 0 && (

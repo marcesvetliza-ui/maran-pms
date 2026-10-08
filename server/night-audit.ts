@@ -1,3 +1,4 @@
+import {getDeferredDespegarReservationIds} from './nightAuditDeferred';
 import { db, pool } from "./db";
 import { randomUUID } from "crypto";
 import { eq, and, inArray, sql, lte, gt, gte, ne, or, isNull } from "drizzle-orm";
@@ -404,7 +405,11 @@ async function runNightAuditUnlocked(options: {
       agencyName: row.agencyId ? agencyNames.get(row.agencyId) ?? null : null,
     });
     const stableById = new Map(allReservations.map(row => [row.id, stableFields(row)]));
-    folioDetail = folioDetail.map(row => ({ ...row, ...stableById.get(row.reservationId) }));
+    // Persist the classification with the audit: zero amounts alone are not
+    // sufficient (courtesies and ordinary empty folios must stay in the main list).
+    const deferredIds=await getDeferredDespegarReservationIds(reservationIds);
+    folioDetail = folioDetail.map(row => ({ ...row, ...stableById.get(row.reservationId),
+      deferredDespegarSettlement: deferredIds.has(row.reservationId) }));
     for (const row of arrivalsDetail) Object.assign(row, stableById.get(row.reservationId));
     const priorDetail = reportingOnlyRerun && existingAudit[0]?.detail
       ? (() => { try { return JSON.parse(existingAudit[0].detail!); } catch { return null; } })()

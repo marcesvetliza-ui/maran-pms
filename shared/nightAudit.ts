@@ -52,3 +52,10 @@ export function classifyReservationRate(rate: unknown, reason: unknown) {
   if (parsed === null || validation) return "missingOrZeroWithoutReason";
   return null;
 }
+/** Display partition only: the source snapshot and occupancy totals stay intact. */
+export function partitionNightAuditInHouse<T extends {deferredDespegarSettlement?: boolean}>(rows:T[]) {
+  return {
+    regular: rows.filter(row=>row.deferredDespegarSettlement !== true),
+    deferredDespegar: rows.filter(row=>row.deferredDespegarSettlement === true),
+  };
+}

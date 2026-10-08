@@ -4,6 +4,7 @@ import {
   isNightAuditReportingOnly,
   classifyReservationRate,
   parseNightAuditDetail,
+  partitionNightAuditInHouse,
 } from "@shared/nightAudit";
 
 describe("night audit execution policy", () => {
@@ -33,4 +34,12 @@ describe("night audit execution policy", () => {
     expect(parseNightAuditDetail('{"inHouse":[{"id":"r1"}],"arrivals":[]}').inHouse).toHaveLength(1);
     expect(parseNightAuditDetail('not-json')).toMatchObject({ version: 0, inHouse: [], arrivals: [] });
   });
+});
+it("separa solo los pendientes identificados, una vez, sin modificar la ocupación ni cortes anteriores",()=>{
+ const rows=[{reservationId:'regular'},{reservationId:'despegar',deferredDespegarSettlement:true},{reservationId:'courtesy',deferredDespegarSettlement:false}];
+ const result=partitionNightAuditInHouse(rows);
+ expect(result.regular.map(r=>r.reservationId)).toEqual(['regular','courtesy']);
+ expect(result.deferredDespegar.map(r=>r.reservationId)).toEqual(['despegar']);
+ expect(rows).toHaveLength(3);
+ expect(partitionNightAuditInHouse([{deferredDespegarSettlement:undefined}]).regular).toHaveLength(1);
 });
