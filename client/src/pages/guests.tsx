@@ -189,7 +189,9 @@ export function GuestFormDialog({
   open,
   onOpenChange,
   onSuccess,
+  saveGuest,
 }: {
+  saveGuest?: (data: Partial<InsertGuest>) => Promise<Guest>;
   guest?: Guest;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -271,6 +273,7 @@ export function GuestFormDialog({
       const payload = Object.fromEntries(
         Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
       );
+      if (saveGuest) return saveGuest(payload);
       if (isEditing) {
         // Empty fiscal identifiers are intentional edits, not missing fields.
         // Sending null lets the API clear legacy placeholder values such as "0".
@@ -300,7 +303,7 @@ export function GuestFormDialog({
         message.toLowerCase().includes("asociado");
       toast({
         title: isDuplicate ? "Huésped no registrado" : "No se pudo guardar el huésped",
-        description: isDuplicate ? message : "No se pudo guardar el huésped. Intentá nuevamente.",
+        description: isDuplicate || saveGuest ? message : "No se pudo guardar el huésped. Intentá nuevamente.",
         variant: "destructive",
       });
     },

@@ -1,3 +1,4 @@
+import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -984,8 +985,6 @@ export default function GroupDetailPage() {
   const [editingLateCheckout, setEditingLateCheckout] = useState(false);
   const [editingLateCheckoutTime, setEditingLateCheckoutTime] = useState("");
   const [editingPassengerRes, setEditingPassengerRes] = useState<ReservationWithDetails | null>(null);
-  const [editPassengerFirst, setEditPassengerFirst] = useState("");
-  const [editPassengerLast, setEditPassengerLast] = useState("");
 
   // Unassign confirmation
   const [unassignResId, setUnassignResId] = useState<string | null>(null);
@@ -1662,21 +1661,6 @@ export default function GroupDetailPage() {
       toast({ title: "Error al eliminar pago", description: parseApiError(e), variant: "destructive" });
       setDeletingMasterPaymentId(null);
     },
-  });
-
-  const updatePassengerMutation = useMutation({
-    mutationFn: ({ reservationId, firstName, lastName }: { reservationId: string; firstName: string; lastName: string }) =>
-      apiRequest("PATCH", `/api/groups/${groupId}/placeholder-reservations/${reservationId}`, {
-        guestFirstName: firstName,
-        guestLastName: lastName,
-      }),
-    onSuccess: () => {
-      // refetch (not just invalidate) so the rooming list updates immediately
-      queryClient.refetchQueries({ queryKey: ["/api/groups", groupId] });
-      toast({ title: "Nombre de pasajero actualizado" });
-      setEditingPassengerRes(null);
-    },
-    onError: (e: any) => toast({ title: "Error al actualizar el nombre", description: parseApiError(e), variant: "destructive" }),
   });
 
   const loadInvoice = async () => {
@@ -2418,15 +2402,12 @@ export default function GroupDetailPage() {
                                 : (res as any).guestName || <span className="text-muted-foreground italic">{group?.name || "Sin asignar"}</span>}
                             </span>
                             <button
-                              className="opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
-                              title="Editar nombre del pasajero"
+                              className="text-muted-foreground hover:text-foreground p-1"
+                              title="Asignar huésped"
+                              aria-label="Asignar huésped"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingPassengerRes(res);
-                                // Pre-fill only from real (non-placeholder) guests
-                                const isRealGuest = res.guestId && !res.guest?.codigo?.startsWith("GROUP-");
-                                setEditPassengerFirst(isRealGuest ? (res.guest?.firstName || "") : "");
-                                setEditPassengerLast(isRealGuest ? (res.guest?.lastName || "") : "");
                               }}
                               data-testid={`button-edit-passenger-${res.id}`}
                             >
@@ -5267,54 +5248,15 @@ export default function GroupDetailPage() {
       </AlertDialog>
 
       {/* ─── EDITAR TARIFA + LATE CHECKOUT ─── */}
-      {/* Editar nombre de pasajero */}
-      <Dialog open={!!editingPassengerRes} onOpenChange={(open) => { if (!open) setEditingPassengerRes(null); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Editar pasajero</DialogTitle>
-            <DialogDescription>
-              Hab. {editingPassengerRes?.room?.roomNumber} — {editingPassengerRes?.reservationCode}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            <div className="space-y-1.5">
-              <Label>Nombre</Label>
-              <Input
-                value={editPassengerFirst}
-                onChange={e => setEditPassengerFirst(e.target.value)}
-                placeholder="Nombre"
-                data-testid="input-edit-passenger-first"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Apellido</Label>
-              <Input
-                value={editPassengerLast}
-                onChange={e => setEditPassengerLast(e.target.value)}
-                placeholder="Apellido"
-                data-testid="input-edit-passenger-last"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingPassengerRes(null)}>Cancelar</Button>
-            <Button
-              disabled={!editPassengerFirst.trim() || updatePassengerMutation.isPending}
-              onClick={() => {
-                if (!editingPassengerRes?.id) return;
-                updatePassengerMutation.mutate({
-                  reservationId: editingPassengerRes.id,
-                  firstName: editPassengerFirst.trim(),
-                  lastName: editPassengerLast.trim(),
-                });
-              }}
-              data-testid="button-save-passenger"
-            >
-              {updatePassengerMutation.isPending ? "Guardando..." : "Guardar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {editingPassengerRes && (
+        <GroupOccupantDialog groupId={groupId!} reservation={editingPassengerRes}
+          onClose={() => setEditingPassengerRes(null)} onAssigned={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+            queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+            setEditingPassengerRes(null);
+          }} />
+      )}
 
       <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
         <DialogContent className="max-w-sm">

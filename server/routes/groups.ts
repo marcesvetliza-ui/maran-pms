@@ -1,3 +1,4 @@
+import { registerGroupOccupantRoutes } from "./group-occupant";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
@@ -344,6 +345,7 @@ async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
 }
 
 export function registerGroupsRoutes(app: Express) {
+  registerGroupOccupantRoutes(app);
   // Groups
   app.get("/api/groups", async (req, res) => {
     try {
