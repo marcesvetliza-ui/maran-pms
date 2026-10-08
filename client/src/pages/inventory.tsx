@@ -1,7 +1,7 @@
 import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
 import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
 import {InventoryPreparation} from "@/components/inventory-preparation";
-import {INVENTORY_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
+import {INVENTORY_AREAS,INVENTORY_SELECTABLE_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
 import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
@@ -1309,7 +1309,7 @@ export default function InventoryPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las áreas</SelectItem>
-                <SelectItem value="general">General</SelectItem>
+                <SelectItem value="general">Depósito General</SelectItem>
                 <SelectItem value="spa">SPA</SelectItem>
                 <SelectItem value="restaurant">Restaurante</SelectItem>
                 <SelectItem value="housekeeping">Housekeeping</SelectItem>
@@ -1605,8 +1605,8 @@ export default function InventoryPage() {
               area === "maintenance" ? "MNT" : area === "admin" ? "ADM" : area === "marketing" ? "MKT" :
               area === "hotel" ? "HTL" : "GEN";
 
-            const groups = categories.filter(c => c.isGroup);
-            const leafCats = categories.filter(c => !c.isGroup);
+            const groups = categories.filter(c => c.isGroup && c.isActive !== "false");
+            const leafCats = categories.filter(c => !c.isGroup && c.isActive !== "false");
 
             const CatCard = ({ cat, isLeaf }: { cat: ItemCategory; isLeaf: boolean }) => {
               const itemCount = items.filter(i => i.categoryId === cat.id).length;
@@ -2406,7 +2406,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <Select value={whArea} onValueChange={setWhArea}>
                 <SelectTrigger data-testid="select-wh-area"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="general">Depósito General</SelectItem>
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
@@ -2481,7 +2481,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
                   <SelectItem value="hotel">Hotel</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="general">Depósito General</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                 </SelectContent>
@@ -2623,11 +2623,11 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="general">General (GEN)</SelectItem>
+                  <SelectItem value="general">Depósito General (GEN)</SelectItem>
                   <SelectItem value="spa">SPA (SPA)</SelectItem>
                   <SelectItem value="restaurant">Restaurante (RST)</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping (HSK)</SelectItem>
-                  <SelectItem value="hotel">Hotel (HTL)</SelectItem>
+                  {catArea === "hotel" && <SelectItem value="hotel">Hotel (histórico)</SelectItem>}
                   <SelectItem value="maintenance">Mantenimiento (MNT)</SelectItem>
                   <SelectItem value="admin">Administración (ADM)</SelectItem>
                   <SelectItem value="events">Eventos</SelectItem>
@@ -2729,11 +2729,11 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="general">Depósito General</SelectItem>
                   <SelectItem value="spa">SPA</SelectItem>
                   <SelectItem value="restaurant">Restaurante</SelectItem>
                   <SelectItem value="housekeeping">Housekeeping</SelectItem>
-                  <SelectItem value="hotel">Hotel</SelectItem>
+                  {groupArea === "hotel" && <SelectItem value="hotel">Hotel (histórico)</SelectItem>}
                   <SelectItem value="maintenance">Mantenimiento</SelectItem>
                   <SelectItem value="admin">Administración</SelectItem>
                   <SelectItem value="events">Eventos</SelectItem>
@@ -2864,7 +2864,7 @@ export function NewItemForm({
           <Label>Área</Label>
           <Select value={newItemArea} onValueChange={v => { setNewItemArea(v); setNewItemGroup("all"); setCategoryId(""); }}>
             <SelectTrigger data-testid="select-item-area"><SelectValue /></SelectTrigger>
-            <SelectContent>{INVENTORY_AREAS.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent>
+            <SelectContent>{INVENTORY_SELECTABLE_AREAS.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent>
           </Select>
           <Label>Agrupamiento</Label>
           <Select value={newItemGroup} onValueChange={v => { setNewItemGroup(v); setCategoryId(""); }}>

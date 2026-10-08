@@ -24,6 +24,7 @@ export async function validateCategory(input: any, id?: string) {
     const used = (await db.execute(sql`SELECT EXISTS(SELECT 1 FROM inventory_items WHERE category_id=${id}) OR EXISTS(SELECT 1 FROM item_categories WHERE parent_id=${id}) AS used`)).rows[0] as any;
     if (used.used) fail('La clasificación está en uso; no se puede cambiar su área o nivel');
   }
+  if (area === 'hotel' && old?.area !== 'hotel') fail('Hotel es un área histórica; elegí una de las ocho áreas vigentes');
   return data as any;
 }
 export async function protectCategoryDeletion(id: string) {

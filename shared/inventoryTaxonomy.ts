@@ -2,6 +2,7 @@ import type {InventoryAreaKey} from './inventoryAreas';
 export type InventoryBranch={area:InventoryAreaKey;group:string;children:readonly string[]};
 // Physical inventory only. Menu dishes and SPA treatments have their own catalogs.
 export const INVENTORY_TAXONOMY:readonly InventoryBranch[]=[
+ {area:'general',group:'Almacén',children:['Varios']},
  {area:'restaurant',group:'Justo Cafetería',children:['Cafetería','Cafetería especial']},
  {area:'restaurant',group:'Justo Cocina',children:['Carnes','Frutas y Verduras','Embutidos','Lácteos','Varios']},
  {area:'restaurant',group:'Justo Bebidas',children:['Vinos y Champagne','Coctelería','Cervezas','Bebidas sin alcohol']},
@@ -10,7 +11,7 @@ export const INVENTORY_TAXONOMY:readonly InventoryBranch[]=[
  {area:'housekeeping',group:'Habitaciones',children:['Blancos Habitaciones','Muebles','Varios']},
  ...['Productos','Blancos','Varios'].map(group=>({area:'spa' as const,group,children:['General']})),
  ...['Insumos de oficina','Papelería','Repuestos técnicos','Varios'].map(group=>({area:'admin' as const,group,children:['General']})),
- ...['Herramientas del edificio','Varios'].map(group=>({area:'maintenance' as const,group,children:['General']})),
+ ...['Herramientas de Mantenimiento','Varios'].map(group=>({area:'maintenance' as const,group,children:['General']})),
  {area:'events',group:'Varios',children:['General']},
  {area:'marketing',group:'Varios comunicación',children:['General']},
 ];
