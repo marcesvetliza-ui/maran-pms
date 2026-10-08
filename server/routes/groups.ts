@@ -2503,11 +2503,11 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
-  // ─── UPDATE RESERVATION RATE + LATE CHECKOUT (from group view) ──────────────
+  // ─── UPDATE RESERVATION RATE + ARRIVAL/DEPARTURE NOTICES (from group view) ──────────────
   app.patch("/api/groups/:groupId/reservations/:reservationId/rate", requireAuth, async (req, res) => {
     try {
       const { groupId, reservationId } = req.params;
-      const { finalRatePerNight, lateCheckOut, lateCheckOutTime } = req.body;
+      const { finalRatePerNight, earlyCheckIn, earlyCheckInTime, lateCheckOut, lateCheckOutTime } = req.body;
 
       const group = await storage.getGroup(groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
@@ -2527,15 +2527,23 @@ export function registerGroupsRoutes(app: Express) {
         updateData.totalRoomAmount = (rate * nights).toFixed(2);
       }
 
-      if (lateCheckOut !== undefined) updateData.lateCheckOut = Boolean(lateCheckOut);
-      if (lateCheckOutTime !== undefined) updateData.lateCheckOutTime = lateCheckOutTime || null;
+      for (const [label, enabled, time] of [["Early Check-in", earlyCheckIn, earlyCheckInTime], ["Late Check-out", lateCheckOut, lateCheckOutTime]]) {
+        if (enabled !== undefined && typeof enabled !== "boolean") return res.status(400).json({ error: `${label}: selección inválida` });
+        if (time !== undefined && time !== null && time !== "" && (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))) return res.status(400).json({ error: `${label}: hora inválida` });
+      }
+      if (earlyCheckIn !== undefined) updateData.earlyCheckIn = earlyCheckIn;
+      if (earlyCheckIn === false) updateData.earlyCheckInTime = null;
+      else if (earlyCheckInTime !== undefined) updateData.earlyCheckInTime = earlyCheckInTime || null;
+      if (lateCheckOut !== undefined) updateData.lateCheckOut = lateCheckOut;
+      if (lateCheckOut === false) updateData.lateCheckOutTime = null;
+      else if (lateCheckOutTime !== undefined) updateData.lateCheckOutTime = lateCheckOutTime || null;
 
       if (Object.keys(updateData).length === 0) return res.status(400).json({ error: "Sin cambios para aplicar" });
 
       await storage.updateReservation(reservationId, updateData);
 
       await audit(req, "update", "reservations",
-        `Tarifa/late checkout actualizado desde grupo ${group.name}: $${finalRatePerNight ?? "sin cambio"}`,
+        `Tarifa/horarios actualizados desde grupo ${group.name}: $${finalRatePerNight ?? "sin cambio"}`,
         { entityType: "reservation", entityId: reservationId }
       );
 

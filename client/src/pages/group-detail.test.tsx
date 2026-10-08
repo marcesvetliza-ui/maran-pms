@@ -151,6 +151,37 @@ describe("Pago Grupal dialog entry-point modes", () => {
     apiRequestMock.mockImplementation(async () => jsonResponse({ success: true }));
   });
 
+  it("guarda early check-in con hora y conserva late check-out al editar tarifa", async () => {
+    groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0], finalRatePerNight: "100.00", lateCheckOut: true, lateCheckOutTime: "16:00" }] };
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByTestId("tab-reservations"));
+    await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
+    expect(screen.getByTestId("checkbox-early-checkin")).not.toBeChecked();
+    expect(screen.getByTestId("checkbox-late-checkout")).toBeChecked();
+    await user.click(screen.getByTestId("checkbox-early-checkin"));
+    const time = screen.getByTestId("input-early-checkin-time");
+    // Native time input is assigned directly because userEvent time typing varies in jsdom.
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.change(time, { target: { value: "08:30" } });
+    await user.click(screen.getByTestId("button-save-rate"));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", `/api/groups/${GROUP_ID}/reservations/${RESERVATION_ID}/rate`, {
+      finalRatePerNight: "100.00", earlyCheckIn: true, earlyCheckInTime: "08:30", lateCheckOut: true, lateCheckOutTime: "16:00",
+    }));
+  });
+
+  it("precarga early check-in y permite quitarlo sin conservar la hora", async () => {
+    groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0], finalRatePerNight: "100.00", earlyCheckIn: true, earlyCheckInTime: "09:00" }] };
+    const user = userEvent.setup(); renderPage();
+    await user.click(await screen.findByTestId("tab-reservations"));
+    await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
+    expect(screen.getByTestId("checkbox-early-checkin")).toBeChecked();
+    expect(screen.getByTestId("input-early-checkin-time")).toHaveValue("09:00");
+    await user.click(screen.getByTestId("checkbox-early-checkin"));
+    await user.click(screen.getByTestId("button-save-rate"));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", `/api/groups/${GROUP_ID}/reservations/${RESERVATION_ID}/rate`, expect.objectContaining({ earlyCheckIn: false, earlyCheckInTime: null })));
+  });
+
   it("calculates Caja only from tender rows, excluding cuenta corriente", () => {
     expect(calculateGroupCajaToday([
       { method: "cash", amount: "100" },

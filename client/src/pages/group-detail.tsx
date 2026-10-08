@@ -979,9 +979,11 @@ export default function GroupDetailPage() {
   const [deletingGroupChargeId, setDeletingGroupChargeId] = useState<string | null>(null);
   const [expandedRoomId, setExpandedRoomId] = useState<string | null>(null);
 
-  // Edit rate + late checkout
+  // Edit rate and arrival/departure notices
   const [editingRateRes, setEditingRateRes] = useState<ReservationWithDetails | null>(null);
   const [editingRate, setEditingRate] = useState("");
+  const [editingEarlyCheckin, setEditingEarlyCheckin] = useState(false);
+  const [editingEarlyCheckinTime, setEditingEarlyCheckinTime] = useState("");
   const [editingLateCheckout, setEditingLateCheckout] = useState(false);
   const [editingLateCheckoutTime, setEditingLateCheckoutTime] = useState("");
   const [editingPassengerRes, setEditingPassengerRes] = useState<ReservationWithDetails | null>(null);
@@ -1286,16 +1288,22 @@ export default function GroupDetailPage() {
   });
 
   const updateRateMutation = useMutation({
-    mutationFn: ({ reservationId, rate, lateCheckOut, lateCheckOutTime }: { reservationId: string; rate: string; lateCheckOut: boolean; lateCheckOutTime: string }) =>
+    mutationFn: ({ reservationId, rate, earlyCheckIn, earlyCheckInTime, lateCheckOut, lateCheckOutTime }: { reservationId: string; rate: string; earlyCheckIn: boolean; earlyCheckInTime: string; lateCheckOut: boolean; lateCheckOutTime: string }) =>
       apiRequest("PATCH", `/api/groups/${groupId}/reservations/${reservationId}/rate`, {
         finalRatePerNight: rate,
+        earlyCheckIn,
+        earlyCheckInTime: earlyCheckIn ? earlyCheckInTime || null : null,
         lateCheckOut,
         lateCheckOutTime: lateCheckOutTime || null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
-      toast({ title: "Tarifa y late checkout actualizados" });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      toast({ title: "Tarifa y horarios actualizados" });
+      setEditingEarlyCheckin(false);
+      setEditingEarlyCheckinTime("");
       setEditingRateRes(null);
       setEditingRate("");
       setEditingLateCheckout(false);
@@ -2430,6 +2438,11 @@ export default function GroupDetailPage() {
                               ? `$${fmtMoney(res.finalRatePerNight)}`
                               : <span className="text-destructive font-medium">Sin tarifa</span>
                             }
+                            {res.earlyCheckIn && (
+                              <Badge className="text-[10px] px-1.5 py-0 h-4 bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-300 dark:border-orange-700">
+                                EARLY{res.earlyCheckInTime ? ` ${res.earlyCheckInTime}` : ""}
+                              </Badge>
+                            )}
                             {(res as any).lateCheckOut && (
                               <Badge className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
                                 LATE{(res as any).lateCheckOutTime ? ` ${(res as any).lateCheckOutTime}` : ""}
@@ -2473,11 +2486,13 @@ export default function GroupDetailPage() {
                                 onClick={() => {
                                   setEditingRateRes(res);
                                   setEditingRate(res.finalRatePerNight || "");
+                                  setEditingEarlyCheckin(!!res.earlyCheckIn);
+                                  setEditingEarlyCheckinTime(res.earlyCheckInTime || "");
                                   setEditingLateCheckout(!!(res as any).lateCheckOut);
                                   setEditingLateCheckoutTime((res as any).lateCheckOutTime || "");
                                 }}
                                 data-testid={`button-edit-rate-${res.id}`}
-                                title="Editar tarifa y late checkout"
+                                title="Editar tarifa, early check-in y late check-out"
                               >
                                 <Pencil className="h-3 w-3 mr-1" />
                                 Tarifa
@@ -5258,7 +5273,7 @@ export default function GroupDetailPage() {
           }} />
       )}
 
-      <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
+      <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingEarlyCheckin(false); setEditingEarlyCheckinTime(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -5283,6 +5298,23 @@ export default function GroupDetailPage() {
                 data-testid="input-editing-rate"
                 className="mt-1"
               />
+            </div>
+            <div className="rounded-lg border p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <Checkbox id="early-checkin" checked={editingEarlyCheckin}
+                  onCheckedChange={(checked) => { setEditingEarlyCheckin(!!checked); if (!checked) setEditingEarlyCheckinTime(""); }}
+                  data-testid="checkbox-early-checkin" />
+                <Label htmlFor="early-checkin" className="cursor-pointer flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-orange-600" />Early Check-in
+                </Label>
+              </div>
+              {editingEarlyCheckin && (
+                <div>
+                  <Label htmlFor="early-checkin-time" className="text-sm text-muted-foreground">Hora de llegada (opcional)</Label>
+                  <Input id="early-checkin-time" type="time" value={editingEarlyCheckinTime}
+                    onChange={(e) => setEditingEarlyCheckinTime(e.target.value)} className="mt-1 w-36" data-testid="input-early-checkin-time" />
+                </div>
+              )}
             </div>
             <div className="rounded-lg border p-3 space-y-3">
               <div className="flex items-center gap-3">
@@ -5323,6 +5355,8 @@ export default function GroupDetailPage() {
                 updateRateMutation.mutate({
                   reservationId: editingRateRes.id,
                   rate: editingRate,
+                  earlyCheckIn: editingEarlyCheckin,
+                  earlyCheckInTime: editingEarlyCheckinTime,
                   lateCheckOut: editingLateCheckout,
                   lateCheckOutTime: editingLateCheckoutTime,
                 });
