@@ -1,3 +1,5 @@
+import {importStockWorkbook} from './inventoryWorkbookImport';
+import initialStockWorkbook from './assets/initial-stock-20261008.json';
 import {ensureInventoryCountWarehouseSchema} from "./inventoryCountSchema";
 import {ensureProductionPendingSchema} from "./productionPending";
 import {ensureAgreedInventoryTaxonomy} from "./inventoryTaxonomy";
@@ -4985,6 +4987,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     await ensureAgreedInventoryTaxonomy();
   } catch (error) {
     logger.warn("No se completó la estructura de Inventario; se conservaron los registros existentes.", {error: error instanceof Error ? error.message : String(error)});
+  }
+  // Explicit deployment opt-in: never replace inventory merely by updating code.
+  if (process.env.INVENTORY_WORKBOOK_IMPORT === initialStockWorkbook.key) {
+    const result = await importStockWorkbook(initialStockWorkbook);
+    logger.info("Carga inicial de inventario verificada", result);
   }
   logger.info("Migraciones incrementales completadas.");
 }

@@ -6,6 +6,7 @@ export const INVENTORY_TAXONOMY:readonly InventoryBranch[]=[
  {area:'restaurant',group:'Justo Cafetería',children:['Cafetería','Cafetería especial']},
  {area:'restaurant',group:'Justo Cocina',children:['Carnes','Frutas y Verduras','Embutidos','Lácteos','Varios']},
  {area:'restaurant',group:'Justo Bebidas',children:['Vinos y Champagne','Coctelería','Cervezas','Bebidas sin alcohol']},
+ {area:'restaurant',group:'Pastelería',children:['Pastelería']},
  {area:'restaurant',group:'Vajilla y Descartables de Cocina',children:['Vajilla','Descartables']},
  ...['Amenities','Lavadero','Áreas Públicas','Eventos','Cocina','SPA','Varios Limpieza'].map(group=>({area:'housekeeping' as const,group,children:['General']})),
  {area:'housekeeping',group:'Habitaciones',children:['Blancos Habitaciones','Muebles','Varios']},

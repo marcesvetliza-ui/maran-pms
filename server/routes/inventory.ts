@@ -16,6 +16,9 @@ import { requireAuth, requirePermission } from "../auth";
 
 // Etapa 3 del ABM de usuarios: mismos roles de antes, ahora como resourceKey
 // propio en role_permissions (ver API_RESOURCE_PERMISSIONS en server/permissions.ts).
+function duplicateArticleError(error:any):boolean {
+  return [error,error?.cause].some(e=>e?.code==='23505' && e?.constraint==='inventory_active_physical_name_unique');
+}
 const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 
 export function registerInventoryRoutes(app: Express) {
@@ -164,7 +167,7 @@ export function registerInventoryRoutes(app: Express) {
           await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,created_at,created_by,warehouse_id) VALUES(${created.id},'entrada',${quantity/1000},0,${quantity/1000},'Stock inicial','manual',now(),${req.user?.id || null},${warehouseId})`);
         }return created;
       });res.status(201).json(item);
-    }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
+    }catch(e:any){if(duplicateArticleError(e))return res.status(409).json({error:"Ya existe un artículo activo con ese nombre. Usá el artículo existente."});res.status(e.statusCode||500).json({error:e.message});}
   });
 
   app.patch("/api/inventory/items/:id", requireAuth, inventoryWritePermission, async (req, res) => {
@@ -183,6 +186,7 @@ export function registerInventoryRoutes(app: Express) {
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
     } catch (error: any) {
+      if(duplicateArticleError(error))return res.status(409).json({error:"Ya existe un artículo activo con ese nombre. Usá el artículo existente."});
       const status = error?.statusCode || (error?.message?.includes("proveedor") ? 400 : 500);
       res.status(status).json({ error: status < 500 ? error.message : "Error updating inventory item" });
     }
@@ -212,7 +216,7 @@ export function registerInventoryRoutes(app: Express) {
         await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);return after;
       });
       if(!item)return res.status(404).json({error:"Artículo no encontrado"});res.json(item);
-    }catch(error:any){res.status(error.statusCode || 500).json({error:error.message || "No se pudo editar el artículo"});}
+    }catch(error:any){if(duplicateArticleError(error))return res.status(409).json({error:"Ya existe un artículo activo con ese nombre. Usá el artículo existente."});res.status(error.statusCode || 500).json({error:error.message || "No se pudo editar el artículo"});}
   });
 
   app.post("/api/inventory/items/:id/deactivate", requireAuth, inventoryWritePermission, async (req,res) => {
