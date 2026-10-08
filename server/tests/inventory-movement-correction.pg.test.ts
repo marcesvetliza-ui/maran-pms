@@ -22,7 +22,23 @@ suite('Correcciones de inventario: stock e historial atómicos',()=>{
  it('exige motivo y cantidad válida',async()=>{await expect(correct(prefix,' ','operador')).rejects.toThrow('motivo');await expect(correct(prefix,'Error','operador',{quantity:'NaN'})).rejects.toThrow('inválida');expect(await stock()).toBe('10.000');});
  it('revierte también el depósito identificado',async()=>{await pool!.query("INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock) VALUES($1,$1,10)",[prefix]);await pool!.query('UPDATE stock_movements SET warehouse_id=$1 WHERE id=$1',[prefix]);try{await correct(prefix,'Error','operador');expect((await pool!.query('SELECT current_stock FROM warehouse_stock WHERE item_id=$1',[prefix])).rows[0].current_stock).toBe('0.000');}finally{await pool!.query('DELETE FROM warehouse_stock WHERE item_id=$1',[prefix]);}});
  it('edita metadatos sin permitir cambiar cantidades directamente',async()=>{const response=await request('PATCH',`/api/inventory/items/${prefix}/metadata`,{name:'Artículo editado',sku:null,minStock:'2',costPrice:'5',isActive:'true',currentStock:'999'});expect(response.status).toBe(200);expect(await stock()).toBe('10.000');});
- it('la baja exige motivo y conserva stock, artículo y movimientos',async()=>{expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{})).status).toBe(400);expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Discontinuado'})).status).toBe(200);expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[prefix])).rows[0].is_active).toBe('false');expect(await stock()).toBe('10.000');expect((await pool!.query('SELECT id FROM stock_movements WHERE item_id=$1',[prefix])).rows).toHaveLength(1);expect((await request('DELETE',`/api/inventory/items/${prefix}`)).status).toBe(405);});
+ it('la baja exige motivo y bloquea artículos con saldo sin modificar stock ni historial',async()=>{
+  expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{})).status).toBe(400);
+  const response=await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Discontinuado'});
+  expect(response.status).toBe(409);expect((await response.json()).error).toContain('saldo');
+  expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[prefix])).rows[0].is_active).toBe('true');
+  expect(await stock()).toBe('10.000');expect((await pool!.query('SELECT id FROM stock_movements WHERE item_id=$1',[prefix])).rows).toHaveLength(1);
+  expect((await request('DELETE',`/api/inventory/items/${prefix}`)).status).toBe(405);
+ });
+ it('permite la baja sin saldo después de anular la entrada y conserva su historial',async()=>{
+  await correct(prefix,'Entrada de prueba anulada','operador');
+  expect(await stock()).toBe('0.000');
+  expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Discontinuado'})).status).toBe(200);
+  expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[prefix])).rows[0].is_active).toBe('false');
+  expect(await stock()).toBe('0.000');
+  const movements=(await pool!.query('SELECT source_type,source_id FROM stock_movements WHERE item_id=$1',[prefix])).rows;
+  expect(movements).toHaveLength(2);expect(movements.find(r=>r.source_type==='movement_reversal')).toMatchObject({source_id:prefix});
+ });
  it('las entradas manuales concurrentes no pierden cantidades',async()=>{const responses=await Promise.all([1,2].map(quantity=>request('POST','/api/inventory/movements',{itemId:prefix,movementType:'entrada',quantity,warehouseId:prefix})));expect(responses.map(r=>r.status)).toEqual([201,201]);expect(await stock()).toBe('13.000');});
  it('un usuario sin permiso no puede anular ni dar de baja',async()=>{role='sin_permiso';try{expect((await request('POST',`/api/inventory/movements/${prefix}/anular`,{reason:'Error'})).status).toBe(403);expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Error'})).status).toBe(403);}finally{role='admin';}expect(await stock()).toBe('10.000');});
  it('una falla de auditoría revierte también stock y registros',async()=>{await pool!.query(`CREATE FUNCTION inventory_correction_test_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity_id='${prefix}' THEN RAISE EXCEPTION 'Falla simulada'; END IF; RETURN NEW; END $$`);await pool!.query('CREATE TRIGGER inventory_correction_test_fail BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION inventory_correction_test_fail()');try{await expect(correct(prefix,'Error','operador')).rejects.toThrow();expect(await stock()).toBe('10.000');expect((await pool!.query('SELECT id FROM stock_movements WHERE item_id=$1',[prefix])).rows).toHaveLength(1);}finally{await pool!.query('DROP TRIGGER inventory_correction_test_fail ON audit_logs');await pool!.query('DROP FUNCTION inventory_correction_test_fail()');}});
