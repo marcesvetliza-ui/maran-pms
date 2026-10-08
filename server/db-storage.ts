@@ -9343,7 +9343,7 @@ export class DatabaseStorage implements IStorage {
   async getInventoryCounts(): Promise<any[]> {
     const rows = await db.execute(sql`
       SELECT
-        ic.*,
+        ic.*, w.name AS warehouse_name,
         COUNT(ici.id)::int                                                                   AS total_items,
         COUNT(CASE WHEN ici.actual_stock IS NOT NULL THEN 1 END)::int                        AS counted_items,
         COUNT(CASE WHEN ici.actual_stock IS NOT NULL
@@ -9351,48 +9351,40 @@ export class DatabaseStorage implements IStorage {
                    THEN 1 END)::int                                                          AS items_with_diff
       FROM inventory_counts ic
       LEFT JOIN inventory_count_items ici ON ic.id = ici.count_id
-      GROUP BY ic.id
+      LEFT JOIN inventory_warehouses w ON w.id=ic.warehouse_id
+      GROUP BY ic.id, w.name
       ORDER BY ic.created_at DESC
     `);
     return rows.rows;
   }
 
-  async createInventoryCount(data: { date: string; area?: string; notes?: string; createdBy?: string }): Promise<any> {
+  async createInventoryCount(data: { date: string; warehouseId: string; area?: string; notes?: string; createdBy?: string }): Promise<any> {
+    if (!data.warehouseId || !/^\d{4}-\d{2}-\d{2}$/.test(data.date || "")) throw Object.assign(new Error("Elegí la fecha y el depósito de la toma"),{statusCode:400});
     return withDatabaseTransaction(async () => {
-    const countResult = await db.execute(sql`
-      INSERT INTO inventory_counts (date, area, notes, created_by)
-      VALUES (${data.date}, ${data.area || null}, ${data.notes || null}, ${data.createdBy || null})
-      RETURNING *
-    `);
-    const count = countResult.rows[0] as any;
-
-    const itemsResult = data.area
-      ? await db.execute(sql`
-          SELECT ii.id, ii.name, ii.unit, ii.current_stock::numeric AS current_stock
-          FROM inventory_items ii
-          LEFT JOIN item_categories ic ON ii.category_id = ic.id
-          WHERE ii.is_active = 'true' AND ic.area = ${data.area}
-          ORDER BY ii.name ASC
-        `)
-      : await db.execute(sql`
-          SELECT ii.id, ii.name, ii.unit, ii.current_stock::numeric AS current_stock
-          FROM inventory_items ii
-          WHERE ii.is_active = 'true'
-          ORDER BY ii.name ASC
-        `);
-
-    for (const item of itemsResult.rows as any[]) {
-      await db.execute(sql`
-        INSERT INTO inventory_count_items (count_id, item_id, item_name, unit, expected_stock)
-        VALUES (${count.id}, ${item.id}, ${item.name}, ${item.unit}, ${item.current_stock ?? 0})
-      `);
-    }
-    return count;
+      // Same lock order as transfers: all items first, then the warehouse.
+      const candidates = await db.execute(sql`SELECT i.id FROM inventory_items i LEFT JOIN item_categories c ON c.id=i.category_id
+        WHERE i.is_active='true' AND COALESCE(i.item_kind,'venta_directa')<>'plato'
+        AND (${data.area || null}::text IS NULL OR c.area=${data.area || null})
+        AND (EXISTS(SELECT 1 FROM warehouse_stock s WHERE s.item_id=i.id AND s.warehouse_id=${data.warehouseId})
+          OR EXISTS(SELECT 1 FROM inventory_location_policies p WHERE p.item_id=i.id AND p.warehouse_id=${data.warehouseId} AND p.is_expected)) ORDER BY i.id`);
+      for(const row of candidates.rows) await db.execute(sql`SELECT id FROM inventory_items WHERE id=${row.id} FOR UPDATE`);
+      await requireActiveInventoryReferences(db,null,data.warehouseId);
+      if(!candidates.rows.length)throw Object.assign(new Error("No hay artículos físicos con ubicación o configurados en este depósito. Registrá sus ubicaciones antes de iniciar la toma."),{statusCode:400});
+      const count=(await db.execute(sql`INSERT INTO inventory_counts(date,warehouse_id,area,notes,created_by,created_at)
+        VALUES(${data.date},${data.warehouseId},${data.area || null},${data.notes || null},${data.createdBy || null},clock_timestamp()) RETURNING *`)).rows[0] as any;
+      for(const row of candidates.rows) {
+        await db.execute(sql`INSERT INTO inventory_count_items(count_id,item_id,item_name,unit,expected_stock,snapshot_movement_count)
+          SELECT ${count.id},i.id,i.name,i.unit,COALESCE(s.current_stock,0),
+            (SELECT count(*) FROM stock_movements m WHERE m.item_id=i.id AND (m.warehouse_id=${data.warehouseId} OR m.to_warehouse_id=${data.warehouseId}))
+          FROM inventory_items i LEFT JOIN warehouse_stock s ON s.item_id=i.id AND s.warehouse_id=${data.warehouseId}
+          WHERE i.id=${row.id} AND i.is_active='true' AND COALESCE(i.item_kind,'venta_directa')<>'plato'`);
+      }
+      return count;
     });
   }
 
   async getInventoryCountWithItems(id: string): Promise<any | null> {
-    const countResult = await db.execute(sql`SELECT * FROM inventory_counts WHERE id = ${id}`);
+    const countResult = await db.execute(sql`SELECT c.*, w.name AS warehouse_name FROM inventory_counts c LEFT JOIN inventory_warehouses w ON w.id=c.warehouse_id WHERE c.id = ${id}`);
     if (!countResult.rows.length) return null;
     const count = countResult.rows[0] as any;
 
@@ -9409,11 +9401,23 @@ export class DatabaseStorage implements IStorage {
   async updateInventoryCountItem(countId: string, itemId: string, actualStock: number | null, notes?: string): Promise<void> {
     if(actualStock !== null)stockUnits(actualStock);
     await withDatabaseTransaction(async()=>{
-      const result=await db.execute(sql`SELECT status FROM inventory_counts WHERE id=${countId} FOR UPDATE`);
+      const result=await db.execute(sql`SELECT status,warehouse_id FROM inventory_counts WHERE id=${countId} FOR UPDATE`);
       if(!result.rows[0])throw Object.assign(new Error("Toma no encontrada"),{statusCode:404});
+      if(!result.rows[0].warehouse_id)throw Object.assign(new Error("Esta toma anterior es de consulta. Creá una nueva toma por depósito."),{statusCode:409});
       if(result.rows[0].status !== 'borrador')throw Object.assign(new Error("Una toma cerrada no se puede editar"),{statusCode:409});
       const updated=await db.execute(sql`UPDATE inventory_count_items SET actual_stock=${actualStock},notes=${notes ?? null} WHERE count_id=${countId} AND item_id=${itemId} RETURNING id`);
       if(!updated.rows.length)throw Object.assign(new Error("El artículo no pertenece a esta toma"),{statusCode:404});
+    });
+  }
+
+  async cancelInventoryCount(id:string, actor:string, reason:string):Promise<void> {
+    if(!reason?.trim())throw Object.assign(new Error("Indicá el motivo de la anulación"),{statusCode:400});
+    await withDatabaseTransaction(async()=>{
+      const before=(await db.execute(sql`SELECT * FROM inventory_counts WHERE id=${id} FOR UPDATE`)).rows[0];
+      if(!before)throw Object.assign(new Error("Toma no encontrada"),{statusCode:404});
+      if(before.status!=='borrador')throw Object.assign(new Error("Solo se pueden anular tomas en borrador"),{statusCode:409});
+      await db.execute(sql`UPDATE inventory_counts SET status='anulado',closed_at=now(),closed_by=${actor} WHERE id=${id}`);
+      await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${actor},'update','inventory','inventory_count',${id},${reason.trim()},${JSON.stringify({before,status:'anulado',reason:reason.trim()})},now())`);
     });
   }
 
@@ -9423,26 +9427,35 @@ export class DatabaseStorage implements IStorage {
       const count:any=counts.rows[0];
       if(!count)throw Object.assign(new Error("Toma no encontrada"),{statusCode:404});
       if(count.status === 'cerrado')return {adjustments:0,alreadyClosed:true};
+      if(!count.warehouse_id)throw Object.assign(new Error("Esta toma anterior no tiene depósito. Creá una nueva toma por depósito; el historial se conserva."),{statusCode:409});
       if(count.status !== 'borrador')throw Object.assign(new Error("La toma no está en borrador"),{statusCode:409});
       const rows=await db.execute(sql`SELECT * FROM inventory_count_items WHERE count_id=${id} AND actual_stock IS NOT NULL ORDER BY item_id FOR UPDATE`);
       if(!rows.rows.length)throw Object.assign(new Error("Registrá al menos un artículo contado antes de cerrar"),{statusCode:400});
+      for(const item of rows.rows as any[]) await db.execute(sql`SELECT id FROM inventory_items WHERE id=${item.item_id} FOR UPDATE`);
+      await requireActiveInventoryReferences(db,null,count.warehouse_id);
       let adjustments=0;
       for(const item of rows.rows as any[]){
-        const currentRows=await db.execute(sql`SELECT current_stock FROM inventory_items WHERE id=${item.item_id} FOR UPDATE`);
-        if(!currentRows.rows[0])throw Object.assign(new Error("Un artículo de la toma ya no existe"),{statusCode:409});
-        const changed=await db.execute(sql`SELECT id FROM stock_movements WHERE item_id=${item.item_id} AND created_at >= ${count.created_at} LIMIT 1`);
-        const current=stockUnits(currentRows.rows[0].current_stock ?? 0),expected=stockUnits(item.expected_stock),actual=stockUnits(item.actual_stock);
-        if(changed.rows.length || current !== expected)throw Object.assign(new Error("El stock cambió durante el conteo. Iniciá una nueva toma con el saldo actualizado."),{statusCode:409});
+        const currentRows=await db.execute(sql`SELECT current_stock,unit,is_active FROM inventory_items WHERE id=${item.item_id}`);
+        const inventory=currentRows.rows[0];
+        if(!inventory || inventory.is_active!=='true' || inventory.unit!==item.unit)throw Object.assign(new Error("Un artículo de la toma cambió de unidad o está inactivo. Iniciá una nueva toma."),{statusCode:409});
+        const stock=(await db.execute(sql`SELECT current_stock FROM warehouse_stock WHERE item_id=${item.item_id} AND warehouse_id=${count.warehouse_id} FOR UPDATE`)).rows[0];
+        const movements=(await db.execute(sql`SELECT count(*) AS total FROM stock_movements WHERE item_id=${item.item_id} AND (warehouse_id=${count.warehouse_id} OR to_warehouse_id=${count.warehouse_id})`)).rows[0];
+        const current=stockUnits(stock?.current_stock ?? 0),expected=stockUnits(item.expected_stock),actual=stockUnits(item.actual_stock);
+        if(item.snapshot_movement_count===null || Number(movements.total)!==Number(item.snapshot_movement_count) || current !== expected)throw Object.assign(new Error("El stock cambió durante el conteo en este depósito. Iniciá una nueva toma con el saldo actualizado."),{statusCode:409});
         const diff=actual-expected;
         if(!diff)continue;
-        await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,created_at,created_by,source_type,source_id)
-          VALUES(${item.item_id},'ajuste',${(Math.abs(diff)/1000).toFixed(3)},${(current/1000).toFixed(3)},${(actual/1000).toFixed(3)},${'Ajuste por toma de inventario '+id},now(),${closedBy},'inventory_count',${id})`);
-        await db.execute(sql`UPDATE inventory_items SET current_stock=${(actual/1000).toFixed(3)} WHERE id=${item.item_id}`);
+        const global=stockUnits(inventory.current_stock ?? 0)+diff;
+        if(global<0)throw Object.assign(new Error("El saldo global no permite este ajuste. Revisá las existencias antes de cerrar."),{statusCode:409});
+        await db.execute(sql`INSERT INTO stock_movements(item_id,warehouse_id,movement_type,quantity,previous_stock,new_stock,notes,created_at,created_by,source_type,source_id)
+          VALUES(${item.item_id},${count.warehouse_id},'ajuste',${(Math.abs(diff)/1000).toFixed(3)},${(current/1000).toFixed(3)},${(actual/1000).toFixed(3)},${'Ajuste por toma de inventario '+id},now(),${closedBy},'inventory_count',${id})`);
+        await db.execute(sql`INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock,updated_at) VALUES(${count.warehouse_id},${item.item_id},${(actual/1000).toFixed(3)},now())
+          ON CONFLICT(warehouse_id,item_id) DO UPDATE SET current_stock=EXCLUDED.current_stock,updated_at=now()`);
+        await db.execute(sql`UPDATE inventory_items SET current_stock=${(global/1000).toFixed(3)} WHERE id=${item.item_id}`);
         adjustments++;
       }
       await db.execute(sql`UPDATE inventory_counts SET status='cerrado',closed_at=now(),closed_by=${closedBy} WHERE id=${id}`);
       await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
-        VALUES(${closedBy},${closedBy},'update','inventory','inventory_count',${id},'Cierre de toma de inventario',${JSON.stringify({adjustments,countedItems:rows.rows.length})},now())`);
+        VALUES(${closedBy},${closedBy},'update','inventory','inventory_count',${id},'Cierre de toma de inventario',${JSON.stringify({adjustments,countedItems:rows.rows.length,warehouseId:count.warehouse_id})},now())`);
       return {adjustments};
     });
   }

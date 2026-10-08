@@ -1,3 +1,4 @@
+import {ensureInventoryCountWarehouseSchema} from "./inventoryCountSchema";
 import {ensureProductionPendingSchema} from "./productionPending";
 import {ensureAgreedInventoryTaxonomy} from "./inventoryTaxonomy";
 import {ensureInventoryLocationSchema} from "./inventoryLocations";
@@ -4970,6 +4971,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await ensureInventoryStage2Schema();
   await ensureInventoryLocationSchema();
   await ensureProductionPendingSchema();
+  await ensureInventoryCountWarehouseSchema();
   try {
     await ensureAgreedInventoryTaxonomy();
   } catch (error) {

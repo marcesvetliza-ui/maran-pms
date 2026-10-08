@@ -15,7 +15,7 @@ async function transfer(quantity:unknown){return request('POST','/api/inventory/
 suite('Inventario fases 0/1: seguridad y concurrencia',()=>{
  beforeAll(async()=>{
   const url=new URL(process.env.DATABASE_URL!);if(!['localhost','127.0.0.1'].includes(url.hostname)||process.env.NODE_ENV==='production')throw new Error('Solo base local aislada');
-  ({storage}=await import('../db-storage'));const {loadRolePermissionsCache}=await import('../permissions');await loadRolePermissionsCache();
+  ({storage}=await import('../db-storage'));await (await import('../inventoryCountSchema')).ensureInventoryCountWarehouseSchema();const {loadRolePermissionsCache}=await import('../permissions');await loadRolePermissionsCache();
   const {registerInventoryRoutes}=await import('../routes/inventory');const app=express();app.use(express.json());app.use((req,_res,next)=>{req.user={id:actor,username:'Operador de prueba',role} as any;req.isAuthenticated=()=>true;next();});registerInventoryRoutes(app);server=http.createServer(app);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${(server.address() as any).port}`;
  });
  beforeEach(async()=>{
@@ -23,8 +23,8 @@ suite('Inventario fases 0/1: seguridad y concurrencia',()=>{
   await pool!.query("INSERT INTO inventory_items(id,name,current_stock) VALUES($1,'Prueba A',14),($2,'Prueba B',10)",[a,b]);
   await pool!.query("INSERT INTO inventory_warehouses(id,name) VALUES($1,'Origen'),($2,'Destino')",[from,to]);
   await pool!.query('INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock) VALUES($1,$2,10),($1,$3,10)',[from,a,b]);
-  await pool!.query("INSERT INTO inventory_counts(id,date) VALUES($1,'2026-10-07')",[count]);
-  await pool!.query("INSERT INTO inventory_count_items(count_id,item_id,item_name,expected_stock,actual_stock) VALUES($1,$2,'A',14,12),($1,$3,'B',10,7)",[count,a,b]);
+  await pool!.query("INSERT INTO inventory_counts(id,date,warehouse_id) VALUES($1,'2026-10-07',$2)",[count,from]);
+  await pool!.query("INSERT INTO inventory_count_items(count_id,item_id,item_name,expected_stock,actual_stock,snapshot_movement_count) VALUES($1,$2,'A',10,8,0),($1,$3,'B',10,7,0)",[count,a,b]);
  });
  afterEach(async()=>{
   await pool!.query('DROP TRIGGER IF EXISTS stage01_fail ON stock_movements');await pool!.query('DROP FUNCTION IF EXISTS stage01_fail()');
@@ -47,8 +47,8 @@ suite('Inventario fases 0/1: seguridad y concurrencia',()=>{
   await pool!.query(`CREATE FUNCTION stage01_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.item_id='${b}' THEN RAISE EXCEPTION 'Falla simulada'; END IF; RETURN NEW; END $$`);await pool!.query('CREATE TRIGGER stage01_fail BEFORE INSERT ON stock_movements FOR EACH ROW EXECUTE FUNCTION stage01_fail()');
   await expect(storage.closeInventoryCount(count,actor)).rejects.toThrow();expect(await current()).toBe(14);expect(await current(b)).toBe(10);expect((await pool!.query('SELECT status FROM inventory_counts WHERE id=$1',[count])).rows[0].status).toBe('borrador');expect((await pool!.query('SELECT id FROM stock_movements WHERE item_id=$1',[a])).rows).toHaveLength(0);
  });
- it('no cierra si el saldo cambió durante el conteo',async()=>{await pool!.query('UPDATE inventory_items SET current_stock=15 WHERE id=$1',[a]);await expect(storage.closeInventoryCount(count,actor)).rejects.toThrow('cambió');expect(await current(b)).toBe(10);});
- it('detecta movimientos posteriores incluso si el saldo final volvió al inicial',async()=>{await pool!.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,created_at) VALUES($1,'ajuste',14,14,14,now())",[a]);await expect(storage.closeInventoryCount(count,actor)).rejects.toThrow('cambió');});
+ it('no cierra si el saldo cambió durante el conteo',async()=>{await pool!.query('UPDATE warehouse_stock SET current_stock=15 WHERE item_id=$1',[a]);await expect(storage.closeInventoryCount(count,actor)).rejects.toThrow('cambió');expect(await current(b)).toBe(10);});
+ it('detecta movimientos posteriores incluso si el saldo final volvió al inicial',async()=>{await pool!.query("INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,created_at,warehouse_id) VALUES($1,'ajuste',10,10,10,now(),$2)",[a,from]);await expect(storage.closeInventoryCount(count,actor)).rejects.toThrow('cambió');});
  it('una falla SQL revierte saldo del depósito, global e historial',async()=>{
   await pool!.query(`CREATE FUNCTION stage01_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.item_id='${a}' THEN RAISE EXCEPTION 'Falla simulada'; END IF; RETURN NEW; END $$`);await pool!.query('CREATE TRIGGER stage01_fail BEFORE INSERT ON stock_movements FOR EACH ROW EXECUTE FUNCTION stage01_fail()');
   expect((await request('POST',`/api/inventory/warehouses/${from}/movements`,{itemId:a,movementType:'entrada',quantity:2,unitCost:25})).status).toBe(500);
@@ -58,7 +58,7 @@ suite('Inventario fases 0/1: seguridad y concurrencia',()=>{
   const [saved,closed]=await Promise.all([request('PATCH',`/api/inventory/counts/${count}/items/${a}`,{actualStock:15}),request('POST',`/api/inventory/counts/${count}/close`,{})]);
   expect([200,409]).toContain(saved.status);expect(closed.status).toBe(200);
   expect((await request('PATCH',`/api/inventory/counts/${count}/items/${a}`,{actualStock:99})).status).toBe(409);
-  expect([12,15]).toContain(await current());
+  expect([12,19]).toContain(await current());
  });
  it('no interpreta artículos sin contar como cero',async()=>{await pool!.query('UPDATE inventory_count_items SET actual_stock=NULL WHERE count_id=$1 AND item_id=$2',[count,b]);expect((await storage.closeInventoryCount(count,actor)).adjustments).toBe(1);expect(await current(b)).toBe(10);});
  it('rechaza conteos negativos, tomas inexistentes y renglones ajenos',async()=>{expect((await request('PATCH',`/api/inventory/counts/${count}/items/${a}`,{actualStock:'1abc'})).status).toBe(400);await expect(storage.updateInventoryCountItem(count,a,-1)).rejects.toThrow('inválida');await expect(storage.closeInventoryCount('inexistente',actor)).rejects.toThrow('encontrada');await expect(storage.updateInventoryCountItem(count,'ajeno',1)).rejects.toThrow('pertenece');});

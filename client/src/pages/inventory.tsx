@@ -747,6 +747,7 @@ export default function InventoryPage() {
   const [selectedCountId, setSelectedCountId] = useState<string | null>(null);
   const [isNewCountDialogOpen, setIsNewCountDialogOpen] = useState(false);
   const [newCountDate, setNewCountDate] = useState(today);
+  const [newCountWarehouse,setNewCountWarehouse] = useState("");
   const [newCountArea, setNewCountArea] = useState("");
   const [newCountNotes, setNewCountNotes] = useState("");
   const [countItemEdits, setCountItemEdits] = useState<Record<string, string>>({});
@@ -900,15 +901,18 @@ export default function InventoryPage() {
     enabled: !!selectedCountId,
   });
 
+  const [cancelCountOpen,setCancelCountOpen] = useState(false);
+  const [cancelCountReason,setCancelCountReason] = useState("");
+  const cancelCountMutation=useMutation({mutationFn:()=>apiRequest("POST",`/api/inventory/counts/${selectedCountId}/cancel`,{reason:cancelCountReason.trim()}),onSuccess:()=>{queryClient.invalidateQueries({queryKey:["/api/inventory/counts"]});setCancelCountOpen(false);setCountItemEdits({});toast({title:"Toma anulada sin modificar stock"});},onError:(e:any)=>toast({title:"No se pudo anular",description:e.message,variant:"destructive"})});
   const createCountMutation = useMutation({
-    mutationFn: async (data: { date: string; area?: string; notes?: string }) => {
+    mutationFn: async (data: { date: string; warehouseId: string; area?: string; notes?: string }) => {
       const res = await apiRequest("POST", "/api/inventory/counts", data);
       return res.json();
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts"] });
       setIsNewCountDialogOpen(false);
-      setNewCountArea(""); setNewCountNotes("");
+      setNewCountArea(""); setNewCountWarehouse(""); setNewCountNotes("");
       setSelectedCountId(count.id);
       setCountItemEdits({});
     },
@@ -945,7 +949,8 @@ export default function InventoryPage() {
       return res.json();
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
+      refreshInventory();
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/locations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory/counts", selectedCountId] });
       setCountItemEdits({});
@@ -2076,7 +2081,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">
-                    Registrá el stock real contado para detectar diferencias con el sistema.
+                    Contá un depósito por toma. Los ajustes se aplican a ese depósito; los artículos sin contar conservan su saldo.
                   </p>
                 </div>
                 <Button permission="operate" onClick={() => { setNewCountDate(today); setIsNewCountDialogOpen(true); }} data-testid="btn-new-count">
@@ -2102,7 +2107,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                   <table className="w-full">
                     <thead className="bg-muted/50">
                       <tr className="text-left">
-                        <th className="p-3 font-medium">Fecha</th>
+                        <th className="p-3 font-medium">Fecha</th><th className="p-3 font-medium">Depósito</th>
                         <th className="p-3 font-medium">Área</th>
                         <th className="p-3 font-medium text-center">Artículos</th>
                         <th className="p-3 font-medium text-center">Contados</th>
@@ -2115,7 +2120,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                       {inventoryCounts.map((c: any) => (
                         <tr key={c.id} className="border-t hover:bg-muted/20" data-testid={`row-count-${c.id}`}>
                           <td className="p-3 font-medium">{new Date(c.date + "T12:00:00").toLocaleDateString("es-AR")}</td>
-                          <td className="p-3 text-sm text-muted-foreground">{c.area || "Todos"}</td>
+                          <td className="p-3 text-sm">{c.warehouse_name || "Toma anterior · sin depósito"}</td><td className="p-3 text-sm text-muted-foreground">{c.area ? inventoryAreaLabel(c.area) : "Todas"}</td>
                           <td className="p-3 text-center">{c.total_items}</td>
                           <td className="p-3 text-center">{c.counted_items} / {c.total_items}</td>
                           <td className="p-3 text-center">
@@ -2125,12 +2130,12 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                           </td>
                           <td className="p-3 text-center">
                             <Badge variant={c.status === "cerrado" ? "secondary" : "default"}>
-                              {c.status === "cerrado" ? "Cerrado" : "Borrador"}
+                              {c.status === "cerrado" ? "Cerrado" : c.status === "anulado" ? "Anulado" : "Borrador"}
                             </Badge>
                           </td>
                           <td className="p-3 text-right">
                             <Button size="sm" variant="outline" onClick={() => { setSelectedCountId(c.id); setCountItemEdits({}); }}>
-                              {c.status === "cerrado" ? "Ver" : "Continuar"}
+                              {c.status !== "borrador" || !c.warehouse_id ? "Ver" : "Continuar"}
                             </Button>
                           </td>
                         </tr>
@@ -2151,15 +2156,16 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 {selectedCount && (
                   <div className="flex items-center gap-2 flex-1">
                     <h2 className="font-semibold">
-                      Toma del {new Date((selectedCount.date || "") + "T12:00:00").toLocaleDateString("es-AR")}
+                      {selectedCount.warehouse_name || "Toma anterior · sin depósito"} — Toma del {new Date((selectedCount.date || "") + "T12:00:00").toLocaleDateString("es-AR")}
                       {selectedCount.area ? ` — ${inventoryAreaLabel(selectedCount.area)}` : " — Todos los artículos"}
                     </h2>
                     <Badge variant={selectedCount.status === "cerrado" ? "secondary" : "default"}>
-                      {selectedCount.status === "cerrado" ? "Cerrado" : "Borrador"}
+                      {selectedCount.status === "cerrado" ? "Cerrado" : selectedCount.status === "anulado" ? "Anulado" : "Borrador"}
                     </Badge>
                   </div>
                 )}
-                {selectedCount?.status === "borrador" && (
+                {selectedCount?.status === "borrador" && <Button permission="operate" variant="outline" disabled={closeCountMutation.isPending || saveCountItemsMutation.isPending || cancelCountMutation.isPending} onClick={()=>{setCancelCountReason("");setCancelCountOpen(true);}}>Anular toma</Button>}
+                {selectedCount?.status === "borrador" && selectedCount?.warehouse_id && (
                   <div className="flex gap-2">
                     <Button permission="operate"
                       size="sm" variant="outline"
@@ -2173,7 +2179,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Button permission="adjust"
                       size="sm"
                       onClick={() => closeCountMutation.mutate()}
-                      disabled={closeCountMutation.isPending || saveCountItemsMutation.isPending}
+                      disabled={closeCountMutation.isPending || saveCountItemsMutation.isPending || cancelCountMutation.isPending}
                       data-testid="btn-close-count"
                     >
                       {closeCountMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-1" />}
@@ -2183,6 +2189,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                 )}
               </div>
 
+              {selectedCount && !selectedCount.warehouse_id && <p className="rounded-md border p-3 text-sm text-muted-foreground">Esta toma anterior se conserva para consulta. Para aplicar ajustes, creá una nueva toma por depósito.</p>}
               {selectedCount?.notes && (
                 <p className="text-sm text-muted-foreground border rounded-md p-2 bg-muted/20">{selectedCount.notes}</p>
               )}
@@ -2218,7 +2225,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                             <td className="p-3 text-center text-sm text-muted-foreground">{item.unit}</td>
                             <td className="p-3 text-right text-sm">{parseFloat(item.expected_stock).toLocaleString("es-AR", { minimumFractionDigits: 3 })}</td>
                             <td className="p-3 text-right">
-                              {selectedCount.status === "cerrado" ? (
+                              {selectedCount.status !== "borrador" || !selectedCount.warehouse_id ? (
                                 <span className="text-sm">{item.actual_stock != null ? parseFloat(item.actual_stock).toLocaleString("es-AR", { minimumFractionDigits: 3 }) : <span className="text-muted-foreground">—</span>}</span>
                               ) : (
                                 <input
@@ -2447,6 +2454,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
         </DialogContent>
       </Dialog>
 
+      <Dialog open={cancelCountOpen} onOpenChange={setCancelCountOpen}><DialogContent><DialogHeader><DialogTitle>Anular toma de inventario</DialogTitle></DialogHeader><p className="text-sm text-muted-foreground">Se conservará el conteo para consulta. No se modifica ninguna cantidad de stock.</p><Label htmlFor="cancel-count-reason">Motivo *</Label><Textarea id="cancel-count-reason" value={cancelCountReason} onChange={e=>setCancelCountReason(e.target.value)}/><DialogFooter><Button variant="outline" onClick={()=>setCancelCountOpen(false)}>Volver</Button><Button permission="operate" disabled={!cancelCountReason.trim() || cancelCountMutation.isPending} onClick={()=>cancelCountMutation.mutate()}>Anular toma</Button></DialogFooter></DialogContent></Dialog>
+
       {/* Nueva Toma de Inventario Dialog */}
       <Dialog open={isNewCountDialogOpen} onOpenChange={setIsNewCountDialogOpen}>
         <DialogContent className="max-w-sm">
@@ -2461,6 +2470,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <Label>Fecha *</Label>
               <Input type="date" value={newCountDate} onChange={e => setNewCountDate(e.target.value)} data-testid="input-count-date" />
             </div>
+            <div className="space-y-1"><Label>Depósito *</Label><Select value={newCountWarehouse} onValueChange={setNewCountWarehouse}><SelectTrigger data-testid="select-count-warehouse"><SelectValue placeholder="Elegir depósito"/></SelectTrigger><SelectContent>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Incluye artículos físicos con ubicación o configurados para este depósito.</p></div>
             <div className="space-y-1">
               <Label>Área <span className="text-muted-foreground font-normal">(opcional — filtra artículos)</span></Label>
               <Select value={newCountArea || "__all__"} onValueChange={v => setNewCountArea(v === "__all__" ? "" : v)}>
@@ -2485,8 +2495,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
           <DialogFooter>
             <Button permission="operate" variant="outline" onClick={() => setIsNewCountDialogOpen(false)}>Cancelar</Button>
             <Button permission="operate"
-              disabled={!newCountDate || createCountMutation.isPending}
-              onClick={() => createCountMutation.mutate({ date: newCountDate, area: newCountArea || undefined, notes: newCountNotes || undefined })}
+              disabled={!newCountDate || !newCountWarehouse || createCountMutation.isPending}
+              onClick={() => createCountMutation.mutate({ date: newCountDate, warehouseId:newCountWarehouse, area: newCountArea || undefined, notes: newCountNotes || undefined })}
               data-testid="btn-confirm-new-count"
             >
               {createCountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

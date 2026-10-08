@@ -26,6 +26,7 @@ export async function protectInventoryItemDeactivation(tx: Executor, id: string)
       JOIN recipes r ON r.id=ri.recipe_id LEFT JOIN menu_items m ON m.id=r.menu_item_id WHERE ri.inventory_item_id=${id}
     UNION SELECT 'Producción: ' || COALESCE(name,id) FROM recipes WHERE output_inventory_item_id=${id}
     UNION SELECT 'Tratamiento SPA: ' || COALESCE(t.name,t.id) FROM treatment_supplies s JOIN spa_treatments t ON t.id=s.treatment_id WHERE s.inventory_item_id=${id}
+    UNION SELECT 'Toma de inventario abierta' WHERE EXISTS (SELECT 1 FROM inventory_count_items ci JOIN inventory_counts c ON c.id=ci.count_id WHERE ci.item_id=${id} AND c.status='borrador' AND c.warehouse_id IS NOT NULL)
     UNION SELECT 'Consumo pendiente' WHERE EXISTS (SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)
     UNION SELECT 'Producción pendiente' WHERE EXISTS (SELECT 1 FROM inventory_pending_productions p JOIN recipes r ON r.id=p.payload->>'recipeId'
       WHERE p.status='pending' AND (r.output_inventory_item_id=${id} OR EXISTS (SELECT 1 FROM recipe_ingredients ri WHERE ri.recipe_id=r.id AND ri.inventory_item_id=${id})))
@@ -39,6 +40,7 @@ export async function protectWarehouseDeactivation(tx: Executor, id: string) {
     SELECT 'Tiene saldo de stock' AS dependency WHERE EXISTS (SELECT 1 FROM warehouse_stock WHERE warehouse_id=${id} AND current_stock<>0)
     UNION SELECT 'Receta: ' || COALESCE(r.name,m.name,ri.ingredient_name,r.id) FROM recipe_ingredients ri JOIN recipes r ON r.id=ri.recipe_id
       LEFT JOIN menu_items m ON m.id=r.menu_item_id WHERE ri.warehouse_id=${id}
+    UNION SELECT 'Toma de inventario abierta' WHERE EXISTS (SELECT 1 FROM inventory_counts WHERE warehouse_id=${id} AND status='borrador')
     UNION SELECT 'Producción pendiente' WHERE EXISTS (SELECT 1 FROM inventory_pending_productions WHERE status='pending'
       AND (payload->>'outputWarehouseId'=${id} OR payload->'lines' @> ${JSON.stringify([{warehouseId:id}])}::jsonb))
     UNION SELECT 'Consumo pendiente' WHERE EXISTS (SELECT 1 FROM inventory_consumption_jobs j CROSS JOIN LATERAL jsonb_array_elements(j.lines) l

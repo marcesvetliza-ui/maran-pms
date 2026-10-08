@@ -1,7 +1,7 @@
 import type {InventoryAreaKey} from "./inventoryAreas";
 import type { LostFoundShippingDetails } from "./lostFoundDelivery";
 import { sql } from "drizzle-orm";
-import { pgTable, pgSequence, text, varchar, integer, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index, check, unique } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, varchar, integer, bigint, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index, check, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -3653,6 +3653,7 @@ export type GiftVoucherEvent = typeof giftVoucherEvents.$inferSelect;
 export const inventoryCounts = pgTable("inventory_counts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   date: date("date").notNull(),
+  warehouseId: varchar("warehouse_id").references(() => inventoryWarehouses.id),
   area: text("area"),                          // null = todos los artículos
   status: text("status").notNull().default("borrador"), // "borrador" | "cerrado"
   notes: text("notes"),
@@ -3670,6 +3671,7 @@ export const inventoryCountItems = pgTable("inventory_count_items", {
   itemId: varchar("item_id").notNull(),
   itemName: text("item_name").notNull(),
   unit: text("unit").notNull().default("unidad"),
+  snapshotMovementCount: bigint("snapshot_movement_count", {mode:"number"}),
   expectedStock: decimal("expected_stock", { precision: 10, scale: 3 }).notNull().default("0"),
   actualStock: decimal("actual_stock", { precision: 10, scale: 3 }),
   notes: text("notes"),

@@ -13,6 +13,7 @@ suite('Bajas seguras y edición del catálogo',()=>{
   if(!['localhost','127.0.0.1'].includes(new URL(process.env.DATABASE_URL!).hostname)||process.env.NODE_ENV==='production') throw new Error('Solo base local de prueba');
   ({storage}=await import('../db-storage'));
   await (await import('../productionPending')).ensureProductionPendingSchema();
+  await (await import('../inventoryCountSchema')).ensureInventoryCountWarehouseSchema();
   await (await import('../permissions')).loadRolePermissionsCache();
   const app=express();app.use(express.json());app.use((req,_res,next)=>{req.user={id:'lifecycle-test',username:'Prueba',role} as any;req.isAuthenticated=()=>true;next();});
   (await import('../routes/inventory')).registerInventoryRoutes(app);server=http.createServer(app);

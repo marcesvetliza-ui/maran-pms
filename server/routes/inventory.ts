@@ -486,6 +486,11 @@ export function registerInventoryRoutes(app: Express) {
     }
   });
 
+  app.post("/api/inventory/counts/:id/cancel", inventoryWritePermission, async(req,res)=>{
+    try {await storage.cancelInventoryCount(req.params.id,req.user!.id,String(req.body.reason || ""));res.json({ok:true});}
+    catch(e:any){res.status(e.statusCode || 500).json({error:e.message});}
+  });
+
   app.post("/api/inventory/counts/:id/close", inventoryWritePermission, async (req, res) => {
     try {
       const user = (req as any).user;
