@@ -1,3 +1,4 @@
+import {getCcManualTrackingRows} from './ccManualTracking';
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
@@ -8,6 +9,8 @@ import {
 const ESTADOS: CcInvoiceTrackingEstado[] = ["pendiente", "enviada", "reclamada", "pagada", "cargada_extranet"];
 
 export type CcInvoiceTrackingRow = {
+  manualId?: number;
+  amountPending?: boolean;
   salesInvoiceId: number;
   numeroFactura: string;
   tipoComprobante: string;
@@ -52,7 +55,7 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
   if (filters.salesInvoiceId) conditions.push(eq(salesInvoices.id, filters.salesInvoiceId));
 
   const invoices = await db.select().from(salesInvoices).where(and(...conditions)).orderBy(desc(salesInvoices.fechaEmision), desc(salesInvoices.id));
-  if (invoices.length === 0) return [];
+
 
   const companyIds = [...new Set(invoices.filter(i => i.recipientEntityType === "company").map(i => i.recipientEntityId!))];
   const agencyIds = [...new Set(invoices.filter(i => i.recipientEntityType === "agency").map(i => i.recipientEntityId!))];
@@ -63,7 +66,7 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
     companyIds.length ? db.select({ id: companies.id, name: sql<string>`COALESCE(${companies.nombreFantasia}, ${companies.razonSocial})` }).from(companies).where(inArray(companies.id, companyIds)) : Promise.resolve([]),
     agencyIds.length ? db.select({ id: agencies.id, name: sql<string>`COALESCE(${agencies.nombreFantasia}, ${agencies.razonSocial})` }).from(agencies).where(inArray(agencies.id, agencyIds)) : Promise.resolve([]),
     reservaIds.length ? db.select({ id: reservations.id, guestId: reservations.guestId }).from(reservations).where(inArray(reservations.id, reservaIds)) : Promise.resolve([]),
-    db.select().from(ccInvoiceTracking).where(inArray(ccInvoiceTracking.salesInvoiceId, invoiceIds)),
+    invoiceIds.length ? db.select().from(ccInvoiceTracking).where(inArray(ccInvoiceTracking.salesInvoiceId, invoiceIds)) : Promise.resolve([]),
   ]);
 
   const guestIds = [...new Set(reservationRows.map(r => r.guestId).filter((id): id is string => !!id))];
@@ -100,7 +103,15 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
     };
   });
 
-  const filtered = rows.filter(r => {
+  const manual = await getCcManualTrackingRows();
+  const manualInvoiceIds=new Set(manual.filter(r=>r.salesInvoiceId>0).map(r=>r.salesInvoiceId));
+  const merged=[...rows.filter(r=>!manualInvoiceIds.has(r.salesInvoiceId)),...manual];
+  const filtered = merged.filter(r => {
+    if(filters.from && r.fecha<filters.from)return false;
+    if(filters.to && r.fecha>filters.to)return false;
+    if(filters.entityType && r.entityType!==filters.entityType)return false;
+    if(filters.entityId && r.entityId!==filters.entityId)return false;
+    if(filters.salesInvoiceId && r.salesInvoiceId!==filters.salesInvoiceId)return false;
     if (filters.estado && r.estado !== filters.estado) return false;
     if (filters.search) {
       const needle = filters.search.toLowerCase();
@@ -110,7 +121,7 @@ export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters
     return true;
   });
 
-  return filtered;
+  return filtered.sort((a,b)=>b.fecha.localeCompare(a.fecha));
 }
 
 export type CcInvoiceRecipientBackfillResult = {
@@ -221,7 +232,7 @@ export async function getCcInvoiceTrackingMonthReport(year: number, month: numbe
   const lastDay = new Date(year, month, 0).getDate();
   const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
-  const rows = await getCcInvoiceTrackingList({ from, to });
+  const rows = (await getCcInvoiceTrackingList({ from, to })).filter(row=>row.salesInvoiceId>0);
 
   const porEstadoMap = new Map<CcInvoiceTrackingEstado, { cantidad: number; monto: number }>();
   for (const estado of ESTADOS) porEstadoMap.set(estado, { cantidad: 0, monto: 0 });
@@ -232,7 +243,7 @@ export async function getCcInvoiceTrackingMonthReport(year: number, month: numbe
     e.cantidad += 1;
     e.monto += row.monto;
 
-    const key = `${row.entityType}:${row.entityId}`;
+    const key = `${row.entityType}:${row.entityId || row.entityName}`;
     const existing = porEmpresaMap.get(key);
     if (existing) {
       existing.cantidad += 1;

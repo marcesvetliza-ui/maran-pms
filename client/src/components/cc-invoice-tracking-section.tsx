@@ -1,3 +1,5 @@
+import {useAuth} from '@/App';
+import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogFooter} from '@/components/ui/dialog';
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -16,6 +18,8 @@ import { FileCheck, ChevronDown, ChevronUp, Loader2, Save, Search, Printer, Rece
 type Estado = "pendiente" | "enviada" | "reclamada" | "pagada" | "cargada_extranet";
 
 type TrackingRow = {
+  manualId?: number;
+  amountPending?: boolean;
   salesInvoiceId: number;
   numeroFactura: string;
   tipoComprobante: string;
@@ -59,21 +63,24 @@ function fmtMoney(n: number) {
 
 function TrackingRowEditor({ row }: { row: TrackingRow }) {
   const { toast } = useToast();
+  const {user}=useAuth();
+  const canEdit=!row.manualId || ["admin","jefe_recepcion"].includes(user?.role??"");
   const [expanded, setExpanded] = useState(false);
   const [estado, setEstado] = useState<Estado>(row.estado);
   const [observaciones, setObservaciones] = useState(row.observaciones || "");
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("PUT", `/api/cc-invoice-tracking/${row.salesInvoiceId}`, {
+      const res = await apiRequest("PUT", row.manualId ? `/api/cc-invoice-tracking/manual/${row.manualId}` : `/api/cc-invoice-tracking/${row.salesInvoiceId}`, {
         estado,
-        observaciones: observaciones || null,
+        observaciones: row.manualId ? observaciones : observaciones || null,
       });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cc-invoice-tracking"] });
       toast({ title: "Seguimiento actualizado" });
+      queryClient.invalidateQueries({queryKey:["/api/cc-invoice-tracking/month"]});
       setExpanded(false);
     },
     onError: (error: any) => toast({ title: "Error al guardar", description: error.message, variant: "destructive" }),
@@ -83,14 +90,14 @@ function TrackingRowEditor({ row }: { row: TrackingRow }) {
     <>
       <TableRow
         className="cursor-pointer hover:bg-muted/40"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => canEdit && setExpanded(!expanded)}
         data-testid={`cc-tracking-row-${row.salesInvoiceId}`}
       >
         <TableCell className="whitespace-nowrap">{row.fecha}</TableCell>
         <TableCell className="whitespace-nowrap">{row.tipoComprobante} {row.numeroFactura}</TableCell>
         <TableCell>{row.entityName}</TableCell>
         <TableCell className="text-muted-foreground">{row.motivo || "-"}</TableCell>
-        <TableCell className="text-right whitespace-nowrap">{fmtMoney(row.monto)}</TableCell>
+        <TableCell className="text-right whitespace-nowrap">{row.amountPending ? <span className="text-xs text-amber-700 dark:text-amber-400">Pendiente de liquidación</span> : fmtMoney(row.monto)}</TableCell>
         <TableCell>
           <Badge className={`${ESTADO_COLORS[row.estado]} border-0`} data-testid={`badge-estado-${row.salesInvoiceId}`}>
             {ESTADO_LABELS[row.estado]}
@@ -98,7 +105,7 @@ function TrackingRowEditor({ row }: { row: TrackingRow }) {
         </TableCell>
         <TableCell className="text-muted-foreground max-w-56 truncate">{row.observaciones || "-"}</TableCell>
         <TableCell className="text-right">
-          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}>
+          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); if(canEdit)setExpanded(!expanded); }}>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </Button>
         </TableCell>
@@ -213,11 +220,11 @@ function ListadoTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map(row => <TrackingRowEditor key={row.salesInvoiceId} row={row} />)}
+              {rows.map(row => <TrackingRowEditor key={row.manualId ? `manual-${row.manualId}` : row.salesInvoiceId} row={row} />)}
             </TableBody>
           </Table>
           <div className="text-sm text-muted-foreground text-right">
-            {rows.length} factura(s) — total {fmtMoney(total)}
+            {rows.length} registro(s) — total conocido {fmtMoney(total)}
           </div>
         </>
       )}
@@ -304,7 +311,7 @@ function InformeMensualTab() {
             </TableHeader>
             <TableBody>
               {summary.porEmpresa.map(e => (
-                <TableRow key={`${e.entityType}:${e.entityId}`}>
+                <TableRow key={`${e.entityType}:${e.entityId || e.entityName}`}>
                   <TableCell>{e.entityName}</TableCell>
                   <TableCell className="text-right">{e.cantidad}</TableCell>
                   <TableCell className="text-right">{fmtMoney(e.monto)}</TableCell>
@@ -359,11 +366,11 @@ export function CcInvoiceTrackingSection() {
           <FileCheck className="h-5 w-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Seguimiento de Facturas CC</h2>
         </div>
-        <BackfillRecipientsButton />
+        <div className="flex flex-wrap gap-2"><AddManualTrackingButton /><BackfillRecipientsButton /></div>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
         Facturas emitidas a Empresas y Agencias en Cuenta Corriente. El estado y las observaciones se cargan y editan acá.
-        Si falta una factura que ya sabés que es de Cta. Cte., probá "Vincular facturas antiguas".
+        También podés agregar manualmente una factura o una gestión pendiente. Los seguimientos no modifican saldos ni emiten comprobantes.
       </p>
       <Tabs defaultValue="listado">
         <TabsList>
@@ -377,4 +384,30 @@ export function CcInvoiceTrackingSection() {
       </Tabs>
     </div>
   );
+}
+
+function AddManualTrackingButton(){
+ const {user}=useAuth();const {toast}=useToast();
+ const [open,setOpen]=useState(false),[mode,setMode]=useState('invoice'),[search,setSearch]=useState(''),[invoiceId,setInvoiceId]=useState('');
+ const [entityName,setEntityName]=useState(''),[reference,setReference]=useState(''),[motivo,setMotivo]=useState(''),[observaciones,setObservaciones]=useState(''),[monto,setMonto]=useState('');
+ const [fecha,setFecha]=useState(new Date().toLocaleDateString('en-CA',{timeZone:'America/Argentina/Cordoba'}));
+ const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
+ const allowed=['admin','jefe_recepcion'].includes(user?.role??'');
+ const {data:candidates=[],isLoading,isError}=useQuery<any[]>({queryKey:['/api/cc-invoice-tracking/candidates',search],enabled:allowed&&open&&mode==='invoice',queryFn:async()=>{const res=await apiRequest('GET',`/api/cc-invoice-tracking/candidates?search=${encodeURIComponent(search)}`);return res.json();}});
+ const selected=candidates.find(c=>String(c.id)===invoiceId);
+ const save=useMutation({mutationFn:async()=>{const res=await apiRequest('POST','/api/cc-invoice-tracking/manual',{requestId,salesInvoiceId:mode==='invoice'?Number(invoiceId):null,entityName:mode==='invoice'?selected?.name:entityName,reference,fecha,motivo,monto:mode==='invoice'||!monto.trim()?null:Number(monto.replace(',','.')),observaciones:observaciones||null});return res.json();},onSuccess:()=>{
+  queryClient.invalidateQueries({queryKey:['/api/cc-invoice-tracking']});queryClient.invalidateQueries({queryKey:['/api/cc-invoice-tracking/month']});queryClient.invalidateQueries({queryKey:['/api/cc-invoice-tracking/candidates']});setOpen(false);setRequestId(crypto.randomUUID());setInvoiceId('');setEntityName('');setReference('');setMotivo('');setMonto('');setObservaciones('');toast({title:'Seguimiento agregado'});
+ },onError:(error:any)=>toast({title:'No se pudo agregar',description:error.message,variant:'destructive'})});
+ if(!allowed)return null;
+ return <><Button size="sm" onClick={()=>setOpen(true)}>Agregar seguimiento</Button>
+ <Dialog open={open} onOpenChange={value=>{if(!save.isPending)setOpen(value);}}><DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Agregar seguimiento</DialogTitle><DialogDescription>Registrá una gestión pendiente. No modifica la cuenta corriente ni emite una factura.</DialogDescription></DialogHeader>
+ <div className="space-y-4">
+  <div className="flex gap-2"><Button variant={mode==='invoice'?'default':'outline'} onClick={()=>setMode('invoice')}>Factura existente</Button><Button variant={mode==='free'?'default':'outline'} onClick={()=>setMode('free')}>Seguimiento libre</Button></div>
+  {mode==='invoice'?<div className="space-y-2"><Label>Buscar factura por empresa o número</Label><Input value={search} onChange={e=>{setSearch(e.target.value);setInvoiceId('');}} placeholder="Despegar, número de factura…" />
+   {isError?<p className="text-sm text-destructive">No se pudieron cargar las facturas.</p>:<Select value={invoiceId} onValueChange={setInvoiceId}><SelectTrigger><SelectValue placeholder={isLoading?'Cargando…':'Elegir factura en cuenta corriente'} /></SelectTrigger><SelectContent>{candidates.map(c=><SelectItem key={c.id} value={String(c.id)}>{c.reference} · {c.name} · {fmtMoney(Number(c.monto))}</SelectItem>)}</SelectContent></Select>}
+   {!isLoading&&!isError&&candidates.length===0&&<p className="text-xs text-muted-foreground">No hay facturas disponibles con esa búsqueda.</p>}
+  </div>:<><div><Label>Empresa / Agencia *</Label><Input value={entityName} onChange={e=>setEntityName(e.target.value)} maxLength={250} /></div><div className="grid grid-cols-2 gap-3"><div><Label>Fecha *</Label><Input type="date" value={fecha} onChange={e=>setFecha(e.target.value)} /></div><div><Label>Referencia / Reserva</Label><Input value={reference} onChange={e=>setReference(e.target.value)} maxLength={150} /></div></div><div><Label>Importe conocido (opcional)</Label><Input inputMode="decimal" value={monto} onChange={e=>setMonto(e.target.value)} placeholder="Sin importe: pendiente de liquidación" /></div></>}
+  <div><Label>Motivo *</Label><Textarea value={motivo} onChange={e=>setMotivo(e.target.value)} maxLength={1000} placeholder="Esperar liquidación mensual de Despegar…" /></div>
+  <div><Label>Observaciones</Label><Textarea value={observaciones} onChange={e=>setObservaciones(e.target.value)} maxLength={5000} /></div>
+ </div><DialogFooter><Button variant="outline" disabled={save.isPending} onClick={()=>setOpen(false)}>Cancelar</Button><Button disabled={save.isPending||!motivo.trim()||(mode==='invoice'?!selected:!entityName.trim()||!fecha)} onClick={()=>save.mutate()}>{save.isPending?'Guardando…':'Agregar seguimiento'}</Button></DialogFooter></DialogContent></Dialog></>;
 }

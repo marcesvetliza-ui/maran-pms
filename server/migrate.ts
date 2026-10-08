@@ -1,3 +1,4 @@
+import {ensureCcManualTrackingSchema} from './ccManualTracking';
 import {importStockWorkbook} from './inventoryWorkbookImport';
 import initialStockWorkbook from './assets/initial-stock-20261008.json';
 import {ensureInventoryCountWarehouseSchema} from "./inventoryCountSchema";
@@ -4993,5 +4994,6 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     const result = await importStockWorkbook(initialStockWorkbook);
     logger.info("Carga inicial de inventario verificada", result);
   }
+  await ensureCcManualTrackingSchema();
   logger.info("Migraciones incrementales completadas.");
 }
