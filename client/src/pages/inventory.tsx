@@ -1287,94 +1287,100 @@ export default function InventoryPage() {
         {canCost && <TabsContent value="prices"><InventoryPriceComparison /></TabsContent>}
         <InventoryTabPanels movementTab={movementTab} onMovementTabChange={setMovementTab}>
         <TabsContent value="items" className="space-y-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="space-y-1"><Label>Depósito</Label><Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
-            <label className="flex items-center gap-2 text-sm">Fecha de stock<Input aria-label="Fecha de stock" type="date" max={today} value={stockDate} onChange={e=>setStockDate(e.target.value||today)} className="w-[165px]"/></label>
-            <Button variant="outline" disabled={reportUnavailable||!filteredItems.length} onClick={()=>{const popup=window.open('','_blank');if(!popup){toast({title:'Permití abrir la ventana de impresión',variant:'destructive'});return;}popup.document.write(stockReportHtml(stockReport));popup.document.close();popup.focus();popup.print();}}>Imprimir stock filtrado</Button>
-            <Button disabled={reportUnavailable} onClick={()=>{if(!historical){              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
-              const url=URL.createObjectURL(new Blob([locationCsv(rows,canCost)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='articulos-filtrados.csv';a.click();URL.revokeObjectURL(url);;return;}const url=URL.createObjectURL(new Blob([stockReportCsv(stockReport)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='stock-'+stockDate+'.csv';a.click();URL.revokeObjectURL(url);}}>Exportar artículos filtrados</Button>
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por artículo, SKU o marca..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="input-search"
-              />
-            </div>
-            <div className="space-y-1"><Label>Área</Label><Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
-              <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
-                <SelectValue placeholder="Todas las áreas" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las áreas</SelectItem>
-                <SelectItem value="general">Depósito General</SelectItem>
-                <SelectItem value="spa">SPA</SelectItem>
-                <SelectItem value="restaurant">Restaurante</SelectItem>
-                <SelectItem value="housekeeping">Housekeeping</SelectItem>
-                <SelectItem value="hotel">Hotel</SelectItem>
-                <SelectItem value="maintenance">Mantenimiento</SelectItem>
-                <SelectItem value="admin">Administración</SelectItem>
-                <SelectItem value="events">Eventos</SelectItem>
-                  <SelectItem value="marketing">Comunicación</SelectItem>
-              </SelectContent>
-            </Select></div>
-            {groups.length > 0 && (
-              <div className="space-y-1"><Label>Agrupamiento</Label><Select
-                value={groupFilter}
-                onValueChange={(val) => {
-                  setGroupFilter(val);
-                  setCategoryFilter("all");
-                }}
-              >
-                <SelectTrigger className="w-[200px]" data-testid="select-group-filter">
-                  <SelectValue placeholder="Todos los agrupamientos" />
+          <div className="space-y-3">
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="space-y-1 flex-1 min-w-[220px] max-w-sm">
+                <Label>Buscar</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Artículo, SKU o marca..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                    data-testid="input-search"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1"><Label>Depósito</Label><Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-1"><Label>Fecha de stock</Label><Input aria-label="Fecha de stock" type="date" max={today} value={stockDate} onChange={e=>setStockDate(e.target.value||today)} className="w-[165px]"/></div>
+              <div className="space-y-1"><Label>Área</Label><Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
+                <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
+                  <SelectValue placeholder="Todas las áreas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos los agrupamientos</SelectItem>
-                  {[...groups]
+                  <SelectItem value="all">Todas las áreas</SelectItem>
+                  <SelectItem value="general">Depósito General</SelectItem>
+                  <SelectItem value="spa">SPA</SelectItem>
+                  <SelectItem value="restaurant">Restaurante</SelectItem>
+                  <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                  <SelectItem value="hotel">Hotel</SelectItem>
+                  <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                  <SelectItem value="admin">Administración</SelectItem>
+                  <SelectItem value="events">Eventos</SelectItem>
+                    <SelectItem value="marketing">Comunicación</SelectItem>
+                </SelectContent>
+              </Select></div>
+              {groups.length > 0 && (
+                <div className="space-y-1"><Label>Agrupamiento</Label><Select
+                  value={groupFilter}
+                  onValueChange={(val) => {
+                    setGroupFilter(val);
+                    setCategoryFilter("all");
+                  }}
+                >
+                  <SelectTrigger className="w-[200px]" data-testid="select-group-filter">
+                    <SelectValue placeholder="Todos los agrupamientos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos los agrupamientos</SelectItem>
+                    {[...groups]
+                      .sort((a, b) => a.name.localeCompare(b.name, "es"))
+                      .map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select></div>
+              )}
+              <div className="space-y-1"><Label>Subagrupamiento</Label><Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
+                  <SelectValue placeholder="Todos los subagrupamientos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los subagrupamientos</SelectItem>
+                  {[...categoriesForFilter]
+                    .filter(cat => cat.id)
                     .sort((a, b) => a.name.localeCompare(b.name, "es"))
-                    .map((g) => (
-                      <SelectItem key={g.id} value={String(g.id)}>
-                        {g.name}
+                    .map((cat) => (
+                      <SelectItem key={cat.id} value={String(cat.id)}>
+                        {cat.name}
                       </SelectItem>
                     ))}
                 </SelectContent>
               </Select></div>
-            )}
-            <div className="space-y-1"><Label>Subagrupamiento</Label><Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
-                <SelectValue placeholder="Todos los subagrupamientos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los subagrupamientos</SelectItem>
-                {[...categoriesForFilter]
-                  .filter(cat => cat.id)
-                  .sort((a, b) => a.name.localeCompare(b.name, "es"))
-                  .map((cat) => (
-                    <SelectItem key={cat.id} value={String(cat.id)}>
-                      {cat.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select></div>
-
-            <div className="space-y-1"><Label>Tipo</Label><Select value={kindFilter} onValueChange={setKindFilter}>
-              <SelectTrigger className="w-[160px]" data-testid="select-kind-filter">
-                <SelectValue placeholder="Todos los tipos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los tipos</SelectItem>
-                <SelectItem value="materia_prima">Materia Prima</SelectItem>
-                <SelectItem value="semielaborado">Semielaborado</SelectItem>
-                <SelectItem value="venta_directa">Venta Directa</SelectItem>
-                <SelectItem value="plato">Plato</SelectItem>
-                <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
-              </SelectContent>
-            </Select></div>
-            <div className="space-y-1"><Label>ABC</Label><Select value={abcFilter} onValueChange={setAbcFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todas las clases</SelectItem><SelectItem value="none">Sin clasificar</SelectItem>{["A","B","C"].map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
-            <div className="space-y-1"><Label>Estado</Label><Select value={activeFilter} onValueChange={setActiveFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent></Select></div>
+              <div className="space-y-1"><Label>Tipo</Label><Select value={kindFilter} onValueChange={setKindFilter}>
+                <SelectTrigger className="w-[160px]" data-testid="select-kind-filter">
+                  <SelectValue placeholder="Todos los tipos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los tipos</SelectItem>
+                  <SelectItem value="materia_prima">Materia Prima</SelectItem>
+                  <SelectItem value="semielaborado">Semielaborado</SelectItem>
+                  <SelectItem value="venta_directa">Venta Directa</SelectItem>
+                  <SelectItem value="plato">Plato</SelectItem>
+                  <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
+                </SelectContent>
+              </Select></div>
+              <div className="space-y-1"><Label>ABC</Label><Select value={abcFilter} onValueChange={setAbcFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todas las clases</SelectItem><SelectItem value="none">Sin clasificar</SelectItem>{["A","B","C"].map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-1"><Label>Estado</Label><Select value={activeFilter} onValueChange={setActiveFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent></Select></div>
+            </div>
+            <div className="flex items-center gap-2 justify-end">
+              <Button variant="outline" disabled={reportUnavailable||!filteredItems.length} onClick={()=>{const popup=window.open('','_blank');if(!popup){toast({title:'Permití abrir la ventana de impresión',variant:'destructive'});return;}popup.document.write(stockReportHtml(stockReport));popup.document.close();popup.focus();popup.print();}}>Imprimir stock filtrado</Button>
+              <Button disabled={reportUnavailable} onClick={()=>{if(!historical){              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
+              const url=URL.createObjectURL(new Blob([locationCsv(rows,canCost)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='articulos-filtrados.csv';a.click();URL.revokeObjectURL(url);;return;}const url=URL.createObjectURL(new Blob([stockReportCsv(stockReport)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='stock-'+stockDate+'.csv';a.click();URL.revokeObjectURL(url);}}>Exportar artículos filtrados</Button>
+            </div>
           </div>
 
           <p className="text-sm text-muted-foreground">{historical?'Stock al cierre del '+stockDate.split('-').reverse().join('/')+'. Clasificación y mínimos actuales; costos históricos no disponibles.':'Stock actual de hoy (día en curso).'} Los indicadores superiores corresponden al stock actual.</p>
