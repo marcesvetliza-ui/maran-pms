@@ -1,3 +1,4 @@
+import {creditNoteAccountMovement} from './creditNoteAccountMovement';
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
@@ -301,57 +302,7 @@ async function reconcileReservationCreditNote(
       }
     }
 
-    // The uncovered settlement of this invoice may have been charged to a
-    // company/agency/guest's cuenta corriente (a 'cargo' row in
-    // account_movements, tagged with this invoice's own reference at
-    // issuance). That cargo doesn't know the fiscal document was credited —
-    // left alone, the account keeps showing debt that no longer matches the
-    // invoice. Credit it back by the NC total, capped at what this cargo
-    // still has un-reversed, so repeated partial NCs on the same invoice
-    // never push the account past zero.
-    const ccCargoResult = await tx.execute(sql`
-      SELECT id, entity_type, entity_id, amount
-      FROM account_movements
-      WHERE reservation_id = ${originalReservationId}
-        AND type = 'cargo'
-        AND reference = ${originalNroFacReal}
-      LIMIT 1
-    `);
-    const ccCargo = ccCargoResult.rows[0] as any;
-    if (ccCargo) {
-      const reversalMarker = `[nc:${ncId}]`;
-      const alreadyReversedResult = await tx.execute(sql`
-        SELECT COALESCE(SUM(amount::numeric), 0) AS total
-        FROM account_movements
-        WHERE reservation_id = ${originalReservationId}
-          AND type = 'pago'
-          AND description LIKE ${`%s/ factura ${originalNroFacReal}%`}
-      `);
-      const alreadyReversed = Math.abs(Number((alreadyReversedResult.rows[0] as any)?.total || 0));
-      const cargoAmount = Number(ccCargo.amount) || 0;
-      const reversalAmount = Number(Math.min(ncTotal, Math.max(0, cargoAmount - alreadyReversed)).toFixed(2));
-      if (reversalAmount > 0.009) {
-        await tx.execute(sql`
-          INSERT INTO account_movements (
-            entity_type, entity_id, date, type, description, amount, reservation_id, reference
-          )
-          SELECT
-            ${ccCargo.entity_type},
-            ${ccCargo.entity_id},
-            ${today},
-            'pago',
-            ${`Nota de crédito ${ncType} ${String(ncPoint).padStart(4, "0")}-${String(ncNumber).padStart(8, "0")} s/ factura ${originalNroFacReal} ${reversalMarker}`},
-            ${String(-reversalAmount)},
-            ${originalReservationId},
-            ${`${ncType}-${String(ncNumber).padStart(8, "0")}`}
-          WHERE NOT EXISTS (
-            SELECT 1 FROM account_movements
-            WHERE reservation_id = ${originalReservationId}
-              AND description LIKE ${`%${reversalMarker}%`}
-          )
-        `);
-      }
-    }
+    await creditNoteAccountMovement(tx, original, nc);
 
     await tx.execute(sql`
       UPDATE sales_invoices
@@ -958,7 +909,11 @@ export function registerBillingRoutes(app: Express) {
         return res.status(404).json({ error: "No se encontró la factura original de la NC" });
       }
       if (nc.reconciliation_status === "conciliada") {
-        return res.json({ ...nc, reconciliationStatus: "conciliada", alreadyReconciled: true });
+        const accountRecovery = await withReservationInvoiceLock(String(original.reserva_id), () =>
+          db.transaction(tx => creditNoteAccountMovement(tx, original, nc)));
+        if (accountRecovery.status === "applied") await audit(req, "update", "sales_invoices",
+          `Recuperación del descuento de NC ${ncId} en cuenta corriente`, {entityType:"sales_invoice",entityId:String(ncId),details:{creditNoteId:ncId, originalInvoiceId:original.id, amount:accountRecovery.amount}});
+        return res.json({ ...nc, reconciliationStatus: "conciliada", alreadyReconciled: true, accountRecovery });
       }
       if (nc.reconciliation_status !== "pendiente") {
         return res.status(409).json({ error: "La NC no está disponible para conciliación automática" });

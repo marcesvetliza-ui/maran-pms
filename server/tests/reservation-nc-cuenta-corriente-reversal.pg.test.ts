@@ -110,7 +110,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     global.fetch = originalFetch;
   });
 
-  it("acredita el saldo de cuenta corriente exactamente en el monto de la NC, y una segunda NC nunca lo pasa de cero", async () => {
+  it.each(["legacy", "operation", "payment"])("acredita cuenta corriente con referencia %s y limita las NC parciales", async (referenceMode) => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
     const companyId = `nc-cc-company-${suffix}`;
@@ -149,6 +149,9 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
         [puntoVenta, originalNumero, reservationId, JSON.stringify([{ descripcion: "Alojamiento", subtotal: 200000 }])],
       );
       originalInvoiceId = invoiceInsert.rows[0].id;
+      if(referenceMode === "operation") await pool.query(
+        'UPDATE sales_invoices SET credit_reapplication_intent=$1::jsonb WHERE id=$2',
+        [JSON.stringify({operationId:suffix}),originalInvoiceId]);
 
       // The cargo the original invoice's cuenta-corriente settlement would
       // have created (server/db-storage.ts createReservationPaymentWithLedger),
@@ -156,8 +159,15 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
       await pool.query(
         `INSERT INTO account_movements (id, entity_type, entity_id, date, type, description, amount, reservation_id, reference)
          VALUES ($1, 'company', $2, CURRENT_DATE, 'cargo', 'Estadía de prueba', '200000.00', $3, $4)`,
-        [cargoId, companyId, reservationId, originalNroFac],
+        [cargoId, companyId, reservationId, referenceMode === "operation" ? `credit-operation:${suffix}` : originalNroFac],
       );
+
+      if(referenceMode === "payment") {
+        const paymentId=randomUUID();
+        await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date) VALUES($1,$2,'200000','cuenta_corriente',CURRENT_DATE)",[paymentId,reservationId]);
+        await pool.query("UPDATE account_movements SET reference=$1,payment_id=$2 WHERE id=$3",[`credit-operation:${suffix}`,paymentId,cargoId]);
+        await pool.query("UPDATE sales_invoices SET payment_id=$1 WHERE id=$2",[paymentId,originalInvoiceId]);
+      }
 
       // Partial NC: the real amount was 150.000, not 200.000 — credit 50.000.
       const first = await postNotaCredito(originalInvoiceId, {
@@ -165,7 +175,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
         monto: 50000,
         items: [{ sourceId: "accommodation", amount: 50000 }],
       });
-      expect(first.status).toBe(201);
+      expect(first.status, JSON.stringify(first.body)).toBe(201);
       ncInvoiceIds.push(Number(first.body.id));
 
       const movementsAfterFirst = await pool.query(
@@ -190,6 +200,18 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
       // exactly the corrected real amount.
       const netBalance = movementsAfterFirst.rows.reduce((sum: number, r: any) => sum + parseFloat(r.amount), 0);
       expect(netBalance).toBeCloseTo(150000, 2);
+
+      // Recovery must neither duplicate the credit nor reapply folio adjustments.
+      const recovered=await fetch(`${baseUrl}/api/billing/credit-notes/${first.body.id}/reconcile`,{method:"POST"});
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json() as any).accountRecovery.status).toBe("already_applied");
+      // Simulate an already-issued NC missing only its account movement.
+      await pool.query("DELETE FROM account_movements WHERE reservation_id=$1 AND type='pago'",[reservationId]);
+      const repairs=await Promise.all([1,2].map(()=>fetch(`${baseUrl}/api/billing/credit-notes/${first.body.id}/reconcile`,{method:"POST"})));
+      expect(repairs.map(r=>r.status)).toEqual([200,200]);
+      const repairResults=await Promise.all(repairs.map(r=>r.json() as Promise<any>));
+      expect(repairResults.map(r=>r.accountRecovery.status).sort()).toEqual(["already_applied","applied"]);
+      expect(repairResults.find(r=>r.accountRecovery.status==="applied").accountRecovery.amount).toBe(50000);
 
       // Second, larger-than-remaining NC on the rest of the invoice: even if
       // requested amount tried to exceed what's left uncredited, the account
@@ -220,6 +242,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
         );
       }
       await pool.query("DELETE FROM account_movements WHERE reservation_id = $1", [reservationId]);
+      await pool.query("DELETE FROM payments WHERE reservation_id = $1", [reservationId]);
       await pool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
       await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
       await pool.query(
@@ -265,7 +288,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
         monto: 80000,
         items: [{ sourceId: "accommodation", amount: 80000 }],
       });
-      expect(response.status).toBe(201);
+      expect(response.status, JSON.stringify(response.body)).toBe(201);
       ncInvoiceIds.push(Number(response.body.id));
 
       const movements = await pool.query(
@@ -280,6 +303,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
           [originalInvoiceId, ncInvoiceIds],
         );
       }
+      await pool.query("DELETE FROM payments WHERE reservation_id = $1", [reservationId]);
       await pool.query("DELETE FROM reservations WHERE id = $1", [reservationId]);
       await pool.query("DELETE FROM invoice_counters WHERE punto_venta = $1", [puntoVenta]);
     }

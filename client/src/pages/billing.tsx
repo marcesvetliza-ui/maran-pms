@@ -274,11 +274,14 @@ export default function BillingPage() {
       const data = await response.json();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/companies"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/agencies"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);
       toast({
-        title: "NC conciliada",
-        description: `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
+        title: data.accountRecovery ? "Cuenta corriente revisada" : "NC conciliada",
+        description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
       });
     },
     onError: async (error: any) => {
@@ -535,6 +538,13 @@ export default function BillingPage() {
                                   {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
                                       <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
+                                  {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && (
+                                    <Button variant="ghost" size="sm" title="Revisar y recuperar descuento en cuenta corriente"
+                                      disabled={reconcileCreditNoteMutation.isPending}
+                                      onClick={() => {if(window.confirm("¿Revisar el descuento de esta NC en cuenta corriente? Solo se registrará si falta; no se emite otro comprobante.")) reconcileCreditNoteMutation.mutate(Number(f.id));}}>
+                                      <RefreshCw className="w-3.5 h-3.5 mr-1"/>Revisar CC
                                     </Button>
                                   )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
@@ -2786,7 +2796,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "master-folio"] });
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "direct-invoices"] });
       }
-      toast({ title: "Nota de Crédito emitida", description: `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
+      toast({ title: "Nota de Crédito emitida", description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
       onSuccess?.(data);
       onClose();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
