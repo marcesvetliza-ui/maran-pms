@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { informationalSummary } from "@/lib/cash-informational-summary";
+import { Fragment, useState, useEffect } from "react";
 import { DespegarUnbilledSection } from "@/components/despegar-unbilled-section";
 import { DESPEGAR_UNBILLED_QUERY_KEY } from "@shared/despegarUnbilled";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
@@ -381,11 +382,12 @@ function buildSummaryFromMovements(movements: CashMovement[]) {
 
 function SummaryTable({ movements }: { movements: CashMovement[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const summary = buildSummaryFromMovements(movements);
+  const summary = buildSummaryFromMovements(movements.filter(m=>m.movementType !== "informational"));
   const totalGeneral = Object.values(summary).reduce((s, v) => s + v.total, 0);
   const totalTx = Object.values(summary).reduce((s, v) => s + v.count, 0);
-  const nonCash = movements.filter(m => !m.anulado && m.movementType === "informational");
-  const nonCashTotal = nonCash.reduce((s, m) => s + (parseFloat(String(m.amount)) || 0), 0);
+  const informative = informationalSummary(movements, normalizePaymentMethod);
+  const rows = [...Object.entries(summary).map(([method,data])=>({method,data,informational:false})),
+    ...Object.entries(informative).map(([method,data])=>({method,data,informational:true}))];
 
   return (
     <Table>
@@ -397,20 +399,23 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {Object.entries(summary).map(([method, data]) => (
-          <>
+        {rows.map(({method,data,informational},index) => {
+          const rowKey=`${informational ? "info" : "cash"}:${method}`;
+          return (
+          <Fragment key={rowKey}>
+            {informational && (index === 0 || !rows[index-1].informational) && <TableRow className="bg-muted/40"><TableCell colSpan={3} className="font-semibold">Comprobantes y liquidaciones informativas · no modifican el dinero de caja</TableCell></TableRow>}
             <TableRow
-              key={method}
-              className={`cursor-pointer hover:bg-muted/40 transition-colors ${NON_CASH_METHODS.has(method) ? "text-muted-foreground italic" : ""}`}
-              onClick={() => setExpanded(expanded === method ? null : method)}
+              key={rowKey}
+              className={`cursor-pointer hover:bg-muted/40 transition-colors ${informational ? "text-muted-foreground italic" : ""}`}
+              onClick={() => setExpanded(expanded === rowKey ? null : rowKey)}
             >
               <TableCell>
                 <span className="flex items-center gap-1">
-                  {expanded === method
+                  {expanded === rowKey
                     ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                   {PAYMENT_METHOD_MAP[method] || method}
-                  {NON_CASH_METHODS.has(method) && <span className="ml-1 text-xs not-italic">(no efectivo)</span>}
+                  {informational && <span className="ml-1 text-xs not-italic">(informativo)</span>}
                 </span>
               </TableCell>
               <TableCell className="text-center">
@@ -418,7 +423,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
               </TableCell>
               <TableCell className="text-right">{formatCurrency(data.total)}</TableCell>
             </TableRow>
-            {expanded === method && (
+            {expanded === rowKey && (
               <TableRow key={`${method}-detail`}>
                 <TableCell colSpan={3} className="p-0 bg-muted/20">
                   <div className="px-4 py-2 space-y-0.5">
@@ -429,7 +434,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                           {cleanCashMovementLabel(m.sourceLabel || m.description) || "—"}
                           {m.registeredBy ? <span className="ml-2 text-muted-foreground font-normal">({m.registeredBy})</span> : null}
                         </span>
-                        <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground line-through" : ""}`}>
+                        <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground" : ""}`}>
                           {m.movementType === "expense" ? "- " : ""}{formatCurrency(Math.abs(parseFloat(String(m.amount))))}
                         </span>
                       </div>
@@ -438,19 +443,14 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                 </TableCell>
               </TableRow>
             )}
-          </>
-        ))}
+          </Fragment>
+        );})}
         <TableRow className="font-bold border-t-2">
-          <TableCell>TOTAL GENERAL</TableCell>
+          <TableCell>TOTAL COBRADO NETO</TableCell>
           <TableCell className="text-center">{totalTx}</TableCell>
           <TableCell className="text-right">{formatCurrency(totalGeneral)}</TableCell>
         </TableRow>
-        {nonCash.length > 0 && (
-          <TableRow className="bg-muted/30 font-semibold">
-            <TableCell colSpan={2}>Liquidaciones no monetarias (Cuenta Corriente / Voucher) — {nonCash.length} transacciones</TableCell>
-            <TableCell className="text-right">{formatCurrency(nonCashTotal)}</TableCell>
-          </TableRow>
-        )}
+
       </TableBody>
     </Table>
   );
@@ -472,7 +472,7 @@ function printClosingSummary(
   const totalTx = closingSnapshot?.transactionCount
     ?? Object.values(summary).reduce((s, v) => s + v.count, 0);
   const informational = activos.filter(m => m.movementType === "informational");
-  const informationalTotal = informational.reduce((s, m) => s + (parseFloat(String(m.amount)) || 0), 0);
+  const informationalGroups = informationalSummary(movements, normalizePaymentMethod);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
   const diferencia = efectivoContado != null && efectivoSistema != null
     ? efectivoContado - efectivoSistema
@@ -511,6 +511,8 @@ function printClosingSummary(
   const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
     const label = PAYMENT_METHOD_MAP[method] || method;
     const total = movs.filter(m => m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
+    const info = informationalGroups[method];
+    const hasMonetary = movs.some(m=>m.movementType !== "informational");
     const isEfectivo = method === "cash";
     const borderColor = isEfectivo ? "#2b6cb0" : "#553c9a";
     const headerBg = isEfectivo ? "#ebf8ff" : "#faf5ff";
@@ -547,7 +549,7 @@ function printClosingSummary(
     <div style="border:2px solid ${borderColor};border-radius:8px;margin-bottom:16px;overflow:hidden;page-break-inside:avoid">
       <div style="background:${headerBg};padding:10px 14px;border-bottom:1px solid ${borderColor};display:flex;justify-content:space-between;align-items:center">
         <span style="font-weight:bold;font-size:14px;color:${borderColor}">${label}</span>
-        <span style="font-weight:bold;font-size:15px">${formatCurrency(total)}</span>
+        <span style="font-weight:bold;font-size:15px">${hasMonetary ? `Cobrado neto: ${formatCurrency(total)}` : ""}${info ? `${hasMonetary ? " · " : ""}Informativo: ${formatCurrency(info.total)} (${info.count})` : ""}</span>
       </div>
       <div style="padding:8px 0">
         <table style="width:100%;border-collapse:collapse">
@@ -615,7 +617,7 @@ function printClosingSummary(
     <div><strong>${shift.closedBy || "-"}</strong> ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</div>
   </div>
   <div style="text-align:right">
-    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Total general</div>
+    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Total cobrado neto</div>
     <div style="font-size:16px;font-weight:bold">${formatCurrency(totalGeneral)}</div>
     <div style="color:#888;font-size:10px">${totalTx} transacciones</div>
   </div>
@@ -636,8 +638,9 @@ ${closingSnapshot ? `<div style="font-size:11px;margin-bottom:14px;padding:10px;
 </div>
 
 ${informational.length ? `<div style="margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #cbd5e1">
-  <div style="font-weight:bold">Liquidaciones no monetarias</div>
-  <div style="font-size:11px;margin-top:4px">Cuenta Corriente / Voucher — ${informational.length} transacciones — ${formatCurrency(informationalTotal)}</div>
+  <div style="font-weight:bold">Comprobantes y liquidaciones informativas</div>
+  ${Object.entries(informationalGroups).map(([method,group])=>`<div style="font-size:11px;margin-top:4px">${PAYMENT_METHOD_MAP[method] || method} — ${group.count} transacciones — ${formatCurrency(group.total)}</div>`).join("")}
+  <div style="font-size:11px;margin-top:4px">Importes informativos: no modifican el dinero de caja.</div>
   ${informational.map(m => `<div style="font-size:11px;margin-top:3px">${PAYMENT_METHOD_MAP[normalizePaymentMethod(m.paymentMethod)] || m.paymentMethod}: ${m.sourceLabel || m.description || "-"}${m.registeredBy ? ` (${m.registeredBy})` : ""} — ${formatCurrency(Number(m.amount))}</div>`).join("")}
 </div>` : ""}
 
