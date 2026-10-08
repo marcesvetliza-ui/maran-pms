@@ -268,8 +268,10 @@ export type ReservationStatus = "tentative" | "pending" | "confirmed" | "web_che
 export type DiscountType = "none" | "percent" | "fixed";
 export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "airbnb" | "despegar" | "hotelbeds" | "agoda" | "ota" | "empresa" | "telefono" | "agencia";
 
+export type HousekeepingPreparation = {roomId:string; state:'prepared'|'review'; note:string; markedAt:string; markedBy:string; previousRoomId?:string|null; movedAt?:string; movedBy?:string};
 export const reservations = pgTable("reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),
   reservationCode: text("reservation_code").notNull(),
   guestId: varchar("guest_id").notNull(),
   companyId: varchar("company_id"),
@@ -496,7 +498,7 @@ export type PlanningData = {
   rooms: RoomWithType[];
   days: string[];
   occupancy: Record<string, PlanningCellStatus[]>;
-  reservations: Record<string, { id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null; isUpgrade?: boolean; movedFromRoomNumber?: string | null; color?: string | null; prefSummary?: { hasAllergies: boolean; hasDiet: boolean; hasCritical?: boolean; hasSpecialDate?: boolean; hasHigh?: boolean; count: number } | null; numberOfGuests?: number | null; bedTypeName?: string | null }>;
+  reservations: Record<string, { housekeepingPreparation?:HousekeepingPreparation|null; id: string; guestName: string; checkIn: string; checkOut: string; status: ReservationStatus; source: ReservationSource; isGroup?: boolean; groupName?: string; groupId?: string; groupColor?: string; earlyCheckIn?: boolean; earlyCheckInTime?: string | null; lateCheckOut?: boolean; lateCheckOutTime?: string | null; isUpgrade?: boolean; movedFromRoomNumber?: string | null; color?: string | null; prefSummary?: { hasAllergies: boolean; hasDiet: boolean; hasCritical?: boolean; hasSpecialDate?: boolean; hasHigh?: boolean; count: number } | null; numberOfGuests?: number | null; bedTypeName?: string | null }>;
   cellReservations: Record<string, Record<string, string>>; // roomId -> date -> reservationId
   groupBlocks: Record<string, { id: string; groupName: string; groupCode: string; checkIn: string; checkOut: string }>;
   cellGroupBlocks: Record<string, Record<string, string>>; // roomId -> date -> groupBlockId

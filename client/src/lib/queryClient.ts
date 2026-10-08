@@ -1,3 +1,4 @@
+import {confirmHousekeepingMove} from "./confirm-housekeeping-move";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 export function handleSessionExpired() {
@@ -62,10 +63,18 @@ export async function apiRequestWithGroupInventoryWarning(
   data: Record<string, unknown>,
 ): Promise<Response> {
   try {
-    return await apiRequest(method, url, data);
+    const response=await apiRequest(method,url,data);
+    if(method==='PATCH'&&url.startsWith('/api/reservations/'))queryClient.invalidateQueries({queryKey:['/api/housekeeping/preparations']});
+    return response;
   } catch (error) {
     const payload = parseApiErrorPayload(error);
+    if(payload?.code === 'HOUSEKEEPING_PREPARATION_WARNING' && payload.canOverride===true){
+      if(data.acknowledgeHousekeepingPreparation===(payload as any).preparationVersion)throw error;
+      if(!await confirmHousekeepingMove(payload.error||'Preparación especial en la habitación de origen'))throw error;
+      return apiRequestWithGroupInventoryWarning(method,url,{...data,acknowledgeHousekeepingPreparation:(payload as any).preparationVersion});
+    }
     if (payload?.code !== "GROUP_BLOCK_WARNING" || payload.canOverride !== true) throw error;
+    if(data.overrideTentativeGroupWarning===true)throw error;
     const rows = payload.warning?.warnings ?? [];
     let message: string;
     if (rows.length > 0) {
@@ -93,7 +102,7 @@ export async function apiRequestWithGroupInventoryWarning(
       ].filter(Boolean).join("\n");
     }
     if (!window.confirm(message)) throw error;
-    return apiRequest(method, url, { ...data, overrideTentativeGroupWarning: true });
+    return apiRequestWithGroupInventoryWarning(method, url, { ...data, overrideTentativeGroupWarning: true });
   }
 }
 

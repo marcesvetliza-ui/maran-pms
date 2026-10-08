@@ -1,3 +1,4 @@
+import {PreparationBadge} from "@/components/housekeeping-preparation";
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -287,6 +288,7 @@ export default function PlanningPage() {
     newCheckIn: string;
     newCheckOut: string;
     dateChanged: boolean;
+    preparation?: import("@shared/schema").HousekeepingPreparation|null;
   } | null>(null);
 
   const pointerSensor = useSensor(PointerSensor, {
@@ -300,13 +302,16 @@ export default function PlanningPage() {
       roomId,
       checkInDate,
       checkOutDate,
+      preparationVersion,
     }: {
       reservationId: string;
       roomId: string;
       checkInDate?: string;
       checkOutDate?: string;
+      preparationVersion?:string;
     }) => {
       const payload: Record<string, string> = { roomId };
+      if(preparationVersion)payload.acknowledgeHousekeepingPreparation=preparationVersion;
       if (checkInDate) payload.checkInDate = checkInDate;
       if (checkOutDate) {
         payload.checkOutDate = checkOutDate;
@@ -430,6 +435,7 @@ export default function PlanningPage() {
       newCheckIn,
       newCheckOut,
       dateChanged: newCheckIn !== reservation.checkIn,
+      preparation:fromRoomId!==toRoomId&&reservation.housekeepingPreparation?.state==='prepared'?reservation.housekeepingPreparation:null,
     });
   };
 
@@ -1183,7 +1189,8 @@ export default function PlanningPage() {
                                   data-testid={`cell-reub-${day}`}
                                 >
                                   <span className="text-[10px] font-medium truncate px-1 max-w-[56px]">
-                                    {reservation.guestName === "Sin Asignar" || !reservation.guestName
+                                    <PreparationBadge compact preparation={reservation.housekeepingPreparation} />
+                                            {reservation.guestName === "Sin Asignar" || !reservation.guestName
                                       ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
                                       : reservation.guestName.split(" ")[0]}
                                   </span>
@@ -1247,6 +1254,7 @@ export default function PlanningPage() {
                                           data-testid={`cell-${room.id}-${day}`}
                                         >
                                           <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate px-1 max-w-[56px]">
+                                            <PreparationBadge compact preparation={reservation.housekeepingPreparation} />
                                             {reservation.guestName === "Sin Asignar" || !reservation.guestName
                                               ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
                                               : reservation.guestName.split(" ")[0]}
@@ -1289,6 +1297,7 @@ export default function PlanningPage() {
                                             {reservation.isUpgrade && !reservation.movedFromRoomNumber && day === reservation.checkIn && (
                                               <span title="Up Grade"><TrendingUp className="h-3 w-3 text-amber-400 flex-shrink-0" /></span>
                                             )}
+                                            <PreparationBadge compact preparation={reservation.housekeepingPreparation} />
                                             {reservation.guestName === "Sin Asignar" || !reservation.guestName
                                               ? reservation.groupName?.substring(0, 4).toUpperCase() || "GRP"
                                               : reservation.guestName.split(" ")[0]}
@@ -1556,6 +1565,7 @@ export default function PlanningPage() {
           moveReservationMutation.mutate({
             reservationId: data.reservationId,
             roomId: data.toRoomId,
+            preparationVersion:data.preparation?.markedAt,
             checkInDate: data.newCheckIn,
             checkOutDate: data.newCheckOut,
           });

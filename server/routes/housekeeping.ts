@@ -1,12 +1,12 @@
 import { lostFoundShippingSchema, lostFoundStatusUpdateSchema } from "@shared/lostFoundDelivery";
 import type { Express } from "express";
 import { storage } from "../db-storage";
-import { db } from "../db";
+import { db,withDatabaseTransaction } from "../db";
 import { lostFoundItems, reservations, safeBoxOpenings, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
 import { requireAuth, requirePermission } from "../auth";
 import {hasPermission} from "../permissions";
 import {hideInventoryCosts} from "../inventoryAccess";
-import { eq, desc, like, and, or, ilike, type SQL } from "drizzle-orm";
+import { eq, desc, like, and, or, ilike, sql, type SQL } from "drizzle-orm";
 
 export function registerHousekeepingRoutes(app: Express) {
   app.get("/api/housekeeping/inventory", requireAuth, requirePermission('sidebar:/housekeeping'), async (req,res) => {
@@ -14,6 +14,32 @@ export function registerHousekeepingRoutes(app: Express) {
       const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping');
       res.json(hasPermission(req.user!.role,'api:inventory:cost')?items:hideInventoryCosts(items));
     } catch { res.status(500).json({error:'No se pudo consultar el inventario de Housekeeping'}); }
+  });
+  app.get('/api/housekeeping/preparations',requireAuth,requirePermission('sidebar:/housekeeping'),async(req,res)=>{
+    try{
+      const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Cordoba'}).format(new Date());
+      const result=await db.execute(sql`SELECT r.id,r.room_id,r.reservation_code,r.check_in_date,r.check_out_date,r.status,r.housekeeping_preparation,concat(g.last_name,' ',g.first_name) AS guest_name FROM reservations r LEFT JOIN guests g ON g.id=r.guest_id WHERE r.status NOT IN ('cancelled','checked_out','no_show') AND r.check_out_date>=${today} ORDER BY r.check_in_date,r.id`);
+      res.json(result.rows);
+    }catch{res.status(500).json({error:'No se pudieron consultar las preparaciones'});}
+  });
+  app.put('/api/housekeeping/room/:roomId/preparation',requireAuth,requirePermission('sidebar:/housekeeping'),async(req,res)=>{
+    const {reservationId,action,note}=req.body;
+    if(typeof reservationId!=='string'||!['mark','clear'].includes(action)||note!==undefined&&(typeof note!=='string'||note.length>500))return res.status(400).json({error:'Elegí la reserva y una nota de hasta 500 caracteres'});
+    try{
+      const result=await withDatabaseTransaction(async()=>{
+        const row=(await db.execute(sql`SELECT room_id,status,housekeeping_preparation FROM reservations WHERE id=${reservationId} FOR UPDATE`)).rows[0] as any;
+        if(!row||row.room_id!==req.params.roomId||['cancelled','checked_out','no_show'].includes(row.status))throw Object.assign(new Error('La reserva ya no corresponde a esta habitación; actualizá la pantalla'),{statusCode:409});
+        const actor=req.user?.username||'Sistema';
+        const preparation=action==='clear'?null:{roomId:req.params.roomId,state:'prepared',note:(note||'').trim(),markedAt:new Date().toISOString(),markedBy:actor};
+        await db.execute(sql`UPDATE reservations SET housekeeping_preparation=${preparation?JSON.stringify(preparation):null}::jsonb WHERE id=${reservationId}`);
+        if(action==='mark'){
+          const occupied=(await db.execute(sql`SELECT id FROM reservations WHERE room_id=${req.params.roomId} AND status='checked_in' LIMIT 1`)).rows.length>0;
+          await storage.updateRoom(req.params.roomId,{status:occupied?'limpia_ocupada':'available'});
+        }
+        await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)VALUES(${reservationId},${actor},'housekeeping',${action==='clear'?'Aviso de preparación especial retirado':`Limpia — No mover. ${preparation!.note}`})`);
+        return {preparation};
+      });res.json(result);
+    }catch(error:any){res.status(error.statusCode||500).json({error:error.message});}
   });
   // Housekeeping Tasks
   app.get("/api/housekeeping", async (req, res) => {

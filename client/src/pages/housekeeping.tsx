@@ -1,3 +1,4 @@
+import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
 import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
@@ -157,6 +158,7 @@ function RoomCard({
   onEditBedConfig: (roomId: string, currentConfig: string) => void;
 }) {
   const [, navigate] = useLocation();
+  const [preparationOpen,setPreparationOpen]=useState(false);
   const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
   const Icon = config.icon;
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "in_progress");
@@ -211,6 +213,7 @@ function RoomCard({
                     <CheckCircle className="h-3 w-3 mr-2 text-green-500" />
                     Marcar Limpia
                   </Button>
+                  <Button size="sm" variant="ghost" className="w-full justify-start h-8 text-xs text-amber-700" onClick={()=>setPreparationOpen(true)}>⚠ Limpia — No mover</Button>
                   {isOccupied && (
                     <Button
                       size="sm"
@@ -266,6 +269,7 @@ function RoomCard({
           {config.label}
         </div>
         
+        <HousekeepingPreparationControl hideTrigger controlledOpen={preparationOpen} onOpenChange={setPreparationOpen} roomId={room.id} roomNumber={room.roomNumber} />
         {pendingTasks.length > 0 ? (
           <div className="space-y-1">
             {pendingTasks.map(task => (
@@ -1287,6 +1291,7 @@ function MobileRoomCard({
             </Button>
           )}
 
+          <HousekeepingPreparationControl roomId={room.id} roomNumber={room.roomNumber} />
           {/* Already available and no action needed */}
           {room.status === "available" && !currentTask && !checkoutToday && (
             <div className="text-center text-sm text-green-600 dark:text-green-400 font-medium py-1">

@@ -1,3 +1,4 @@
+import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
 import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
@@ -1127,6 +1128,7 @@ export class DatabaseStorage implements IStorage {
   async createReservation(reservation: InsertReservation, beforeCommit?: (created: Reservation) => Promise<void>): Promise<Reservation> {
     return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       const insertData = { ...(reservation as any) };
+      delete insertData.housekeepingPreparation;
       const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
       const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
       delete insertData._inventoryContextGroupId;
@@ -1271,8 +1273,17 @@ export class DatabaseStorage implements IStorage {
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
     return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT id FROM reservations WHERE id=${id} FOR UPDATE`);
       const existing = await this.getReservation(id);
       if (!existing) return undefined;
+      const preparationAck=(reservation as any)._housekeepingPreparationAck;
+      const warning=preparationMoveWarning(existing.housekeepingPreparation??null,existing.roomId,(reservation as any).roomId,preparationAck);
+      if(warning)throw Object.assign(new Error(warning.error),{statusCode:409,response:warning});
+      if((reservation as any).roomId && (reservation as any).roomId!==existing.roomId && existing.housekeepingPreparation){
+        const actor=(reservation as any)._housekeepingPreparationActor||'Sistema';
+        reservation={...reservation,housekeepingPreparation:{...existing.housekeepingPreparation,state:'review',roomId:(reservation as any).roomId,previousRoomId:existing.roomId,movedAt:new Date().toISOString(),movedBy:actor}};
+        await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)VALUES(${id},${actor},'housekeeping',${`Cambio de habitación con preparación especial: revisar en destino. ${existing.housekeepingPreparation.note}`})`);
+      }
       const finalRoomId = (reservation as any).roomId || existing.roomId;
       const finalRoomTypeId = (reservation as any).roomTypeId || existing.roomTypeId;
       const finalCheckIn = (reservation as any).checkInDate || existing.checkInDate;
@@ -1281,6 +1292,8 @@ export class DatabaseStorage implements IStorage {
       const contextGroupId = (reservation as any)._inventoryContextGroupId as string | undefined;
       const overrideSoft = (reservation as any)._inventoryOverrideTentativeGroupWarning === true;
       const safeReservation = { ...(reservation as any) };
+      delete safeReservation._housekeepingPreparationAck;
+      delete safeReservation._housekeepingPreparationActor;
       delete safeReservation._inventoryContextGroupId;
       delete safeReservation._inventoryOverrideTentativeGroupWarning;
       const inventoryRelevant = ["roomId", "roomTypeId", "checkInDate", "checkOutDate", "status"]
@@ -2360,6 +2373,7 @@ export class DatabaseStorage implements IStorage {
         reservationsMap[res.id] = {
           id: res.id,
           guestName: guest ? `${guest.lastName} ${guest.firstName}`.trim() : "(Sin huésped)",
+          housekeepingPreparation: res.housekeepingPreparation,
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,

@@ -33,6 +33,7 @@ export interface MoveConfirmData {
   newCheckIn: string;
   newCheckOut: string;
   dateChanged: boolean;
+  preparation?:import("@shared/schema").HousekeepingPreparation|null;
 }
 
 interface MoveConfirmDialogProps {
@@ -75,6 +76,7 @@ export function PlanningMoveConfirmDialog({
                 Hab. {moveConfirm.toRoomNumber}
               </Badge>
             </div>
+            {moveConfirm.preparation&&<div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><strong>Housekeeping pidió NO MOVER</strong><p>{moveConfirm.preparation.note||'Preparación especial'}</p><p>La preparación de la habitación {moveConfirm.fromRoomNumber} puede no estar en la {moveConfirm.toRoomNumber}. Si continuás, quedará pendiente de revisión por Housekeeping.</p></div>}
             {moveConfirm.dateChanged && (
               <div className="flex items-center gap-3 text-sm">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -110,7 +112,7 @@ export function PlanningMoveConfirmDialog({
             disabled={isPending}
             data-testid="button-confirm-move"
           >
-            {isPending ? "Moviendo..." : "Confirmar Movimiento"}
+            {isPending ? "Moviendo..." : moveConfirm?.preparation ? "Mover igualmente" : "Confirmar Movimiento"}
           </Button>
         </DialogFooter>
       </DialogContent>

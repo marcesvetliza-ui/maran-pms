@@ -1,3 +1,4 @@
+import {preparationMoveWarning} from "../housekeepingPreparation";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs";
@@ -443,6 +444,9 @@ export function registerReservationsRoutes(app: Express) {
 
   app.patch("/api/reservations/:id", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
+      const preparationAck=req.body.acknowledgeHousekeepingPreparation;
+      delete req.body.acknowledgeHousekeepingPreparation;
+      delete req.body.housekeepingPreparation;
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
@@ -451,6 +455,8 @@ export function registerReservationsRoutes(app: Express) {
       if (!existing) {
         return res.status(404).json({ error: "Reservation not found" });
       }
+      const preparationWarning=preparationMoveWarning(existing.housekeepingPreparation??null,existing.roomId,req.body.roomId,preparationAck);
+      if(preparationWarning)return res.status(409).json(preparationWarning);
       // The persisted link is authoritative. Generic reservation editors do not
       // send contextGroupId, and without it an extension is counted once inside
       // the confirmed group block and again as unrelated demand.
@@ -637,7 +643,7 @@ export function registerReservationsRoutes(app: Express) {
         cambios.push({ tipo: "notas", descripcion: `Notas actualizadas` });
       }
 
-      const reservation = await storage.updateReservation(req.params.id, req.body);
+      const reservation = await storage.updateReservation(req.params.id, {...req.body,_housekeepingPreparationAck:preparationAck,_housekeepingPreparationActor:req.user?.username||"Sistema"} as any);
       if (!reservation) {
         return res.status(404).json({ error: "Reservation not found" });
       }
