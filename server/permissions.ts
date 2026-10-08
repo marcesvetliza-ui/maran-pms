@@ -193,7 +193,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   // server/billing/routes.ts — antes FINANCE_RECONCILIATION_ROLES, 3
   // endpoints de conciliación de Notas de Crédito pendientes.
-  "api:billing:nc-reconciliation": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:billing:nc-reconciliation": ["admin", "manager", "resp_administracion", "jefe_recepcion", "reception"],
 
   // server/routes/spa.ts (7 endpoints) + server/billing/routes.ts (1 chequeo
   // inline dentro de POST /api/billing/invoices) — antes SPA_ACCESS_ROLES /

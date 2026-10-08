@@ -201,7 +201,7 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       ["admin", "jefe_recepcion", "manager", "resp_administracion"].sort(),
     );
     expect(API_RESOURCE_PERMISSIONS["api:billing:nc-reconciliation"].slice().sort()).toEqual(
-      ["admin", "jefe_recepcion", "manager", "resp_administracion"].sort(),
+      ["admin", "jefe_recepcion", "manager", "resp_administracion", "reception"].sort(),
     );
     expect(API_RESOURCE_PERMISSIONS["api:spa:write"].slice().sort()).toEqual(
       ["admin", "ama_de_llaves", "comercial", "jefe_recepcion", "manager", "reception", "spa"].sort(),

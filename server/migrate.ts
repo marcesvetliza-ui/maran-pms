@@ -4968,6 +4968,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await db.execute(sql`WITH applied AS (
     INSERT INTO resource_permission_seeds(resource_key) VALUES('inventory-granular-menu-20261007') ON CONFLICT DO NOTHING RETURNING resource_key
   ) INSERT INTO role_permissions(role,resource_key) SELECT 'restaurant','sidebar:/inventory' FROM applied ON CONFLICT DO NOTHING`);
+  // User-authorized grant for existing reception roles, applied once so later
+  // administrator revocations are preserved across restarts.
+  await db.execute(sql`WITH applied AS (
+    INSERT INTO resource_permission_seeds(resource_key)
+    VALUES('reception-credit-notes-20261008') ON CONFLICT DO NOTHING RETURNING resource_key
+  ) INSERT INTO role_permissions(role,resource_key)
+    SELECT role,'api:billing:nc-reconciliation'
+    FROM applied CROSS JOIN (VALUES ('reception'),('jefe_recepcion')) AS roles(role)
+    ON CONFLICT DO NOTHING`);
   await ensureInventoryStage2Schema();
   await ensureInventoryLocationSchema();
   await ensureProductionPendingSchema();

@@ -68,6 +68,24 @@ describe("billing NC reconciliation route — migrada a requirePermission(api:bi
     expect(response.status).toBe(200);
   });
 
+  it("permite emitir una nota de crédito a recepción cuando tiene el permiso", async () => {
+    permissionsState.granted.add("reception:api:billing:nc-reconciliation");
+    app = await startApp("reception");
+    const response = await fetch(`${app.baseUrl}/api/billing/invoices/99999/nota-credito`, {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({motivo:"Prueba"}),
+    });
+    // The mocked invoice does not exist; passing authorization must reach 404.
+    expect(response.status).toBe(404);
+  });
+
+  it("permite acceder a notas de débito a recepción", async () => {
+    app = await startApp("reception");
+    const response = await fetch(`${app.baseUrl}/api/billing/invoices/99999/nota-debito`, {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({motivo:"Prueba"}),
+    });
+    expect(response.status).toBe(404);
+  });
+
   it("rechaza con 403 a un rol sin el permiso", async () => {
     app = await startApp("reception");
     const response = await fetch(`${app.baseUrl}/api/billing/credit-note-reconciliations/pending`);
