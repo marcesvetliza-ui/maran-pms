@@ -120,8 +120,8 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
 
   it.each([
     ["Resumen Bancario (gasto)", "RESUMEN-BANCO"],
-    ["Retenciones (gasto)", "RETENCION"],
-  ])("%s permite artículos para detallar el gasto sin registrar cobros", async (label, type) => {
+    ["Retenciones recibidas", "RETENCION"],
+  ])("%s ofrece un registro específico sin artículos ni cobros", async (label, type) => {
     mockRole = "resp_deposito";
     const user = userEvent.setup();
     queryClient.setQueryData(["/api/accounting-suppliers"], [{ id: 331, razon_social: "Banco prueba", cuit: "30111222333", cuenta_contable_id: 440 }]);
@@ -134,13 +134,14 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     await user.click(screen.getByRole("option", { name: "Compra" }));
     await user.click(screen.getByTestId("select-tipo"));
     await user.click(screen.getByRole("option", { name: label }));
-    expect(screen.getByTestId("registro-gasto-compra")).toBeInTheDocument();
-    expect(screen.getByTestId("btn-registrar-gasto")).toBeDisabled();
-    await user.click(screen.getByTestId("select-existing-item-0"));
-    await user.click(screen.getByText("Varios IVA 21"));
-    expect(screen.getByTestId("gasto-articulo-0")).toHaveTextContent("21%");
-    expect(screen.getByTestId("btn-registrar-gasto")).toBeDisabled();
-    expect(screen.getByText(new RegExp(type === "RETENCION" ? "Retenciones" : "Resumen Bancario"))).toBeInTheDocument();
+    expect(screen.getByTestId("special-purchase-form")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Registrar comprobante"})).toBeDisabled();
+    expect(screen.queryByTestId("select-existing-item-0")).not.toBeInTheDocument();
+    if(type==='RETENCION')expect(screen.getByLabelText('Importe final, sin agregar IVA')).toBeInTheDocument();
+    else {
+      await user.type(screen.getByLabelText('Neto gravado al 21%'),'100');
+      expect(screen.getByText('IVA 21%: $21,00')).toBeInTheDocument();
+    }
   });
 
   it.each([

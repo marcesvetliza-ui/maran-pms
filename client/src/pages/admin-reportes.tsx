@@ -285,6 +285,20 @@ function EstadoResultadosReport() {
           </div>
         </div>
       </div>
+      {data.desgloseAdministrativo?.registros?.length > 0 && <Card>
+        <CardHeader><CardTitle className="text-base">Impuestos y retenciones de registros administrativos</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Los gastos bancarios y comerciales incluyen el neto y los conceptos exentos. El IVA, las percepciones y las retenciones se muestran separados. Ley 25.413 queda pendiente de su tratamiento fiscal. Los registros anteriores conservan sus importes históricos.</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {[['IVA', 'iva'], ['Percepción IVA', 'percepcionIva'], ['Ley 25.413', 'ley25413'], ['Retención IIBB tarjetas', 'retencionIibbTarjetas'], ['Retenciones recibidas', 'retencionesRecibidas']].map(([label,key])=><KpiCard key={key} title={label} value={data.desgloseAdministrativo[key]} unit="$" />)}
+          </div>
+          <div className="space-y-2">{data.desgloseAdministrativo.registros.map((r:any)=><div key={r.id} className="rounded-lg border p-3 text-sm">
+            <div className="flex flex-wrap justify-between gap-2"><strong>{r.proveedor_nombre} · {r.numero_comprobante}</strong><strong>${fPeso(Number(r.monto_total))}</strong></div>
+            <p className="text-muted-foreground">{r.fecha_emision} · {r.tipo_comprobante==='RETENCION'?'Retención recibida':r.tipo_comprobante==='RESUMEN-BANCO'?'Resumen bancario':'Liquidación de tarjeta'}</p>
+            {r.tipo_comprobante==='RETENCION'?<p>{r.subtipo_retencion?.toUpperCase()} {r.special_details.jurisdiction} · {r.special_details.paymentMovementId?'Cobro vinculado':'Pendiente de asociar a un cobro'}</p>:<p>Neto y exento: ${fPeso(Number(r.monto_neto)+Number(r.monto_exento))} · IVA: ${fPeso(Number(r.monto_iva21)+Number(r.monto_iva105))} · Percepción IVA: ${fPeso(Number(r.percepcion_iva))}{Number(r.ley25413)>0&&` · Ley 25.413: $${fPeso(Number(r.ley25413))}`}{Number(r.retencion_iibb)>0&&` · Retención IIBB: $${fPeso(Number(r.retencion_iibb))}`}</p>}
+          </div>)}</div>
+        </CardContent>
+      </Card>}
     </div>
   );
 }

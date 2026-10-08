@@ -1,3 +1,4 @@
+import {createSpecialPurchase} from './specialPurchase';
 import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -3021,6 +3022,11 @@ export async function registerRoutes(
     }
   });
 
+  app.get('/api/purchase-invoices/retention-payments',requireAuth,requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY),async(req,res)=>{
+    if(!['company','agency'].includes(String(req.query.entityType))||typeof req.query.entityId!=='string')return res.status(400).json({error:'Agente inválido'});
+    try{const rows=await db.execute(sql`SELECT id,date,description,amount,retentions FROM account_movements WHERE entity_type=${String(req.query.entityType)} AND entity_id=${req.query.entityId} AND type='pago' AND voided=false ORDER BY date DESC,created_at DESC LIMIT 100`);res.json(rows.rows);}catch(error:any){res.status(500).json({error:error.message});}
+  });
+
   app.get("/api/purchase-invoices/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -3065,6 +3071,10 @@ export async function registerRoutes(
       // Liquidación Tarjeta se sumó acá: antes tenía sus propias retenciones
       // sufridas y movía Caja al liquidarse; confirmado con el usuario que
       // pase a ser puramente informativa, igual que Resumen Bancario/Retención.
+      if (["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"].includes(req.body.tipoComprobante) && req.body.specialDetails) {
+        if(req.body.stockItems?.length||req.body.expenseItems?.length)return res.status(400).json({error:'Estos comprobantes no utilizan artículos ni stock'});
+        return res.status(201).json(await createSpecialPurchase(req.body,req.user?.username??null));
+      }
       if (["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"].includes(req.body.tipoComprobante)) {
         const input = req.body;
         const supplierId = Number(input.supplierId);

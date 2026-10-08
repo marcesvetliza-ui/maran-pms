@@ -1,3 +1,4 @@
+import {SpecialPurchaseForm} from '@/components/special-purchase-form';
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
@@ -114,94 +115,11 @@ const TIPOS_COMPRA: { value: string; label: string }[] = [
   { value: "NC-C", label: "Nota de Crédito C" },
   { value: "REMITO", label: "Remito" },
   { value: "RESUMEN-BANCO", label: "Resumen Bancario (gasto)" },
-  { value: "RETENCION", label: "Retenciones (gasto)" },
+  { value: "RETENCION", label: "Retenciones recibidas" },
   { value: "LIQ-TARJETA", label: "Liquidación Tarjeta (gasto)" },
 ];
 
 const SOLO_GASTO = new Set(["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"]);
-type ExpenseRow = { itemId: string; quantity: string; unitPrice: string; vatRate: string };
-const expenseRow = (): ExpenseRow => ({ itemId: "", quantity: "1", unitPrice: "", vatRate: "" });
-const suggestedVat = (sku?: string | null) => {
-  const normalized = (sku ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return ({ VARIOS21: "21", VARIOS105: "10.5", VARIOS27: "27", VARIOSEXENTO: "exento", VARIOSNOGRAV: "no_gravado" } as Record<string, string>)[normalized] ?? "";
-};
-
-function RegistroGastoCompra({ tipo, suppliers, accounts, onClose }: {
-  tipo: string; suppliers: Supplier[]; accounts: AccountingAccount[]; onClose: () => void;
-}) {
-  const { toast } = useToast();
-  const [supplierId, setSupplierId] = useState("");
-  const [numero, setNumero] = useState("");
-  const [fecha, setFecha] = useState(getLocalToday());
-  const [rows, setRows] = useState<ExpenseRow[]>([expenseRow()]);
-  const [pickerOpen, setPickerOpen] = useState<Record<number, boolean>>({});
-  const { data: inventoryItems = [] } = useQuery<PurchaseInventoryOption[]>({ queryKey: ["/api/inventory/items"] });
-  const [observaciones, setObservaciones] = useState("");
-  const supplier = suppliers.find(s => String(s.id) === supplierId);
-  const account = accounts.find(a => a.id === supplier?.cuentaContableId && a.tipo === "egreso");
-  const amountCents = rows.reduce((sum, row) => sum + Math.round(Number(row.quantity) * Number(row.unitPrice) * 100), 0);
-  const validRows = rows.length > 0 && rows.every(row => row.itemId && /^\d+(?:\.\d{1,3})?$/.test(row.quantity) && Number(row.quantity) > 0 && Number(row.quantity) <= 9999999 &&
-    /^\d+(?:\.\d{1,2})?$/.test(row.unitPrice) && Number(row.unitPrice) >= 0 &&
-    (!row.vatRate || ["2.5", "5", "10.5", "21", "27", "exento", "no_gravado"].includes(row.vatRate)));
-  const valid = !!account && !!numero.trim() && !!fecha && validRows && amountCents > 0;
-  const updateRow = (index: number, change: Partial<ExpenseRow>) => setRows(current => current.map((row, i) => i === index ? { ...row, ...change } : row));
-  const create = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/purchase-invoices", {
-        tipoComprobante: tipo, supplierId: Number(supplierId), numeroComprobante: numero.trim(),
-        fechaEmision: fecha, montoNeto: (amountCents / 100).toFixed(2), observaciones,
-        expenseItems: rows.map(row => ({ itemId: row.itemId, quantity: row.quantity, unitPrice: row.unitPrice, vatRate: row.vatRate || null })),
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
-      toast({ title: "Gasto registrado" });
-      onClose();
-    },
-    onError: (error: Error) => toast({ title: "No se pudo registrar", description: error.message, variant: "destructive" }),
-  });
-
-  return (
-    <div className="space-y-4" data-testid="registro-gasto-compra">
-      <p className="text-sm text-muted-foreground">Registro para informes mensuales. No genera deuda, pago, asiento de Caja ni movimiento de stock.</p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <Label>Banco u organismo</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
-            <SelectTrigger data-testid="select-emisor-gasto"><SelectValue placeholder="Elegir del ABM de proveedores" /></SelectTrigger>
-            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.razonSocial} — {s.cuit}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div><Label>Número de comprobante</Label><Input value={numero} onChange={e => setNumero(e.target.value)} data-testid="input-numero-gasto" /></div>
-        <div><Label>Fecha</Label><Input type="date" value={fecha} onChange={e => setFecha(e.target.value)} data-testid="input-fecha-gasto" /></div>
-        <div className="sm:col-span-2"><Label>Cuenta de gasto asignada</Label><Input readOnly value={account ? `${account.codigo} — ${account.nombre}` : "Sin cuenta de gasto asignada al emisor"} data-testid="input-cuenta-gasto" /></div>
-        <div className="sm:col-span-2"><Label>Detalle</Label><Input value={observaciones} onChange={e => setObservaciones(e.target.value)} data-testid="input-detalle-gasto" /></div>
-      </div>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between"><Label>Artículos del gasto</Label><Button type="button" variant="outline" size="sm" onClick={() => setRows(current => [...current, expenseRow()])}><Plus className="h-4 w-4 mr-1" />Agregar artículo</Button></div>
-        {rows.map((row, index) => (
-          <div key={index} className="rounded-md border p-3 space-y-2" data-testid={`gasto-articulo-${index}`}>
-            <div className="flex items-start gap-2">
-              <div className="flex-1"><PurchaseInventoryPicker items={inventoryItems.filter(item => item.isActive !== "false")} selectedId={row.itemId} open={!!pickerOpen[index]} onOpenChange={open => setPickerOpen(current => ({ ...current, [index]: open }))} onSelect={id => { const selected = inventoryItems.find(item => item.id === id); updateRow(index, { itemId: id, vatRate: suggestedVat(selected?.sku) }); setPickerOpen(current => ({ ...current, [index]: false })); }} index={index} /></div>
-              <Button type="button" variant="ghost" size="icon" aria-label="Quitar artículo" onClick={() => setRows(current => current.filter((_, i) => i !== index))}><Trash2 className="h-4 w-4" /></Button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div><Label>Cantidad</Label><Input type="number" min="0.001" step="0.001" value={row.quantity} onChange={e => updateRow(index, { quantity: e.target.value })} /></div>
-              <div><Label>Importe unitario final</Label><Input type="number" min="0" step="0.01" value={row.unitPrice} onChange={e => updateRow(index, { unitPrice: e.target.value })} /></div>
-              <div><Label>IVA informativo</Label><Select value={row.vatRate || "sin_dato"} onValueChange={vatRate => updateRow(index, { vatRate: vatRate === "sin_dato" ? "" : vatRate })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sin_dato">Sin dato</SelectItem><SelectItem value="21">21%</SelectItem><SelectItem value="10.5">10,5%</SelectItem><SelectItem value="27">27%</SelectItem><SelectItem value="5">5%</SelectItem><SelectItem value="2.5">2,5%</SelectItem><SelectItem value="exento">Exento</SelectItem><SelectItem value="no_gravado">No gravado</SelectItem></SelectContent></Select></div>
-            </div>
-            <p className="text-sm text-right">Subtotal: ${fmtMoney(Number(row.quantity) * Number(row.unitPrice) || 0)}</p>
-          </div>
-        ))}
-        <p className="text-right font-semibold" data-testid="total-gasto">Total del gasto: ${fmtMoney(amountCents / 100)}</p>
-      </div>
-      {supplier && !account && <p className="text-sm text-destructive">Asigná primero una cuenta de gasto activa a este emisor en el ABM.</p>}
-      <Button disabled={!valid || create.isPending} onClick={() => create.mutate()} data-testid="btn-registrar-gasto">Registrar gasto</Button>
-    </div>
-  );
-}
-
 const TIPOS_MOVIMIENTO: { value: string; label: string }[] = [
   { value: "desayuno", label: "Desayuno" },
   { value: "evento", label: "Evento" },
@@ -440,7 +358,7 @@ export default function EmitirComprobantePage() {
               )}
 
               {operacion === "compra" && SOLO_GASTO.has(tipo) && (
-                <RegistroGastoCompra key={tipo} tipo={tipo} suppliers={suppliers} accounts={accounts} onClose={resetSeleccion} />
+                <SpecialPurchaseForm key={tipo} tipo={tipo} suppliers={suppliers} accounts={accounts} onClose={resetSeleccion} />
               )}
 
               {operacion === "compra" && !SOLO_GASTO.has(tipo) && (

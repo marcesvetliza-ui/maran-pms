@@ -2090,6 +2090,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
   const montos: [string, string][] = [
     ...(invoice.descuento?[["Descuento — "+invoice.descuento.descripcion,"−"+fmt2(invoice.descuento.importe)] as [string,string]]:[]),
     [isRetencion ? "Importe final" : "Monto Neto (gravado)", fmt2(invoice.montoNeto)],
+    ...(invoice.montoExento && parseFloat(invoice.montoExento) !== 0 ? [["Exento", fmt2(invoice.montoExento)] as [string, string]] : []),
     ["IVA 21%", fmt2(invoice.montoIva21)],
     ["IVA 10.5%", fmt2(invoice.montoIva105)],
     ["IVA 27%", fmt2(invoice.montoIva27)],
@@ -2138,6 +2139,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
               </div>
             </div>
           </div>
+          {detail?.special_details?.version===1 && <section className="rounded-lg border bg-muted/10 p-4 text-sm space-y-2"><h3 className="font-semibold">Registro informativo</h3><p>Sin movimientos de Caja, cuentas corrientes, stock ni asientos.</p>{detail.special_details.period&&<p>Período del documento: {detail.special_details.period}</p>}{detail.subtipo_retencion&&<p>Impuesto retenido: {detail.subtipo_retencion.toUpperCase()}</p>}{detail.special_details.jurisdiction&&<p>Jurisdicción: {detail.special_details.jurisdiction}</p>}{detail.tipo_comprobante==='RETENCION'&&<p>Cobro asociado: {detail.special_details.paymentMovementId ? 'Vinculado a un cobro existente' : 'Pendiente de asociar'}</p>}{detail.special_details.roundingReason&&<p>Corrección del IVA: {detail.special_details.roundingReason}</p>}</section>}
           {!!detail?.articleLines?.length && (
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">

@@ -164,7 +164,9 @@ async function costosCompras(desde: string, hasta: string): Promise<any[]> {
     SELECT
       aa.codigo,
       aa.nombre,
-      COALESCE(SUM(pi.monto_total::numeric), 0) AS total
+      COALESCE(SUM(CASE WHEN pi.special_details->>'version'='1' THEN
+        CASE WHEN pi.tipo_comprobante='RETENCION' THEN 0 ELSE pi.monto_neto::numeric+coalesce(pi.monto_exento::numeric,0) END
+        ELSE pi.monto_total::numeric END), 0) AS total
     FROM purchase_invoices pi
     LEFT JOIN accounting_accounts aa ON aa.id = pi.cuenta_contable_id
     WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
@@ -250,7 +252,12 @@ export function registerReportsRoutes(app: Express) {
       `);
       const iibb = $n((iibbRetenciones.rows[0] as any)?.total);
 
+      const specialRows=await db.execute(sql`SELECT id,tipo_comprobante,proveedor_nombre,proveedor_cuit,numero_comprobante,fecha_emision,monto_neto,monto_total,monto_iva21,monto_iva105,monto_exento,percepcion_iva,ley_25413 AS ley25413,retencion_iibb,subtipo_retencion,special_details
+        FROM purchase_invoices WHERE fecha_emision BETWEEN ${desde} AND ${hasta} AND estado='registrado' AND special_details->>'version'='1' ORDER BY fecha_emision DESC,id DESC`);
+      const sumSpecial=(column:string)=>specialRows.rows.reduce((sum,row:any)=>sum+Number(row[column]??0),0);
+      const desgloseAdministrativo={registros:specialRows.rows,iva:sumSpecial('monto_iva21')+sumSpecial('monto_iva105'),percepcionIva:sumSpecial('percepcion_iva'),ley25413:sumSpecial('ley25413'),retencionIibbTarjetas:sumSpecial('retencion_iibb'),retencionesRecibidas:specialRows.rows.filter((r:any)=>r.tipo_comprobante==='RETENCION').reduce((sum,r:any)=>sum+Number(r.monto_total),0)};
       res.json({
+        desgloseAdministrativo,
         periodo,
         desde,
         hasta,

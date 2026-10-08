@@ -1269,7 +1269,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
     invoice_counters: [],
-    purchase_invoices: ["subtipo_retencion", "descuento"],
+    purchase_invoices: ["subtipo_retencion", "descuento", "special_details"],
     purchase_invoice_lines: ["id", "invoice_id", "line_number", "item_id", "item_name", "item_sku", "quantity", "unit_price", "vat_rate", "line_total", "warehouse_id"],
   },
   indexes: {
@@ -4961,6 +4961,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
+  await db.execute(sql`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS special_details jsonb`);
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

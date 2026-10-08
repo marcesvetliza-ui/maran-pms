@@ -2784,6 +2784,7 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   descuento: jsonb("descuento"),
   observaciones: text("observaciones"),
   subtipoRetencion: text("subtipo_retencion"),
+  specialDetails: jsonb("special_details"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
