@@ -1,3 +1,5 @@
+import { insertInventoryItemSchema } from "@shared/schema";
+import { protectWarehouseDeactivation } from "../inventoryLifecycle";
 import {registerInventoryHistoryRoutes} from "../inventoryHistory";
 import {registerInventoryLocationRoutes} from "../inventoryLocations";
 import {inventoryAccess,inventoryWritePermission} from "../inventoryAccess";
@@ -94,7 +96,8 @@ export function registerInventoryRoutes(app: Express) {
 
   app.post("/api/inventory/brands", inventoryWritePermission, async (req, res) => {
     try {
-      const brand = await storage.createBrand(req.body);
+      if (typeof req.body.name !== "string" || !req.body.name.trim()) return res.status(400).json({error:"Indicá el nombre de la marca"});
+      const brand = await storage.createBrand({name:req.body.name.trim()});
       res.status(201).json(brand);
     } catch (error) {
       res.status(500).json({ error: "Error creating brand" });
@@ -103,7 +106,9 @@ export function registerInventoryRoutes(app: Express) {
 
   app.patch("/api/inventory/brands/:id", inventoryWritePermission, async (req, res) => {
     try {
-      const brand = await withDatabaseTransaction(async () => { await catalogLock(); return storage.updateBrand(req.params.id, req.body); });
+      const { name, isActive } = req.body;
+      if ((name !== undefined && (typeof name !== "string" || !name.trim())) || (isActive !== undefined && !["true","false"].includes(isActive))) return res.status(400).json({error:"Datos de marca inválidos"});
+      const brand = await withDatabaseTransaction(async () => { await catalogLock(); return storage.updateBrand(req.params.id, {...(name !== undefined ? {name:name.trim()} : {}),...(isActive !== undefined ? {isActive} : {})}); });
       if (!brand) return res.status(404).json({ error: "Brand not found" });
       res.json(brand);
     } catch (error) {
@@ -112,15 +117,7 @@ export function registerInventoryRoutes(app: Express) {
   });
 
   app.delete("/api/inventory/brands/:id", inventoryWritePermission, async (req, res) => {
-    try {
-      await withDatabaseTransaction(async () => { await catalogLock(); await storage.deleteBrand(req.params.id); });
-      res.status(204).send();
-    } catch (error: any) {
-      if (error?.code === "23503") {
-        return res.status(400).json({ error: "No se puede eliminar — tiene artículos asociados" });
-      }
-      res.status(500).json({ error: "Error deleting brand" });
-    }
+    res.status(405).json({error:"Las marcas se desactivan y conservan sus vínculos e historial."});
   });
 
   // Inventory Items
@@ -172,8 +169,17 @@ export function registerInventoryRoutes(app: Express) {
 
   app.patch("/api/inventory/items/:id", requireAuth, inventoryWritePermission, async (req, res) => {
     try {
+      if(req.body.isActive === "false") return res.status(400).json({error:"Usá dar de baja e indicá el motivo"});
       if(req.body.currentStock!==undefined)return res.status(409).json({error:"Las cantidades se corrigen con movimientos de stock por depósito."});
-      const item = await withDatabaseTransaction(async () => { await catalogLock(); await validateItemClassification(req.body, req.params.id); return storage.updateInventoryItem(req.params.id, req.body); });
+      const item = await withDatabaseTransaction(async () => {
+        await catalogLock();
+        await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
+        const before = await storage.getInventoryItem(req.params.id);
+        await validateItemClassification(req.body, req.params.id);
+        const after = await storage.updateInventoryItem(req.params.id, req.body);
+        if(after) await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);
+        return after;
+      });
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
     } catch (error: any) {
@@ -191,10 +197,18 @@ export function registerInventoryRoutes(app: Express) {
       const {name,sku,minStock,costPrice,isActive}=req.body;
       if (typeof name !== "string" || !name.trim() || !Number.isFinite(Number(minStock)) || Number(minStock)<0 || (costPrice !== undefined && (!Number.isFinite(Number(costPrice)) || Number(costPrice)<0))) return res.status(400).json({error:"Revisá el nombre, stock mínimo y costo"});
       const item = await withDatabaseTransaction(async()=>{
+        await catalogLock();
         await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
         const before=await storage.getInventoryItem(req.params.id); if(!before)return null;
+        const fields = ["name","sku","categoryId","brandId","unit","costPrice","minStock","maxStock","criticalStock","itemKind","abcClass","ivaRate","description","location"];
+        const input = Object.fromEntries(fields.filter(key=>req.body[key] !== undefined).map(key=>[key, req.body[key]]));
+        for (const key of ["costPrice","minStock","maxStock","criticalStock"]) if (input[key] != null) input[key] = String(input[key]);
+        const parsed = insertInventoryItemSchema.partial().safeParse(input);
+        if (!parsed.success) throw Object.assign(new Error("Revisá los datos del artículo"),{statusCode:400});
+        for (const key of ["costPrice","minStock","maxStock","criticalStock"]) if (input[key] != null && (!Number.isFinite(Number(input[key])) || Number(input[key]) < 0)) throw Object.assign(new Error("Los importes y límites deben ser números no negativos"),{statusCode:400});
+        await validateItemClassification(input, req.params.id);
         if(before.isActive !== "false" && isActive === "false") throw Object.assign(new Error("Usá dar de baja e indicá el motivo"),{statusCode:400});
-        const after=await storage.updateInventoryItem(req.params.id,{name:name.trim(),sku:typeof sku === "string" ? sku.trim() || null : null,minStock:String(minStock),...(costPrice !== undefined ? {costPrice:String(costPrice)} : {}),isActive:isActive === "true" ? "true" : before.isActive});
+        const after=await storage.updateInventoryItem(req.params.id,{...parsed.data,name:name.trim(),...(sku !== undefined ? {sku:typeof sku === "string" ? sku.trim() || null : null} : {}),...(req.body.accountingSupplierIds !== undefined ? {accountingSupplierIds:req.body.accountingSupplierIds,preferredAccountingSupplierId:req.body.preferredAccountingSupplierId} : {}),isActive:isActive === "true" ? "true" : before.isActive});
         await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);return after;
       });
       if(!item)return res.status(404).json({error:"Artículo no encontrado"});res.json(item);
@@ -214,7 +228,7 @@ export function registerInventoryRoutes(app: Express) {
       });
       if (!item) return res.status(404).json({error:"Artículo no encontrado"});
       res.json(item);
-    } catch { res.status(500).json({error:"No se pudo dar de baja el artículo"}); }
+    } catch(error:any) { res.status(error.statusCode || 500).json({error:error.message || "No se pudo dar de baja el artículo",dependencies:error.dependencies}); }
   });
   for (const action of ["anular","corregir"] as const) {
     app.post(`/api/inventory/movements/:id/${action}`, requireAuth, inventoryWritePermission, async(req,res) => {
@@ -305,7 +319,12 @@ export function registerInventoryRoutes(app: Express) {
   app.patch("/api/inventory/warehouses/:id", inventoryWritePermission, async (req, res) => {
     try {
       const { name, description, area, isActive } = req.body;
-      const rows = await db.execute(sql`
+      if (isActive !== undefined && !["true","false"].includes(isActive)) return res.status(400).json({error:"Estado inválido"});
+      const rows = await withDatabaseTransaction(async () => {
+        await db.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${req.params.id} FOR UPDATE`);
+        const before = (await db.execute(sql`SELECT * FROM inventory_warehouses WHERE id=${req.params.id}`)).rows[0];
+        if (isActive === "false") await protectWarehouseDeactivation(db, req.params.id);
+        const updated = await db.execute(sql`
         UPDATE inventory_warehouses
         SET name = COALESCE(${name}, name),
             description = COALESCE(${description}, description),
@@ -314,19 +333,28 @@ export function registerInventoryRoutes(app: Express) {
         WHERE id = ${req.params.id}
         RETURNING *
       `);
+        if(updated.rows[0]) await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},'update','inventory','warehouse',${req.params.id},'Edición de depósito',${JSON.stringify({before,after:updated.rows[0]})},now())`);
+        return updated;
+      });
       if (!rows.rows[0]) return res.status(404).json({ error: "Warehouse not found" });
       res.json(rows.rows[0]);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Error updating warehouse" });
+      res.status(error.statusCode || 500).json({ error: error.message || "Error updating warehouse" });
     }
   });
 
   app.delete("/api/inventory/warehouses/:id", inventoryWritePermission, async (req, res) => {
     try {
-      await db.execute(sql`UPDATE inventory_warehouses SET is_active = 'false' WHERE id = ${req.params.id}`);
+      await withDatabaseTransaction(async () => {
+        await protectWarehouseDeactivation(db, req.params.id);
+        const before = (await db.execute(sql`SELECT * FROM inventory_warehouses WHERE id=${req.params.id}`)).rows[0];
+        if(!before) throw Object.assign(new Error("Depósito no encontrado"),{statusCode:404});
+        await db.execute(sql`UPDATE inventory_warehouses SET is_active = 'false' WHERE id = ${req.params.id}`);
+        await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},'update','inventory','warehouse',${req.params.id},'Baja de depósito',${JSON.stringify({before,after:{...before,is_active:'false'}})},now())`);
+      });
       res.status(204).send();
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Error deleting warehouse" });
+      res.status(error.statusCode || 500).json({ error: error.message || "Error deleting warehouse" });
     }
   });
 

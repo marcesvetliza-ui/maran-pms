@@ -33,3 +33,18 @@ it('ofrece Eventos y conserva la clave de Comunicación al asignar un subagrupam
  await user.type(screen.getByTestId('input-item-name'),'Artículo comunicación');await user.click(screen.getByTestId('button-save-item'));
  expect(submit).toHaveBeenCalledWith(expect.objectContaining({categoryId:'legacy-marketing'}));
 });
+
+it('edita la ficha completa, conserva marca inactiva y omite costos sin permiso',async()=>{
+ const user=userEvent.setup();const submit=vi.fn();
+ const categories=[{id:'group',name:'Cocina',area:'restaurant',isGroup:true,isActive:'true'},{id:'sub',name:'Harinas',area:'restaurant',parentId:'group',isGroup:false,isActive:'true'}];
+ const item={id:'item',name:'Harina',sku:'RST-1',categoryId:'sub',category:categories[1],brandId:'old',unit:'kg',costPrice:'100',minStock:2,maxStock:20,criticalStock:1,currentStock:8,isActive:'true',itemKind:'materia_prima',abcClass:'B',ivaRate:'10.5',suppliers:[{id:1,razonSocial:'Proveedor',cuit:'1',isPreferred:true}]};
+ render(<QueryClientProvider client={new QueryClient()}><NewItemForm initialItem={item as any} canCost={false} categories={categories as any} brands={[{id:'old',name:'Marca histórica',isActive:'false'}]} suppliers={[{id:1,razonSocial:'Proveedor',cuit:'1',activo:true} as any]} existingItems={[item as any]} onSubmit={submit} isPending={false} onCancel={()=>{}}/></QueryClientProvider>);
+ expect(screen.getByTestId('select-unit')).toBeDisabled();
+ expect(screen.getByTestId('select-category')).toHaveTextContent('Harinas');
+ expect(screen.queryByTestId('input-cost')).toBeNull();
+ expect(screen.queryByTestId('warning-duplicate-item-name')).toBeNull();
+ await user.clear(screen.getByTestId('input-max-stock'));await user.type(screen.getByTestId('input-max-stock'),'30');
+ await user.click(screen.getByTestId('button-save-item'));
+ expect(submit).toHaveBeenCalledWith(expect.objectContaining({name:'Harina',sku:'RST-1',categoryId:'sub',brandId:'old',unit:'kg',maxStock:'30',abcClass:'B',ivaRate:'10.5',accountingSupplierIds:[1],preferredAccountingSupplierId:1}));
+ expect(submit.mock.calls[0][0]).not.toHaveProperty('costPrice');expect(submit.mock.calls[0][0]).not.toHaveProperty('currentStock');
+});

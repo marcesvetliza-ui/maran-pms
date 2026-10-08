@@ -16,7 +16,7 @@ function mount(error=false){
 it('consulta la fecha, conserva desconocidos y la impresión respeta la búsqueda',async()=>{
  mount();await screen.findByText('Carne');fireEvent.change(screen.getByLabelText('Fecha de stock'),{target:{value:'2026-10-05'}});
  expect(await screen.findByText('Sin información histórica')).toBeInTheDocument();expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).includes('date=2026-10-05'))).toBe(true);
- await userEvent.type(screen.getByPlaceholderText('Buscar artículos...'),'Carne');
+ await userEvent.type(screen.getByTestId('input-search'),'Carne');
  const write=vi.fn(),print=vi.fn();vi.stubGlobal('open',vi.fn(()=>({document:{write,close:vi.fn()},focus:vi.fn(),print})));
  await userEvent.click(screen.getByRole('button',{name:'Imprimir stock filtrado'}));expect(write.mock.calls[0][0]).toContain('05/10/2026');expect(write.mock.calls[0][0]).toContain('Carne');expect(write.mock.calls[0][0]).not.toContain('Queso');expect(print).toHaveBeenCalledOnce();
 });

@@ -1,3 +1,4 @@
+import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
 import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
@@ -5261,13 +5262,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRecipe(recipe: InsertRecipe): Promise<Recipe> {
-    const [created] = await db.insert(recipes).values(recipe as any).returning();
-    return created;
+    return db.transaction(async tx => {
+      await requireActiveInventoryReferences(tx, recipe.outputInventoryItemId);
+      const [created] = await tx.insert(recipes).values(recipe as any).returning();
+      return created;
+    });
   }
 
   async updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe | undefined> {
-    const [updated] = await db.update(recipes).set(recipe as any).where(eq(recipes.id, id)).returning();
-    return updated;
+    return db.transaction(async tx => {
+      await requireActiveInventoryReferences(tx, recipe.outputInventoryItemId);
+      const [updated] = await tx.update(recipes).set(recipe as any).where(eq(recipes.id, id)).returning();
+      return updated;
+    });
   }
 
   async deleteRecipe(id: string): Promise<boolean> {
@@ -5281,13 +5288,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRecipeIngredient(ingredient: InsertRecipeIngredient): Promise<RecipeIngredient> {
-    const [created] = await db.insert(recipeIngredients).values(ingredient as any).returning();
-    return created;
+    return db.transaction(async tx => {
+      await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      const [created] = await tx.insert(recipeIngredients).values(ingredient as any).returning();
+      return created;
+    });
   }
 
   async updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined> {
-    const [updated] = await db.update(recipeIngredients).set(ingredient as any).where(eq(recipeIngredients.id, id)).returning();
-    return updated;
+    return db.transaction(async tx => {
+      await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      const [updated] = await tx.update(recipeIngredients).set(ingredient as any).where(eq(recipeIngredients.id, id)).returning();
+      return updated;
+    });
   }
 
   async deleteRecipeIngredient(id: string): Promise<boolean> {
@@ -5455,11 +5468,13 @@ export class DatabaseStorage implements IStorage {
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
       throw new Error("La lista de proveedores contables es inválida");
     }
+    if(itemValues.isActive !== undefined && !["true","false"].includes(itemValues.isActive as string)) throw Object.assign(new Error("Estado de artículo inválido"),{statusCode:400});
     if(itemValues.currentStock!==undefined)throw Object.assign(new Error('El stock se modifica mediante movimientos por depósito'),{statusCode:409});
     const [updated] = await db.transaction(async (tx) => {
-      const current=await tx.execute(sql`SELECT unit FROM inventory_items WHERE id=${id} FOR UPDATE`);
+      const current=await tx.execute(sql`SELECT unit, is_active FROM inventory_items WHERE id=${id} FOR UPDATE`);
+      if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false") await protectInventoryItemDeactivation(tx, id);
       if(itemValues.unit!==undefined && current.rows.length && itemValues.unit!==current.rows[0].unit){
-        const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
+        const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM recipes WHERE output_inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM treatment_supplies WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
         if(references.rows.length)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
         await tx.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${id}`);
       }
@@ -5505,17 +5520,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteInventoryItem(id: string): Promise<{ deleted: boolean; deactivated: boolean }> {
-    const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
-    if (!item) return { deleted: false, deactivated: false };
-
-    const hasMovement = await this.inventoryItemHasMovement(id);
-    if (hasMovement) {
-      await db.update(inventoryItems).set({ isActive: "false" } as any).where(eq(inventoryItems.id, id));
-      return { deleted: false, deactivated: true };
-    }
-
-    const result = await db.delete(inventoryItems).where(eq(inventoryItems.id, id));
-    return { deleted: (result.rowCount ?? 0) > 0, deactivated: false };
+    const updated = await this.updateInventoryItem(id, {isActive:"false"});
+    return {deleted:false, deactivated:!!updated};
   }
 
   async getStockMovements(itemId?: string): Promise<StockMovementWithItem[]> {
@@ -6117,8 +6123,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTreatmentSupply(supply: InsertTreatmentSupply): Promise<TreatmentSupply> {
-    const [created] = await db.insert(treatmentSupplies).values(supply as any).returning();
-    return created;
+    return db.transaction(async tx => {
+      await requireActiveInventoryReferences(tx, supply.inventoryItemId);
+      const [created] = await tx.insert(treatmentSupplies).values(supply as any).returning();
+      return created;
+    });
   }
 
   async deleteTreatmentSupply(id: string): Promise<boolean> {

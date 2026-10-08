@@ -1,3 +1,4 @@
+import { requireActiveInventoryReferences } from "./inventoryLifecycle";
 import {sql} from "drizzle-orm";
 import {INVENTORY_UNITS} from './inventoryUnits';
 import {stockUnits} from "./inventorySafety";
@@ -120,6 +121,7 @@ async function assertBaseRecipe(recipeId: string): Promise<typeof recipes.$infer
 export async function linkRecipeToOutputItem(recipeId: string, outputInventoryItemId: string): Promise<void> {
   await db.transaction(async tx=>{
     const current=await tx.execute(sql`SELECT id FROM recipes WHERE id=${recipeId} AND is_base=true FOR UPDATE`);if(!current.rows.length)throw new Error('La Elaboración Base no existe');
+    await requireActiveInventoryReferences(tx, outputInventoryItemId);
     const [item]=await tx.select().from(inventoryItems).where(eq(inventoryItems.id,outputInventoryItemId));
     if(!item || item.isActive!=='true')throw new Error('El artículo de inventario no existe o está inactivo');
     await tx.update(recipes).set({outputInventoryItemId}).where(eq(recipes.id,recipeId));

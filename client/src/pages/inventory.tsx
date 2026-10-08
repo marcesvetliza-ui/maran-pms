@@ -30,10 +30,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useForm } from "react-hook-form";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Plus, 
-  Package, 
-  AlertTriangle, 
+import {
+  Plus,
+  Package,
+  AlertTriangle,
   Loader2,
   Search,
   TrendingDown,
@@ -752,6 +752,8 @@ export default function InventoryPage() {
   const [countItemEdits, setCountItemEdits] = useState<Record<string, string>>({});
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [activeFilter,setActiveFilter] = useState("active");
+  const [abcFilter,setAbcFilter] = useState("all");
   const [kindFilter, setKindFilter] = useState("all");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ItemCategory | null>(null);
@@ -822,19 +824,14 @@ export default function InventoryPage() {
   });
 
   const [editingArticle, setEditingArticle] = useState<InventoryItem | null>(null);
-  const [articleName, setArticleName] = useState("");
-  const [articleSku, setArticleSku] = useState("");
-  const [articleMin, setArticleMin] = useState("");
-  const [articleCost, setArticleCost] = useState("");
-  const [articleActive, setArticleActive] = useState(true);
   const [inventoryAction, setInventoryAction] = useState<{kind:"deactivate"|"anular"|"corregir"; id:string; name:string; quantity?:string; notes?:string} | null>(null);
   const [actionReason, setActionReason] = useState("");
   const [actionQuantity, setActionQuantity] = useState("");
   const [actionNotes, setActionNotes] = useState("");
   const refreshInventory = () => { queryClient.invalidateQueries({queryKey:["/api/inventory/items"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/movements"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/warehouse-stock"]}); };
-  const editArticle = (item:InventoryItem) => {setEditingArticle(item);setArticleName(item.name);setArticleSku(item.sku || "");setArticleMin(String(item.minStock || "0"));setArticleCost(String(item.costPrice || "0"));setArticleActive(item.isActive !== "false");};
+  const editArticle = (item:InventoryItem) => {setEditingArticle(item);};
   const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
-  const editArticleMutation = useMutation({mutationFn:async()=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,{name:articleName.trim(),sku:articleSku.trim() || null,minStock:articleMin,...(canCost ? {costPrice:articleCost} : {}),isActive:articleActive?"true":"false"});},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const editArticleMutation = useMutation({mutationFn:async(data:Partial<InventoryItem>)=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,data);},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
   const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [expandedMovements, setExpandedMovements] = useState<Set<string>>(new Set());
@@ -1123,16 +1120,7 @@ export default function InventoryPage() {
     onError: () => toast({ title: "Error al actualizar marca", variant: "destructive" }),
   });
 
-  const deleteBrandMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/inventory/brands/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/brands"] });
-      toast({ title: "Marca eliminada" });
-    },
-    onError: () => toast({ title: "No se puede eliminar — tiene artículos asociados", variant: "destructive" }),
-  });
+
 
   // Groups are categories with isGroup=true; leaf categories are those with a parentId
   const groups = categories.filter((c) => c.isGroup && (areaFilter === "all" || c.area === areaFilter));
@@ -1146,18 +1134,18 @@ export default function InventoryPage() {
   const filteredItems = historicalItems
     .filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.sku?.toLowerCase().includes(searchQuery.toLowerCase());
+        item.sku?.toLowerCase().includes(searchQuery.toLowerCase()) || item.brand?.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesArea = areaFilter === "all" || (item.category as any)?.area === areaFilter;
       const matchesCategory = categoryFilter === "all" || String((item.category as any)?.id || item.categoryId || "") === categoryFilter;
       const matchesKind = kindFilter === "all" ? item.itemKind !== "plato" : item.itemKind === kindFilter;
       // Group filter: item matches if its category's parentId equals the selected group
       const matchesGroup = groupFilter === "all" || String((item.category as any)?.parentId || "") === groupFilter;
-      return matchesSearch && matchesArea && matchesCategory && matchesKind && matchesGroup;
+      return matchesSearch && matchesArea && matchesCategory && matchesKind && matchesGroup && (activeFilter === "all" || (activeFilter === "active" ? item.isActive !== "false" : item.isActive === "false")) && (abcFilter === "all" || (abcFilter === "none" ? !item.abcClass : item.abcClass === abcFilter));
     })
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
   const reportUnavailable=historical?(historyLoading||historyError):locationFilter!=='all'&&(locationsLoading||locationsError);
-  const stockReport:StockReport={date:stockDate,warehouse:locationFilter==='all'?'Stock global · todos los depósitos':warehouses.find(w=>w.id===locationFilter)?.name||'',historical,filters:[searchQuery&&'Búsqueda: '+searchQuery,areaFilter!=='all'&&inventoryAreaLabel(areaFilter),groupFilter!=='all'&&categories.find(c=>String(c.id)===groupFilter)?.name,categoryFilter!=='all'&&categories.find(c=>String(c.id)===categoryFilter)?.name,kindFilter!=='all'&&kindFilter].filter(Boolean).join(' · ')||'Todos los artículos',rows:filteredItems.map(i=>({name:i.name,sku:i.sku,unit:i.unit,category:i.category?.name,quantity:i.currentStock===null?null:Number(i.currentStock),...(canCost&&!historical?{cost:Number(i.costPrice)}:{})}))};
+  const stockReport:StockReport={date:stockDate,warehouse:locationFilter==='all'?'Stock global · todos los depósitos':warehouses.find(w=>w.id===locationFilter)?.name||'',historical,filters:["Estado: "+({active:"Activos",inactive:"Inactivos",all:"Todos"}[activeFilter as "active"|"inactive"|"all"]),abcFilter!=="all"&&"ABC: "+abcFilter,searchQuery&&'Búsqueda: '+searchQuery,areaFilter!=='all'&&inventoryAreaLabel(areaFilter),groupFilter!=='all'&&categories.find(c=>String(c.id)===groupFilter)?.name,categoryFilter!=='all'&&categories.find(c=>String(c.id)===categoryFilter)?.name,kindFilter!=='all'&&kindFilter].filter(Boolean).join(' · ')||'Todos los artículos',rows:filteredItems.map(i=>({name:i.name,sku:i.sku,unit:i.unit,category:i.category?.name,quantity:i.currentStock===null?null:Number(i.currentStock),...(canCost&&!historical?{cost:Number(i.costPrice)}:{})}))};
 
   // Indicadores del dashboard: excluyen los "plato" (referencias internas que
   // el restaurante sincroniza desde el menú, no son artículos de inventario
@@ -1274,7 +1262,7 @@ export default function InventoryPage() {
           </TabsTrigger>
           <TabsTrigger value="categorias" data-testid="tab-categorias">
             <Tag className="h-4 w-4 mr-2" />
-            Subagrupamientos
+            Clasificación
           </TabsTrigger>
           <TabsTrigger value="marcas" data-testid="tab-marcas">
             <Tag className="h-4 w-4 mr-2" />
@@ -1295,7 +1283,7 @@ export default function InventoryPage() {
         <InventoryTabPanels movementTab={movementTab} onMovementTabChange={setMovementTab}>
         <TabsContent value="items" className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
-            <Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+            <div className="space-y-1"><Label>Depósito</Label><Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
             <label className="flex items-center gap-2 text-sm">Fecha de stock<Input aria-label="Fecha de stock" type="date" max={today} value={stockDate} onChange={e=>setStockDate(e.target.value||today)} className="w-[165px]"/></label>
             <Button variant="outline" disabled={reportUnavailable||!filteredItems.length} onClick={()=>{const popup=window.open('','_blank');if(!popup){toast({title:'Permití abrir la ventana de impresión',variant:'destructive'});return;}popup.document.write(stockReportHtml(stockReport));popup.document.close();popup.focus();popup.print();}}>Imprimir stock filtrado</Button>
             <Button disabled={reportUnavailable} onClick={()=>{if(!historical){              const rows:InventoryLocation[]=filteredItems.map(i=>({warehouseId:locationFilter,warehouseName:locationFilter==='all'?'Stock global':warehouses.find(w=>w.id===locationFilter)?.name || '',warehouseArea:'',itemId:i.id,name:i.name,sku:i.sku,unit:i.unit,area:i.category?.area || null,categoryId:i.categoryId,itemKind:i.itemKind || "venta_directa",stock:String(i.currentStock),costPrice:i.costPrice,minStock:i.minStock===null?null:String(i.minStock),criticalStock:i.criticalStock===null?null:String(i.criticalStock),expected:false,status:'unconfigured',suggestedQuantity:'0'})).map(row => locationFilter === 'all' ? row : locations.find(l=>l.itemId===row.itemId&&l.warehouseId===locationFilter)!);
@@ -1303,15 +1291,32 @@ export default function InventoryPage() {
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar artículos..."
+                placeholder="Buscar por artículo, SKU o marca..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
                 data-testid="input-search"
               />
             </div>
+            <div className="space-y-1"><Label>Área</Label><Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
+              <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
+                <SelectValue placeholder="Todas las áreas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las áreas</SelectItem>
+                <SelectItem value="general">General</SelectItem>
+                <SelectItem value="spa">SPA</SelectItem>
+                <SelectItem value="restaurant">Restaurante</SelectItem>
+                <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                <SelectItem value="hotel">Hotel</SelectItem>
+                <SelectItem value="maintenance">Mantenimiento</SelectItem>
+                <SelectItem value="admin">Administración</SelectItem>
+                <SelectItem value="events">Eventos</SelectItem>
+                  <SelectItem value="marketing">Comunicación</SelectItem>
+              </SelectContent>
+            </Select></div>
             {groups.length > 0 && (
-              <Select
+              <div className="space-y-1"><Label>Agrupamiento</Label><Select
                 value={groupFilter}
                 onValueChange={(val) => {
                   setGroupFilter(val);
@@ -1331,9 +1336,9 @@ export default function InventoryPage() {
                       </SelectItem>
                     ))}
                 </SelectContent>
-              </Select>
+              </Select></div>
             )}
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <div className="space-y-1"><Label>Subagrupamiento</Label><Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
                 <SelectValue placeholder="Todos los subagrupamientos" />
               </SelectTrigger>
@@ -1348,25 +1353,9 @@ export default function InventoryPage() {
                     </SelectItem>
                   ))}
               </SelectContent>
-            </Select>
-            <Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
-              <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
-                <SelectValue placeholder="Todas las áreas" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las áreas</SelectItem>
-                <SelectItem value="general">General</SelectItem>
-                <SelectItem value="spa">SPA</SelectItem>
-                <SelectItem value="restaurant">Restaurante</SelectItem>
-                <SelectItem value="housekeeping">Housekeeping</SelectItem>
-                <SelectItem value="hotel">Hotel</SelectItem>
-                <SelectItem value="maintenance">Mantenimiento</SelectItem>
-                <SelectItem value="admin">Administración</SelectItem>
-                <SelectItem value="events">Eventos</SelectItem>
-                  <SelectItem value="marketing">Comunicación</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={kindFilter} onValueChange={setKindFilter}>
+            </Select></div>
+
+            <div className="space-y-1"><Label>Tipo</Label><Select value={kindFilter} onValueChange={setKindFilter}>
               <SelectTrigger className="w-[160px]" data-testid="select-kind-filter">
                 <SelectValue placeholder="Todos los tipos" />
               </SelectTrigger>
@@ -1378,7 +1367,9 @@ export default function InventoryPage() {
                 <SelectItem value="plato">Plato</SelectItem>
                 <SelectItem value="activo_fijo">Activo Fijo</SelectItem>
               </SelectContent>
-            </Select>
+            </Select></div>
+            <div className="space-y-1"><Label>ABC</Label><Select value={abcFilter} onValueChange={setAbcFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todas las clases</SelectItem><SelectItem value="none">Sin clasificar</SelectItem>{["A","B","C"].map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1"><Label>Estado</Label><Select value={activeFilter} onValueChange={setActiveFilter}><SelectTrigger className="w-[160px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent></Select></div>
           </div>
 
           <p className="text-sm text-muted-foreground">{historical?'Stock al cierre del '+stockDate.split('-').reverse().join('/')+'. Clasificación y mínimos actuales; costos históricos no disponibles.':'Stock actual de hoy (día en curso).'} Los indicadores superiores corresponden al stock actual.</p>
@@ -1410,7 +1401,7 @@ export default function InventoryPage() {
                   {filteredItems.map((item) => (
                     <Fragment key={item.id}><tr className="border-t" data-testid={`row-item-${item.id}`}>
                       <td className="p-3">
-                        <div className="font-medium break-words">{item.name}</div>
+                        <div className="font-medium break-words">{item.name}</div>{item.isActive === "false" && <Badge variant="destructive" className="text-[10px] mt-1">Inactivo</Badge>}
                         {item.sku && (
                           <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>
                         )}
@@ -1419,7 +1410,7 @@ export default function InventoryPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        <div>{item.category?.name || "-"}</div>
+                        <div className="text-xs text-muted-foreground">{categories.find(c=>c.id===item.category?.parentId)?.name}</div><div>{item.category?.name || "Sin subagrupamiento"}</div>
                         <div className="flex flex-wrap gap-1 mt-0.5">
                           {item.category?.area && item.category.area !== "general" && (
                             <Badge variant="secondary" className="text-[10px]">{inventoryAreaLabel((item.category as any).area).toUpperCase()}</Badge>
@@ -1438,9 +1429,7 @@ export default function InventoryPage() {
                               Clase {item.abcClass}
                             </Badge>
                           )}
-                          {(item as any).isActive === "false" && (
-                            <Badge variant="destructive" className="text-[10px]">Inactivo</Badge>
-                          )}
+
                         </div>
                       </td>
                       <td className="p-3 text-right">
@@ -1670,7 +1659,7 @@ export default function InventoryPage() {
             return (
               <>
                 {/* ── Agrupamientos ─────────────────────────────── */}
-                <div className="space-y-3">
+                <section className="space-y-3 rounded-lg border bg-card p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Layers className="h-4 w-4 text-muted-foreground" />
@@ -1691,7 +1680,7 @@ export default function InventoryPage() {
                       {groups.map(g => <CatCard key={g.id} cat={g} isLeaf={false} />)}
                     </div>
                   )}
-                </div>
+                </section>
 
                 {/* ── Subagrupamientos ─────────────────────────────────── */}
                 <div className="space-y-4">
@@ -1831,14 +1820,7 @@ export default function InventoryPage() {
                               >
                                 {b.isActive !== "false" ? "Desactivar" : "Activar"}
                               </Button>
-                              <Button permission="catalog"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => deleteBrandMutation.mutate(b.id)}
-                                data-testid={`button-delete-brand-${b.id}`}
-                              >
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
+
                             </>
                           )}
                         </TableCell>
@@ -2018,7 +2000,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                     <Package className="h-4 w-4" />
                     Stock — {warehouses.find(w => w.id === selectedWarehouseId)?.name}
                   </CardTitle>
-  
+
                 </div>
               </CardHeader>
               <CardContent>
@@ -2577,20 +2559,13 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       </Dialog>
 
       <Dialog open={!!editingArticle} onOpenChange={open=>{if(!open && !editArticleMutation.isPending)setEditingArticle(null);}}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
-          <Label htmlFor="article-name">Nombre</Label><Input id="article-name" value={articleName} onChange={e=>setArticleName(e.target.value)}/>
-          <Label htmlFor="article-sku">SKU</Label><Input id="article-sku" value={articleSku} onChange={e=>setArticleSku(e.target.value)}/>
-          <Label htmlFor="article-min">Stock mínimo</Label><Input id="article-min" type="number" min="0" step="0.001" value={articleMin} onChange={e=>setArticleMin(e.target.value)}/>
-          {canCost && <><Label htmlFor="article-cost">Costo unitario</Label><Input id="article-cost" type="number" min="0" step="0.01" value={articleCost} onChange={e=>setArticleCost(e.target.value)}/></>}
-          <label className="flex gap-2"><input type="checkbox" disabled={editingArticle?.isActive !== "false"} checked={articleActive} onChange={e=>setArticleActive(e.target.checked)}/>Artículo activo</label>
-          <p className="text-sm text-muted-foreground">Las cantidades se corrigen desde movimientos. El historial se conserva.</p>
-          {editingArticle && <InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/>}
-          <DialogFooter><Button permission="catalog" disabled={editArticleMutation.isPending || !articleName.trim() || articleMin === "" || articleCost === "" || Number(articleMin)<0 || Number(articleCost)<0} onClick={()=>editArticleMutation.mutate()}>Guardar artículo</Button></DialogFooter>
+        <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
+          {editingArticle && <><NewItemForm key={editingArticle.id} initialItem={editingArticle} canCost={canCost} categories={categories} brands={brands} suppliers={accountingSuppliers} existingItems={items} onSubmit={data=>editArticleMutation.mutate(data)} isPending={editArticleMutation.isPending} onCancel={()=>setEditingArticle(null)}/><InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/></>}
         </DialogContent>
       </Dialog>
       <Dialog open={!!inventoryAction} onOpenChange={open=>{if(!open && !inventoryActionMutation.isPending)setInventoryAction(null);}}>
         <DialogContent><DialogHeader><DialogTitle>{inventoryAction?.kind === "deactivate" ? "Dar de baja artículo" : inventoryAction?.kind === "corregir" ? "Corregir movimiento" : "Anular movimiento"}</DialogTitle></DialogHeader>
-          <p>{inventoryAction?.name}</p><p className="text-sm text-muted-foreground">{inventoryAction?.kind === "deactivate" ? "El artículo quedará inactivo. Se conservarán el stock y su historial." : "Se conservará el original y se registrará la reversión del stock. La operación exige un motivo."}</p>
+          <p>{inventoryAction?.name}</p><p className="text-sm text-muted-foreground">{inventoryAction?.kind === "deactivate" ? "Solo se dará de baja si no tiene saldo, recetas, tratamientos ni operaciones pendientes. Su historial se conserva." : "Se conservará el original y se registrará la reversión del stock. La operación exige un motivo."}</p>
           {inventoryAction?.kind === "corregir" && <><Label htmlFor="correction-quantity">Cantidad corregida</Label><Input id="correction-quantity" type="number" min="0" step="0.001" value={actionQuantity} onChange={e=>setActionQuantity(e.target.value)}/><Label htmlFor="correction-notes">Notas</Label><Textarea id="correction-notes" value={actionNotes} onChange={e=>setActionNotes(e.target.value)}/></>}
           <Label htmlFor="inventory-action-reason">Motivo obligatorio</Label><Textarea id="inventory-action-reason" value={actionReason} onChange={e=>setActionReason(e.target.value)}/>
           <DialogFooter><Button variant="outline" disabled={inventoryActionMutation.isPending} onClick={()=>setInventoryAction(null)}>Cancelar</Button><Button disabled={inventoryActionMutation.isPending || !actionReason.trim() || (inventoryAction?.kind === "corregir" && !actionQuantity)} onClick={()=>inventoryActionMutation.mutate()}>Confirmar operación</Button></DialogFooter>
@@ -2603,6 +2578,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
             <DialogTitle>Nuevo Articulo</DialogTitle>
           </DialogHeader>
           <NewItemForm
+            canCost={canCost}
             categories={categories}
             brands={brands}
             suppliers={accountingSuppliers}
@@ -2788,6 +2764,8 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
 }
 
 export function NewItemForm({
+  initialItem,
+  canCost = true,
   categories,
   brands,
   suppliers,
@@ -2796,6 +2774,8 @@ export function NewItemForm({
   isPending,
   onCancel,
 }: {
+  initialItem?: InventoryItem;
+  canCost?: boolean;
   categories: ItemCategory[];
   brands: Brand[];
   suppliers: AccountingSupplier[];
@@ -2805,24 +2785,26 @@ export function NewItemForm({
   onCancel: () => void;
 }) {
   const { toast } = useToast();
-  const [name, setName] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [newItemArea, setNewItemArea] = useState("general");
-  const [newItemGroup, setNewItemGroup] = useState("all");
-  const [brandId, setBrandId] = useState("");
+  const [sku, setSku] = useState(initialItem?.sku || "");
+  const [active, setActive] = useState(initialItem?.isActive !== "false");
+  const [name, setName] = useState(initialItem?.name || "");
+  const [categoryId, setCategoryId] = useState(initialItem?.categoryId || "");
+  const [newItemArea, setNewItemArea] = useState(initialItem?.category?.area || "general");
+  const [newItemGroup, setNewItemGroup] = useState(initialItem?.category?.parentId || "all");
+  const [brandId, setBrandId] = useState(initialItem?.brandId || "");
   const [showNewBrandInput, setShowNewBrandInput] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
-  const [supplierIds, setSupplierIds] = useState<number[]>([]);
-  const [preferredSupplierId, setPreferredSupplierId] = useState("");
+  const [supplierIds, setSupplierIds] = useState<number[]>(initialItem?.suppliers?.map(s=>s.id) || []);
+  const [preferredSupplierId, setPreferredSupplierId] = useState(String(initialItem?.suppliers?.find(s=>s.isPreferred)?.id || ""));
   const [supplierSearch, setSupplierSearch] = useState("");
-  const [unit, setUnit] = useState<string>("unidad");
-  const [costPrice, setCostPrice] = useState("0");
-  const [minStock, setMinStock] = useState("0");
-  const [maxStock, setMaxStock] = useState("");
-  const [criticalStock, setCriticalStock] = useState("");
-  const [itemKind, setItemKind] = useState<string>("venta_directa");
-  const [abcClass, setAbcClass] = useState<string>("__none__");
-  const [ivaRate, setIvaRate] = useState<string>("__none__");
+  const [unit, setUnit] = useState<string>(initialItem?.unit || "unidad");
+  const [costPrice, setCostPrice] = useState(String(initialItem?.costPrice ?? "0"));
+  const [minStock, setMinStock] = useState(String(initialItem?.minStock ?? "0"));
+  const [maxStock, setMaxStock] = useState(initialItem?.maxStock == null ? "" : String(initialItem.maxStock));
+  const [criticalStock, setCriticalStock] = useState(initialItem?.criticalStock == null ? "" : String(initialItem.criticalStock));
+  const [itemKind, setItemKind] = useState<string>(initialItem?.itemKind || "venta_directa");
+  const [abcClass, setAbcClass] = useState<string>(initialItem?.abcClass || "__none__");
+  const [ivaRate, setIvaRate] = useState<string>(initialItem?.ivaRate || "__none__");
 
   const createBrandMutation = useMutation({
     mutationFn: async (name: string) => {
@@ -2840,7 +2822,7 @@ export function NewItemForm({
 
   const duplicateMatches = name.trim().length > 1
     ? existingItems.filter(
-        (i) => i.isActive !== "false" && i.name.trim().toLowerCase() === name.trim().toLowerCase()
+        (i) => i.id !== initialItem?.id && i.isActive !== "false" && i.name.trim().toLowerCase() === name.trim().toLowerCase()
       )
     : [];
 
@@ -2855,7 +2837,8 @@ export function NewItemForm({
           placeholder="Nombre del artículo"
           data-testid="input-item-name"
         />
-        <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área del subagrupamiento (ej: SPA-0001, RST-0042).</p>
+        {!initialItem && <p className="text-xs text-muted-foreground">El SKU se asignará automáticamente según el área del subagrupamiento (ej: SPA-0001, RST-0042).</p>}
+        {initialItem && <><Label>SKU</Label><Input value={sku} onChange={e=>setSku(e.target.value)}/><p className="text-sm text-muted-foreground">Stock actual: {Number(initialItem.currentStock).toLocaleString("es-AR", {maximumFractionDigits:3})} {unitLabels[initialItem.unit]}. Las cantidades se cambian mediante movimientos.</p><label className="flex gap-2 text-sm"><input type="checkbox" checked={active} disabled={initialItem.isActive !== "false"} onChange={e=>setActive(e.target.checked)}/>Artículo activo</label></>}
         {duplicateMatches.length > 0 && (
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-2 text-xs text-amber-800 dark:text-amber-400" data-testid="warning-duplicate-item-name">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -2990,7 +2973,7 @@ export function NewItemForm({
                 <SelectValue placeholder="Sin marca" />
               </SelectTrigger>
               <SelectContent>
-                {brands.filter(b => b.isActive !== "false").map(b => (
+                {brands.filter(b => b.isActive !== "false" || b.id === initialItem?.brandId).map(b => (
                   <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
                 ))}
                 <SelectItem value="__new__">+ Nueva marca...</SelectItem>
@@ -3030,7 +3013,7 @@ export function NewItemForm({
         </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
-          <Select value={unit} onValueChange={setUnit}>
+          <Select value={unit} onValueChange={setUnit} disabled={!!initialItem}>
             <SelectTrigger data-testid="select-unit">
               <SelectValue />
             </SelectTrigger>
@@ -3042,8 +3025,9 @@ export function NewItemForm({
               ))}
             </SelectContent>
           </Select>
+          {initialItem && <p className="text-xs text-muted-foreground">La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.</p>}
         </div>
-        <div className="space-y-2">
+        {canCost && <div className="space-y-2">
           <Label>Costo Unitario</Label>
           <Input
             type="number"
@@ -3053,7 +3037,7 @@ export function NewItemForm({
             onChange={(e) => setCostPrice(e.target.value)}
             data-testid="input-cost"
           />
-        </div>
+        </div>}
         <div className="space-y-2">
           <Label>Stock Minimo</Label>
           <Input
@@ -3116,12 +3100,13 @@ export function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
+              ...(initialItem ? {sku:sku.trim() || null,isActive:active ? "true" : "false"} : {}),
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,
               preferredAccountingSupplierId: preferredSupplierId ? Number(preferredSupplierId) : null,
               brandId: brandId || null,
               unit: unit as any,
-              costPrice,
+              ...(canCost ? {costPrice} : {}),
               minStock,
               maxStock: maxStock.trim() === "" ? null : maxStock,
               criticalStock: criticalStock.trim() === "" ? null : criticalStock,
