@@ -714,6 +714,7 @@ export default function AdminCuentasPage() {
     onError: (error: any) => toast({ title: "Error al deshacer", description: error.message, variant: "destructive" }),
   });
 
+  const [reporteExpanded,setReporteExpanded]=useState(false);
   const [reporteFrom, setReporteFrom] = useState(() => {
     return getArgentinaToday().slice(0, 7) + "-01";
   });
@@ -1454,11 +1455,12 @@ export default function AdminCuentasPage() {
 
       {/* Reporte de Facturación en página completa */}
       <div>
-        <div className="flex items-center gap-2 mb-4">
-          <CalendarDays className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Reporte de Facturación</h2>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2"><CalendarDays className="h-5 w-5 text-muted-foreground" /><h2 className="text-lg font-semibold">Reporte de Facturación</h2></div>
+          <Button variant="outline" size="sm" aria-expanded={reporteExpanded} aria-controls="cc-report-content" onClick={()=>setReporteExpanded(!reporteExpanded)} className="print:hidden">{reporteExpanded?'Ocultar':'Mostrar'}{reporteExpanded?<ChevronUp className="ml-2 h-4 w-4" />:<ChevronDown className="ml-2 h-4 w-4" />}</Button>
         </div>
-
+        <p className="mb-4 text-sm text-muted-foreground">Cargos, pagos y saldo neto de las cuentas corrientes en el período seleccionado.</p>
+        <div id="cc-report-content" className={reporteExpanded?'':'hidden print:block'}>
         {/* Filtros */}
         <div className="flex flex-wrap gap-4 mb-6">
           <div className="grid gap-1 min-w-[140px]">
@@ -1608,6 +1610,7 @@ export default function AdminCuentasPage() {
             })()}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

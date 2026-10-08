@@ -88,31 +88,21 @@ function TrackingRowEditor({ row }: { row: TrackingRow }) {
 
   return (
     <>
-      <TableRow
-        className="cursor-pointer hover:bg-muted/40"
-        onClick={() => canEdit && setExpanded(!expanded)}
-        data-testid={`cc-tracking-row-${row.salesInvoiceId}`}
-      >
-        <TableCell className="whitespace-nowrap">{row.fecha}</TableCell>
-        <TableCell className="whitespace-nowrap">{row.tipoComprobante} {row.numeroFactura}</TableCell>
-        <TableCell>{row.entityName}</TableCell>
-        <TableCell className="text-muted-foreground">{row.motivo || "-"}</TableCell>
-        <TableCell className="text-right whitespace-nowrap">{row.amountPending ? <span className="text-xs text-amber-700 dark:text-amber-400">Pendiente de liquidación</span> : fmtMoney(row.monto)}</TableCell>
-        <TableCell>
-          <Badge className={`${ESTADO_COLORS[row.estado]} border-0`} data-testid={`badge-estado-${row.salesInvoiceId}`}>
-            {ESTADO_LABELS[row.estado]}
-          </Badge>
-        </TableCell>
-        <TableCell className="text-muted-foreground max-w-56 truncate">{row.observaciones || "-"}</TableCell>
-        <TableCell className="text-right">
-          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); if(canEdit)setExpanded(!expanded); }}>
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </Button>
-        </TableCell>
-      </TableRow>
-      {expanded && (
-        <TableRow className="bg-muted/20 hover:bg-muted/20">
-          <TableCell colSpan={8} className="py-3 px-4">
+      <div className="rounded-lg border bg-background" data-testid={`cc-tracking-row-${row.salesInvoiceId}`}>
+        <div className="flex items-start justify-between gap-3 p-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="text-[10px]">{row.manualId ? 'Seguimiento manual' : row.entityType==='agency' ? 'Agencia' : 'Empresa'}</Badge><span className="text-sm font-medium">{row.entityName}</span></div>
+            <p className="text-xs text-muted-foreground">{row.tipoComprobante} {row.numeroFactura}{row.motivo && ` · ${row.motivo}`}</p>
+            <p className="text-[11px] text-muted-foreground">{row.fecha.split('-').reverse().join('/')}</p>
+            {row.observaciones && <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{row.observaciones}</p>}
+          </div>
+          <div className="flex shrink-0 items-start gap-2">
+            <div className="text-right space-y-1"><p className="text-sm font-semibold tabular-nums">{row.amountPending ? <span className="text-amber-700 dark:text-amber-400">Pendiente de liquidación</span> : fmtMoney(row.monto)}</p><Badge className={`${ESTADO_COLORS[row.estado]} border-0`} data-testid={`badge-estado-${row.salesInvoiceId}`}>{ESTADO_LABELS[row.estado]}</Badge></div>
+            {canEdit && <Button size="icon" variant="ghost" className="h-7 w-7" aria-label={expanded?'Cerrar edición del seguimiento':'Editar seguimiento'} aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?<ChevronUp className="h-4 w-4" />:<ChevronDown className="h-4 w-4" />}</Button>}
+          </div>
+        </div>
+        {expanded && (
+          <div className="border-t bg-muted/20 p-3">
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Estado</Label>
@@ -142,9 +132,9 @@ function TrackingRowEditor({ row }: { row: TrackingRow }) {
                 Guardar
               </Button>
             </div>
-          </TableCell>
-        </TableRow>
-      )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -206,23 +196,9 @@ function ListadoTab() {
         <p className="text-center text-muted-foreground py-8">No hay facturas CC en los filtros elegidos.</p>
       ) : (
         <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Fecha</TableHead>
-                <TableHead>N° Factura</TableHead>
-                <TableHead>Organismo/Empresa</TableHead>
-                <TableHead>Motivo</TableHead>
-                <TableHead className="text-right">Monto</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Observaciones</TableHead>
-                <TableHead className="w-10"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map(row => <TrackingRowEditor key={row.manualId ? `manual-${row.manualId}` : row.salesInvoiceId} row={row} />)}
-            </TableBody>
-          </Table>
+          <div className="space-y-2">
+            {rows.map(row => <TrackingRowEditor key={row.manualId ? `manual-${row.manualId}` : row.salesInvoiceId} row={row} />)}
+          </div>
           <div className="text-sm text-muted-foreground text-right">
             {rows.length} registro(s) — total conocido {fmtMoney(total)}
           </div>
@@ -359,19 +335,22 @@ function BackfillRecipientsButton() {
 }
 
 export function CcInvoiceTrackingSection() {
+  const [expanded,setExpanded]=useState(false);
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2">
           <FileCheck className="h-5 w-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold">Seguimiento de Facturas CC</h2>
         </div>
-        <div className="flex flex-wrap gap-2"><AddManualTrackingButton /><BackfillRecipientsButton /></div>
+        <Button variant="outline" size="sm" aria-expanded={expanded} aria-controls="cc-tracking-content" onClick={()=>setExpanded(!expanded)} className="print:hidden">{expanded?'Ocultar':'Mostrar'}{expanded?<ChevronUp className="ml-2 h-4 w-4" />:<ChevronDown className="ml-2 h-4 w-4" />}</Button>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
         Facturas emitidas a Empresas y Agencias en Cuenta Corriente. El estado y las observaciones se cargan y editan acá.
         También podés agregar manualmente una factura o una gestión pendiente. Los seguimientos no modifican saldos ni emiten comprobantes.
       </p>
+      <div id="cc-tracking-content" className={expanded?'':'hidden print:block'}>
+      <div className="mb-4 flex flex-wrap gap-2 print:hidden"><AddManualTrackingButton /><BackfillRecipientsButton /></div>
       <Tabs defaultValue="listado">
         <TabsList>
           <TabsTrigger value="listado" data-testid="tab-cc-tracking-listado">
@@ -382,6 +361,7 @@ export function CcInvoiceTrackingSection() {
         <TabsContent value="listado" className="mt-4"><ListadoTab /></TabsContent>
         <TabsContent value="informe" className="mt-4"><InformeMensualTab /></TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }
