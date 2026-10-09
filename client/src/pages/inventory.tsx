@@ -726,6 +726,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
 
 export default function InventoryPage() {
   const canCost = useInventoryPermission("cost");
+  const canSeeValorTotal = useInventoryPermission("valor-total");
   const canOperate = useInventoryPermission("operate");
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("items");
@@ -833,6 +834,7 @@ export default function InventoryPage() {
   const editArticle = (item:InventoryItem) => {setEditingArticle(item);};
   const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
   const editArticleMutation = useMutation({mutationFn:async(data:Partial<InventoryItem>)=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,data);},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const reactivateItemMutation = useMutation({mutationFn:async(item:{id:string;name:string;minStock:unknown})=>{await apiRequest("PATCH",`/api/inventory/items/${item.id}/metadata`,{name:item.name,minStock:item.minStock,isActive:"true"});},onSuccess:()=>{refreshInventory();toast({title:"Artículo reactivado"});},onError:(e:any)=>toast({title:"No se pudo reactivar",description:e.message,variant:"destructive"})});
   const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [expandedMovements, setExpandedMovements] = useState<Set<string>>(new Set());
@@ -1243,7 +1245,7 @@ export default function InventoryPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {canCost ? `$${totalValue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "Sin acceso a costos"}
+              {canSeeValorTotal ? `$${totalValue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "Sin acceso"}
             </div>
           </CardContent>
         </Card>
@@ -1344,9 +1346,9 @@ export default function InventoryPage() {
                   </SelectContent>
                 </Select></div>
               )}
-              <div className="space-y-1"><Label>Subagrupamiento</Label><Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <div className="space-y-1"><Label>Subagrupamiento</Label><Select value={categoryFilter} onValueChange={setCategoryFilter} disabled={groupFilter === "all"}>
                 <SelectTrigger className="w-[200px]" data-testid="select-category-filter">
-                  <SelectValue placeholder="Todos los subagrupamientos" />
+                  <SelectValue placeholder={groupFilter === "all" ? "Elegí un agrupamiento primero" : "Todos los subagrupamientos"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los subagrupamientos</SelectItem>
@@ -1455,7 +1457,7 @@ export default function InventoryPage() {
                       <td className="p-3 text-right">
                         {canCost && !historical ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button><Button permission="catalog" variant="ghost" size="icon" disabled={item.isActive === "false"} aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
@@ -1984,9 +1986,9 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
                         <div className="text-xs text-muted-foreground">Sin stock</div>
                       </div>
                     </div>
-                    <div className="text-sm text-center text-muted-foreground border-t pt-2">
+                    {canSeeValorTotal && <div className="text-sm text-center text-muted-foreground border-t pt-2">
                       Valor: <span className="font-semibold text-foreground">${parseFloat(ws.total_value || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                    </div>
+                    </div>}
                     <div className="text-xs text-center text-primary font-medium">
                       {isSelected ? "▲ Ver menos" : "▼ Ver stock de este depósito"}
                     </div>
@@ -2819,8 +2821,8 @@ export function NewItemForm({
   const [maxStock, setMaxStock] = useState(initialItem?.maxStock == null ? "" : String(initialItem.maxStock));
   const [criticalStock, setCriticalStock] = useState(initialItem?.criticalStock == null ? "" : String(initialItem.criticalStock));
   const [itemKind, setItemKind] = useState<string>(initialItem?.itemKind || "venta_directa");
-  const [abcClass, setAbcClass] = useState<string>(initialItem?.abcClass || "__none__");
-  const [ivaRate, setIvaRate] = useState<string>(initialItem?.ivaRate || "__none__");
+  const [abcClass, setAbcClass] = useState<string>(initialItem?.abcClass || (initialItem ? "__none__" : "C"));
+  const [ivaRate, setIvaRate] = useState<string>(initialItem?.ivaRate || (initialItem ? "__none__" : "21"));
 
   const createBrandMutation = useMutation({
     mutationFn: async (name: string) => {
@@ -2841,6 +2843,19 @@ export function NewItemForm({
         (i) => i.id !== initialItem?.id && i.isActive !== "false" && i.name.trim().toLowerCase() === name.trim().toLowerCase()
       )
     : [];
+
+  // Un artículo nuevo no puede quedar sin estos datos — ver pedido de administración.
+  // Nota: "Agrupamiento" no se exige por separado — hay áreas sin agrupamientos
+  // configurados todavía y el Subagrupamiento ya puede quedar sin padre (igual
+  // que categorías legadas existentes).
+  const missingRequiredFields = initialItem ? [] : [
+    !categoryId && "Subagrupamiento",
+    supplierIds.length === 0 && "Proveedor",
+    minStock.trim() === "" && "Stock Mínimo",
+    criticalStock.trim() === "" && "Stock Crítico",
+    abcClass === "__none__" && "Clasificación ABC",
+    ivaRate === "__none__" && "Alícuota de IVA",
+  ].filter((v): v is string => typeof v === "string");
 
   return (
     <div className="space-y-4">
@@ -2998,7 +3013,7 @@ export function NewItemForm({
           )}
         </div>
         <div className="space-y-2">
-          <Label>Clasificación ABC (opcional)</Label>
+          <Label>Clasificación ABC{initialItem ? " (opcional)" : ""}</Label>
           <Select value={abcClass} onValueChange={setAbcClass}>
             <SelectTrigger data-testid="select-abc-class">
               <SelectValue placeholder="Sin clasificar" />
@@ -3078,7 +3093,7 @@ export function NewItemForm({
           />
         </div>
         <div className="space-y-2">
-          <Label>Stock Crítico (opcional)</Label>
+          <Label>Stock Crítico{initialItem ? " (opcional)" : ""}</Label>
           <Input
             type="number"
             min={0}
@@ -3108,6 +3123,11 @@ export function NewItemForm({
         </Select>
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
+      {!initialItem && missingRequiredFields.length > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
+          Falta completar: {missingRequiredFields.join(", ")}.
+        </p>
+      )}
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
           Cancelar
@@ -3131,7 +3151,7 @@ export function NewItemForm({
               ivaRate: ivaRate === "__none__" ? null : ivaRate,
             } as any);
           }}
-          disabled={isPending || !name}
+          disabled={isPending || !name || missingRequiredFields.length > 0}
           data-testid="button-save-item"
         >
           {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
