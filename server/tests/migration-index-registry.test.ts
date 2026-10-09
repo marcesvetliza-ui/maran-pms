@@ -75,6 +75,7 @@ describe("incremental migration registry", () => {
     expect(INCREMENTAL_NON_INDEX_DDL.chargeTypesTable).toContain("to_regclass");
     expect(INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn).toContain("pg_attribute");
     expect(INCREMENTAL_NON_INDEX_DDL.groupPaymentsReceiptNumberSequence).toContain("to_regclass");
+    expect(INCREMENTAL_NON_INDEX_DDL.databaseIdentityTable).toContain("to_regclass");
   });
 
   it("does not leave notice-producing non-index DDL in production migrations", () => {

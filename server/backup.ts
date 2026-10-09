@@ -6,6 +6,7 @@ import { sendEmailWithPdfAttachment } from "./email-service";
 import { backupLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { systemSettings } from "@shared/schema";
+import { shouldBlockExternalComm } from "./external-comms-policy";
 
 async function logBackup(entry: {
   type: string; status: string; destination?: string;
@@ -97,6 +98,19 @@ export async function runRestoreTest(): Promise<RestoreTestResult> {
 // funciona ahí.
 export async function sendBackupByEmail(targetEmail: string, type: string = "manual_email"): Promise<void> {
   const start = Date.now();
+
+  if (shouldBlockExternalComm({ integration: "email-backup", action: type })) {
+    await logBackup({
+      type,
+      status: "error",
+      destination: targetEmail,
+      durationMs: Date.now() - start,
+      errorMessage: "Bloqueado por ambiente (APP_ENV≠production)",
+    });
+    throw new Error("El envío de backups por email está bloqueado en este ambiente (piloto/desarrollo/test).");
+  }
+
+
   const sqlBuffer = await generateBackupSql();
   const now = new Date();
   const dateStr = now.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })

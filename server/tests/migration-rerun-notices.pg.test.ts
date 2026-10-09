@@ -236,6 +236,13 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     });
   });
 
+  it("silences database_identity table-creation notices in an isolated schema", async () => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, "database_identity_table", async () => {
+      await expectSilentSecondRun(client, INCREMENTAL_NON_INDEX_DDL.databaseIdentityTable);
+    });
+  });
+
   it("silences existing-column notices in an isolated schema", async () => {
     if (!client) throw new Error("DATABASE_URL no está configurado");
     await inIsolatedSchema(client, "column", async () => {

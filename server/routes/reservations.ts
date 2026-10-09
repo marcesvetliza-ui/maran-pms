@@ -32,6 +32,7 @@ import {
   getReservationRateAuditEvent,
 } from "@shared/reservationFolio";
 import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import { assertPaymentHasNoUnresolvedCreditHold } from "../billing/reservationCreditReconciliation";
 import PDFDocument from "pdfkit";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
@@ -3787,6 +3788,7 @@ async function handleConfirmationPdf(req: any, res: any) {
       .join("  ·  ");
 
     const doc = new PDFDocument({ margin: 0, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const filename = `Confirmacion-${reservation.reservationCode || reservation.id}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

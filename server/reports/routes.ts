@@ -5,6 +5,7 @@ import { requireAuth, requirePermission } from "../auth";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 
 // Etapa 3 del ABM de usuarios: cada informe tiene su propio resourceKey
 // (prefijo "api:reports:") en vez de un array de roles hardcodeado — así se
@@ -1390,6 +1391,7 @@ export function registerReportsRoutes(app: Express) {
 
       const pdfBuf = await new Promise<Buffer>((resolve, reject) => {
         const doc = new PDFDocument({ margin: 40, size: "A4" });
+        applyPilotPdfWatermark(doc);
         const chunks: Buffer[] = [];
         doc.on("data", (c: Buffer) => chunks.push(c));
         doc.on("end", () => resolve(Buffer.concat(chunks)));

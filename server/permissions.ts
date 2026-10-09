@@ -22,6 +22,9 @@ import { rolePermissions, type SystemUserRole } from "@shared/schema";
  * ruta realmente permitía (marcadas "CORRECCIÓN" abajo, en el rol que se
  * agrega o se saca) — el resto reproduce el comportamiento actual tal cual.
  */
+// Preserve the existing demo access after the granular-permissions migration.
+export const PILOT_EXTERNAL_RESOURCE_KEYS = ["sidebar:/", "sidebar:/planning", "sidebar:/reservations", "sidebar:/new-reservation", "sidebar:/check-in", "sidebar:/check-out", "sidebar:/rooms", "sidebar:/guests", "sidebar:/rate-plans", "sidebar:/admin/booking-engine", "sidebar:/ota-channels", "sidebar:/groups", "sidebar:/companies", "sidebar:/agencies", "sidebar:/restaurant", "sidebar:/spa", "sidebar:/spa-clients", "sidebar:/events", "sidebar:/gift-vouchers", "sidebar:/cash-register"] as const;
+
 export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   // ── MÓDULO 1: PMS Core ──────────────────────────────────────────────────
   "sidebar:/": [

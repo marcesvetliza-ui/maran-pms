@@ -6,6 +6,7 @@ import { presupuestos, presupuestoItems, quoteCatalogItems, quoteConditions } fr
 import { requireAuth } from "../auth";
 import { eq, desc, like, and, asc } from "drizzle-orm";
 import PDFDocument from "pdfkit";
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import { assetPath } from "../utils/assetPath";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
@@ -1282,6 +1283,7 @@ export function registerPresupuestosRoutes(app: Express) {
       }
 
       const doc = new PDFDocument({ margin: 0, size: "A4" });
+      applyPilotPdfWatermark(doc);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${pres.numero}.pdf"`);
       doc.pipe(res);

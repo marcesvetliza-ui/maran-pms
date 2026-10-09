@@ -843,6 +843,18 @@ export const INCREMENTAL_NON_INDEX_DDL = {
       sort_order integer NOT NULL DEFAULT 0
     )
   `),
+  // Identidad persistente de base (Fase 4, Etapa A — ver
+  // docs/pilot-environment-plan.md sección 10). Tabla vacía por diseño: solo
+  // el script script/mark-database-identity.ts inserta la fila única, nunca
+  // una migración automática. Fila única por CHECK(id = 1), nunca por PK.
+  databaseIdentityTable: createTableWithoutRerunNotice("database_identity", `
+    CREATE TABLE database_identity (
+      id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      environment text NOT NULL CHECK (environment IN ('development', 'test', 'pilot', 'production')),
+      created_at timestamp NOT NULL DEFAULT now(),
+      locked_by text
+    )
+  `),
   cashShiftsTurnoTipoColumn: addColumnWithoutRerunNotice("cash_shifts", "turno_tipo", "text"),
   groupPaymentsReceiptNumberSequence: createSequenceWithoutRerunNotice("group_payments_receipt_number_seq"),
 } as const;
@@ -1679,6 +1691,13 @@ export async function runMigrations() {
 
   await withTimeout("charge_types (create)", T, () =>
     db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.chargeTypesTable))
+  );
+
+  // Solo crea la tabla (aditivo, vacía). Nunca inserta ni marca nada acá —
+  // eso es responsabilidad exclusiva de script/mark-database-identity.ts,
+  // ejecutado manualmente. Ver server/database-identity.ts.
+  await withTimeout("database_identity (create)", T, () =>
+    db.execute(sql.raw(INCREMENTAL_NON_INDEX_DDL.databaseIdentityTable))
   );
   await withTimeout("charge_types (seed)", T, async () => {
     const existing = await db.execute(sql`SELECT COUNT(*) FROM charge_types`);
@@ -4794,6 +4813,17 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       "sidebar:/admin/permisos": ["admin"],
       ...API_RESOURCE_PERMISSIONS,
     });
+  });
+
+  await withTimeout("pilot external permissions compatibility", T, async () => {
+    const { PILOT_EXTERNAL_RESOURCE_KEYS } = await import("./permissions");
+    await db.execute(sql`WITH applied AS (
+      INSERT INTO resource_permission_seeds(resource_key)
+      VALUES('pilot-granular-permissions-20261009') ON CONFLICT DO NOTHING RETURNING resource_key
+    ) INSERT INTO role_permissions(role,resource_key)
+      SELECT 'piloto_externo', key FROM applied
+      CROSS JOIN unnest(${[...PILOT_EXTERNAL_RESOURCE_KEYS]}::text[]) AS resources(key)
+      ON CONFLICT DO NOTHING`);
   });
 
   // Marca (Bloque A del pedido de mejoras de Inventario), Clasificación ABC

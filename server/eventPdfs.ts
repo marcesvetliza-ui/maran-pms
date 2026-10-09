@@ -4,6 +4,7 @@ import path from "path";
 import type { EventWithDetails } from "@shared/schema";
 import { assetPath } from "./utils/assetPath";
 import { formatArgentinaDate, formatArgentinaDateTime } from "./utils/argentinaDateTime";
+import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 
 const HOTEL_NAME    = "Maran Suites & Towers";
 const HOTEL_ADDRESS = "Alameda de la Federación 698, Paraná, Entre Ríos";
@@ -133,6 +134,7 @@ export async function generateTablesResumenPdf(
 ): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
@@ -341,6 +343,7 @@ export async function generateTableReceiptPdf(
 ): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -555,6 +558,7 @@ export async function generateTableReceiptPdf(
 export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4", autoFirstPage: true });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
@@ -725,6 +729,7 @@ export async function generateHojaFuncionPdf(event: EventWithDetails): Promise<B
 export async function generateConfirmacionEventoPdf(event: EventWithDetails): Promise<Buffer> {
   return new Promise((resolve) => {
     const doc = new PDFDocument({ margin: 0, size: "A4" });
+    applyPilotPdfWatermark(doc);
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));

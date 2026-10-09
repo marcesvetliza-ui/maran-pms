@@ -22,7 +22,11 @@ import { permissionsForRole, hasPermission } from "./permissions";
 const DASHBOARD_BREAKFASTS_RESOURCE_KEY = "api:dashboard:breakfasts";
 const PURCHASE_INVOICES_WRITE_RESOURCE_KEY = "api:purchase-invoices:write";
 const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
+import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
+import { getAppEnv, isPilotEnv } from "./app-env";
+import { authorizePilotExternalRole } from "./pilot-external-role";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
+import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { voidSpaPayment } from "./spaCancellation";
 import { db } from "./db";
@@ -282,6 +286,12 @@ export async function registerRoutes(
       status,
       database: dbStatus,
       environment,
+      // Indicador visual del piloto (Fase 5) — a diferencia de `environment`
+      // (heredado, basado en NODE_ENV), esto lee APP_ENV, la fuente de
+      // verdad real. Ruta pública y sin autenticación a propósito: el
+      // indicador debe verse también en la pantalla de login.
+      appEnv: getAppEnv(),
+      isPilot: isPilotEnv(),
       version: "1.0.0",
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
@@ -366,6 +376,19 @@ export async function registerRoutes(
 
     requireAuth(req, res, next);
   });
+
+  // Fase 6 del ambiente piloto: autorización limitada para el rol
+  // piloto_externo. Corre después de requireAuth (req.user ya poblado por
+  // Passport) y antes de cualquier ruta de negocio, para que aplique sin
+  // excepción a todos los módulos registrados más abajo. No afecta a
+  // ningún otro rol.
+  app.use("/api", authorizePilotExternalRole);
+
+  // Fase 9 (ronda 2): registrada acá, después del middleware de arriba,
+  // para que piloto_externo caiga en su deny por defecto (403). Antes
+  // vivía en server/index.ts, antes de registerRoutes() — quedaba fuera
+  // del alcance de authorizePilotExternalRole por completo.
+  registerDebugAssetsApiRoute(app);
 
   // Etapa 1 del ABM de usuarios: el sidebar (y, a futuro, los guards de ruta)
   // consultan esto en vez de traer sus propios arrays de roles hardcodeados.
@@ -1111,24 +1134,13 @@ export async function registerRoutes(
       if (!notification) return res.status(404).json({ error: "Notification not found" });
 
       // Send confirmation back to guest via MARA if sessionId is available
-      const maraBaseUrl = process.env.MARA_BASE_URL;
-      const maraSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (maraBaseUrl && maraSecret && (notification as any).sessionId) {
-        const guestName = (notification as any).guestName || "Huésped";
-        const maraMessages: Record<string, string> = {
-          en_proceso: `¡Hola ${guestName}! 👋 Tu solicitud fue recibida por nuestro equipo y ya está siendo atendida. Te avisamos en cuanto esté lista.`,
-          completado: `¡Hola ${guestName}! ✅ Tu solicitud fue completada. Si necesitás algo más, escribinos cuando quieras.`,
-          rechazado: `Hola ${guestName}, lamentablemente no podemos atender tu solicitud en este momento. Por favor acercate a recepción y con gusto te ayudamos. 🙏`,
-        };
-        const maraMessage = maraMessages[status];
-        if (maraMessage) {
-          fetch(`${maraBaseUrl}/api/send-message`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Chatbot-Secret": maraSecret },
-            body: JSON.stringify({ sessionId: (notification as any).sessionId, message: maraMessage }),
-          }).catch((err) => console.error("[MARA] Error sending confirmation:", err));
-        }
-      }
+      sendMaraStatusUpdate({
+        maraBaseUrl: process.env.MARA_BASE_URL,
+        maraSecret: process.env.CHATBOT_WEBHOOK_SECRET,
+        sessionId: (notification as any).sessionId,
+        guestName: (notification as any).guestName || "Huésped",
+        status,
+      });
 
       res.json(notification);
     } catch (error) {
@@ -1157,123 +1169,9 @@ export async function registerRoutes(
   });
 
   // ==================== CHATBOT WEBHOOK ====================
-
-  // Helper: get or auto-generate the chatbot webhook secret
-  async function getChatbotWebhookSecret(): Promise<string> {
-    try {
-      // 1. Prefer env var if set
-      const envSecret = process.env.CHATBOT_WEBHOOK_SECRET;
-      if (envSecret && envSecret.trim()) return envSecret.trim();
-      // 2. Try DB
-      const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, "chatbot_webhook_secret"));
-      if (row?.value) return row.value;
-      // 3. Auto-generate and persist
-      const generated = randomUUID();
-      await db.insert(systemSettings).values({
-        id: randomUUID(),
-        key: "chatbot_webhook_secret",
-        value: generated,
-        category: "integrations",
-        description: "Auto-generated MARA webhook secret",
-        updatedAt: new Date(),
-        updatedBy: null,
-      } as any);
-      console.log("[webhook/chatbot] Secreto auto-generado y guardado en DB:", generated.slice(-4));
-      return generated;
-    } catch (err) {
-      console.error("[webhook/chatbot] Error en getChatbotWebhookSecret:", err);
-      return "";
-    }
-  }
-
-  app.get("/api/webhook/chatbot/secret", requireAuth, async (req, res) => {
-    if (!hasPermission(String((req.user as any)?.role || ""), "api:admin:chatbot-secret")) {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-    const secret = await getChatbotWebhookSecret();
-    res.json({ secret });
-  });
-
-  app.post("/api/webhook/chatbot", async (req, res) => {
-    try {
-      const secret = req.headers["x-chatbot-secret"] as string;
-      const expectedSecret = await getChatbotWebhookSecret();
-      if (!secret || secret !== expectedSecret) {
-        const receivedHint = secret ? `"...${secret.slice(-4)}" (${secret.length} chars)` : "ninguno";
-        const expectedHint = `"...${expectedSecret.slice(-4)}" (${expectedSecret.length} chars)`;
-        console.warn(`[webhook/chatbot] 401 — recibido: ${receivedHint} | esperado: ${expectedHint}`);
-        return res.status(401).json({ error: "Invalid or missing webhook secret" });
-      }
-
-      const { eventType, priority, guestName, roomNumber, reservationId, message, timestamp, sessionId } = req.body;
-      let { area } = req.body;
-
-      const validAreas = ["housekeeping", "maintenance", "restaurant", "spa", "reception", "all"];
-      const validPriorities = ["normal", "high", "urgent"];
-
-      if (!message) {
-        return res.status(400).json({ error: "message is required" });
-      }
-      if (!area || !validAreas.includes(area)) {
-        area = "all";
-      }
-      if (priority && !validPriorities.includes(priority)) {
-        return res.status(400).json({ error: `Invalid priority. Must be one of: ${validPriorities.join(", ")}` });
-      }
-
-      const areaLabels: Record<string, string> = {
-        housekeeping: "Housekeeping",
-        maintenance: "Mantenimiento",
-        restaurant: "Restaurante",
-        spa: "SPA",
-        reception: "Recepción",
-        all: "General",
-      };
-
-      const typeMap: Record<string, string> = {
-        housekeeping: "chatbot_housekeeping",
-        maintenance: "chatbot_maintenance",
-        restaurant: "chatbot_restaurant",
-        spa: "chatbot_spa",
-        reception: "chatbot_request",
-        all: "chatbot_request",
-      };
-
-      const notification = await storage.createNotification({
-        type: (typeMap[area] || "chatbot_request") as any,
-        title: `Solicitud de ${guestName || "Huésped"} - Hab. ${roomNumber || "N/A"}`,
-        message,
-        targetArea: area,
-        relatedEntityType: reservationId ? "reservation" : "room",
-        relatedEntityId: reservationId ? String(reservationId) : roomNumber,
-        priority: priority || "normal",
-        sessionId: sessionId || null,
-        guestName: guestName || null,
-      } as any);
-
-      if (area === "housekeeping" && roomNumber) {
-        const rooms = await storage.getRooms();
-        const room = rooms.find(r => r.roomNumber === roomNumber);
-        if (room) {
-          try {
-            await storage.createHousekeepingTask({
-              roomId: room.id,
-              taskType: "guest_request",
-              status: "pending",
-              priority: priority === "urgent" ? "urgent" : "normal",
-              notes: `Chatbot: ${message} (${guestName || "Huésped"})`,
-              scheduledDate: getArgentinaToday(),
-              createdAt: new Date(),
-            });
-          } catch {}
-        }
-      }
-
-      res.json({ success: true, notificationId: notification.id });
-    } catch (error) {
-      res.status(500).json({ error: "Error processing webhook" });
-    }
-  });
+  // Extraído a server/mara.ts (registerMaraRoutes, llamado más abajo junto
+  // al resto de los registradores de rutas) para poder testearlo aislado
+  // sin registrar todo este archivo.
 
   // ==================== WEB CHECK-IN ====================
 
@@ -4067,6 +3965,7 @@ export async function registerRoutes(
   registerAdminCashRoutes(app);
   registerBillingRoutes(app);
   registerReportsRoutes(app);
+  registerMaraRoutes(app);
   registerOperationalReportRoutes(app);
 
   // ==================== NIGHT AUDIT ====================

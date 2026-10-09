@@ -7,7 +7,8 @@
  * el resto del sistema (sendEmailWithPdfAttachment).
  */
 import pg from "pg";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
 const originalFetch = global.fetch;
 
@@ -27,8 +28,14 @@ suite("PostgreSQL real: backup por email respeta el proveedor configurado (Resen
     await pool.query(`INSERT INTO email_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
   });
 
+  beforeEach(() => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
+  });
+
   afterEach(async () => {
     global.fetch = originalFetch;
+    resetAppEnvForTests();
     if (pool) await pool.query(`DELETE FROM backup_logs`);
   });
 

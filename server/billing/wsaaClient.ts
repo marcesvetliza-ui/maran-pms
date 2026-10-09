@@ -2,6 +2,7 @@ import forge from "node-forge";
 import { db } from "../db";
 import { billingConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { assertExternalCommAllowed } from "../external-comms-policy";
 
 const WSAA_HOMOLOG = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms";
 const WSAA_PROD    = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
@@ -55,6 +56,13 @@ function signTRA(traXml: string, certPem: string, keyPem: string): string {
 }
 
 async function soapPost(url: string, body: string): Promise<string> {
+  // Defensa en profundidad: es el único fetch() real de este archivo. Ya
+  // queda cubierto porque getTokenAuth() (su único caller) chequea primero,
+  // pero se repite acá — el punto más bajo posible antes de la llamada de
+  // red — para que agregar un nuevo caller interno en el futuro no pueda
+  // saltarse el bloqueo por accidente.
+  assertExternalCommAllowed({ integration: "arca", action: "wsaa-soap-post" });
+
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '""' },
@@ -111,6 +119,8 @@ async function requestNewToken(
   keyPem: string,
   ambiente: "homologacion" | "produccion",
 ): Promise<{ token: string; sign: string }> {
+  assertExternalCommAllowed({ integration: "arca", action: `wsaa-login-${ambiente}` });
+
   const tra = buildTRA();
   const cms = signTRA(tra, certPem, keyPem);
   const url = ambiente === "homologacion" ? WSAA_HOMOLOG : WSAA_PROD;
@@ -168,6 +178,8 @@ export async function getTokenAuth(
   keyPem: string,
   ambiente: "homologacion" | "produccion"
 ): Promise<{ token: string; sign: string }> {
+  assertExternalCommAllowed({ integration: "arca", action: `wsaa-login-${ambiente}` });
+
   // 1. Intentar desde DB (persiste entre restarts)
   const cached = await loadFromDb(ambiente);
   if (cached) return cached;
