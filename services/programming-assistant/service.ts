@@ -1,3 +1,4 @@
+import { diagnosisFailure } from "./errors";
 import express from "express";
 import pg from "pg";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -160,9 +161,14 @@ export async function createService(
           ? res.json(ticket)
           : res.status(409).json({ error: "Identificador ya utilizado" });
       }
-      if ((ticket.status === "closed" && action !== "close") || ((ticket.messages?.length || 0) >= 30 && action !== "close")) {
+      if (
+        (ticket.status === "closed" && action !== "close") ||
+        ((ticket.messages?.length || 0) >= 30 && action !== "close")
+      ) {
         await client.query("ROLLBACK");
-        return res.status(409).json({error:"Caso cerrado o límite de seguimiento alcanzado"});
+        return res
+          .status(409)
+          .json({ error: "Caso cerrado o límite de seguimiento alcanzado" });
       }
       if (ticket.status === "queued" || ticket.status === "investigating") {
         await client.query("ROLLBACK");
@@ -278,10 +284,14 @@ export async function createService(
             ? "needs_info"
             : "proposal_ready";
           ticket.lastError = null;
-        } catch {
+        } catch (error) {
+          const failure = diagnosisFailure(error);
+          console.warn("Investigación del asistente fallida", {
+            caseId: ticket.id,
+            code: failure.code,
+          });
           ticket.status = "failed";
-          ticket.lastError =
-            "No se pudo completar el diagnóstico. Revisá la configuración o solicitá otro intento.";
+          ticket.lastError = failure.message;
         }
         ticket.updatedAt = new Date().toISOString();
         const saved = await pool.query(
