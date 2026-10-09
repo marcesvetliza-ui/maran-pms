@@ -46,6 +46,91 @@ describe("read-only code investigator", () => {
       source.validates({ path: "server/normal.ts", start: 6, end: 6 }),
     ).toBe(false);
   });
+  it("requests strict output and accepts a diagnosis based on read lines", async () => {
+    const source = await fixture();
+    await writeFile(
+      path.join(directory, "server", "normal.ts"),
+      "export const cost=10;",
+    );
+    const ticket = { version: source.version } as SupportTicket;
+    let round = 0;
+    const client = {
+      chat: {
+        completions: {
+          create: async (request: any) => {
+            expect(request.response_format.type).toBe("json_schema");
+            expect(request.response_format.json_schema.strict).toBe(true);
+            expect(
+              request.response_format.json_schema.schema.required,
+            ).toContain("dataRepair");
+            if (round++ === 0)
+              return {
+                choices: [
+                  {
+                    message: {
+                      role: "assistant",
+                      content: null,
+                      tool_calls: [
+                        {
+                          id: "read1",
+                          type: "function",
+                          function: {
+                            name: "read_code",
+                            arguments: JSON.stringify({
+                              path: "server/normal.ts",
+                              start: 1,
+                              end: 1,
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              };
+            return {
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: {
+                    content: JSON.stringify({
+                      summary: "Costo conservado",
+                      certainty: "sustentado_en_codigo",
+                      cause: "Costo fijo",
+                      proposal: "Revisar el flujo",
+                      proposedTests: ["Comprobar una compra"],
+                      questions: [],
+                      dataRepair: "",
+                      limitations: [],
+                      evidence: [
+                        {
+                          path: "server/normal.ts",
+                          start: 1,
+                          end: 1,
+                          explanation: "Valor leído",
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            };
+          },
+        },
+      },
+    };
+    const result = await diagnose(
+      ticket,
+      source,
+      { apiKey: "not-used", model: "mock" },
+      client as any,
+    );
+    expect(result.report.certainty).toBe("sustentado_en_codigo");
+    expect(result.calls).toBe(1);
+    expect(result.report.limitations.join(" ")).toContain(
+      "no se ejecutaron pruebas",
+    );
+  });
   it("rejects a diagnosis citing unread source", async () => {
     const source = await fixture();
     await writeFile(path.join(directory, "server", "normal.ts"), "one");
