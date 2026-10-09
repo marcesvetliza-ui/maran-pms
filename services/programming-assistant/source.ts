@@ -93,29 +93,62 @@ export class CodeSource {
     this.readRanges.set(rel, list);
     return { path: rel, start, end, content: selected.join("\n") };
   }
-  async search(term: string, prefix = "") {
-    if (term.trim().length < 3 || term.length > 120)
-      throw new Error("Búsqueda entre 3 y 120 caracteres.");
+  async findFiles(term: string, prefix = "") {
+    if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
+      throw new Error("Nombre entre 3 y 120 caracteres.");
+    const needle = term.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!needle) throw new Error("Nombre inválido.");
     const files = (await this.files()).filter(
-      (p) => !prefix || p.startsWith(prefix),
+      (p) =>
+        (!prefix || p.startsWith(prefix)) &&
+        p
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .includes(needle),
     );
+    return { files: files.slice(0, 60), limited: files.length > 60 };
+  }
+  async search(term: string, prefix = "") {
+    if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
+      throw new Error("Búsqueda entre 3 y 120 caracteres.");
+    const priority = (p: string) =>
+      p.startsWith("shared/") ||
+      (p.startsWith("server/") && !p.includes("/tests/"))
+        ? 0
+        : p.startsWith("client/src/") && !p.includes(".test.")
+          ? 1
+          : p.startsWith("docs/")
+            ? 3
+            : 2;
+    const files = (await this.files())
+      .filter((p) => !prefix || p.startsWith(prefix))
+      .sort((a, b) => priority(a) - priority(b) || a.localeCompare(b));
     const matches: Array<{ path: string; line: number; snippet: string }> = [];
+    let limited = false;
     for (const f of files) {
       const lines = (await this.content(f)).split("\n");
+      let fileMatches = 0;
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].toLowerCase().includes(term.toLowerCase())) {
+          if (fileMatches++ >= 4) {
+            limited = true;
+            continue;
+          }
           matches.push({
             path: f,
             line: i + 1,
             snippet: lines[i].trim().slice(0, 240),
           });
-          if (matches.length >= 30) break;
+          if (matches.length >= 30) {
+            limited = true;
+            break;
+          }
         }
       }
       if (matches.length >= 30) break;
     }
     this.searches.push(term);
-    return { matches, limited: matches.length >= 30 };
+    return { matches, limited };
   }
   validates(ref: { path: string; start: number; end: number }) {
     return (
