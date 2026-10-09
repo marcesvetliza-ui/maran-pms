@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {confirmHousekeepingMove} from "./confirm-housekeeping-move";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
@@ -80,7 +81,7 @@ export async function apiRequestWithGroupInventoryWarning(
     if (rows.length > 0) {
       const groups = [...new Set(rows.map(row => row.groupName || row.groupId))].join(", ");
       const dates = [...new Set(rows.map(row => row.date))].sort();
-      const dateText = dates.length === 1 ? dates[0] : `${dates[0]} a ${dates[dates.length - 1]}`;
+      const dateText = dates.length === 1 ? formatDisplayDate(dates[0]) : `${formatDisplayDate(dates[0])} a ${formatDisplayDate(dates[dates.length - 1])}`;
       message = [
         "Esta operación consume disponibilidad comprometida para un grupo tentativo.",
         groups ? `Grupo(s): ${groups}.` : "",
@@ -94,7 +95,7 @@ export async function apiRequestWithGroupInventoryWarning(
       const w = payload.warning as any;
       const roomTypeLabel = w?.roomTypeName || w?.roomTypeId;
       message = [
-        `La categoría${roomTypeLabel ? ` "${roomTypeLabel}"` : ""} ya está al límite de su inventario operativo${w?.date ? ` para el ${w.date}` : ""}.`,
+        `La categoría${roomTypeLabel ? ` "${roomTypeLabel}"` : ""} ya está al límite de su inventario operativo${w?.date ? ` para el ${formatDisplayDate(w.date)}` : ""}.`,
         (w?.hardDemand !== undefined && w?.operationalInventory !== undefined)
           ? `Demanda: ${w.hardDemand} / Habitaciones operativas: ${w.operationalInventory}.`
           : "",
@@ -142,7 +143,7 @@ export function parseApiError(err: unknown): string {
         if (parsed.code === "GROUP_BLOCK_SHORTAGE" && parsed.warning) {
           const warning = parsed.warning;
           const details = [
-            warning.date ? `Fecha: ${warning.date}.` : "",
+            warning.date ? `Fecha: ${formatDisplayDate(warning.date)}.` : "",
             warning.roomTypeName || warning.roomTypeId
               ? `Tipo: ${warning.roomTypeName || warning.roomTypeId}.`
               : "",

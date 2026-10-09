@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -128,7 +129,7 @@ function GuestCard({ item, testPrefix }: { item: any; testPrefix: string }) {
             {(item.reservation as any)?.room?.roomNumber && (
               <span className="font-mono font-medium">Hab. {(item.reservation as any).room.roomNumber} · </span>
             )}
-            {item.checkInDate}
+            {formatDisplayDate(item.checkInDate)}
           </p>
           <div className="flex flex-wrap gap-1 mt-1">
             {item.preferences?.slice(0, 4).map((p: GuestPreference) => (
@@ -267,7 +268,7 @@ function DashboardTab() {
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-sm">{item.guest?.lastName} {item.guest?.firstName}</p>
                       <SegmentBadge segment={item.guest?.segment} />
-                      <Badge variant="outline" className="text-xs">{item.reservation?.status === "checked_in" ? "In-house" : `Llega ${item.reservation?.checkInDate}`}</Badge>
+                      <Badge variant="outline" className="text-xs">{item.reservation?.status === "checked_in" ? "In-house" : `Llega ${formatDisplayDate(item.reservation?.checkInDate)}`}</Badge>
                     </div>
                     {item.specialDates?.map((p: GuestPreference) => (
                       <p key={p.id} className="text-xs text-yellow-700 dark:text-yellow-300">{p.title}: {p.description}</p>
@@ -1197,7 +1198,7 @@ function HistoryTab() {
                               <div className="flex items-center gap-2 text-sm">
                                 <span className="font-medium">Hab. {(r as any).room?.roomNumber || r.roomId}</span>
                                 <span className="text-muted-foreground">·</span>
-                                <span>{r.checkInDate} → {r.checkOutDate}</span>
+                                <span>{formatDisplayDate(r.checkInDate)} → {formatDisplayDate(r.checkOutDate)}</span>
                               </div>
                               <Badge variant="outline" className="text-xs">
                                 {statusLabels[r.status] || r.status}

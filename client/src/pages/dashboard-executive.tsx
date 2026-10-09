@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useMemo } from "react";
 import { getArgentinaToday, toArgentinaDateStr, getArgentinaFirstOfMonth } from "@/lib/date-utils";
 import { useQuery } from "@tanstack/react-query";
@@ -403,10 +404,7 @@ export default function DashboardExecutive() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
-                  tickFormatter={(val: string) => {
-                    const d = new Date(val);
-                    return `${d.getDate()}/${d.getMonth() + 1}`;
-                  }}
+                  tickFormatter={(val: string) => formatDisplayDate(val).slice(0, 5)}
                   fontSize={12}
                 />
                 <YAxis
@@ -416,10 +414,7 @@ export default function DashboardExecutive() {
                 />
                 <Tooltip
                   formatter={(value: number) => [`${value.toFixed(1)}%`, "Ocupación"]}
-                  labelFormatter={(label: string) => {
-                    const d = new Date(label);
-                    return d.toLocaleDateString("es-AR");
-                  }}
+                  labelFormatter={formatDisplayDate}
                 />
                 <Line
                   type="monotone"

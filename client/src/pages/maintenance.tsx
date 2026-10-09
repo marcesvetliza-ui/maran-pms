@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -2193,7 +2194,7 @@ export default function MaintenancePage() {
               <div key={c.id} className="px-3 py-2">
                 <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                  Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                 </p>
               </div>
             ))}
@@ -2239,7 +2240,7 @@ export default function MaintenancePage() {
                 <p className="font-medium text-sm">Hab. {room.roomNumber}</p>
                 {conflicts.map((c) => (
                   <p key={c.id} className="text-xs text-muted-foreground">
-                    {c.guestName || "Sin nombre"} · Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                    {c.guestName || "Sin nombre"} · Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                   </p>
                 ))}
               </div>

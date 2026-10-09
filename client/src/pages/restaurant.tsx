@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useCallback, useRef, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
@@ -456,7 +457,7 @@ function AdvanceDialog({
           </DialogTitle>
           {reservation && (
             <p className="text-sm text-muted-foreground">
-              {reservation.guestName} — {reservation.reservationDate} {reservation.reservationTime}
+              {reservation.guestName} — {formatDisplayDate(reservation.reservationDate)} {reservation.reservationTime}
               {reservation.partySize > 1 ? ` (${reservation.partySize}p)` : ""}
             </p>
           )}
@@ -522,7 +523,7 @@ function AdvanceDialog({
                         <hr class="sep">
                         <div class="row"><span class="label">Reserva a nombre de:</span></div>
                         <div class="row"><span class="val">${reservation.guestName}</span></div>
-                        <div class="row"><span class="label">Fecha reserva:</span><span class="val">${reservation.reservationDate} ${reservation.reservationTime}</span></div>
+                        <div class="row"><span class="label">Fecha reserva:</span><span class="val">${formatDisplayDate(reservation.reservationDate)} ${reservation.reservationTime}</span></div>
                         <div class="row"><span class="label">Cubiertos:</span><span class="val">${reservation.partySize}</span></div>
                         <hr class="sep">
                         <div class="row"><span class="label">Fecha pago:</span><span class="val">${fecha}</span></div>
@@ -3234,7 +3235,7 @@ export default function RestaurantPage() {
                   if (w) {
                     const [y,m,d] = date.split("-").map(Number);
                     const dateStr = format(new Date(y,m-1,d), "EEEE d/MM/yyyy", { locale: es });
-                    w.document.write(`<html><head><title>Reservas ${date}</title><style>body{font-family:monospace;padding:20px}h1{font-size:16px}pre{white-space:pre;line-height:1.8}</style></head><body><h1>Reservas del día — ${dateStr}</h1><pre>${lines || "Sin reservas"}</pre></body></html>`);
+                    w.document.write(`<html><head><title>Reservas ${formatDisplayDate(date)}</title><style>body{font-family:monospace;padding:20px}h1{font-size:16px}pre{white-space:pre;line-height:1.8}</style></head><body><h1>Reservas del día — ${dateStr}</h1><pre>${lines || "Sin reservas"}</pre></body></html>`);
                     w.document.close();
                     w.print();
                   }
@@ -3270,7 +3271,7 @@ export default function RestaurantPage() {
                   }).join("");
                   const w = window.open("", "_blank", "width=900,height=750");
                   if (w) {
-                    w.document.write(`<!DOCTYPE html><html><head><title>Reservas ${date}</title>
+                    w.document.write(`<!DOCTYPE html><html><head><title>Reservas ${formatDisplayDate(date)}</title>
                     <style>
                       body{font-family:Arial,sans-serif;padding:30px;color:#111;font-size:13px}
                       h1{font-size:20px;margin:0 0 4px}p.sub{color:#666;font-size:13px;margin:0 0 20px}
@@ -3393,7 +3394,7 @@ export default function RestaurantPage() {
                 <CalendarDays className="h-10 w-10 text-muted-foreground mb-3" />
                 <h3 className="font-semibold mb-1">Sin reservas</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  {reservationViewMode === "day" ? `No hay reservas para ${reservationDateFilter === todayForFilter ? "hoy" : reservationDateFilter}` : "No hay reservas que coincidan con los filtros"}
+                  {reservationViewMode === "day" ? `No hay reservas para ${reservationDateFilter === todayForFilter ? "hoy" : formatDisplayDate(reservationDateFilter)}` : "No hay reservas que coincidan con los filtros"}
                 </p>
                 <Button size="sm" onClick={() => setIsReservationDialogOpen(true)} data-testid="button-add-first-reservation">
                   <Plus className="h-4 w-4 mr-2" />

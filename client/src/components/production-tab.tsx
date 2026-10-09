@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {ProductionStock} from "./production-stock";
 import {ProductionPreparationEditor} from "./production-preparation-editor";
 import { useState } from "react";
@@ -307,7 +308,7 @@ function HistoryTab() {
       <TableBody>
         {history.map(run => (
           <TableRow key={run.id} data-testid={`production-run-row-${run.id}`}>
-            <TableCell>{run.date}</TableCell>
+            <TableCell>{formatDisplayDate(run.date)}</TableCell>
             <TableCell>{run.recipeName}</TableCell>
             <TableCell>{run.outputItemName}</TableCell>
             <TableCell className="text-right">{run.outputQuantity.toLocaleString("es-AR")} {run.outputUnit}</TableCell>

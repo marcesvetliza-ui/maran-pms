@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { ArcaCredentialDiagnosticPanel } from "@/components/arca-credential-diagnostic";
@@ -66,9 +67,7 @@ function redistributeNonRetentionRows(rows: any[], targetGross: number): any[] {
 }
 
 function fDate(d: string | undefined | null) {
-  if (!d) return "—";
-  const dt = new Date(d + "T12:00:00");
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
+  return formatDisplayDate(d);
 }
 
 function padNum(n: number | undefined, len: number) {
@@ -3691,7 +3690,7 @@ function DeleteNonFiscalSection() {
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       toast({
         title: data.deleted === 0 ? "Sin comprobantes para borrar" : `${data.deleted} comprobante(s) eliminado(s)`,
-        description: data.deleted > 0 ? `Período: ${startDate} → ${endDate}` : undefined,
+        description: data.deleted > 0 ? `Período: ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : undefined,
       });
     } catch (e: any) {
       toast({ title: "Error al borrar", description: parseApiError(e), variant: "destructive" });
@@ -3753,7 +3752,7 @@ function DeleteNonFiscalSection() {
           </DialogHeader>
           <p className="text-sm">
             Se eliminarán <strong>todos los comprobantes no fiscales</strong> (Tickets, Vouchers, Cierres) emitidos
-            entre el <strong>{startDate}</strong> y el <strong>{endDate}</strong>.
+            entre el <strong>{formatDisplayDate(startDate)}</strong> y el <strong>{formatDisplayDate(endDate)}</strong>.
           </p>
           <p className="text-sm text-destructive font-medium">Esta acción es irreversible.</p>
           <DialogFooter>

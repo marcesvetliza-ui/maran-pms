@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -662,7 +663,7 @@ function NightAuditTab() {
             {status?.lastAudit ? (
               <div>
                 <p className={`text-sm font-medium ${STATUS_COLOR_NA[status.lastAudit.status]}`}>
-                  {STATUS_LABEL_NA[status.lastAudit.status]} — {status.lastAudit.auditDate}
+                  {STATUS_LABEL_NA[status.lastAudit.status]} — {formatDisplayDate(status.lastAudit.auditDate)}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {formatHotelDateTime(status.lastAudit.executedAt)}
@@ -729,7 +730,7 @@ function NightAuditTab() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
               <CheckCircle className="h-4 w-4" />
-              Resultado — {lastResult.auditDate}
+              Resultado — {formatDisplayDate(lastResult.auditDate)}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -789,7 +790,7 @@ function NightAuditTab() {
               <TableBody>
                 {(history as any[]).map((audit) => (
                   <TableRow key={audit.id}>
-                    <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
+                    <TableCell className="font-mono text-sm">{formatDisplayDate(audit.auditDate)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatHotelDateTime(audit.executedAt)}
                       {audit.isManual && <Badge variant="outline" className="ml-1 text-[10px]">manual</Badge>}

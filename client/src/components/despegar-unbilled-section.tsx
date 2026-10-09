@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
@@ -66,8 +67,8 @@ export function DespegarUnbilledSection() {
                     <TableCell className="font-medium">{row.roomNumber}</TableCell>
                     <TableCell>{row.guestName}</TableCell>
                     <TableCell className="font-mono text-xs">{row.reservationCode ?? "—"}</TableCell>
-                    <TableCell>{row.checkInDate}</TableCell>
-                    <TableCell>{row.checkOutDate}</TableCell>
+                    <TableCell>{formatDisplayDate(row.checkInDate)}</TableCell>
+                    <TableCell>{formatDisplayDate(row.checkOutDate)}</TableCell>
                     <TableCell className="text-right">
                       {row.totalRoomAmount != null
                         ? `$${row.totalRoomAmount.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`

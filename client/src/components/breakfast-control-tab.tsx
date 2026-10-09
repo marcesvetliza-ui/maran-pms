@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -531,7 +532,7 @@ function MonthlyTab() {
                     <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">Sin días cargados en este mes</TableCell></TableRow>
                   ) : summary.days.map(d => (
                     <TableRow key={d.date} data-testid={`row-month-day-${d.date}`}>
-                      <TableCell>{d.date}</TableCell>
+                      <TableCell>{formatDisplayDate(d.date)}</TableCell>
                       <TableCell className="text-right">{d.pax}</TableCell>
                       <TableCell className="text-right">{fmtMoney(d.totalCost)}</TableCell>
                       <TableCell className="text-right">{fmtMoney(d.costPerPax)}</TableCell>

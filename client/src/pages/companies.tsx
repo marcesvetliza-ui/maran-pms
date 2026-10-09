@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -83,7 +84,7 @@ function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               {r.guest?.lastName} {r.guest?.firstName} · Hab. {r.room?.roomNumber}
               {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
             </p>
-            <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>
+            <p className="text-muted-foreground text-xs">{formatDisplayDate(r.checkInDate)} → {formatDisplayDate(r.checkOutDate)} ({r.nights}n)</p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -114,7 +115,7 @@ function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               <p className="text-xs font-semibold text-muted-foreground mb-1">Pagos</p>
               {activePayments.map(p => (
                 <div key={p.id} className="flex justify-between text-xs">
-                  <span>{payMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                  <span>{payMethodLabel[p.method || ""] || p.method} · {formatDisplayDate(p.date)}</span>
                   <span className="text-green-700 dark:text-green-400">${fmtMoney(p.amount)}</span>
                 </div>
               ))}
@@ -777,7 +778,7 @@ export default function CompaniesPage() {
                 <TableBody>
                   {accountData.movements.map((mov) => (
                     <TableRow key={mov.id} data-testid={`movement-row-${mov.id}`}>
-                      <TableCell className="text-sm">{mov.date}</TableCell>
+                      <TableCell className="text-sm">{formatDisplayDate(mov.date)}</TableCell>
                       <TableCell>
                         <div>
                           <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>

@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -2195,7 +2196,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
                         </div>
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground">Fecha de pago</div>
-                          <div className="font-medium">{op.fecha}</div>
+                          <div className="font-medium">{formatDisplayDate(op.fecha)}</div>
                         </div>
                       </div>
                     ))}
@@ -2428,7 +2429,7 @@ function PaymentOrderDialog({
                         {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {inv.fechaEmision}
+                        {formatDisplayDate(inv.fechaEmision)}
                         {inv.estado === "parcial" && ` · Total ${fmt(inv.montoTotal)}, ya pagado ${fmt($n(inv.montoTotal) - $n(inv.saldoPendiente))}`}
                       </div>
                     </div>
@@ -3027,7 +3028,7 @@ export default function PurchaseInvoices() {
                           <TableCell className="max-w-[160px] truncate" title={inv.supplierNombre || inv.proveedorNombre}>
                             {inv.supplierNombre || inv.proveedorNombre || "—"}
                           </TableCell>
-                          <TableCell>{inv.fechaEmision}</TableCell>
+                          <TableCell>{formatDisplayDate(inv.fechaEmision)}</TableCell>
                           <TableCell>{inv.periodo || "—"}</TableCell>
                           <TableCell className="text-right font-semibold">${fmt(inv.montoTotal)}</TableCell>
                           <TableCell>{estadoBadge(inv.estado)}</TableCell>

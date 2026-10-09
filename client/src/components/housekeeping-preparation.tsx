@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -213,7 +214,7 @@ export function HousekeepingPreparationControl({
                 <SelectContent>
                   {candidates.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
-                      {r.guest_name} · {r.check_in_date} · {r.reservation_code}
+                      {r.guest_name} · {formatDisplayDate(r.check_in_date)} · {r.reservation_code}
                     </SelectItem>
                   ))}
                 </SelectContent>

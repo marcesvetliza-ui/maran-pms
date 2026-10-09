@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "../../shared/date-display";
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
@@ -177,7 +178,7 @@ export function registerEventsRoutes(app: Express) {
             const room = await storage.getEventRoom(eventRoomId);
             return res.status(409).json({
               error: "Superposición de evento",
-              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${formatDisplayDate(existing.startDate)} al ${formatDisplayDate(existing.endDate)}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
             });
           }
         }
@@ -220,7 +221,7 @@ export function registerEventsRoutes(app: Express) {
             const room = await storage.getEventRoom(eventRoomId);
             return res.status(409).json({
               error: "Superposición de evento",
-              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${existing.startDate} al ${existing.endDate}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
+              message: `El salón '${room?.name || eventRoomId}' ya tiene el evento '${existing.name}' reservado del ${formatDisplayDate(existing.startDate)} al ${formatDisplayDate(existing.endDate)}${existing.startTime ? ` (${existing.startTime}–${existing.endTime})` : ""}.`,
             });
           }
         }
