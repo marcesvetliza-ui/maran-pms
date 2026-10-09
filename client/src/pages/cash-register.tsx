@@ -1,5 +1,5 @@
 import { informationalSummary } from "@/lib/cash-informational-summary";
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { DespegarUnbilledSection } from "@/components/despegar-unbilled-section";
 import { DESPEGAR_UNBILLED_QUERY_KEY } from "@shared/despegarUnbilled";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
@@ -2449,6 +2449,7 @@ const nightAuditText = (value: unknown, fallback = "—") => {
 };
 
 function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: boolean; onClose: () => void }) {
+  const [expandedExceptions, setExpandedExceptions] = useState<Record<string, boolean>>({});
   if (!audit) return null;
   const parsed = parseNightAuditDetail(audit.detail);
   const detail: any = parsed;
@@ -2514,12 +2515,35 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                 <span className="text-xs text-muted-foreground">{exceptionGroups.reduce((total, [, rows]) => total + rows.length, 0)} registros</span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {exceptionGroups.map(([label, rows]) => (
-                  <div key={label} className="rounded-md border bg-background p-3">
-                    <div className="flex items-center justify-between text-xs font-medium"><span>{label}</span><Badge variant="outline" className="text-[10px]">{rows.length}</Badge></div>
-                    <p className="mt-2 truncate text-[11px] text-muted-foreground">{rows.slice(0, 3).map((row: any) => [row.guestName, row.roomNumber && `Hab. ${row.roomNumber}`, row.companyName, row.agencyName, row.reservationCode ?? row.reservationId ?? row.name].filter(Boolean).join(" · ") || "Registro").join(" / ")}{rows.length > 3 ? ` +${rows.length - 3}` : ""}</p>
-                  </div>
-                ))}
+                {exceptionGroups.map(([label, rows]) => {
+                  const isOpen = !!expandedExceptions[label];
+                  const describe = (row: any) => [row.guestName, row.roomNumber && `Hab. ${row.roomNumber}`, row.companyName, row.agencyName, row.reservationCode ?? row.reservationId ?? row.name].filter(Boolean).join(" · ") || "Registro";
+                  return (
+                    <div key={label} className="rounded-md border bg-background p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-xs font-medium"
+                        onClick={() => setExpandedExceptions(s => ({ ...s, [label]: !s[label] }))}
+                        data-testid={`toggle-exception-${label}`}
+                      >
+                        <span className="flex items-center gap-1">
+                          {label}
+                          {isOpen ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+                        </span>
+                        <Badge variant="outline" className="text-[10px]">{rows.length}</Badge>
+                      </button>
+                      {isOpen ? (
+                        <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-muted-foreground">
+                          {rows.map((row: any, idx: number) => (
+                            <li key={idx} className="border-t pt-1 first:border-t-0 first:pt-0">{describe(row)}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 truncate text-[11px] text-muted-foreground">{rows.slice(0, 3).map(describe).join(" / ")}{rows.length > 3 ? ` +${rows.length - 3}` : ""}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -2658,6 +2682,10 @@ function NightAuditTab() {
   const [lastResult, setLastResult] = useState<any>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [selectedAudit, setSelectedAudit] = useState<any>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const monthStart = useMemo(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }, []);
+  const [historyFrom, setHistoryFrom] = useState(monthStart);
+  const [historyTo, setHistoryTo] = useState("");
 
   const { data: status, refetch: refetchStatus } = useQuery<any>({
     queryKey: ["/api/night-audit/status"],
@@ -2665,7 +2693,16 @@ function NightAuditTab() {
   });
 
   const { data: history = [], refetch: refetchHistory } = useQuery<any[]>({
-    queryKey: ["/api/night-audit/history"],
+    queryKey: ["/api/night-audit/history", historyFrom, historyTo],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: "400" });
+      if (historyFrom) params.set("from", historyFrom);
+      if (historyTo) params.set("to", historyTo);
+      const res = await fetch(`/api/night-audit/history?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("No se pudo cargar el historial");
+      return res.json();
+    },
+    enabled: historyOpen,
   });
 
   const runAudit = async (force = false) => {
@@ -2793,10 +2830,33 @@ function NightAuditTab() {
       )}
 
       <Card>
-        <CardHeader className="pb-3"><CardTitle className="text-sm">Historial de ejecuciones</CardTitle></CardHeader>
+        <CardHeader
+          className="pb-3 cursor-pointer select-none"
+          onClick={() => setHistoryOpen(open => !open)}
+          data-testid="toggle-night-audit-history"
+        >
+          <CardTitle className="text-sm flex items-center justify-between gap-2">
+            <span>Historial de ejecuciones</span>
+            {historyOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </CardTitle>
+        </CardHeader>
+        {historyOpen && (
         <CardContent className="p-0">
+          <div className="flex items-end gap-3 flex-wrap px-4 pb-4" onClick={e => e.stopPropagation()}>
+            <div className="space-y-1">
+              <Label className="text-xs">Desde</Label>
+              <Input type="date" value={historyFrom} onChange={e => setHistoryFrom(e.target.value)} className="w-40" data-testid="input-history-from" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Hasta</Label>
+              <Input type="date" value={historyTo} onChange={e => setHistoryTo(e.target.value)} className="w-40" placeholder="Hoy" data-testid="input-history-to" />
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { setHistoryFrom(monthStart); setHistoryTo(""); }} data-testid="button-history-reset-month">
+              Este mes
+            </Button>
+          </div>
           {(history as any[]).length === 0 ? (
-            <p className="text-sm text-muted-foreground p-4 text-center">Sin registros aún</p>
+            <p className="text-sm text-muted-foreground p-4 text-center">Sin registros en el rango seleccionado</p>
           ) : (
             <Table>
               <TableHeader>
@@ -2855,6 +2915,7 @@ function NightAuditTab() {
             </Table>
           )}
         </CardContent>
+        )}
       </Card>
 
       <NightAuditDetailDialog
