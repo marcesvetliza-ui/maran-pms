@@ -213,6 +213,8 @@ vi.mock("../db-storage", async () => {
 });
 
 vi.mock("../auth", () => ({
+  // Business-route fixture: permission enforcement is verified separately.
+  requirePermission: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 

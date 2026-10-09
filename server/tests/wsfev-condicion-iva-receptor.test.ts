@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { feCAESolicitar } from "../billing/wsfevClient";
 import { resolveCondicionIvaReceptorId } from "../billing/fiscalDocument";
 
@@ -9,9 +9,12 @@ import { resolveCondicionIvaReceptorId } from "../billing/fiscalDocument";
  * el tipo pero nunca lo volcaba en el request — faltaba el tag.
  */
 
+import {initAppEnv,resetAppEnvForTests} from "../app-env";
 const originalFetch = global.fetch;
+beforeEach(()=>initAppEnv({APP_ENV:"production",NODE_ENV:"production"}));
 
 afterEach(() => {
+  resetAppEnvForTests();
   global.fetch = originalFetch;
   vi.restoreAllMocks();
 });

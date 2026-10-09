@@ -209,6 +209,8 @@ function PermissionRoute({ component: Component, resourceKey }: { component: Rea
   return <Component />;
 }
 
+const ProgrammingSupportPage = lazy(() => import("@/pages/programming-support"));
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -277,6 +279,7 @@ function Router() {
         <Route path="/admin/spa-fiscal-review">
           {() => <PermissionRoute component={SpaFiscalReviewPage} resourceKey="sidebar:/admin/spa-fiscal-review" />}
         </Route>
+        <Route path="/programming-support">{() => <PermissionRoute component={ProgrammingSupportPage} resourceKey="sidebar:/seguridad" />}</Route>
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
         <Route path="/mozo" component={MozoPage} />

@@ -1,3 +1,6 @@
+vi.mock("dns", () => ({
+  default: { promises: { resolve4: vi.fn(async () => ["192.0.2.1"]) } },
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initAppEnv, resetAppEnvForTests } from "../app-env";
 
@@ -12,12 +15,21 @@ const state = vi.hoisted(() => ({
 // pueda ejecutarse sin una base real; lo que importa es demostrar que, en
 // ambientes bloqueados, ni siquiera se llega a leer la configuración SMTP.
 vi.mock("../db", () => ({
-  pool: { connect: vi.fn(async () => ({ query: vi.fn(async () => ({ rows: [] })), release: vi.fn() })) },
+  pool: {
+    connect: vi.fn(async () => ({
+      query: vi.fn(async () => ({ rows: [] })),
+      release: vi.fn(),
+    })),
+  },
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        limit: vi.fn(() => Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : [])),
-        where: vi.fn(() => Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : [])),
+        limit: vi.fn(() =>
+          Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : []),
+        ),
+        where: vi.fn(() =>
+          Promise.resolve(state.emailConfigRow ? [state.emailConfigRow] : []),
+        ),
       })),
     })),
     insert: vi.fn(() => ({
@@ -30,9 +42,13 @@ vi.mock("../db", () => ({
   },
 }));
 
-const nodemailerState = vi.hoisted(() => ({ sendMail: vi.fn(async () => ({})) }));
+const nodemailerState = vi.hoisted(() => ({
+  sendMail: vi.fn(async () => ({})),
+}));
 vi.mock("nodemailer", () => ({
-  default: { createTransport: vi.fn(() => ({ sendMail: nodemailerState.sendMail })) },
+  default: {
+    createTransport: vi.fn(() => ({ sendMail: nodemailerState.sendMail })),
+  },
 }));
 
 const { sendBackupByEmail } = await import("../backup");
@@ -67,9 +83,19 @@ describe("backup.ts — bloqueo por ambiente antes de leer config SMTP o generar
   it.each(["pilot", "development", "test"] as const)(
     "APP_ENV=%s bloquea antes de leer emailConfig y sin invocar SMTP",
     async (appEnv) => {
-      initAppEnv({ APP_ENV: appEnv, NODE_ENV: appEnv === "pilot" ? "production" : appEnv === "test" ? "test" : "development" });
+      initAppEnv({
+        APP_ENV: appEnv,
+        NODE_ENV:
+          appEnv === "pilot"
+            ? "production"
+            : appEnv === "test"
+              ? "test"
+              : "development",
+      });
 
-      await expect(sendBackupByEmail("destino@example.com", "scheduled")).rejects.toThrow(/bloqueado/i);
+      await expect(
+        sendBackupByEmail("destino@example.com", "scheduled"),
+      ).rejects.toThrow(/bloqueado/i);
 
       expect(db.select).not.toHaveBeenCalled();
       expect(nodemailer.createTransport).not.toHaveBeenCalled();

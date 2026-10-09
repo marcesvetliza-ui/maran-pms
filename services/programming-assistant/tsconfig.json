@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./*.ts", "../../shared/programming-support.ts"],
+  "exclude": ["../../node_modules"],
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/typescript/assistant.tsbuildinfo"
+  }
+}

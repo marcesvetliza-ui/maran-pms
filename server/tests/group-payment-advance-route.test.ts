@@ -30,6 +30,8 @@ vi.mock("../billing/groupInvoiceScope", () => ({
 }));
 vi.mock("../migrate", () => ({ assertFinancialSchemaReady: mocks.assertFinancialSchemaReady }));
 vi.mock("../auth", () => ({
+  // Business-route fixture: permission enforcement is verified separately.
+  requirePermission: () => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { username: "tester" };
     next();

@@ -25,6 +25,7 @@ const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
 import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { getAppEnv, isPilotEnv } from "./app-env";
 import { authorizePilotExternalRole } from "./pilot-external-role";
+import { registerProgrammingSupport } from "./routes/programming-support";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
@@ -389,6 +390,7 @@ export async function registerRoutes(
   // vivía en server/index.ts, antes de registerRoutes() — quedaba fuera
   // del alcance de authorizePilotExternalRole por completo.
   registerDebugAssetsApiRoute(app);
+  registerProgrammingSupport(app);
 
   // Etapa 1 del ABM de usuarios: el sidebar (y, a futuro, los guards de ruta)
   // consultan esto en vez de traer sus propios arrays de roles hardcodeados.
