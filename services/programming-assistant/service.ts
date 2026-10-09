@@ -179,7 +179,6 @@ export async function createService(
       if (action === "analyze") {
         if (
           !config.apiKey ||
-          ticket.version !== config.version ||
           req.headers["x-support-version"] !== config.version
         ) {
           await client.query("ROLLBACK");
@@ -198,6 +197,7 @@ export async function createService(
           });
         }
         ticket.version = config.version;
+        ticket.report = null;
         ticket.status = "queued";
         ticket.lastError = null;
       } else if (action === "close") ticket.status = "closed";

@@ -99,6 +99,8 @@ import { createService } from "../../services/programming-assistant/service";
             )
           ).status,
         ).toBe(409);
+        // Cases created before a deployment can be retried against the current revision.
+        await service.pool.query("UPDATE support_cases SET data=jsonb_set(data, '{version}', to_jsonb($2::text)) WHERE id=$1", [ticket.id, "c".repeat(40)]);
         const run = { requestId: randomUUID() };
         expect((await request(`/cases/${ticket.id}/analyze`, run)).status).toBe(
           200,
@@ -109,6 +111,7 @@ import { createService } from "../../services/programming-assistant/service";
         await service.tick();
         const updated = await (await request("/cases")).json();
         expect(updated[0].status).toBe("proposal_ready");
+        expect(updated[0].version).toBe(version);
         const count = await service.pool.query(
           "SELECT count(*)::int AS count FROM support_runs WHERE kind='analyze'",
         );
