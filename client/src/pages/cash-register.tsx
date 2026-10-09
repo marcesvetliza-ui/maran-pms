@@ -2449,6 +2449,7 @@ const nightAuditText = (value: unknown, fallback = "—") => {
 };
 
 function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: boolean; onClose: () => void }) {
+  const [expandedExceptions, setExpandedExceptions] = useState<Record<string, boolean>>({});
   if (!audit) return null;
   const parsed = parseNightAuditDetail(audit.detail);
   const detail: any = parsed;
@@ -2514,12 +2515,35 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                 <span className="text-xs text-muted-foreground">{exceptionGroups.reduce((total, [, rows]) => total + rows.length, 0)} registros</span>
               </div>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {exceptionGroups.map(([label, rows]) => (
-                  <div key={label} className="rounded-md border bg-background p-3">
-                    <div className="flex items-center justify-between text-xs font-medium"><span>{label}</span><Badge variant="outline" className="text-[10px]">{rows.length}</Badge></div>
-                    <p className="mt-2 truncate text-[11px] text-muted-foreground">{rows.slice(0, 3).map((row: any) => [row.guestName, row.roomNumber && `Hab. ${row.roomNumber}`, row.companyName, row.agencyName, row.reservationCode ?? row.reservationId ?? row.name].filter(Boolean).join(" · ") || "Registro").join(" / ")}{rows.length > 3 ? ` +${rows.length - 3}` : ""}</p>
-                  </div>
-                ))}
+                {exceptionGroups.map(([label, rows]) => {
+                  const isOpen = !!expandedExceptions[label];
+                  const describe = (row: any) => [row.guestName, row.roomNumber && `Hab. ${row.roomNumber}`, row.companyName, row.agencyName, row.reservationCode ?? row.reservationId ?? row.name].filter(Boolean).join(" · ") || "Registro";
+                  return (
+                    <div key={label} className="rounded-md border bg-background p-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-xs font-medium"
+                        onClick={() => setExpandedExceptions(s => ({ ...s, [label]: !s[label] }))}
+                        data-testid={`toggle-exception-${label}`}
+                      >
+                        <span className="flex items-center gap-1">
+                          {label}
+                          {isOpen ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+                        </span>
+                        <Badge variant="outline" className="text-[10px]">{rows.length}</Badge>
+                      </button>
+                      {isOpen ? (
+                        <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[11px] text-muted-foreground">
+                          {rows.map((row: any, idx: number) => (
+                            <li key={idx} className="border-t pt-1 first:border-t-0 first:pt-0">{describe(row)}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 truncate text-[11px] text-muted-foreground">{rows.slice(0, 3).map(describe).join(" / ")}{rows.length > 3 ? ` +${rows.length - 3}` : ""}</p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
