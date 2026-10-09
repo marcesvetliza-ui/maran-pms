@@ -4816,14 +4816,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   });
 
   await withTimeout("pilot external permissions compatibility", T, async () => {
-    const { PILOT_EXTERNAL_RESOURCE_KEYS } = await import("./permissions");
-    await db.execute(sql`WITH applied AS (
-      INSERT INTO resource_permission_seeds(resource_key)
-      VALUES('pilot-granular-permissions-20261009') ON CONFLICT DO NOTHING RETURNING resource_key
-    ) INSERT INTO role_permissions(role,resource_key)
-      SELECT 'piloto_externo', key FROM applied
-      CROSS JOIN unnest(${[...PILOT_EXTERNAL_RESOURCE_KEYS]}::text[]) AS resources(key)
-      ON CONFLICT DO NOTHING`);
+    const { seedPilotPermissionsOnce } = await import("./pilot-permissions");
+    await seedPilotPermissionsOnce(db);
   });
 
   // Marca (Bloque A del pedido de mejoras de Inventario), Clasificación ABC
