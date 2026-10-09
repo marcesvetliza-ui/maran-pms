@@ -131,6 +131,66 @@ describe("read-only code investigator", () => {
       "no se ejecutaron pruebas",
     );
   });
+  it("repairs an invalid citation within the same investigation without trusting unread lines", async () => {
+    const source = await fixture();
+    await writeFile(
+      path.join(directory, "server", "normal.ts"),
+      "const cost=10;",
+    );
+    await source.read("server/normal.ts", 1, 1);
+    let attempts = 0;
+    const client = {
+      chat: {
+        completions: {
+          create: async (request: any) => {
+            const correcting = attempts++ > 0;
+            if (correcting) {
+              const feedback = JSON.parse(request.messages.at(-1).content);
+              expect(feedback.allowedReadRanges).toEqual([
+                { path: "server/normal.ts", ranges: [[1, 1]] },
+              ]);
+              expect(feedback.invalidEvidence[0].end).toBe(2);
+            }
+            return {
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: JSON.stringify({
+                      summary: "Resumen",
+                      certainty: "sustentado_en_codigo",
+                      cause: "Causa",
+                      proposal: "Propuesta",
+                      proposedTests: [],
+                      questions: [],
+                      dataRepair: "",
+                      limitations: [],
+                      evidence: [
+                        {
+                          path: "server/normal.ts",
+                          start: 1,
+                          end: correcting ? 1 : 2,
+                          explanation: "Costo",
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            };
+          },
+        },
+      },
+    };
+    const result = await diagnose(
+      { version: source.version } as SupportTicket,
+      source,
+      { apiKey: "not-used", model: "mock" },
+      client as any,
+    );
+    expect(attempts).toBe(2);
+    expect(result.report.evidence[0].end).toBe(1);
+  });
   it("rejects a diagnosis citing unread source", async () => {
     const source = await fixture();
     await writeFile(path.join(directory, "server", "normal.ts"), "one");

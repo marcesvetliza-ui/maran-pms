@@ -106,14 +106,15 @@ export async function diagnose(
   ];
   const timeout = AbortSignal.timeout(options.timeoutMs || 180000);
   let tokens = 0,
-    calls = 0;
-  for (let round = 0; round < 7; round++) {
+    calls = 0,
+    evidenceCorrections = 0;
+  for (let round = 0; round < 9; round++) {
     const response = await ai.chat.completions.create(
       {
         model: options.model,
         messages,
         tools,
-        tool_choice: round === 6 ? "none" : "auto",
+        tool_choice: round >= 6 ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -137,17 +138,32 @@ export async function diagnose(
     if (!answer) throw new Error("Respuesta vacía del modelo.");
     if (!answer.tool_calls?.length) {
       const report = diagnosisSchema.parse(JSON.parse(answer.content || "{}"));
-      if (report.evidence.some((ref) => !source.validates(ref)))
-        throw new Error(
-          "El diagnóstico cita líneas que no fueron consultadas. Requiere una nueva investigación.",
-        );
-      if (
-        report.certainty === "sustentado_en_codigo" &&
-        !report.evidence.length
-      )
-        throw new Error(
-          "No hay evidencia de código para sostener el diagnóstico.",
-        );
+      const invalidEvidence = report.evidence.filter(
+        (ref) => !source.validates(ref),
+      );
+      const missingEvidence =
+        report.certainty === "sustentado_en_codigo" && !report.evidence.length;
+      if (invalidEvidence.length || missingEvidence) {
+        if (evidenceCorrections++ >= 2 || round === 8)
+          throw new Error(
+            "El diagnóstico cita líneas que no fueron consultadas o carece de evidencia verificable.",
+          );
+        messages.push(answer);
+        messages.push({
+          role: "user",
+          content: JSON.stringify({
+            validationError:
+              "Las referencias deben estar completamente contenidas en rangos devueltos por read_code. search_code solo localiza archivos; sus resultados no habilitan citas. Corregí el diagnóstico usando exclusivamente líneas realmente leídas. Si no alcanzan para sostener la conclusión, indicá falta_informacion, pedí la información necesaria y no afirmes una causa confirmada.",
+            invalidEvidence,
+            missingEvidence,
+            allowedReadRanges: [...source.readRanges].map(([path, ranges]) => ({
+              path,
+              ranges,
+            })),
+          }),
+        });
+        continue;
+      }
       report.limitations = [
         ...new Set([
           ...report.limitations,
