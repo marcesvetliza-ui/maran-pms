@@ -1267,7 +1267,7 @@ export function InvoiceDialog({
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter((w: any) => w.id && String(w.is_active ?? w.isActive) === "true").map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -1973,7 +1973,7 @@ export function InvoiceDialog({
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter((w: any) => w.id && String(w.is_active ?? w.isActive) === "true").map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>

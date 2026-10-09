@@ -36,8 +36,9 @@ const EXISTING_ITEMS = [
   { id: "item-3", name: "Artículo Sin IVA Cargado", currentStock: "0", unit: "unidad" },
 ];
 const WAREHOUSES = [
-  { id: "wh-cocina", name: "Depósito Cocina", isActive: "true" },
-  { id: "wh-general", name: "Depósito General", isActive: "true" },
+  { id: "wh-cocina", name: "Depósito Cocina", is_active: "true" },
+  { id: "wh-general", name: "Depósito General", is_active: "true" },
+  { id: "wh-inactive", name: "Depósito Inactivo", is_active: "false" },
 ];
 
 function buildFetchMock() {
@@ -140,6 +141,7 @@ describe("InvoiceDialog — sugerencia de IVA por artículo y depósito por defe
     await screen.findByText("Depósito General");
 
     await user.click(screen.getByTestId("select-inv-warehouse-0"));
+    expect(screen.queryByRole("option", { name: "Depósito Inactivo" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("option", { name: "Depósito Cocina" }));
     expect(screen.getByTestId("select-inv-warehouse-0")).toHaveTextContent("Depósito Cocina");
   });
