@@ -25,7 +25,11 @@ function setup(queryFn: () => Promise<typeof reservation[]>) {
   });
   return {
     client,
-    mount: () => render(<QueryClientProvider client={client}><DespegarUnbilledSection /></QueryClientProvider>),
+    mount: () => {
+      const utils = render(<QueryClientProvider client={client}><DespegarUnbilledSection /></QueryClientProvider>);
+      fireEvent.click(screen.getByTestId("toggle-despegar-unbilled"));
+      return utils;
+    },
   };
 }
 
