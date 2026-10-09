@@ -4961,8 +4961,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)
   );
 
-  await db.execute(sql`ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS special_details jsonb`);
-  await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS housekeeping_preparation jsonb`);
+  await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN special_details jsonb`)));
+  await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN housekeeping_preparation jsonb`)));
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

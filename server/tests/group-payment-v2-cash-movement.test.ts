@@ -19,6 +19,7 @@ vi.mock("../migrate", () => ({
   assertFinancialSchemaReady: vi.fn(),
 }));
 vi.mock("../auth", () => ({
+  requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { username: "tester" };
     next();

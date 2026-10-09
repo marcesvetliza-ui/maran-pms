@@ -244,6 +244,22 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     });
   });
 
+  it.each([
+    ["purchase_invoices", "special_details"],
+    ["reservations", "housekeeping_preparation"],
+  ])("preserves %s.%s JSON data when its migration runs again", async (table, column) => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, column, async () => {
+      await client.query(`CREATE TABLE ${table} (id integer PRIMARY KEY)`);
+      const ddl = incrementalDdlWithoutRerunNotice(`ALTER TABLE ${table} ADD COLUMN ${column} jsonb`);
+      await client.query(ddl);
+      await client.query(`INSERT INTO ${table} (id, ${column}) VALUES (1, $1::jsonb)`, [JSON.stringify({ preserved: true })]);
+      await expectSilentSecondRun(client, ddl);
+      const result = await client.query(`SELECT ${column} AS value FROM ${table} WHERE id = 1`);
+      expect(result.rows).toEqual([{ value: { preserved: true } }]);
+    });
+  });
+
   it("silences multi-column incremental additions without skipping missing columns", async () => {
     if (!client) throw new Error("DATABASE_URL no está configurado");
     await inIsolatedSchema(client, "multi_column", async () => {

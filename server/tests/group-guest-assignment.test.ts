@@ -45,6 +45,7 @@ vi.mock("../db-storage", () => ({
 }));
 
 vi.mock("../auth", () => ({
+  requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
 
