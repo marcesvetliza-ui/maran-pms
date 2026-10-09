@@ -268,6 +268,7 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       "api:admin:countries-list", "api:account-movements:void", "api:admin:audit-logs",
       "api:cash:configs-write", "api:cash:payment-links-audit",
       "api:cash:repair-movements", "api:cash:force-anular",
+      "api:inventory:valor-total",
     ];
     for (const key of adminManagerKeys) {
       expect(API_RESOURCE_PERMISSIONS[key].slice().sort(), key).toEqual(["admin", "manager"].sort());

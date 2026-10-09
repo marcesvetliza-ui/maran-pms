@@ -223,6 +223,9 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:inventory:operate": ["admin", "manager", "resp_deposito", "resp_administracion", "restaurant"],
   "api:inventory:adjust": ["admin", "manager", "resp_deposito", "resp_administracion"],
   "api:inventory:cost": ["admin", "manager", "resp_deposito", "resp_administracion"],
+  // Valor Total agregado (dashboard + por depósito): más sensible que ver el
+  // costo de un artículo puntual, se restringe a admin/gerencia nada más.
+  "api:inventory:valor-total": ["admin", "manager"],
   "api:inventory:write": ["admin", "manager", "restaurant", "resp_deposito", "resp_administracion"],
 
   // server/reports/routes.ts — un resourceKey por informe (antes FINANCE_ROLES
@@ -397,6 +400,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:inventory:operate": {label: "Operar stock y elaboraciones", section: "API — Inventario"},
   "api:inventory:adjust": {label: "Ajustar, anular y cerrar conteos", section: "API — Inventario"},
   "api:inventory:cost": {label: "Consultar y modificar costos", section: "API — Inventario"},
+  "api:inventory:valor-total": {label: "Ver Valor Total agregado (dashboard y por depósito)", section: "API — Inventario"},
   "api:inventory:write": { label: "Permiso anterior (reemplazado por permisos específicos)", section: "API — Inventario" },
 
   "api:reports:estado-resultados": { label: "Estado de Resultados", section: "API — Reportes" },
