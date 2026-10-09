@@ -4097,9 +4097,16 @@ export async function registerRoutes(
   app.get("/api/night-audit/history", requireAuth, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string || "30");
+      const from = typeof req.query.from === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : undefined;
+      const to = typeof req.query.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : undefined;
+      const conditions = [
+        ...(from ? [gte(nightAuditLogs.auditDate, from)] : []),
+        ...(to ? [lte(nightAuditLogs.auditDate, to)] : []),
+      ];
       const history = await db
         .select()
         .from(nightAuditLogs)
+        .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(desc(nightAuditLogs.executedAt))
         .limit(limit);
       res.json(history);
