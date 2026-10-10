@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
@@ -2864,7 +2865,7 @@ export default function Housekeeping() {
               <div key={c.id} className="px-3 py-2">
                 <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                  Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                 </p>
               </div>
             ))}

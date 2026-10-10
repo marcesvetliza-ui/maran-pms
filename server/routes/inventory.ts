@@ -158,10 +158,19 @@ export function registerInventoryRoutes(app: Express) {
   app.post("/api/inventory/items", requireAuth, inventoryWritePermission, async(req,res)=>{
     try{
       const {warehouseId,...body}=req.body,quantity=stockUnits(body.currentStock ?? 0);
+      if (typeof body.name !== "string" || !body.name.trim() || typeof body.unit !== "string" || !body.unit.trim()) return res.status(400).json({error:"Indicá nombre y unidad del artículo"});
+      if (!['A','B','C'].includes(body.abcClass) || !['0','2.5','5','10.5','21','27'].includes(String(body.ivaRate))) return res.status(400).json({error:"Indicá clasificación ABC y alícuota de IVA válidas"});
+      if(body.maxStock != null && String(body.maxStock).trim() !== "" && (!Number.isFinite(Number(body.maxStock)) || Number(body.maxStock)<Number(body.minStock))) return res.status(400).json({error:"El stock máximo no puede ser menor que el mínimo"});
       if(quantity&&!warehouseId)return res.status(400).json({error:'El stock inicial necesita depósito de destino'});
+      if(!body.categoryId || body.minStock == null || body.criticalStock == null) return res.status(400).json({error:"Indicá subagrupamiento, stock mínimo y crítico"});
+      for (const field of ["minStock","criticalStock"]) if (String(body[field]).trim() === "" || !Number.isFinite(Number(body[field])) || Number(body[field]) < 0) return res.status(400).json({error:"Los límites de stock deben ser números no negativos"});
+      if(Number(body.criticalStock)>Number(body.minStock)) return res.status(400).json({error:"El stock crítico no puede superar el mínimo"});
+      if (["materia_prima","venta_directa"].includes(body.itemKind || "venta_directa") && (!Array.isArray(body.accountingSupplierIds) || !body.accountingSupplierIds.length)) return res.status(400).json({error:"Asociá al menos un proveedor para un artículo comprado"});
       const item=await withDatabaseTransaction(async()=>{
         if(quantity){const wh=await db.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${warehouseId} AND is_active='true' FOR SHARE`);if(!wh.rows.length)throw Object.assign(new Error('Depósito inexistente o inactivo'),{statusCode:400});}
         await catalogLock(); await validateItemClassification(body);
+        const classification=await db.execute(sql`SELECT parent_id FROM item_categories WHERE id=${body.categoryId} FOR SHARE`);
+        if(!classification.rows[0]?.parent_id) throw Object.assign(new Error("El subagrupamiento debe pertenecer a un agrupamiento; completá esa clasificación antes del alta"),{statusCode:400});
         const created=await storage.createInventoryItem({...body,currentStock:(quantity/1000).toFixed(3)});
         if(quantity){await db.execute(sql`INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock,updated_at) VALUES(${warehouseId},${created.id},${quantity/1000},now())`);
           await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,created_at,created_by,warehouse_id) VALUES(${created.id},'entrada',${quantity/1000},0,${quantity/1000},'Stock inicial','manual',now(),${req.user?.id || null},${warehouseId})`);
@@ -190,6 +199,21 @@ export function registerInventoryRoutes(app: Express) {
       const status = error?.statusCode || (error?.message?.includes("proveedor") ? 400 : 500);
       res.status(status).json({ error: status < 500 ? error.message : "Error updating inventory item" });
     }
+  });
+
+  app.patch("/api/inventory/items/:id/purchasing", requireAuth, inventoryWritePermission, async (req,res) => {
+    if (typeof req.body.purchaseEnabled !== "boolean") return res.status(400).json({error:"Estado de compras inválido"});
+    try {
+      const item = await withDatabaseTransaction(async()=>{
+        const row=await db.execute(sql`SELECT * FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
+        if(!row.rows.length) return null;
+        const updated=await storage.updateInventoryItem(req.params.id,{purchaseEnabled:req.body.purchaseEnabled});
+        await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},'update','inventory','inventory_item',${req.params.id},${req.body.purchaseEnabled ? 'Compras habilitadas' : 'Artículo discontinuado para compras'},${JSON.stringify({before:row.rows[0],after:updated})},now())`);
+        return updated;
+      });
+      if(!item) return res.status(404).json({error:"Artículo no encontrado"});
+      res.json(item);
+    } catch(e:any) {res.status(e.statusCode||500).json({error:e.message});}
   });
 
   app.delete("/api/inventory/items/:id", requireAuth, inventoryWritePermission, (_req,res) => {

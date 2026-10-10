@@ -1,6 +1,7 @@
+import {breakfastEligibility} from "./stayEligibility";
 import { and, eq, gte, lte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { db } from "./db";
+import { db, withDatabaseTransaction } from "./db";
 import {
   breakfastCatalogItems, breakfastDays, breakfastEntries,
   inventoryItems, recipes,
@@ -71,23 +72,37 @@ export async function createBreakfastCatalogItem(data: {
   if (data.itemSourceType === "elaboracion" && !data.recipeId) {
     throw new Error("Falta la elaboración base");
   }
-  const existing = await db.select().from(breakfastCatalogItems);
-  const maxSort = existing.reduce((max, r) => Math.max(max, r.sortOrder), -1);
-  const [created] = await db.insert(breakfastCatalogItems).values({
-    itemSourceType: data.itemSourceType,
-    inventoryItemId: data.itemSourceType === "inventario" ? data.inventoryItemId : null,
-    recipeId: data.itemSourceType === "elaboracion" ? data.recipeId : null,
-    sortOrder: maxSort + 1,
-    isActive: "true",
-  } as any).returning();
-  return created.id;
+  return withDatabaseTransaction(async () => {
+    await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+    if (data.recipeId) {
+      const active = await db.execute(sql`SELECT id FROM recipes WHERE id=${data.recipeId} AND is_active='true' FOR SHARE`);
+      if (!active.rows.length) throw Object.assign(new Error("La elaboración está inactiva o no existe"),{statusCode:409});
+    }
+    const existing = await db.select().from(breakfastCatalogItems);
+    const maxSort = existing.reduce((max, r) => Math.max(max, r.sortOrder), -1);
+    const [created] = await db.insert(breakfastCatalogItems).values({
+      itemSourceType: data.itemSourceType,
+      inventoryItemId: data.itemSourceType === "inventario" ? data.inventoryItemId : null,
+      recipeId: data.itemSourceType === "elaboracion" ? data.recipeId : null,
+      sortOrder: maxSort + 1,
+      isActive: "true",
+    } as any).returning();
+    return created.id;
+  });
 }
 
 export async function updateBreakfastCatalogItem(
   id: string,
   data: Partial<{ sortOrder: number; isActive: string }>,
 ): Promise<void> {
-  await db.update(breakfastCatalogItems).set(data as any).where(eq(breakfastCatalogItems.id, id));
+  await withDatabaseTransaction(async () => {
+    await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+    if (data.isActive === 'true') {
+      const inactive=await db.execute(sql`SELECT 1 FROM breakfast_catalog_items c JOIN recipes r ON r.id=c.recipe_id WHERE c.id=${id} AND r.is_active='false'`);
+      if(inactive.rows.length) throw Object.assign(new Error("Reactivá primero la elaboración"),{statusCode:409});
+    }
+    await db.update(breakfastCatalogItems).set(data as any).where(eq(breakfastCatalogItems.id, id));
+  });
 }
 
 export async function deleteBreakfastCatalogItem(id: string): Promise<void> {
@@ -105,9 +120,7 @@ export async function suggestedBreakfastPax(date: string): Promise<number> {
     SELECT COALESCE(SUM(r.number_of_guests), 0) AS pax
     FROM reservations r
     JOIN rooms rm ON rm.id = r.room_id
-    WHERE r.check_in_date < ${date}::date
-      AND r.check_out_date >= ${date}::date
-      AND r.status NOT IN ('cancelled', 'no_show')
+    WHERE ${breakfastEligibility(date)}
       AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
   `);
   return Number((result.rows[0] as any)?.pax ?? 0);
@@ -130,6 +143,7 @@ export type BreakfastDayView = {
   date: string;
   pax: number;
   paxIsSuggested: boolean;
+  forecastPax: number;
   notes: string | null;
   entries: BreakfastEntryView[];
 };
@@ -172,11 +186,13 @@ export async function getBreakfastDay(date: string): Promise<BreakfastDayView> {
     });
   }
 
-  const pax = dayRow?.pax ?? await suggestedBreakfastPax(date);
+  const forecastPax = await suggestedBreakfastPax(date);
+  const pax = dayRow?.pax ?? forecastPax;
   return {
     date,
     pax,
     paxIsSuggested: !dayRow,
+    forecastPax,
     notes: dayRow?.notes ?? null,
     entries,
   };

@@ -94,6 +94,7 @@ type Recipe = {
   id: string;
   menuItemId: string | null;   // null for elaboraciones base
   notes: string | null;
+  isActive?: string;
   // Elaboración fields
   isBase?: boolean;
   name?: string | null;
@@ -106,6 +107,14 @@ type Recipe = {
 
 export default function RecetasCostosPage() {
   const { toast } = useToast();
+  const [catalogState, setCatalogState] = useState("active");
+  const [baseSearch, setBaseSearch] = useState("");
+  const matchesState = (active?: string | null) => catalogState === "all" || (catalogState === "active" ? active !== "false" : active === "false");
+  const lifecycle = useMutation({
+    mutationFn: async ({kind,id,active}: {kind:"menu/items"|"menu/categories"|"recipes";id:string;active:boolean}) => apiRequest("PATCH", `/api/restaurant/${kind}/${id}`, {isActive:active ? "true" : "false", ...(kind === "menu/items" ? {isAvailable:active ? "true" : "false"} : {})}),
+    onSuccess: () => { for (const key of ["/api/restaurant/menu/items","/api/restaurant/menu/categories","/api/restaurant/recipes","/api/production/formulas","/api/inventory/items"]) queryClient.invalidateQueries({queryKey:[key]}); toast({title:"Estado actualizado; historial conservado"}); },
+    onError: (e:any) => toast({title:"No se pudo cambiar el estado",description:e.message,variant:"destructive"}),
+  });
 
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
   const [selectedRecipeItem, setSelectedRecipeItem] = useState<MenuItem | null>(null);
@@ -227,21 +236,9 @@ export default function RecetasCostosPage() {
     },
     onSuccess: (created: Recipe) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/recipes"] });
-      setSelectedBaseRecipe(created);
+      setSelectedBaseRecipe({ ...created, ingredients: created.ingredients ?? [] });
       setIsBaseRecipeDialogOpen(true);
       toast({ title: "Elaboración creada", description: "Ahora podés agregar sus ingredientes." });
-    },
-  });
-
-  const deleteBaseRecipeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/restaurant/recipes/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/recipes"] });
-      setSelectedBaseRecipe(null);
-      setIsBaseRecipeDialogOpen(false);
-      toast({ title: "Elaboración eliminada" });
     },
   });
 
@@ -321,23 +318,6 @@ export default function RecetasCostosPage() {
     },
   });
 
-  const deleteMenuItemMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/api/restaurant/menu/items/${id}`);
-      if (res.status === 204) return { deactivated: false };
-      return res.json();
-    },
-    onSuccess: (result: { deactivated?: boolean; message?: string }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/items"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      if (result?.deactivated) {
-        toast({ title: "No se pudo eliminar", description: result.message || "El plato tiene ventas registradas, se desactivó en su lugar." });
-      } else {
-        toast({ title: "Plato eliminado" });
-      }
-    },
-  });
-
   const createCategoryMutation = useMutation({
     mutationFn: async (data: CategoryFormValues) => {
       const res = await apiRequest("POST", "/api/restaurant/menu/categories", data);
@@ -365,16 +345,6 @@ export default function RecetasCostosPage() {
     },
   });
 
-  const deleteCategoryMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/restaurant/menu/categories/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/categories"] });
-      toast({ title: "Categoria eliminada" });
-    },
-  });
-
   const openMenuItemDialog = (item?: MenuItem) => {
     if (item) {
       setIsNewItemWizard(false);
@@ -394,7 +364,7 @@ export default function RecetasCostosPage() {
       setEditingMenuItem(null);
       menuItemForm.reset({
         name: "",
-        categoryId: menuCategories[0]?.id || "",
+        categoryId: menuCategories.find(c=>c.isActive !== "false")?.id || "",
         description: "",
         price: 0,
         preparationTime: 0,
@@ -429,7 +399,7 @@ export default function RecetasCostosPage() {
   // Elaboraciones base = recipes where isBase=true
   const baseRecipes = (recipes as Recipe[]).filter(r => r.isBase && !r.outputInventoryItemId);
   const producedRecipes = (recipes as Recipe[]).filter(r => r.isBase && !!r.outputInventoryItemId);
-  const ingredientRecipes = ingredientSourceType === "produccion" ? producedRecipes : baseRecipes;
+  const ingredientRecipes = (ingredientSourceType === "produccion" ? producedRecipes : baseRecipes).filter(r=>r.isActive !== "false");
   const ingredientUnit = (rec: Recipe) => rec.outputInventoryItemId ? inventoryItems.find(i=>i.id===rec.outputInventoryItemId)?.unit || rec.productionUnit || "g" : rec.productionUnit || "g";
 
   // Current elaboración (when editing via base recipe dialog)
@@ -480,7 +450,7 @@ export default function RecetasCostosPage() {
   const filteredItems = menuItems.filter((item) => {
     const matchSearch = !recipeSearch || item.name.toLowerCase().includes(recipeSearch.toLowerCase());
     const matchCat = recipeCategoryFilter === "all" || item.categoryId === recipeCategoryFilter;
-    return matchSearch && matchCat;
+    return matchSearch && matchCat && matchesState(item.isActive);
   });
 
   return (
@@ -495,8 +465,8 @@ export default function RecetasCostosPage() {
             Cargá platos, categorías y recetas para calcular costos y márgenes
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIsCategoryManagerOpen(true)} data-testid="button-manage-categories">
+        {activeTab === "platos" && <div className="flex items-center gap-2">
+          <Button disabled={activeTab !== "platos"} variant="outline" onClick={() => setIsCategoryManagerOpen(true)} data-testid="button-manage-categories">
             <UtensilsCrossed className="h-4 w-4 mr-2" />
             Categorías
           </Button>
@@ -507,7 +477,7 @@ export default function RecetasCostosPage() {
               setIsEditingBasicData(true);
               menuItemForm.reset({
                 name: "",
-                categoryId: menuCategories[0]?.id || "",
+                categoryId: menuCategories.find(c=>c.isActive !== "false")?.id || "",
                 description: "",
                 price: 0,
                 preparationTime: 0,
@@ -517,14 +487,16 @@ export default function RecetasCostosPage() {
               });
               setIsRecipeDialogOpen(true);
             }}
+            disabled={activeTab !== "platos" || createMenuItemMutation.isPending}
             data-testid="button-add-menu-item"
           >
             <Plus className="h-4 w-4 mr-2" />
             Agregar Plato
           </Button>
-        </div>
+        </div>}
       </div>
 
+      {["platos","elaboraciones"].includes(activeTab) && <div className="flex flex-wrap items-center gap-3"><Label>Estado del catálogo</Label><Select value={catalogState} onValueChange={setCatalogState}><SelectTrigger className="w-44" aria-label="Estado del catálogo"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent></Select></div>}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="platos" data-testid="tab-platos">
@@ -567,7 +539,7 @@ export default function RecetasCostosPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas las categorías</SelectItem>
-              {menuCategories.map((cat) => (
+              {menuCategories.filter(c=>c.isActive !== "false").map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
               ))}
             </SelectContent>
@@ -674,10 +646,12 @@ export default function RecetasCostosPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => deleteMenuItemMutation.mutate(item.id)}
+                            onClick={() => lifecycle.mutate({kind:"menu/items",id:item.id,active:item.isActive === "false"})}
+                            disabled={lifecycle.isPending}
+                            aria-label={`${item.isActive === "false" ? "Activar" : "Desactivar"} ${item.name}`}
                             data-testid={`button-delete-item-${item.id}`}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            {item.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                           </Button>
                         </div>
                       </TableCell>
@@ -718,10 +692,11 @@ export default function RecetasCostosPage() {
               data-testid="button-new-elaboracion-form"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Nueva Elaboración
+              Limpiar formulario
             </Button>
           </div>
 
+          <Input aria-label="Buscar elaboración" placeholder="Buscar elaboración por nombre…" value={baseSearch} onChange={e=>setBaseSearch(e.target.value)}/>
           {/* Inline create form */}
           <Card>
             <CardContent className="pt-5">
@@ -841,7 +816,7 @@ export default function RecetasCostosPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {baseRecipes.map((br) => {
+              {baseRecipes.filter(br=>matchesState(br.isActive) && (!baseSearch || (br.name || "").toLocaleLowerCase("es-AR").includes(baseSearch.toLocaleLowerCase("es-AR")))).map((br) => {
                 const totalCost = baseRecipeTotalCost(br);
                 const cpUnit = baseRecipeCostPerUnit(br);
                 const isOpen = currentBaseRecipe?.id === br.id && isBaseRecipeDialogOpen;
@@ -891,10 +866,12 @@ export default function RecetasCostosPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => deleteBaseRecipeMutation.mutate(br.id)}
+                            onClick={() => lifecycle.mutate({kind:"recipes",id:br.id,active:br.isActive === "false"})}
+                            disabled={lifecycle.isPending}
+                            aria-label={`${br.isActive === "false" ? "Activar" : "Desactivar"} ${br.name}`}
                             data-testid={`button-delete-base-recipe-${br.id}`}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            {br.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                           </Button>
                         </div>
                       </div>
@@ -1318,15 +1295,15 @@ export default function RecetasCostosPage() {
                             onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}
                           >✕</button>
                         </div>
-                        <div className="max-h-52 overflow-y-auto">
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Materias primas: artículos activos. Los semielaborados se eligen en Preparación con stock. Café comprado por kilo: 8 g equivalen a 0,008 kg.</p><div className="max-h-52 overflow-y-auto">
                           {(() => {
                             const filtered = (inventoryItems as any[]).filter((i: any) =>
-                              i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
+                              i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
                               i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
                               (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase())))
                             );
                             if (filtered.length === 0) return (
-                              <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>
+                              <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos activos. Revisá la clasificación o elegí Preparación con stock para un semielaborado.</p>
                             );
                             return filtered.map((item: any) => (
                               <button
@@ -1717,7 +1694,7 @@ export default function RecetasCostosPage() {
               {menuCategories.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-6">No hay categorías creadas</p>
               )}
-              {menuCategories.map((cat) => (
+              {menuCategories.filter(cat=>matchesState(cat.isActive)).map((cat) => (
                 <div key={cat.id} className="flex items-center justify-between gap-2 p-3 border rounded-md" data-testid={`category-row-${cat.id}`}>
                   <div>
                     <div className="flex items-center gap-2">
@@ -1732,8 +1709,8 @@ export default function RecetasCostosPage() {
                     <Button variant="ghost" size="icon" onClick={() => openCategoryDialog(cat)} data-testid={`button-edit-category-${cat.id}`}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => deleteCategoryMutation.mutate(cat.id)} data-testid={`button-delete-category-${cat.id}`}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                    <Button variant="ghost" size="icon" onClick={() => lifecycle.mutate({kind:"menu/categories",id:cat.id,active:cat.isActive === "false"})} disabled={lifecycle.isPending} aria-label={`${cat.isActive === "false" ? "Activar" : "Desactivar"} ${cat.name}`} data-testid={`button-delete-category-${cat.id}`}>
+                      {cat.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                     </Button>
                   </div>
                 </div>
@@ -2000,12 +1977,12 @@ export default function RecetasCostosPage() {
                             <button type="button" className="text-muted-foreground hover:text-foreground"
                               onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
                           </div>
-                          <div className="max-h-48 overflow-y-auto">
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Los semielaborados se eligen en Preparación con stock. Si el café tiene unidad kg, cargá la cantidad en kg (8 g = 0,008 kg).</p><div className="max-h-48 overflow-y-auto">
                             {(() => {
                               const filtered = (inventoryItems as any[]).filter((i: any) =>
-                                i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
+                                i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
                               );
-                              if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>;
+                              if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos activos. Revisá la clasificación o elegí Preparación con stock para un semielaborado.</p>;
                               return filtered.map((item: any) => (
                                 <button key={item.id} type="button"
                                   className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"

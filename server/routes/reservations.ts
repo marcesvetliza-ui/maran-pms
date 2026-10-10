@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
@@ -857,7 +858,7 @@ export function registerReservationsRoutes(app: Express) {
       const diffDays = Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24));
 
       if (diffDays > 0) {
-        return res.status(400).json({ error: `No se puede hacer check-in en fecha futura. La reserva es para el ${checkInDate} y hoy es ${today}.` });
+        return res.status(400).json({ error: `No se puede hacer check-in en fecha futura. La reserva es para el ${formatDisplayDate(checkInDate)} y hoy es ${formatDisplayDate(today)}.` });
       }
 
       if (diffDays < 0) {
@@ -865,7 +866,7 @@ export function registerReservationsRoutes(app: Express) {
         if (!motivo || String(motivo).trim() === "") {
           return res.status(400).json({
             error: "CHECK_IN_RETROACTIVO",
-            message: `La fecha de check-in es ${checkInDate}. Para registrar con fecha pasada, ingrese un motivo.`,
+            message: `La fecha de check-in es ${formatDisplayDate(checkInDate)}. Para registrar con fecha pasada, ingrese un motivo.`,
             requiresMotivo: true,
           });
         }
@@ -874,7 +875,7 @@ export function registerReservationsRoutes(app: Express) {
           fecha: new Date(),
           operador: (req as any).user?.username || "sistema",
           tipo: "checkin_retroactivo",
-          descripcion: `Check-in retroactivo registrado el ${today} para fecha ${checkInDate}. Motivo: ${String(motivo).trim()}`,
+          descripcion: `Check-in retroactivo registrado el ${formatDisplayDate(today)} para fecha ${formatDisplayDate(checkInDate)}. Motivo: ${String(motivo).trim()}`,
         }).catch((e) => console.warn("changelog insert failed (non-fatal):", e?.message));
       }
 
@@ -1556,7 +1557,7 @@ export function registerReservationsRoutes(app: Express) {
       const isHistorical = diffDays < -1;
 
       if (diffDays > 1) {
-        return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${checkOutDate} y hoy es ${today}` });
+        return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${formatDisplayDate(checkOutDate)} y hoy es ${formatDisplayDate(today)}` });
       }
 
       const forceCheckout = req.body.forceCheckout === true || isHistorical;

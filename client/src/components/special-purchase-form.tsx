@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -273,7 +274,7 @@ export function SpecialPurchaseForm({
                   <SelectItem value="none">Pendiente de asociar</SelectItem>
                   {payments.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.date} · {p.description} · $
+                      {formatDisplayDate(p.date)} · {p.description} · $
                       {fmtMoney(Math.abs(Number(p.amount)))}
                     </SelectItem>
                   ))}

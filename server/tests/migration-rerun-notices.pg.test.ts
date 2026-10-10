@@ -110,6 +110,20 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     await client.end();
   });
 
+  it.each([
+    { table: 'recipes', column: 'is_active', ddl: "ALTER TABLE recipes ADD COLUMN is_active text NOT NULL DEFAULT 'true'", disabled: 'false' },
+    { table: 'inventory_items', column: 'purchase_enabled', ddl: 'ALTER TABLE inventory_items ADD COLUMN purchase_enabled boolean NOT NULL DEFAULT true', disabled: false },
+  ])('el nuevo estado $column mantiene datos al repetir la migración',async ({table,column,ddl,disabled})=>{
+    if(!client)throw new Error('DATABASE_URL requerida');
+    await inIsolatedSchema(client,table,async()=>{
+      await client.query(`CREATE TABLE ${table}(id integer PRIMARY KEY, quantity numeric NOT NULL); INSERT INTO ${table}(id,quantity) VALUES(1,25)`);
+      const migration=incrementalDdlWithoutRerunNotice(ddl);await client.query(migration);
+      await client.query(`UPDATE ${table} SET ${column}=$1 WHERE id=1`,[disabled]);await client.query(migration);
+      const row=(await client.query(`SELECT quantity,${column} AS state FROM ${table} WHERE id=1`)).rows[0];expect(row.quantity).toBe('25');expect(row.state).toBe(disabled);
+    });
+    await client.query(`SET search_path TO "${schemaName}"`);
+  });
+
   it("completes twice without duplicate-object notices on the second run", async () => {
     if (!client) throw new Error("DATABASE_URL no está configurado");
 
@@ -248,6 +262,22 @@ runIfDatabaseIsConfigured("incremental migration reruns", () => {
     await inIsolatedSchema(client, "column", async () => {
       await client.query("CREATE TABLE cash_shifts (id serial PRIMARY KEY)");
       await expectSilentSecondRun(client, INCREMENTAL_NON_INDEX_DDL.cashShiftsTurnoTipoColumn);
+    });
+  });
+
+  it.each([
+    ["purchase_invoices", "special_details"],
+    ["reservations", "housekeeping_preparation"],
+  ])("preserves %s.%s JSON data when its migration runs again", async (table, column) => {
+    if (!client) throw new Error("DATABASE_URL no está configurado");
+    await inIsolatedSchema(client, column, async () => {
+      await client.query(`CREATE TABLE ${table} (id integer PRIMARY KEY)`);
+      const ddl = incrementalDdlWithoutRerunNotice(`ALTER TABLE ${table} ADD COLUMN ${column} jsonb`);
+      await client.query(ddl);
+      await client.query(`INSERT INTO ${table} (id, ${column}) VALUES (1, $1::jsonb)`, [JSON.stringify({ preserved: true })]);
+      await expectSilentSecondRun(client, ddl);
+      const result = await client.query(`SELECT ${column} AS value FROM ${table} WHERE id = 1`);
+      expect(result.rows).toEqual([{ value: { preserved: true } }]);
     });
   });
 

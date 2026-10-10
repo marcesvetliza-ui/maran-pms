@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/utils";
 import { useLocation } from "wouter";
@@ -133,7 +134,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
     const typeColor = m.type === "cargo" ? "#dc2626" : m.type === "pago" ? "#16a34a" : "#2563eb";
     return `
       <tr>
-        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">${m.date}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">${formatDisplayDate(m.date)}</td>
         <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">
           <span style="background:#f3f4f6;color:${typeColor};border:1px solid ${typeColor}33;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">
             ${MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
@@ -421,7 +422,7 @@ function EntityMovementsInline({
 
             return (
               <tr key={m.id} className={rowClass}>
-                <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{m.date}</td>
+                <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{formatDisplayDate(m.date)}</td>
                 <td className="px-3 py-1.5">
                   {m.type === "cargo" ? (
                     <span className="flex items-center gap-1">
@@ -1276,7 +1277,7 @@ export default function AdminCuentasPage() {
                       <TableBody>
                         {recentReconcileCargos.map(c => (
                           <TableRow key={c.id} data-testid={`row-recent-reconcile-${c.id}`}>
-                            <TableCell className="whitespace-nowrap">{c.date}</TableCell>
+                            <TableCell className="whitespace-nowrap">{formatDisplayDate(c.date)}</TableCell>
                             <TableCell>{c.reservation_code || "-"}</TableCell>
                             <TableCell>{c.guest_name || "-"}</TableCell>
                             <TableCell className="text-right">${Number(c.amount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</TableCell>
@@ -1412,7 +1413,7 @@ export default function AdminCuentasPage() {
                   const methodLabel = r.paymentMethod ? (methodLabels[r.paymentMethod] ?? r.paymentMethod) : "—";
                   return (
                     <tr key={r.id} className="hover:bg-muted/30" data-testid={`row-recibo-${r.id}`}>
-                      <td className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap">{r.date}</td>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground whitespace-nowrap">{formatDisplayDate(r.date)}</td>
                       <td className="px-3 py-2">
                         <Badge variant="outline" className="text-[10px] px-1.5">{r.entityTypeName}</Badge>
                       </td>
@@ -1585,7 +1586,7 @@ export default function AdminCuentasPage() {
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{m.description}</p>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-[11px] text-muted-foreground">{m.date}</span>
+                        <span className="text-[11px] text-muted-foreground">{formatDisplayDate(m.date)}</span>
                         {isPago && m.paymentMethod && (
                           <Badge
                             variant="secondary"

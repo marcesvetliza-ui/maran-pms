@@ -13,6 +13,7 @@ export type PurchaseStockRow = {
   quantity: number;
   unitCost: number;
   unit?: string;
+  stockUnitsPerInput?: number;
   vatRate: string | null;
 };
 
@@ -31,8 +32,10 @@ export function parsePurchaseStockRows(value: unknown): PurchaseStockRow[] {
       (vatRate !== null && !["2.5", "5", "10.5", "21", "27"].includes(vatRate))) {
       throw Object.assign(new Error(`Artículo ${index + 1}: comprobá artículo, depósito, cantidad y costo.`), { statusCode: 400 });
     }
+    const stockUnitsPerInput = row?.stockUnitsPerInput == null || row.stockUnitsPerInput === "" ? undefined : Number(row.stockUnitsPerInput);
+    if (stockUnitsPerInput !== undefined && (!['caja','paquete'].includes(row.unit) || !Number.isFinite(stockUnitsPerInput) || stockUnitsPerInput <= 0 || stockUnitsPerInput > 9999999)) throw Object.assign(new Error(`Artículo ${index+1}: contenido de presentación inválido`), {statusCode:400});
     stockUnits(quantity);
-    return { itemId, warehouseId:warehouseId.trim(), quantity, unitCost, vatRate, unit: row.unit };
+    return { itemId, warehouseId:warehouseId.trim(), quantity, unitCost, vatRate, unit: row.unit, ...(stockUnitsPerInput === undefined ? {} : {stockUnitsPerInput}) };
   });
 }
 
@@ -54,13 +57,14 @@ export async function enterPurchaseInvoiceStock(
     // Serialize updates to the same item, including repeated rows in this invoice.
     const itemResult = await tx.execute(sql`
       SELECT id, sku, name, unit, current_stock, cost_price FROM inventory_items
-      WHERE id = ${row.itemId} AND is_active = 'true' FOR UPDATE
+      WHERE id = ${row.itemId} AND is_active = 'true' AND purchase_enabled = true FOR UPDATE
     `);
     if (!itemResult.rows.length) {
-      throw Object.assign(new Error(`Artículo ${index + 1}: no existe o está inactivo.`), { statusCode: 400 });
+      throw Object.assign(new Error(`Artículo ${index + 1}: no existe, está inactivo o discontinuado para compras.`), { statusCode: 400 });
     }
     const item = itemResult.rows[0] as any;
-    const factor=await unitFactor(tx,row.itemId,row.unit || item.unit,item.unit);
+    if (row.stockUnitsPerInput !== undefined && row.unit === item.unit) throw Object.assign(new Error("La presentación ya es la unidad de stock; no se puede aplicar otro contenido"), {statusCode:400});
+    const factor=row.stockUnitsPerInput ?? await unitFactor(tx,row.itemId,row.unit || item.unit,item.unit);
     const stockQuantity=convertInventoryQuantity(row.quantity,factor),stockCost=row.unitCost/factor;
     if(!Number.isFinite(stockCost)||stockCost>99999999)throw Object.assign(new Error("El costo convertido está fuera de rango"),{statusCode:400});
     await tx.execute(sql`
@@ -77,7 +81,7 @@ export async function enterPurchaseInvoiceStock(
         SELECT id FROM inventory_warehouses WHERE id = ${row.warehouseId} AND is_active = 'true'
       `);
       if (!warehouse.rows.length) {
-        throw Object.assign(new Error(`Artículo ${index + 1}: el depósito no existe o está inactivo.`), { statusCode: 400 });
+        throw Object.assign(new Error(`Artículo ${index + 1}: el depósito no existe, está inactivo o discontinuado para compras.`), { statusCode: 400 });
       }
       const stock = await tx.execute(sql`
         SELECT current_stock FROM warehouse_stock

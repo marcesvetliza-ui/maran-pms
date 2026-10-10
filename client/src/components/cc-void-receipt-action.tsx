@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Ban, Loader2 } from "lucide-react";
@@ -66,7 +67,7 @@ export function CcVoidReceiptAction({
           <div className="space-y-3 py-2 text-sm">
             <div className="rounded-md border bg-muted/30 p-3 space-y-1">
               <div><span className="text-muted-foreground">Entidad:</span> {entityLabel || movement.entityId}</div>
-              <div><span className="text-muted-foreground">Fecha:</span> {movement.date}</div>
+              <div><span className="text-muted-foreground">Fecha:</span> {formatDisplayDate(movement.date)}</div>
               <div><span className="text-muted-foreground">Importe:</span> ${Math.abs(Number(movement.amount)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</div>
               {movement.receiptNumber && <div><span className="text-muted-foreground">Recibo:</span> {movement.receiptNumber}</div>}
             </div>

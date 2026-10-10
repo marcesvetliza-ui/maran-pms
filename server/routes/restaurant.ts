@@ -193,7 +193,7 @@ export function registerRestaurantRoutes(app: Express) {
       if (!category) return res.status(404).json({ error: "Category not found" });
       res.json(category);
     } catch (error) {
-      res.status(500).json({ error: "Error updating category" });
+      res.status((error as any).statusCode || 500).json({ error: (error as any).message || "Error updating category" });
     }
   });
 
@@ -202,7 +202,7 @@ export function registerRestaurantRoutes(app: Express) {
       await storage.deleteMenuCategory(req.params.id);
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: "Error deleting category" });
+      res.status((error as any).statusCode || 500).json({ error: (error as any).message || "Error deleting category" });
     }
   });
 
@@ -231,7 +231,7 @@ export function registerRestaurantRoutes(app: Express) {
       if (!item) return res.status(404).json({ error: "Item not found" });
       res.json(item);
     } catch (error) {
-      res.status(500).json({ error: "Error updating menu item" });
+      res.status((error as any).statusCode || 500).json({ error: (error as any).message || "Error updating menu item" });
     }
   });
 
@@ -242,7 +242,7 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(404).json({ error: "Item not found" });
       }
       if (result.deactivated) {
-        return res.status(200).json({ deleted: false, deactivated: true, message: "El plato tiene ventas registradas, no se puede eliminar. Se desactivó en su lugar." });
+        return res.status(200).json({ deleted: false, deactivated: true, message: "Plato desactivado. Se conservan su receta y su historial." });
       }
       res.status(204).send();
     } catch (error) {
@@ -841,6 +841,7 @@ export function registerRestaurantRoutes(app: Express) {
       const { menuItemId, quantity, notes, course, customPrice, customName } = req.body;
       const menuItem = await storage.getMenuItem(menuItemId);
       if (!menuItem) return res.status(404).json({ error: "Menu item not found" });
+      if (menuItem.isActive === "false" || menuItem.isAvailable === "false" || menuItem.category?.isActive === "false") return res.status(409).json({error:"El plato está inactivo o no disponible"});
 
       const order = await storage.getRestaurantOrder(req.params.orderId);
       if (!order) return res.status(404).json({ error: "Order not found" });
@@ -1583,7 +1584,7 @@ export function registerRestaurantRoutes(app: Express) {
   app.post("/api/restaurant/recipes", async (req, res) => {
     try {
       const recipe = await storage.createRecipe(req.body);
-      res.status(201).json(recipe);
+      res.status(201).json({ ...recipe, ingredients: [] });
     } catch (error) {
       res.status(500).json({ error: "Error creating recipe" });
     }
@@ -1595,7 +1596,7 @@ export function registerRestaurantRoutes(app: Express) {
       if (!recipe) return res.status(404).json({ error: "Recipe not found" });
       res.json(recipe);
     } catch (error) {
-      res.status(500).json({ error: "Error updating recipe" });
+      res.status((error as any).statusCode || 500).json({ error: (error as any).message || "Error updating recipe" });
     }
   });
 
@@ -1604,7 +1605,7 @@ export function registerRestaurantRoutes(app: Express) {
       await storage.deleteRecipe(req.params.id);
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: "Error deleting recipe" });
+      res.status((error as any).statusCode || 500).json({ error: (error as any).message || "Error deleting recipe" });
     }
   });
 

@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {PreparationBadge} from "@/components/housekeeping-preparation";
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
@@ -912,7 +913,7 @@ export default function PlanningPage() {
                                 {block.quantity - block.assigned} hab. {block.roomTypeName}
                                 {block.roomTypeCode ? ` (${block.roomTypeCode})` : ""}
                               </span>
-                              <span className="text-orange-500">({block.checkIn} → {block.checkOut})</span>
+                              <span className="text-orange-500">({formatDisplayDate(block.checkIn)} → {formatDisplayDate(block.checkOut)})</span>
                             </button>
                           ))}
                         </div>
@@ -1399,7 +1400,7 @@ export default function PlanningPage() {
                                             )}
                                             <div className="font-medium">{reservation.guestName}</div>
                                             <div className="text-muted-foreground">
-                                              {reservation.checkIn} → {reservation.checkOut}
+                                              {formatDisplayDate(reservation.checkIn)} → {formatDisplayDate(reservation.checkOut)}
                                             </div>
                                             <div className="flex items-center gap-2 text-muted-foreground">
                                               {reservation.numberOfGuests != null && (

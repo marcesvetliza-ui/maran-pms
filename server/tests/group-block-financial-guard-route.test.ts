@@ -60,8 +60,9 @@ vi.mock("../db", () => ({
 }));
 vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
 vi.mock("../auth", () => ({
-  // Business-route fixture: permission enforcement is verified separately.
-  requirePermission: () => (_req: any, _res: any, next: () => void) => next(), requireAuth: (_req: any, _res: any, next: () => void) => next() }));
+  requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+}));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 vi.mock("../billing/groupInvoiceScope", () => ({
   assertGroupPaymentInvoiceScope: vi.fn(),

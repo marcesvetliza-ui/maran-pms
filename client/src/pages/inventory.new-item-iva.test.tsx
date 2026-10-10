@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const { NewItemForm } = await import("./inventory");
 
-const categories = [{ id: "cat-1", name: "Varios", area: "general", isGroup: false, isActive: "true" }] as any;
+const categories = [{ id:"group-1",name:"Insumos",area:"general",isGroup:true,isActive:"true" }, { id: "cat-1", name: "Varios", area: "general", isGroup: false, parentId: "group-1", isActive: "true" }] as any;
 const suppliers = [{ id: 1, razonSocial: "Proveedor Uno", razon_social: "Proveedor Uno", cuit: "20111111111", activo: true }] as any;
 
 function renderForm(onSubmit = vi.fn()) {
@@ -39,6 +39,8 @@ async function fillOtherRequiredFields(user: ReturnType<typeof userEvent.setup>)
   await user.click(screen.getByTestId("select-category"));
   await user.click(await screen.findByRole("option", { name: "Varios" }));
   fireEvent.click(screen.getByRole("checkbox", { name: /Proveedor Uno/ }));
+  await user.clear(screen.getByTestId("input-min-stock"));
+  await user.type(screen.getByTestId("input-min-stock"), "2");
   await user.type(screen.getByTestId("input-critical-stock"), "1");
 }
 

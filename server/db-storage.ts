@@ -1,3 +1,4 @@
+import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
 import { stockUnits } from "./inventorySafety";
@@ -2250,15 +2251,7 @@ export class DatabaseStorage implements IStorage {
         COUNT(*) AS rooms_count
       FROM reservations r
       JOIN rooms rm ON rm.id = r.room_id
-      WHERE r.check_in_date <= ${today}
-        AND r.check_out_date > ${today}
-        AND (
-          r.status = 'checked_in'
-          OR (
-            r.check_in_date = ${today}
-            AND r.status IN ('confirmed', 'web_checkin', 'pending')
-          )
-        )
+      WHERE ${breakfastEligibility(new Date(Date.parse(today+"T12:00:00Z")+86400000).toISOString().slice(0,10))}
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
@@ -4501,13 +4494,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMenuCategory(id: string, category: Partial<InsertMenuCategory>): Promise<MenuCategory | undefined> {
-    const [updated] = await db.update(menuCategories).set(category as any).where(eq(menuCategories.id, id)).returning();
-    return updated;
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if(category.isActive !== undefined && !["true","false"].includes(category.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
+      if (category.isActive === "false") {
+        const [used] = await db.select({id:menuItems.id}).from(menuItems).where(and(eq(menuItems.categoryId,id),eq(menuItems.isActive,"true"))).limit(1);
+        if (used) throw Object.assign(new Error("La categoría tiene platos activos; reasignalos o desactivalos primero"), {statusCode:409});
+      }
+      const [updated] = await db.update(menuCategories).set(category as any).where(eq(menuCategories.id, id)).returning();
+      return updated;
+    });
   }
 
+
   async deleteMenuCategory(id: string): Promise<boolean> {
-    const result = await db.delete(menuCategories).where(eq(menuCategories.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const updated = await this.updateMenuCategory(id, { isActive: "false" });
+    return !!updated;
   }
 
   async getMenuItems(): Promise<MenuItemWithCategory[]> {
@@ -4567,15 +4569,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
-    const [created] = await db.insert(menuItems).values(item as any).returning();
-    return this.syncMenuItemInventoryMirror(created);
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      const category = await this.getMenuCategory(item.categoryId);
+      if (!category || category.isActive === "false") throw Object.assign(new Error("La categoría está inactiva o no existe"), { statusCode: 409 });
+      const [created] = await db.insert(menuItems).values(item as any).returning();
+      return this.syncMenuItemInventoryMirror(created);
+    });
   }
 
+
   async updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
-    const [updated] = await db.update(menuItems).set(item as any).where(eq(menuItems.id, id)).returning();
-    if (!updated) return undefined;
-    return this.syncMenuItemInventoryMirror(updated);
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if (item.isActive !== undefined && !["true","false"].includes(item.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
+      if (item.isActive === "true" || item.categoryId) {
+        const [existing] = await db.select().from(menuItems).where(eq(menuItems.id,id));
+        if(!existing) return undefined;
+        const [category] = await db.select().from(menuCategories).where(eq(menuCategories.id,item.categoryId || existing.categoryId));
+        if(!category || category.isActive === "false") throw Object.assign(new Error("La categoría está inactiva o no existe"), {statusCode:409});
+        const missing = await db.execute(sql`WITH RECURSIVE deps(id) AS (
+          SELECT id FROM recipes WHERE menu_item_id=${id}
+          UNION SELECT ri.sub_recipe_id FROM recipe_ingredients ri JOIN deps d ON d.id=ri.recipe_id WHERE ri.sub_recipe_id IS NOT NULL
+        ) SELECT 1 FROM recipes r JOIN deps d ON d.id=r.id WHERE r.is_active='false' LIMIT 1`);
+        if(missing.rows.length) throw Object.assign(new Error("Primero reactivá las elaboraciones de la receta"), {statusCode:409});
+      }
+      const [updated] = await db.update(menuItems).set(item as any).where(eq(menuItems.id, id)).returning();
+      if (!updated) return undefined;
+      return this.syncMenuItemInventoryMirror(updated);
+    });
   }
+
 
   async menuItemHasMovement(id: string): Promise<boolean> {
     const [row] = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.menuItemId, id)).limit(1);
@@ -4586,20 +4610,8 @@ export class DatabaseStorage implements IStorage {
     const [item] = await db.select().from(menuItems).where(eq(menuItems.id, id));
     if (!item) return { deleted: false, deactivated: false };
 
-    const hasMovement = await this.menuItemHasMovement(id);
-    if (hasMovement) {
-      await db.update(menuItems).set({ isActive: "false", isAvailable: "false" } as any).where(eq(menuItems.id, id));
-      if (item.inventoryItemId) {
-        await db.update(inventoryItems).set({ isActive: "false" } as any).where(eq(inventoryItems.id, item.inventoryItemId));
-      }
-      return { deleted: false, deactivated: true };
-    }
-
-    if (item.inventoryItemId) {
-      await db.delete(inventoryItems).where(eq(inventoryItems.id, item.inventoryItemId));
-    }
-    const result = await db.delete(menuItems).where(eq(menuItems.id, id));
-    return { deleted: (result.rowCount ?? 0) > 0, deactivated: false };
+    await this.updateMenuItem(id, { isActive: "false", isAvailable: "false" });
+    return { deleted: false, deactivated: true };
   }
 
   async closeStaleOrders(): Promise<number> {
@@ -5284,17 +5296,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe | undefined> {
+    if (recipe.isActive !== undefined && !["true","false"].includes(recipe.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
     return db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
       await requireActiveInventoryReferences(tx, recipe.outputInventoryItemId);
+      if (recipe.isActive === "false") {
+        const used = await tx.execute(sql`SELECT 1 FROM recipe_ingredients ri JOIN recipes r ON r.id=ri.recipe_id LEFT JOIN menu_items m ON m.id=r.menu_item_id
+          WHERE ri.sub_recipe_id=${id} AND r.is_active='true' AND (r.menu_item_id IS NULL OR m.is_active IS DISTINCT FROM 'false') LIMIT 1`);
+        if (used.rows.length) throw Object.assign(new Error("La elaboración está usada por una receta activa; quitá o reemplazá esa referencia antes de desactivarla"), {statusCode:409});
+        const breakfast = await tx.execute(sql`SELECT 1 FROM breakfast_catalog_items WHERE recipe_id=${id} AND is_active='true' LIMIT 1`);
+        if (breakfast.rows.length) throw Object.assign(new Error("Desactivá primero esta elaboración en el catálogo de Desayunos"),{statusCode:409});
+        const pending = await tx.execute(sql`SELECT 1 FROM inventory_pending_productions WHERE status='pending' AND payload->>'recipeId'=${id} LIMIT 1`);
+        if (pending.rows.length) throw Object.assign(new Error("La elaboración tiene una producción pendiente; resolvela antes de desactivar"), {statusCode:409});
+      }
+      if (recipe.isActive === "true") {
+        const inactive = await tx.execute(sql`WITH RECURSIVE deps(id) AS (
+          SELECT sub_recipe_id FROM recipe_ingredients WHERE recipe_id=${id} AND sub_recipe_id IS NOT NULL
+          UNION SELECT ri.sub_recipe_id FROM recipe_ingredients ri JOIN deps d ON d.id=ri.recipe_id WHERE ri.sub_recipe_id IS NOT NULL
+        ) SELECT 1 FROM recipes r JOIN deps d ON d.id=r.id WHERE r.is_active='false' LIMIT 1`);
+        if (inactive.rows.length) throw Object.assign(new Error("Primero reactivá las elaboraciones usadas como ingredientes"), {statusCode:409});
+      }
       const [updated] = await tx.update(recipes).set(recipe as any).where(eq(recipes.id, id)).returning();
       return updated;
     });
   }
 
   async deleteRecipe(id: string): Promise<boolean> {
-    await db.delete(recipeIngredients).where(eq(recipeIngredients.recipeId, id));
-    const result = await db.delete(recipes).where(eq(recipes.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const updated = await this.updateRecipe(id, { isActive: "false" });
+    return !!updated;
   }
 
   async getRecipeIngredients(recipeId: string): Promise<RecipeIngredient[]> {
@@ -5303,6 +5332,11 @@ export class DatabaseStorage implements IStorage {
 
   async createRecipeIngredient(ingredient: InsertRecipeIngredient): Promise<RecipeIngredient> {
     return db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if (ingredient.subRecipeId) {
+        const sub = await tx.execute(sql`SELECT id FROM recipes WHERE id=${ingredient.subRecipeId} AND is_active='true' FOR SHARE`);
+        if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), {statusCode:409});
+      }
       await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
       const [created] = await tx.insert(recipeIngredients).values(ingredient as any).returning();
       return created;
@@ -5311,6 +5345,11 @@ export class DatabaseStorage implements IStorage {
 
   async updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined> {
     return db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if (ingredient.subRecipeId) {
+        const sub = await tx.execute(sql`SELECT id FROM recipes WHERE id=${ingredient.subRecipeId} AND is_active='true' FOR SHARE`);
+        if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), { statusCode: 409 });
+      }
       await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
       const [updated] = await tx.update(recipeIngredients).set(ingredient as any).where(eq(recipeIngredients.id, id)).returning();
       return updated;

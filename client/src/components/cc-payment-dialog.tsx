@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useEffect, useRef, useState } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { moneyInputValue, moneyPayload, parseMoneyInput } from "@/lib/money-input";
@@ -294,7 +295,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">{charge.description}</p>
-                        <p className="text-xs text-muted-foreground">{charge.date} · Pendiente: ${fmtMoney(charge.saldoPendiente)}</p>
+                        <p className="text-xs text-muted-foreground">{formatDisplayDate(charge.date)} · Pendiente: ${fmtMoney(charge.saldoPendiente)}</p>
                       </div>
                       <Input
                          type="text"

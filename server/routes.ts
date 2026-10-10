@@ -1,3 +1,4 @@
+import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
 import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import type { Express } from "express";
@@ -478,12 +479,12 @@ export async function registerRoutes(
 
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const requestedDate = typeof req.query.date === "string" && req.query.date ? req.query.date : today;
+      if (!validCalendarDate(requestedDate)) return res.status(400).json({error:"Fecha inválida"});
 
       let activeReservations: typeof reservations.$inferSelect[] = [];
       let roomNumberMap = new Map<string, string>();
 
-      // Siempre usar rango de fechas: checkIn <= fecha AND checkOut > fecha AND no canceladas
-      // Esto evita el bug de mostrar reservas sin filtro de fecha cuando se usa status de habitación
+      // En casa: check-in realizado y fecha dentro de la estadía, sin habitaciones virtuales.
       const rows = await db.select({
         reservation: reservations,
         roomNumber: rooms.roomNumber,
@@ -493,6 +494,8 @@ export async function registerRoutes(
         .where(
           and(
             eq(reservations.status, "checked_in"),
+            sql`${reservations.checkInDate} <= ${requestedDate}`,
+            sql`${reservations.checkOutDate} > ${requestedDate}`,
             sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
           )
         );
@@ -575,13 +578,15 @@ export async function registerRoutes(
       const from = typeof req.query.from === "string" && req.query.from ? req.query.from : today;
       const to = typeof req.query.to === "string" && req.query.to ? req.query.to : today;
       const mode = req.query.mode === "inhouse" ? "inhouse" : "period";
+      const requestedDate = typeof req.query.date === "string" && req.query.date ? req.query.date : today;
+      if (!validCalendarDate(requestedDate)) return res.status(400).json({error:"Fecha inválida"});
 
       const rows = await db.select({ reservation: reservations, roomNumber: rooms.roomNumber })
         .from(reservations)
         .innerJoin(rooms, eq(rooms.id, reservations.roomId))
         .where(
           mode === "inhouse"
-            ? and(eq(reservations.status, "checked_in"), sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`)
+            ? and(eq(reservations.status, "checked_in"), sql`${reservations.checkInDate} <= ${requestedDate}`, sql`${reservations.checkOutDate} > ${requestedDate}`, sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`)
             : and(
                 sql`${reservations.checkInDate} >= ${from}`,
                 sql`${reservations.checkInDate} <= ${to}`,
@@ -661,7 +666,7 @@ export async function registerRoutes(
         }
       }
 
-      const label = mode === "inhouse" ? `InHouse_${today}` : `Policial_${from}_${to}`;
+      const label = mode === "inhouse" ? `InHouse_${requestedDate}` : `Policial_${from}_${to}`;
       res.setHeader("Content-Disposition", `attachment; filename="Listado_${label}.xlsx"`);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       await wb.xlsx.write(res);
@@ -692,15 +697,7 @@ export async function registerRoutes(
         FROM reservations r
         JOIN rooms rm ON rm.id = r.room_id
         LEFT JOIN guests g ON g.id = r.guest_id
-        WHERE r.check_in_date <= ${today}
-          AND r.check_out_date > ${today}
-          AND (
-            r.status = 'checked_in'
-            OR (
-              r.check_in_date = ${today}
-              AND r.status IN ('confirmed', 'web_checkin', 'pending')
-            )
-          )
+        WHERE ${breakfastEligibility(new Date(Date.parse(today+"T12:00:00Z")+86400000).toISOString().slice(0,10))}
           AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
         ORDER BY rm.room_number
       `);
@@ -2840,7 +2837,7 @@ export async function registerRoutes(
     try {
       const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
         alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, cuentaContableId } = req.body;
-      if (!razonSocial || !cuit || !condicionIva) {
+      if (![razonSocial,cuit,condicionIva].every(value=>typeof value === "string" && value.trim())) {
         return res.status(400).json({ error: "Razón social, CUIT y condición IVA son requeridos" });
       }
       const result = await db.execute(sql`
@@ -2860,6 +2857,7 @@ export async function registerRoutes(
       const id = parseInt(req.params.id);
       const { razonSocial, cuit, condicionIva, domicilio, localidad, provincia, cp,
         alicuotaIibb, alicuotaGanancias, alicuotaIva, cbu, banco, activo, cuentaContableId } = req.body;
+      if ([razonSocial,cuit,condicionIva].some(value=>value !== undefined && (typeof value !== "string" || !value.trim()))) return res.status(400).json({error:"Razón social, CUIT y condición IVA no pueden quedar vacíos"});
       const result = await db.execute(sql`
         UPDATE accounting_suppliers SET
           razon_social = COALESCE(${razonSocial||null}, razon_social),

@@ -9,6 +9,7 @@ export async function savePreparation(input:any,id?:string,actor?:string){
  if(!Array.isArray(input.lines)||!input.lines.length)throw new Error('Agregá al menos un ingrediente');
  return withDatabaseTransaction(async()=>{
   await catalogLock();
+  await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
   const old=id?(await db.execute(sql`SELECT * FROM recipes WHERE id=${id} AND is_base=true FOR UPDATE`)).rows[0] as any:null;
   if(id&&!old)throw new Error('Preparación inexistente');
   if(old&&!old.output_inventory_item_id)throw new Error('Esta receta no es una preparación con stock');
@@ -24,7 +25,7 @@ export async function savePreparation(input:any,id?:string,actor?:string){
    if(line.itemId){const item=(await db.execute(sql`SELECT * FROM inventory_items WHERE id=${line.itemId} FOR SHARE`)).rows[0] as any;
     if(!item||item.is_active!=='true'||!['materia_prima','venta_directa','semielaborado'].includes(item.item_kind)||item.id===output?.id)throw new Error('Elegí un insumo físico activo; la preparación no puede consumirse a sí misma');
     name=item.name;cost=Number(item.cost_price||0)*await unitFactor(db,item.id,line.unit,item.unit);
-   }else{const sub=(await db.execute(sql`SELECT * FROM recipes WHERE id=${line.subRecipeId} AND is_base=true FOR SHARE`)).rows[0] as any;if(!sub||sub.id===id)throw new Error('Elaboración inválida o circular');
+   }else{const sub=(await db.execute(sql`SELECT * FROM recipes WHERE id=${line.subRecipeId} AND is_base=true AND is_active='true' FOR SHARE`)).rows[0] as any;if(!sub||sub.id===id)throw new Error('Elaboración inválida o circular');
     const seen=new Set<string>();async function check(recipeId:string,path=new Set<string>()){if(recipeId===id||path.has(recipeId)||path.size>=20)throw new Error('Referencia circular entre preparaciones');if(seen.has(recipeId))return;const next=new Set(path);next.add(recipeId);for(const child of (await db.execute(sql`SELECT sub_recipe_id,inventory_item_id FROM recipe_ingredients WHERE recipe_id=${recipeId}`)).rows as any[]){if(output?.id&&child.inventory_item_id===output.id)throw new Error('La preparación no puede consumir su propio artículo');if(child.sub_recipe_id)await check(child.sub_recipe_id,next);}seen.add(recipeId);}
     await check(sub.id);name=sub.name;
     if(sub.output_inventory_item_id){const item=(await db.execute(sql`SELECT * FROM inventory_items WHERE id=${sub.output_inventory_item_id}`)).rows[0] as any;if(!item||item.is_active!=='true'||item.id===output?.id)throw new Error('Preparación de ingrediente inválida');cost=Number(item.cost_price||0)*await unitFactor(db,item.id,line.unit,item.unit);}

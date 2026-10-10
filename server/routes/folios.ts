@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "../../shared/date-display";
 import type { Express } from "express";
 import { formatReservationInvoiceRef } from "@shared/reservationFolio";
 import PDFDocument from "pdfkit";
@@ -523,11 +524,11 @@ export function registerFolioRoutes(app: Express) {
                   : `${g.lastName ?? ""} ${g.firstName ?? ""}`.trim())
               : "";
             const room = (resv as any).room?.roomNumber ?? resv.roomId;
-            entityLabel = `${resv.reservationCode} — ${guestName} — Hab. ${room} (${resv.checkInDate} → ${resv.checkOutDate})`;
+            entityLabel = `${resv.reservationCode} — ${guestName} — Hab. ${room} (${formatDisplayDate(resv.checkInDate)} → ${formatDisplayDate(resv.checkOutDate)})`;
           }
         } else if (entityType === "event") {
           const evt = await storage.getEvent(entityId);
-          if (evt) entityLabel = `${evt.name} (${evt.startDate ?? ""})`;
+          if (evt) entityLabel = `${evt.name} (${formatDisplayDate(evt.startDate)})`;
         } else if (entityType === "group") {
           const grp = await storage.getGroup(entityId);
           if (grp) entityLabel = `${grp.name}`;

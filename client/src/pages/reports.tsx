@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -458,7 +459,7 @@ export default function ReportsPage() {
         if (occupancy.data) {
           exportCSV(
             ["Fecha", "Hab. Disponibles", "Hab. Ocupadas", "% Ocupación"],
-            occupancy.data.map((r) => [r.date, String(r.available), String(r.occupied), `${r.occupancy}%`]),
+            occupancy.data.map((r) => [formatDisplayDate(r.date), String(r.available), String(r.occupied), `${r.occupancy}%`]),
             "ocupacion"
           );
         }
@@ -485,7 +486,7 @@ export default function ReportsPage() {
         if (reservations.data) {
           exportCSV(
             ["Código", "Huésped", "Empresa", "Habitación", "Tipo", "Check-in", "Check-out", "Noches", "Canal", "Estado", "Total", "Pagado", "Saldo"],
-            reservations.data.map((r) => [r.code, r.guest, r.company, r.room, r.type, r.checkIn, r.checkOut, String(r.nights), r.source, r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)]),
+            reservations.data.map((r) => [r.code, r.guest, r.company, r.room, r.type, formatDisplayDate(r.checkIn), formatDisplayDate(r.checkOut), String(r.nights), r.source, r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)]),
             "reservas"
           );
         }
@@ -503,7 +504,7 @@ export default function ReportsPage() {
         if (topGuests.data) {
           exportCSV(
             ["Ranking", "Huésped", "Código", "Estadías", "Noches", "Revenue", "Última visita", "Segmento"],
-            topGuests.data.map((r) => [String(r.rank), r.guest, r.code, String(r.stays), String(r.nights), formatARS(r.revenue), r.lastVisit, r.segment]),
+            topGuests.data.map((r) => [String(r.rank), r.guest, r.code, String(r.stays), String(r.nights), formatARS(r.revenue), formatDisplayDate(r.lastVisit), r.segment]),
             "huespedes-frecuentes"
           );
         }
@@ -532,7 +533,7 @@ export default function ReportsPage() {
           exportCSV(
             ["Fecha", "Reserva", "Habitación", "Huésped", "Empresa", "Método", "Factura a", "Monto", "Referencia"],
             billing.data.payments.map((p) => [
-              p.date, p.reservation_code || "-", p.room_number || "-", p.guest_name || "-", p.company_name || "-",
+              formatDisplayDate(p.date), p.reservation_code || "-", p.room_number || "-", p.guest_name || "-", p.company_name || "-",
               methodLabels[p.method] || p.method, p.billing_target === "company" ? "Empresa" : "Huésped",
               formatARS(parseFloat(p.amount || "0")), p.reference || ""
             ]),
@@ -558,7 +559,7 @@ export default function ReportsPage() {
                 ? gp.retentionDetail.filter((r: any) => r?.monto).map((r: any) => `${r.tipo}: ${formatARS(parseFloat(r.monto || "0"))}`).join(" + ")
                 : "";
               return [
-                gp.date, gp.groupName || gp.groupCode || gp.groupId, formatARS(parseFloat(gp.amount || "0")),
+                formatDisplayDate(gp.date), gp.groupName || gp.groupCode || gp.groupId, formatARS(parseFloat(gp.amount || "0")),
                 methodsLabel, gp.destination === "master_folio" ? "Folio Maestro" : "Distribuido entre habitaciones",
                 GROUP_PAYMENT_STATUS_LABELS[getGroupPaymentStatus(gp)],
                 receiverName, retencion,
@@ -570,7 +571,7 @@ export default function ReportsPage() {
         break;
       case "arrivals-departures": {
         const cols = ["Código", "Huésped", "Hab.", "Tipo", "Check-in", "Check-out", "Noches", "Pax", "Estado", "Total", "Pagado", "Saldo"];
-        const toRow = (r: ArrDepRow) => [r.code, r.guest, r.room, r.roomType, r.checkIn, r.checkOut, String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)];
+        const toRow = (r: ArrDepRow) => [r.code, r.guest, r.room, r.roomType, formatDisplayDate(r.checkIn), formatDisplayDate(r.checkOut), String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)];
         if (arrDep.data) {
           const allRows = [
             ["--- LLEGADAS ---", "", "", "", "", "", "", "", "", "", "", ""],
@@ -586,7 +587,7 @@ export default function ReportsPage() {
         if (pendingBalances.data) {
           exportCSV(
             ["Código", "Huésped", "Hab.", "Tipo", "Check-in", "Check-out", "Noches", "Pax", "Estado", "Total", "Pagado", "Saldo"],
-            pendingBalances.data.map((r) => [r.code, r.guest, r.room, r.roomType, r.checkIn, r.checkOut, String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)]),
+            pendingBalances.data.map((r) => [r.code, r.guest, r.room, r.roomType, formatDisplayDate(r.checkIn), formatDisplayDate(r.checkOut), String(r.nights), String(r.pax), r.status, formatARS(r.total), formatARS(r.paid), formatARS(r.balance)]),
             "saldos-pendientes"
           );
         }
@@ -803,9 +804,9 @@ export default function ReportsPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={occupancy.data}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                        <XAxis dataKey="date" tick={{ fontSize: 12 }} tickFormatter={formatDisplayDate} />
                         <YAxis unit="%" />
-                        <Tooltip formatter={(v: number) => [`${v}%`, "Ocupación"]} />
+                        <Tooltip labelFormatter={formatDisplayDate} formatter={(v: number) => [`${v}%`, "Ocupación"]} />
                         <Legend />
                         <Line type="monotone" dataKey="occupancy" name="% Ocupación" stroke={COLORS[0]} strokeWidth={2} dot={false} />
                       </LineChart>
@@ -824,7 +825,7 @@ export default function ReportsPage() {
                       <TableBody>
                         {occupancy.data.map((row, i) => (
                           <TableRow key={i} data-testid={`row-occupancy-${i}`}>
-                            <TableCell>{row.date}</TableCell>
+                            <TableCell>{formatDisplayDate(row.date)}</TableCell>
                             <TableCell className="text-right">{row.available}</TableCell>
                             <TableCell className="text-right">{row.occupied}</TableCell>
                             <TableCell className="text-right">{row.occupancy}%</TableCell>
@@ -1014,8 +1015,8 @@ export default function ReportsPage() {
                           <TableCell>{row.company || "-"}</TableCell>
                           <TableCell>{row.room}</TableCell>
                           <TableCell>{row.type}</TableCell>
-                          <TableCell>{row.checkIn}</TableCell>
-                          <TableCell>{row.checkOut}</TableCell>
+                          <TableCell>{formatDisplayDate(row.checkIn)}</TableCell>
+                          <TableCell>{formatDisplayDate(row.checkOut)}</TableCell>
                           <TableCell className="text-right">{row.nights}</TableCell>
                           <TableCell>{row.source}</TableCell>
                           <TableCell>
@@ -1133,7 +1134,7 @@ export default function ReportsPage() {
                           <TableCell className="text-right">{row.stays}</TableCell>
                           <TableCell className="text-right">{row.nights}</TableCell>
                           <TableCell className="text-right">{formatARS(row.revenue)}</TableCell>
-                          <TableCell>{row.lastVisit}</TableCell>
+                          <TableCell>{formatDisplayDate(row.lastVisit)}</TableCell>
                           <TableCell>
                             <Badge variant="secondary">{row.segment}</Badge>
                           </TableCell>
@@ -1823,8 +1824,8 @@ export default function ReportsPage() {
                             <TableCell className="font-medium">{r.guest}</TableCell>
                             <TableCell>{r.room}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
-                            <TableCell className="text-sm">{r.checkIn}</TableCell>
-                            <TableCell className="text-sm">{r.checkOut}</TableCell>
+                            <TableCell className="text-sm">{formatDisplayDate(r.checkIn)}</TableCell>
+                            <TableCell className="text-sm">{formatDisplayDate(r.checkOut)}</TableCell>
                             <TableCell className="text-center">{r.nights}</TableCell>
                             <TableCell className="text-center">{r.pax}</TableCell>
                             <TableCell className="text-right">{formatARS(r.total)}</TableCell>
@@ -1869,8 +1870,8 @@ export default function ReportsPage() {
                             <TableCell className="font-medium">{r.guest}</TableCell>
                             <TableCell>{r.room}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
-                            <TableCell className="text-sm">{r.checkIn}</TableCell>
-                            <TableCell className="text-sm">{r.checkOut}</TableCell>
+                            <TableCell className="text-sm">{formatDisplayDate(r.checkIn)}</TableCell>
+                            <TableCell className="text-sm">{formatDisplayDate(r.checkOut)}</TableCell>
                             <TableCell className="text-center">{r.nights}</TableCell>
                             <TableCell className="text-center">{r.pax}</TableCell>
                             <TableCell className="text-right">{formatARS(r.total)}</TableCell>
@@ -1927,8 +1928,8 @@ export default function ReportsPage() {
                           <TableCell className="font-medium">{r.guest}</TableCell>
                           <TableCell>{r.room}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{r.roomType}</TableCell>
-                          <TableCell className="text-sm">{r.checkIn}</TableCell>
-                          <TableCell className="text-sm">{r.checkOut}</TableCell>
+                          <TableCell className="text-sm">{formatDisplayDate(r.checkIn)}</TableCell>
+                          <TableCell className="text-sm">{formatDisplayDate(r.checkOut)}</TableCell>
                           <TableCell className="text-center">{r.nights}</TableCell>
                           <TableCell className="text-center">{r.pax}</TableCell>
                           <TableCell><Badge variant="outline" className="text-xs">{r.status}</Badge></TableCell>
@@ -2030,7 +2031,7 @@ export default function ReportsPage() {
                             <TableCell>{r.nombre}</TableCell>
                             <TableCell><Badge variant="outline" className="text-xs">{r.tipo}</Badge></TableCell>
                             <TableCell><Badge variant="outline" className="text-xs">{r.estado}</Badge></TableCell>
-                            <TableCell className="text-sm">{r.fechaInicio}</TableCell>
+                            <TableCell className="text-sm">{formatDisplayDate(r.fechaInicio)}</TableCell>
                             <TableCell className="text-center">{r.asistentes}</TableCell>
                             <TableCell className="text-right">{formatARS(r.totalFacturado)}</TableCell>
                             <TableCell className="text-right text-green-600">{formatARS(r.totalCobrado)}</TableCell>

@@ -1459,6 +1459,7 @@ export type RestaurantTimeSlot = typeof restaurantTimeSlots.$inferSelect;
 
 // Recipes (ingredients per dish, or standalone base "elaboraciones")
 export const recipes = pgTable("recipes", {
+  isActive: text("is_active").notNull().default("true"),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   menuItemId: varchar("menu_item_id"),   // nullable — null when isBase=true
   notes: text("notes"),
@@ -1583,6 +1584,7 @@ export type InsertBrand = z.infer<typeof insertBrandSchema>;
 export type Brand = typeof brands.$inferSelect;
 
 export const inventoryItems = pgTable("inventory_items", {
+  purchaseEnabled: boolean("purchase_enabled").notNull().default(true),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sku: text("sku").unique(),
   name: text("name").notNull(),

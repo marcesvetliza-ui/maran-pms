@@ -1,3 +1,5 @@
+import { isActiveWarehouse } from "@/lib/inventory-warehouse";
+import { formatDisplayDate } from "@shared/date-display";
 import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -322,6 +324,7 @@ interface InvItemRow {
   unit: string;
   costPrice: string;
   warehouseId: string;
+  stockUnitsPerInput?: string;
   vatRate: string;
 }
 
@@ -575,13 +578,13 @@ export function InvoiceDialog({
     enabled: open,
   });
 
-  const { data: invWarehouses = [] } = useQuery<any[]>({
+  const { data: invWarehouses = [], isError: warehouseError, isLoading: warehouseLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory/warehouses"],
     enabled: open,
   });
 
   const defaultWarehouseId = useMemo(() => {
-    const general = (invWarehouses as any[]).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
+    const general = (invWarehouses as any[]).filter(isActiveWarehouse).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
     return general ? String(general.id) : "";
   }, [invWarehouses]);
 
@@ -612,6 +615,8 @@ export function InvoiceDialog({
     setInvItems((p) => p.map((r, j) => j === i ? {
       ...r,
       existingItemId: id,
+      unit: selected?.unit || "unidad",
+      stockUnitsPerInput: "",
       vatRate: r.vatRate || (selected?.ivaRate ? String(selected.ivaRate) : r.vatRate),
     } : r));
   };
@@ -803,6 +808,7 @@ export function InvoiceDialog({
           itemId: row.existingItemId,
           warehouseId: row.warehouseId || null,
           unit: row.unit,
+          ...(["caja","paquete"].includes(row.unit) && row.stockUnitsPerInput ? {stockUnitsPerInput:row.stockUnitsPerInput} : {}),
           quantity: row.quantity,
           unitCost: row.costPrice,
           vatRate: row.vatRate || null,
@@ -1206,7 +1212,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1229,6 +1235,8 @@ export function InvoiceDialog({
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
 
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
@@ -1262,12 +1270,12 @@ export function InvoiceDialog({
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
                         <div>
-                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>{warehouseLoading ? <p className="text-xs">Cargando depósitos…</p> : warehouseError ? <p role="alert" className="text-xs">No se pudieron cargar los depósitos. Volvé a intentar.</p> : !invWarehouses.some(isActiveWarehouse) ? <p role="alert" className="text-xs">No hay depósitos activos.</p> : null}
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter(isActiveWarehouse).map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -1912,7 +1920,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1935,6 +1943,8 @@ export function InvoiceDialog({
                           <Input type="number" min="0" step="0.01" value={row.costPrice} onChange={(e) => updateInvRow(i, "costPrice", e.target.value)} className="h-8 text-sm" data-testid={`input-inv-cost-${i}`} />
                         </div>
                       </div>
+
+                      {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
 
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
@@ -1968,12 +1978,12 @@ export function InvoiceDialog({
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
                         <div>
-                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>{warehouseLoading ? <p className="text-xs">Cargando depósitos…</p> : warehouseError ? <p role="alert" className="text-xs">No se pudieron cargar los depósitos. Volvé a intentar.</p> : !invWarehouses.some(isActiveWarehouse) ? <p role="alert" className="text-xs">No hay depósitos activos.</p> : null}
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter(isActiveWarehouse).map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -2195,7 +2205,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
                         </div>
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground">Fecha de pago</div>
-                          <div className="font-medium">{op.fecha}</div>
+                          <div className="font-medium">{formatDisplayDate(op.fecha)}</div>
                         </div>
                       </div>
                     ))}
@@ -2428,7 +2438,7 @@ function PaymentOrderDialog({
                         {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {inv.fechaEmision}
+                        {formatDisplayDate(inv.fechaEmision)}
                         {inv.estado === "parcial" && ` · Total ${fmt(inv.montoTotal)}, ya pagado ${fmt($n(inv.montoTotal) - $n(inv.saldoPendiente))}`}
                       </div>
                     </div>
@@ -3027,7 +3037,7 @@ export default function PurchaseInvoices() {
                           <TableCell className="max-w-[160px] truncate" title={inv.supplierNombre || inv.proveedorNombre}>
                             {inv.supplierNombre || inv.proveedorNombre || "—"}
                           </TableCell>
-                          <TableCell>{inv.fechaEmision}</TableCell>
+                          <TableCell>{formatDisplayDate(inv.fechaEmision)}</TableCell>
                           <TableCell>{inv.periodo || "—"}</TableCell>
                           <TableCell className="text-right font-semibold">${fmt(inv.montoTotal)}</TableCell>
                           <TableCell>{estadoBadge(inv.estado)}</TableCell>
