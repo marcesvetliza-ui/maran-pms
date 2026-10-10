@@ -36,6 +36,63 @@ suite('Bajas seguras y edición del catálogo',()=>{
   await pool!.query('DELETE FROM inventory_warehouses WHERE id=$1',[warehouse]);
  });
  afterAll(async()=>{if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));await pool!.end();await (await import('../db')).pool.end();});
+ it('discontinuar conserva el stock y permite consumir y volver a comprar',async()=>{
+  await pool!.query('UPDATE inventory_items SET current_stock=2 WHERE id=$1',[item]);
+  await pool!.query('INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock) VALUES($1,$2,2)',[warehouse,item]);
+  expect((await request('PATCH',`/api/inventory/items/${item}/purchasing`,{purchaseEnabled:false})).status).toBe(200);
+  expect((await pool!.query('SELECT current_stock,is_active,purchase_enabled FROM inventory_items WHERE id=$1',[item])).rows[0]).toMatchObject({current_stock:'2.000',is_active:'true',purchase_enabled:false});
+  const {db,withDatabaseTransaction}=await import('../db');
+  await withDatabaseTransaction(async()=>{await (await import('../inventoryStockEngine')).consumeStockLines(db,[{itemId:item,quantity:1,warehouseId:warehouse}],{type:'manual',id,actor:'lifecycle-test',notes:'Consumo de remanente'});});
+  expect((await pool!.query('SELECT current_stock FROM inventory_items WHERE id=$1',[item])).rows[0].current_stock).toBe('1.000');
+  expect((await request('PATCH',`/api/inventory/items/${item}/purchasing`,{purchaseEnabled:true})).status).toBe(200);
+  expect((await pool!.query('SELECT purchase_enabled FROM inventory_items WHERE id=$1',[item])).rows[0].purchase_enabled).toBe(true);
+ });
+ it('la elaboración se archiva conservando ingredientes y bloquea dependencias activas',async()=>{
+  const parent=id+'-parent';
+  try {
+   await storage.createRecipeIngredient({recipeId:recipe,inventoryItemId:item,ingredientName:'Harina',quantity:'1',unit:'kg'});
+   await pool!.query("INSERT INTO recipes(id,name,is_base) VALUES($1,'Plato con base',true)",[parent]);
+   await storage.createRecipeIngredient({recipeId:parent,subRecipeId:recipe,ingredientName:'Base',quantity:'1',unit:'kg'});
+   await expect(storage.deleteRecipe(recipe)).rejects.toThrow('receta activa');
+   await storage.deleteRecipe(parent);
+   await storage.deleteRecipe(recipe);
+   expect((await storage.getRecipe(recipe))?.ingredients).toHaveLength(1);
+   expect((await storage.getRecipe(recipe))?.isActive).toBe('false');
+   await expect(storage.updateRecipe(parent,{isActive:'true'})).rejects.toThrow('reactivá');
+   await storage.updateRecipe(recipe,{isActive:'true'});
+   await storage.updateRecipe(parent,{isActive:'true'});
+  } finally {await pool!.query('DELETE FROM recipe_ingredients WHERE recipe_id=$1',[parent]);await pool!.query('DELETE FROM recipes WHERE id=$1',[parent]);}
+ });
+ it('plato y categoría conservan sus filas y se recuperan en el orden correcto',async()=>{
+  const category=id+'-cat',plate=id+'-plate';
+  try {
+   await pool!.query("INSERT INTO menu_categories(id,name) VALUES($1,'Categoría prueba')",[category]);
+   await pool!.query("INSERT INTO menu_items(id,category_id,name,price,inventory_item_id) VALUES($1,$2,'Plato prueba',100,$3)",[plate,category,item]);
+   await expect(storage.deleteMenuCategory(category)).rejects.toThrow('platos activos');
+   expect(await storage.deleteMenuItem(plate)).toEqual({deleted:false,deactivated:true});
+   expect(await storage.deleteMenuCategory(category)).toBe(true);
+   expect((await pool!.query('SELECT is_active FROM menu_items WHERE id=$1',[plate])).rows[0].is_active).toBe('false');
+   await expect(storage.updateMenuItem(plate,{isActive:'true',isAvailable:'true'})).rejects.toThrow('categoría');
+   await storage.updateMenuCategory(category,{isActive:'true'});
+   await storage.updateMenuItem(plate,{isActive:'true',isAvailable:'true'});
+   expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[item])).rows[0].is_active).toBe('true');
+  } finally {await pool!.query('DELETE FROM menu_items WHERE id=$1',[plate]);await pool!.query('DELETE FROM menu_categories WHERE id=$1',[category]);}
+ });
+ it('el alta exige clasificación completa, proveedor y límites coherentes',async()=>{
+  const group=id+'-group',category=id+'-leaf';let created:string|undefined;const supplier=(await pool!.query("INSERT INTO accounting_suppliers(razon_social,cuit,condicion_iva) VALUES($1,$2,'responsable_inscripto') RETURNING id",[id,'30'+randomUUID().replaceAll('-','').slice(0,9)])).rows[0].id;
+  try {
+   await pool!.query("INSERT INTO item_categories(id,name,area,is_group) VALUES($1,'Agrupamiento','restaurant',true)",[group]);await pool!.query("INSERT INTO item_categories(id,name,area,parent_id) VALUES($1,'Subagrupamiento','restaurant',$2)",[category,group]);
+   const payload={name:id,unit:'unidad',categoryId:category,itemKind:'materia_prima',accountingSupplierIds:[supplier],minStock:'2',criticalStock:'1',abcClass:'C',ivaRate:'21'};
+   expect((await request('POST','/api/inventory/items',{...payload,accountingSupplierIds:[]})).status).toBe(400);
+   expect((await request('POST','/api/inventory/items',{...payload,criticalStock:'3'})).status).toBe(400);
+   expect((await request('POST','/api/inventory/items',{...payload,ivaRate:null})).status).toBe(400);
+   const response=await request('POST','/api/inventory/items',payload);const result=await response.json();expect(response.status,JSON.stringify(result)).toBe(201);created=result.id;
+   expect((await pool!.query('SELECT category_id,min_stock,critical_stock FROM inventory_items WHERE id=$1',[created])).rows[0]).toMatchObject({category_id:category,min_stock:'2.000',critical_stock:'1.000'});
+  } finally {
+   if(created){await pool!.query('DELETE FROM inventory_item_suppliers WHERE item_id=$1',[created]);await pool!.query('DELETE FROM inventory_items WHERE id=$1',[created]);}
+   await pool!.query('DELETE FROM item_categories WHERE id=$1',[category]);await pool!.query('DELETE FROM item_categories WHERE id=$1',[group]);await pool!.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplier]);
+  }
+ });
  it('bloquea saldos y conserva cantidades',async()=>{
   await pool!.query('UPDATE inventory_items SET current_stock=2 WHERE id=$1',[item]);
   const r=await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Prueba'});expect(r.status).toBe(409);expect((await r.json()).error).toContain('saldo');

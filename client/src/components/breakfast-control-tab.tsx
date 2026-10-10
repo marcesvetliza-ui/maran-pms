@@ -19,7 +19,7 @@ import { Plus, Trash2, Loader2, Printer, Save } from "lucide-react";
 type ItemSourceType = "inventario" | "elaboracion";
 
 type InventoryItemLite = { id: string; name: string; unit: string; costPrice: string; isActive: string | null };
-type RecipeLite = { id: string; isBase?: boolean; name?: string | null; productionUnit?: string | null };
+type RecipeLite = { id: string; isActive?: string; isBase?: boolean; name?: string | null; productionUnit?: string | null };
 
 type CatalogItem = {
   id: string;
@@ -50,6 +50,7 @@ type DayView = {
   date: string;
   pax: number;
   paxIsSuggested: boolean;
+  forecastPax?: number;
   notes: string | null;
   entries: DayEntry[];
 };
@@ -73,7 +74,7 @@ function SourcePicker({
   const { data: recipes = [] } = useQuery<RecipeLite[]>({ queryKey: ["/api/restaurant/recipes"] });
   const { data: inventoryItems = [] } = useQuery<InventoryItemLite[]>({ queryKey: ["/api/inventory/items"] });
 
-  const baseRecipes = recipes.filter(r => r.isBase && (r.name || "").toLowerCase().includes(search.toLowerCase()));
+  const baseRecipes = recipes.filter(r => r.isActive !== "false" && r.isBase && (r.name || "").toLowerCase().includes(search.toLowerCase()));
   const items = inventoryItems.filter(i => i.isActive !== "false" && i.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -325,14 +326,14 @@ function DailyEntryTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-4">
+      <div className="flex flex-wrap items-start gap-4">
         <div className="space-y-1">
           <Label>Fecha</Label>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="input-breakfast-date" />
           <p className="text-xs text-muted-foreground">Se puede elegir cualquier día pasado para cargar con atraso.</p>
         </div>
         <div className="space-y-1">
-          <Label>N° Pax</Label>
+          <Label>Pax reales del servicio</Label>
           <Input
             type="number"
             min={0}
@@ -341,7 +342,7 @@ function DailyEntryTab() {
             className="w-28"
             data-testid="input-breakfast-pax"
           />
-          {day?.paxIsSuggested && <p className="text-xs text-muted-foreground">Sugerido por ocupación — editable</p>}
+          <p className="text-xs text-muted-foreground">Previstos: {day?.forecastPax ?? day?.pax ?? "…"} · {day?.paxIsSuggested ? "Precargado por ocupación; confirmá los reales" : "Cantidad registrada para el servicio"}</p>
         </div>
         <div className="flex-1 min-w-48 space-y-1">
           <Label>Notas (opcional)</Label>

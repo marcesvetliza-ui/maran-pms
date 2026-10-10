@@ -145,4 +145,13 @@ describe("InvoiceDialog — sugerencia de IVA por artículo y depósito por defe
     await user.click(await screen.findByRole("option", { name: "Depósito Cocina" }));
     expect(screen.getByTestId("select-inv-warehouse-0")).toHaveTextContent("Depósito Cocina");
   });
+  it.each([true,false])("permite indicar el contenido variable de una caja (vista unificada: %s)",async unifiedLayout=>{
+    const user=userEvent.setup();renderDialog({unifiedLayout});if(!unifiedLayout)for(let step=0;step<4;step++)await user.click(screen.getByTestId('btn-next-step'));await addItemRow(user);await selectItemOnRow(user,'Aceite de Oliva');
+    await user.click(screen.getAllByRole('combobox').find(e=>e.textContent==='unidad')!);await user.click(screen.getByRole('option',{name:'caja'}));
+    await user.clear(screen.getByTestId('input-inv-qty-0'));await user.type(screen.getByTestId('input-inv-qty-0'),'2');
+    const content=screen.getByLabelText('Contenido de presentación 1'),cost=screen.getByTestId('input-inv-cost-0');
+    await user.type(content,'24');await user.clear(cost);await user.type(cost,'240');expect(screen.getByText(/Ingreso: 48 unidades de stock/)).toHaveTextContent('costo por unidad: $10');
+    await user.clear(content);await user.type(content,'120');await user.clear(cost);await user.type(cost,'1200');expect(screen.getByText(/Ingreso: 240 unidades de stock/)).toHaveTextContent('costo por unidad: $10');
+  });
+
 });

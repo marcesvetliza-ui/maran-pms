@@ -40,6 +40,7 @@ export type ProducibleFormulaLine = {
 };
 
 export type ProducibleFormula = {
+  isActive?: string;
   recipeId: string;
   name: string;
   productionUnit: string | null;
@@ -70,6 +71,7 @@ export async function getProducibleFormulas(): Promise<ProducibleFormula[]> {
     const ingredients = await db.select().from(recipeIngredients).where(eq(recipeIngredients.recipeId, recipe.id));
     result.push({
       recipeId: recipe.id,
+      isActive: recipe.isActive,
       name: recipe.name || "Elaboración",
       productionUnit: recipe.productionUnit,
       productionYield: parseFloat(String(recipe.productionYield || "0")),
@@ -207,7 +209,7 @@ export async function registerProductionRun(input: RegisterProductionRunInput): 
   }
   await tx.execute(sql`SELECT id FROM recipes WHERE id=${input.recipeId} FOR SHARE`);
   const [recipe]=await tx.select().from(recipes).where(eq(recipes.id,input.recipeId));
-  if(!recipe || !recipe.isBase)throw new Error('La Elaboración Base no existe');
+  if(!recipe || !recipe.isBase || recipe.isActive === 'false')throw new Error('La Elaboración Base no existe o está inactiva');
   if (!recipe.outputInventoryItemId) {
     throw new Error("Esta Elaboración Base no está marcada como producible");
   }

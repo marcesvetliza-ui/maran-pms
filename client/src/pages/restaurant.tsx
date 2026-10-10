@@ -5054,7 +5054,7 @@ export default function RestaurantPage() {
 
                 if (menuSearch.trim()) {
                   const visibleItems = menuItems.filter(item =>
-                    item.isAvailable !== "false" && (
+                    item.isActive !== "false" && item.isAvailable !== "false" && (
                       item.name.toLowerCase().includes(menuSearch.toLowerCase()) ||
                       (item.description || "").toLowerCase().includes(menuSearch.toLowerCase())
                     )
@@ -5082,7 +5082,7 @@ export default function RestaurantPage() {
                   return (
                     <div className="grid gap-2 sm:grid-cols-2">
                       {menuItems
-                        .filter((item) => item.categoryId === effectiveCategory && item.isAvailable !== "false")
+                        .filter((item) => item.categoryId === effectiveCategory && item.isActive !== "false" && item.isAvailable !== "false")
                         .map((item) => (
                           <button
                             key={item.id}
