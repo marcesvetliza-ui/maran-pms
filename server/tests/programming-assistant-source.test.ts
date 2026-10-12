@@ -16,6 +16,30 @@ async function fixture() {
   return new CodeSource(directory, "a".repeat(40));
 }
 describe("read-only code investigator", () => {
+  it.each(["invalid_json", "invalid_field", "too_long"])("corrects %s without accepting the invalid report", async (kind) => {
+    const source = await fixture();
+    const report = {summary:"Falta comprobar",certainty:"falta_informacion",cause:"Sin evidencia suficiente",proposal:"Revisar",proposedTests:[],questions:[],dataRepair:"",limitations:Array(10).fill("Limitación"),evidence:[]};
+    let attempts = 0;
+    const client = {chat:{completions:{create:async(request:any)=>{
+      if (attempts++ === 0) return {choices:[{message:{role:"assistant",content:kind === "invalid_json" ? "{broken" : JSON.stringify({...report,...(kind === "invalid_field" ? {dataRepair:null} : {summary:"x".repeat(3001)})})}}]};
+      const correction = JSON.parse(request.messages.at(-1).content);
+      expect(correction.validationError).toContain("no cumple el formato");
+      expect(correction.issues.length).toBeGreaterThan(0);
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result = await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
+    expect(attempts).toBe(2);
+    expect(result.report.summary).toBe(report.summary);
+    expect(result.report.limitations.length).toBeLessThanOrEqual(10);
+    expect(result.report.limitations.join(" ")).toContain("revisión humana");
+  });
+  it("stops after two format corrections instead of saving a malformed report", async () => {
+    const source = await fixture();
+    let attempts=0;
+    const client={chat:{completions:{create:async()=>{attempts++;return {choices:[{message:{role:"assistant",content:"{broken"}}]};}}}};
+    await expect(diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any)).rejects.toBeInstanceOf(SyntaxError);
+    expect(attempts).toBe(3);
+  });
   it("excludes secret files, traversals and symlinks", async () => {
     const source = await fixture();
     await writeFile(
