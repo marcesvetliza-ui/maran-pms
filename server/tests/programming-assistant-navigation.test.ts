@@ -6,6 +6,24 @@ import { CodeSource } from "../../services/programming-assistant/source";
 import { orientInvestigation } from "../../services/programming-assistant/navigation";
 import type { SupportTicket } from "../../shared/programming-support";
 describe("code navigation", () => {
+  it("orients the user's exact invoice case even when the selected module is otro", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"otro",title:"Descuento general y descuentos",actual:"Factura A con neto $1.000, IVA $210. Diez unidades a $100 cada una. Descuento general del 10 % y edito y guardo nuevamente.",expected:"Total de $1.089. El costo del artículo debe conservarse en $100 por unidad.",steps:"",messages:[]} as SupportTicket,source);
+    expect(result.initialReads.map(r=>r.path)).toContain("shared/purchaseInvoiceDiscount.ts");
+    expect(result.initialReads.map(r=>r.path)).toContain("server/purchase-invoice-stock.ts");
+    expect(result.initialReads.map(r=>r.path)).toContain("server/tests/purchase-invoice-discount.test.ts");
+    expect(result.initialReads[0].content).toContain("restorePurchaseDiscount");
+  });
+  it("does not route a reservation discount into purchase invoices", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"otro",title:"Descuento general",actual:"Reserva de habitación con descuento",expected:"Conservar la tarifa",steps:"",messages:[]} as SupportTicket,source);
+    expect(result.initialReads).toEqual([]);
+  });
+  it("provides pending production and its existing tests without needing a module selection", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"otro",title:"Reintento de producción",actual:"Falta materia prima y dos usuarios reintentan",expected:"Sin movimientos duplicados",steps:"",messages:[]} as SupportTicket,source);
+    expect(result.initialReads.map(r=>r.path)).toEqual(["server/productionPending.ts","server/production.ts","server/tests/production-workflow.pg.test.ts"]);
+  });
   it("distributes content matches across backend, shared calculations, frontend and tests", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "assistant-nav-"));
     try {

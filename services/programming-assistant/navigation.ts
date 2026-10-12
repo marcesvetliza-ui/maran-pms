@@ -7,11 +7,17 @@ export async function orientInvestigation(
 ) {
   const files = await source.files();
   const text =
-    `${ticket.title} ${ticket.actual} ${ticket.expected} ${ticket.steps} ${ticket.messages?.map((m) => m.text).join(" ") || ""}`.toLowerCase();
-  const purchases = /compra|proveedor|purchase/.test(text);
+    `${ticket.module} ${ticket.title} ${ticket.actual} ${ticket.expected} ${ticket.steps} ${ticket.messages?.map((m) => m.text).join(" ") || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const discount = /descuento|discount/.test(text);
+  // Users describe invoice amounts and item costs without saying "compra".
+  // This is a navigation hint, not a conclusion about the invoice or its behavior.
+  const purchases = /compra|proveedor|purchase/.test(text) ||
+    (discount && /factura|fact-[abc]|invoice/.test(text) && /stock|articul|unitari/.test(text));
+  const production = /produccion|production/.test(text);
   const terms = purchases
     ? ["purchase", "compras"]
+    : production
+      ? ["production", "inventoryStockEngine", "inventorySafety"]
     : ticket.module === "inventario"
       ? ["inventory", "stock"]
       : ticket.module === "grupos"
@@ -34,7 +40,9 @@ export async function orientInvestigation(
           ? "server/tests/purchase-invoice-discount.test.ts"
           : "server/tests/purchase-invoice-stock.pg.test.ts",
       ]
-    : [];
+    : production
+      ? ["server/productionPending.ts", "server/production.ts", "server/tests/production-workflow.pg.test.ts"]
+      : [];
   const initialReads = [];
   for (const file of seedPaths.filter((p) => files.includes(p)))
     initialReads.push(await source.read(file, 1, 140));
