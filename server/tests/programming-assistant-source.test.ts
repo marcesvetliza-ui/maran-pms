@@ -16,6 +16,33 @@ async function fixture() {
   return new CodeSource(directory, "a".repeat(40));
 }
 describe("read-only code investigator", () => {
+  it("traces the real preview route, its conversion dependencies and existing regression tests", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await source.traceEndpoint("/api/inventory/recipe-stock-preview");
+    expect(result.handlers[0].path).toBe("server/inventoryStage2Routes.ts");
+    expect(result.handlers[0].content).toContain("res.json");
+    expect(result.dependencies.map(d=>d.symbol)).toEqual(expect.arrayContaining(["unitFactor","planIngredientsWithActualQuantities","convertInventoryQuantity"]));
+    expect(result.dependencies.every(d=>d.definitions.length>0)).toBe(true);
+    expect(result.tests[0].content).toContain("sin mover stock");
+    expect(result.tests[0].content).toContain("falta equivalencia");
+    expect([...result.handlers,...result.tests,...result.dependencies.flatMap(d=>d.definitions)].every(r=>source.validates(r))).toBe(true);
+    await expect(source.traceEndpoint("https://example.com")).rejects.toThrow();
+  });
+  it("delivers server evidence automatically after reading a frontend API call", async () => {
+    const source=await fixture();
+    await mkdir(path.join(directory,"client/src"),{recursive:true});
+    await writeFile(path.join(directory,"client/src","preview.ts"),"fetch('/api/preview');");
+    await writeFile(path.join(directory,"server","endpoint.ts"),"app.post('/api/preview', (_req,res)=>res.json({quantity:1.5}));");
+    const report={summary:"Vista previa",certainty:"sustentado_en_codigo",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[{path:"server/endpoint.ts",start:1,end:1,explanation:"Respuesta"}]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      if(round++===0)return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"frontend",type:"function",function:{name:"read_code",arguments:'{"path":"client/src/preview.ts","start":1,"end":1}'}}]}}]};
+      if(round===2)expect(JSON.parse(request.messages.at(-1).content).endpointContext[0].handlers[0].content).toContain("quantity:1.5");
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(result.report.certainty).toBe("sustentado_en_codigo");expect(result.readFiles).toContain("server/endpoint.ts");
+  });
   it("reserves a closing phase instead of aborting when a batch exceeds research calls", async () => {
     const source=await fixture();
     await writeFile(path.join(directory,"server","budget.ts"),Array.from({length:30},(_,i)=>`const n${i}=${i};`).join("\n"));

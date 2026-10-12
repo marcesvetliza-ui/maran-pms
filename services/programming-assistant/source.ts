@@ -108,7 +108,7 @@ export class CodeSource {
     );
     return { files: files.slice(0, 60), limited: files.length > 60 };
   }
-  async inspectSymbol(symbol: string) {
+  async inspectSymbol(symbol: string, limits={maxDefinitions:3,maxTests:2,lines:140}) {
     if (typeof symbol !== "string" || !/^[A-Za-z_$][\w$]{2,79}$/.test(symbol)) throw new Error("Símbolo inválido.");
     const escaped=symbol.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     const definition=new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function\\s+${escaped}\\b|(?:const|let|class)\\s+${escaped}\\b)`);
@@ -117,17 +117,53 @@ export class CodeSource {
     const tests: Awaited<ReturnType<CodeSource["read"]>>[]=[];
     for (const file of (await this.files()).filter(f=>/\.(ts|tsx)$/.test(f))) {
       const isTest=file.includes("/tests/") || file.includes(".test.");
-      if (isTest && tests.length>=2) continue;
-      if (!isTest && definitions.length>=3) continue;
+      if (isTest && tests.length>=limits.maxTests) continue;
+      if (!isTest && definitions.length>=limits.maxDefinitions) continue;
       const lines=(await this.content(file)).split("\n");
       const index=lines.findIndex(line=>isTest ? occurrence.test(line) : definition.test(line));
       if(index<0) continue;
       const start=Math.max(1,index+1-3);
-      (isTest?tests:definitions).push(await this.read(file,start,start+139));
+      (isTest?tests:definitions).push(await this.read(file,start,start+limits.lines-1));
     }
     this.searches.push(`symbol:${symbol}`);
     return {symbol,definitions,tests,partial:true,
       guidance:"Fragmentos leídos, no funciones ejecutadas. Si no termina el cuerpo, continuar con read_code. Los tests sin mención literal del símbolo no están incluidos: buscar también por endpoint y comportamiento."};
+  }
+  async traceEndpoint(endpoint: string) {
+    if(typeof endpoint!=="string" || !/^\/api\/[A-Za-z0-9_/:.-]{1,180}$/.test(endpoint)) throw new Error("Endpoint inválido.");
+    const escaped=endpoint.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const route=new RegExp(`\\b(?:app|router)\\.(?:get|post|put|patch|delete)\\s*\\(\\s*['\"]${escaped}['\"]`);
+    const nextRoute=/\b(?:app|router)\.(?:get|post|put|patch|delete)\s*\(/;
+    const handlers:Awaited<ReturnType<CodeSource["read"]>>[]=[];
+    const dependencies:Awaited<ReturnType<CodeSource["inspectSymbol"]>>[]=[];
+    const tests:Awaited<ReturnType<CodeSource["read"]>>[]=[];
+    const symbols=new Set<string>();
+    for(const file of (await this.files()).filter(f=>f.startsWith("server/") && /\.tsx?$/.test(f))){
+      const text=await this.content(file),lines=text.split("\n");
+      if(file.includes("/tests/")){
+        const index=lines.findIndex(line=>line.includes(endpoint));
+        if(index>=0 && tests.length<1){const start=Math.max(1,index-8);tests.push(await this.read(file,start,start+59));}
+        continue;
+      }
+      if(handlers.length>=1)continue;
+      const index=lines.findIndex(line=>route.test(line));
+      if(index<0)continue;
+      const following=lines.findIndex((line,i)=>i>index && nextRoute.test(line));
+      const end=Math.min(index+80,following<0?lines.length:following);
+      const handler=await this.read(file,index+1,end);
+      handlers.push(handler);
+      for(const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['\"][^'\"]+['\"]/g)){
+        for(const part of match[1].split(',')){
+          if(/^\s*type\b/.test(part))continue;
+          const [original,alias]=part.trim().split(/\s+as\s+/),local=alias||original;
+          if(!/^[A-Za-z_$][\w$]{2,79}$/.test(original))continue;
+          const escapedLocal=local.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+          if(new RegExp(`\\b${escapedLocal}\\s*\\(`).test(handler.content))symbols.add(original);
+        }
+      }
+    }
+    for(const symbol of [...symbols].slice(0,4))dependencies.push(await this.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80}));
+    return {endpoint,handlers,dependencies,tests,partial:true,guidance:"Fragmentos realmente leídos. Continuar cuerpos parciales con read_code; no ejecutar ni inferir ausencia de otros tests."};
   }
   async search(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
