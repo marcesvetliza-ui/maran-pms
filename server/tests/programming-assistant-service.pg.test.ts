@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, it, expect } from "vitest";
 import { createService } from "../../services/programming-assistant/service";
+import type {SupportDiagnosis} from "../../shared/programming-support";
 
 (process.env.DATABASE_URL ? describe : describe.skip)(
   "persistent assistant service",
@@ -17,13 +18,13 @@ import { createService } from "../../services/programming-assistant/service";
       url.searchParams.set("options", `-c search_path=${schema}`);
       const secret = "synthetic-secret-".repeat(3);
       const version = "a".repeat(40);
-      const report = {
+      const report: SupportDiagnosis = {
         summary: "Diagnóstico de prueba",
         certainty: "hipotesis" as const,
         cause: "Simulación",
         proposal: "Revisar",
         proposedTests: [],
-        questions: [],
+        questions: ["¿Querés revisar otro circuito?"],
         dataRepair: "",
         limitations: [],
         evidence: [],
@@ -112,10 +113,14 @@ import { createService } from "../../services/programming-assistant/service";
         const updated = await (await request("/cases")).json();
         expect(updated[0].status).toBe("proposal_ready");
         expect(updated[0].version).toBe(version);
+        report.certainty = "falta_informacion";
+        expect((await request(`/cases/${ticket.id}/analyze`, {requestId:randomUUID()})).status).toBe(200);
+        await service.tick();
+        expect((await (await request("/cases")).json())[0].status).toBe("needs_info");
         const count = await service.pool.query(
           "SELECT count(*)::int AS count FROM support_runs WHERE kind='analyze'",
         );
-        expect(count.rows[0].count).toBe(1);
+        expect(count.rows[0].count).toBe(2);
         await service.pool.query(
           "INSERT INTO support_runs(id,owner,request_id,case_id,kind) SELECT gen_random_uuid(),'owner1',gen_random_uuid(),$1,'analyze' FROM generate_series(1,9)",
           [ticket.id],

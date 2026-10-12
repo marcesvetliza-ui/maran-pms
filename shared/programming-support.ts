@@ -66,6 +66,10 @@ export type SupportState =
   | "proposal_ready"
   | "failed"
   | "closed";
+/** Only an indispensable missing fact blocks a diagnosis; optional questions do not. */
+export function diagnosisState(report: SupportDiagnosis): "needs_info" | "proposal_ready" {
+  return report.certainty === "falta_informacion" ? "needs_info" : "proposal_ready";
+}
 export type SupportMessage = {
   id: string;
   author: string;

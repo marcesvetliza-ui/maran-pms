@@ -1,0 +1,46 @@
+# Prueba del piloto: calidad del diagnóstico
+
+Mantener ambos servicios del piloto en `fix/assistant-diagnostic-format`. Esta actualización conserva la corrección de formato y no modifica producción.
+
+## Consulta 1: descuento general
+
+Título: Descuento general sin alterar costo por artículo
+
+Módulo: Compras
+
+Qué ocurrió: Quiero verificar el comportamiento existente, no reportar un error. Ejemplo ficticio: factura A con neto $1.000, IVA 21 % de $210, sin percepciones ni otros conceptos. Diez unidades del mismo artículo a $100 por unidad, en su unidad base, sin conversión. Aplico 10 % de descuento general.
+
+Qué esperaba: Total $1.089: neto $900 e IVA $189. El costo de stock debe seguir en $100 por unidad. Al editar y guardar de nuevo, el descuento no debe aplicarse dos veces. Verificá el flujo y las aserciones existentes, sin ejecutar operaciones ni pruebas.
+
+Pasos: Cargar importes y renglón → aplicar descuento → guardar → editar y volver a guardar.
+
+Criterios: explicar cálculo, persistencia y restauración con citas precisas; no volver a preguntar si se espera conservar el costo; reconocer cualquier tramo que no haya inspeccionado; distinguir pruebas leídas de ejecutadas. Puede presentar propuesta lista si respondió lo principal.
+
+## Consulta 2: reintento de producción
+
+Título: Reintentar producción sin duplicar stock
+
+Módulo: Producción / Inventario
+
+Qué ocurrió: Quiero verificar qué hace el sistema cuando una producción queda pendiente por falta de materia prima. Después de reponerla, dos usuarios presionan reintentar casi al mismo tiempo sobre la misma producción pendiente.
+
+Qué esperaba: Que el insumo se descuente una sola vez y el elaborado ingrese una sola vez; si todavía falta stock, que no se aplique un movimiento parcial. Investigá los controles del servidor y las pruebas existentes. No registres movimientos ni ejecutes pruebas.
+
+Pasos: Producción con faltante → reposición → dos reintentos de la misma solicitud.
+
+Criterios: seguir pendiente, reintento, transacción y movimientos; citar los controles y distinguir una aserción existente de una ejecución real; no pedir al usuario rutas del código. Si falta evidencia, declararla sin inventar una garantía.
+
+## Control opcional de falta de información
+
+Nueva consulta: «Veo una cantidad de stock que no coincide con la realidad». Sin identificar artículo, depósito, operación o cantidades. Debe pedir datos concretos anonimizados necesarios para investigar el caso; no afirmar que encontró una causa específica.
+
+## Cambios
+
+- Conclusión primero y uso de requisitos ya informados.
+- Preguntas solo indispensables, sin ampliar alcance automáticamente.
+- Estado pendiente basado en falta de información declarada, no en la mera existencia de preguntas.
+- Etiqueta «Consultas adicionales» si las preguntas no bloquean la conclusión.
+- Limitaciones breves y relevantes; separación entre descuento y conversión.
+- Los tests leídos no se presentan como ejecutados.
+
+La mejora de lenguaje se comprobará con consultas reales al modelo. Las pruebas locales verifican el estado persistido, las validaciones y el código de soporte, sin llamadas a OpenAI.

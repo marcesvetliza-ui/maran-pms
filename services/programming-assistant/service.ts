@@ -3,6 +3,7 @@ import express from "express";
 import pg from "pg";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
+  diagnosisState,
   supportCreateSchema,
   supportMessageSchema,
   supportRunSchema,
@@ -280,9 +281,7 @@ export async function createService(
             { apiKey: config.apiKey!, model: config.model },
           );
           ticket.report = result.report;
-          ticket.status = result.report.questions.length
-            ? "needs_info"
-            : "proposal_ready";
+          ticket.status = diagnosisState(result.report);
           ticket.lastError = null;
         } catch (error) {
           const failure = diagnosisFailure(error);

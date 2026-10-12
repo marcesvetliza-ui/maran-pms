@@ -307,7 +307,7 @@ export default function ProgrammingSupport() {
                         "Pruebas propuestas — sin ejecutar",
                         ticket.report.proposedTests,
                       ],
-                      ["Información que falta", ticket.report.questions],
+                      [ticket.report.certainty === "falta_informacion" ? "Información necesaria para continuar" : "Consultas adicionales", ticket.report.questions],
                       [
                         "Alcance de este diagnóstico",
                         ticket.report.limitations,
