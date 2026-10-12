@@ -51,6 +51,10 @@ export const diagnosisOutputSchema = {
 };
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
+    type:"function",
+    function:{name:"inspect_symbol",description:"Localiza y lee definiciones de una función y tests con su nombre en todo el catálogo. No ejecuta código. Usar para seguir las funciones llamadas, sin pedir al usuario archivos.",parameters:{type:"object",properties:{symbol:{type:"string"}},required:["symbol"],additionalProperties:false}},
+  },
+  {
     type: "function",
     function: {
       name: "find_files",
@@ -124,14 +128,15 @@ export async function diagnose(
   let tokens = 0,
     calls = 0,
     formatCorrections = 0,
+    coverageReviewed = false,
     evidenceCorrections = 0;
-  for (let round = 0; round < 12; round++) {
+  for (let round = 0; round < 14; round++) {
     const response = await ai.chat.completions.create(
       {
         model: options.model,
         messages,
         tools,
-        tool_choice: round >= 9 && !(evidenceCorrections > 0 && calls < 24) ? "none" : "auto",
+        tool_choice: round >= 9 && !((evidenceCorrections > 0 || coverageReviewed) && calls < 24) ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -158,7 +163,7 @@ export async function diagnose(
       try {
         report = diagnosisSchema.parse(JSON.parse(answer.content || "{}"));
       } catch (error) {
-        if (formatCorrections++ >= 2 || round === 11) throw error;
+        if (formatCorrections++ >= 2 || round === 13) throw error;
         // Return field paths and validation codes only, never provider error bodies.
         const issues = error && typeof error === "object" && "issues" in error
           ? (error as { issues: Array<{ path: unknown[]; code: string }> }).issues
@@ -177,7 +182,7 @@ export async function diagnose(
       const missingEvidence =
         report.certainty === "sustentado_en_codigo" && !report.evidence.length;
       if (invalidEvidence.length || missingEvidence) {
-        if (evidenceCorrections++ >= 2 || round === 11)
+        if (evidenceCorrections++ >= 2 || round === 13)
           throw new Error(
             "El diagnóstico cita líneas que no fueron consultadas o carece de evidencia verificable.",
           );
@@ -195,6 +200,16 @@ export async function diagnose(
             })),
           }),
         });
+        continue;
+      }
+      if (!coverageReviewed) {
+        if (round === 13) throw new Error("Se alcanzó el límite antes de revisar la cobertura del diagnóstico.");
+        coverageReviewed=true;
+        messages.push({...answer,role:"assistant"});
+        messages.push({role:"user",content:JSON.stringify({
+          review:"Antes de entregar el diagnóstico, revisá este borrador contra los requisitos completos del caso. Si afirmás un cálculo o validación delegada a una función, leé su definición con inspect_symbol y continuá el cuerpo si el fragmento es parcial. Buscá tests por símbolo, endpoint y comportamiento antes de afirmar que no existen o proponer una aserción ya cubierta. No sostengas en el resumen un comportamiento que declarás no inspeccionado en las limitaciones. Si falta una parte central y no podés inspeccionarla con el presupuesto restante, indicá falta_informacion y limitá la conclusión. No preguntes al usuario dónde está código que podés buscar. Entregá el JSON definitivo después de esta revisión.",
+          allowedReadRanges:[...source.readRanges].map(([path,ranges])=>({path,ranges})),
+        })});
         continue;
       }
       report.limitations = [
@@ -222,7 +237,9 @@ export async function diagnose(
       try {
         const args = JSON.parse(call.function.arguments);
         result =
-          call.function.name === "find_files"
+          call.function.name === "inspect_symbol"
+            ? await source.inspectSymbol(args.symbol)
+            : call.function.name === "find_files"
             ? await source.findFiles(args.term, args.prefix || "")
             : call.function.name === "search_code"
               ? await source.search(args.term, args.prefix || "")

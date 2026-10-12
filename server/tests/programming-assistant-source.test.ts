@@ -16,6 +16,42 @@ async function fixture() {
   return new CodeSource(directory, "a".repeat(40));
 }
 describe("read-only code investigator", () => {
+  it("finds definitions and tests across filenames without exposing excluded files", async () => {
+    const source=await fixture();
+    await mkdir(path.join(directory,"server/tests"));
+    await writeFile(path.join(directory,"server","generic.ts"),"export async function unitFactor(){return 0.001;}");
+    await writeFile(path.join(directory,"server/tests","unrelated.test.ts"),"expect(unitFactor()).toBe(0.001);");
+    await writeFile(path.join(directory,"server","secrets.ts"),"export function unitFactor(){return 'private';}");
+    const result=await source.inspectSymbol("unitFactor");
+    expect(result.definitions.map(r=>r.path)).toEqual(["server/generic.ts"]);
+    expect(result.tests.map(r=>r.path)).toEqual(["server/tests/unrelated.test.ts"]);
+    expect(source.validates(result.definitions[0])).toBe(true);
+    expect((await source.inspectSymbol("absentSymbol")).definitions).toEqual([]);
+    await expect(source.inspectSymbol("../../secrets")).rejects.toThrow();
+  });
+  it("finds the real conversion functions missing from the preview diagnosis", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    for(const symbol of ["unitFactor","planIngredientsWithActualQuantities","convertInventoryQuantity"]){
+      const result=await source.inspectSymbol(symbol);
+      expect(result.definitions.length,symbol).toBeGreaterThan(0);
+      expect(result.definitions.every(r=>source.validates(r))).toBe(true);
+    }
+  });
+  it("reviews a draft and reads a called symbol before the final conclusion", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","generic.ts"),"export function factor(){return 0.001;}");
+    const draft={summary:"Falta función",certainty:"falta_informacion",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      const current=round++;
+      if(current===0)return {choices:[{message:{role:"assistant",content:JSON.stringify(draft)}}]};
+      if(current===1){expect(JSON.parse(request.messages.at(-1).content).review).toContain("inspect_symbol");return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"symbol1",type:"function",function:{name:"inspect_symbol",arguments:'{"symbol":"factor"}'}}]}}]};}
+      expect(JSON.parse(request.messages.at(-1).content).definitions[0].content).toContain("0.001");
+      return {choices:[{message:{role:"assistant",content:JSON.stringify({...draft,summary:"Factor leído",certainty:"sustentado_en_codigo",evidence:[{path:"server/generic.ts",start:1,end:1,explanation:"Conversión"}]})}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(round).toBe(3);expect(result.calls).toBe(1);expect(result.report.certainty).toBe("sustentado_en_codigo");
+  });
   it("can read missing evidence during a late correction without bypassing validation", async () => {
     const source=await fixture();
     await writeFile(path.join(directory,"server","late.ts"),"const first=1;\nconst second=2;");
@@ -25,12 +61,12 @@ describe("read-only code investigator", () => {
       const current=round++;
       if (current===9) expect(request.tool_choice).toBe("none");
       if (current===10) expect(request.tool_choice).toBe("auto");
-      if (current===9 || current===11) return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+      if (current===9 || current>=11) return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
       const line=current===10?2:1;
       return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:`read-${current}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/late.ts",start:line,end:line})}}]}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
-    expect(round).toBe(12);
+    expect(round).toBe(13);
     expect(result.calls).toBe(10);
     expect(result.report.evidence).toEqual(report.evidence);
   });
@@ -55,12 +91,12 @@ describe("read-only code investigator", () => {
     const client = {chat:{completions:{create:async(request:any)=>{
       if (attempts++ === 0) return {choices:[{message:{role:"assistant",content:kind === "invalid_json" ? "{broken" : JSON.stringify({...report,...(kind === "invalid_field" ? {dataRepair:null} : {summary:"x".repeat(3001)})})}}]};
       const correction = JSON.parse(request.messages.at(-1).content);
-      expect(correction.validationError).toContain("no cumple el formato");
-      expect(correction.issues.length).toBeGreaterThan(0);
+      if (correction.review) expect(correction.review).toContain("revisá este borrador");
+      else {expect(correction.validationError).toContain("no cumple el formato"); expect(correction.issues.length).toBeGreaterThan(0);}
       return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result = await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(3);
     expect(result.report.summary).toBe(report.summary);
     expect(result.report.limitations.length).toBeLessThanOrEqual(10);
     expect(result.report.limitations.join(" ")).toContain("revisión humana");
@@ -205,7 +241,8 @@ describe("read-only code investigator", () => {
               expect(feedback.allowedReadRanges).toEqual([
                 { path: "server/normal.ts", ranges: [[1, 1]] },
               ]);
-              expect(feedback.invalidEvidence[0].end).toBe(2);
+              if (feedback.invalidEvidence) expect(feedback.invalidEvidence[0].end).toBe(2);
+              else expect(feedback.review).toContain("inspect_symbol");
             }
             return {
               choices: [
@@ -244,7 +281,7 @@ describe("read-only code investigator", () => {
       { apiKey: "not-used", model: "mock" },
       client as any,
     );
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(3);
     expect(result.report.evidence[0].end).toBe(1);
   });
   it("rejects a diagnosis citing unread source", async () => {

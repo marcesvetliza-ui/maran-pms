@@ -108,6 +108,27 @@ export class CodeSource {
     );
     return { files: files.slice(0, 60), limited: files.length > 60 };
   }
+  async inspectSymbol(symbol: string) {
+    if (typeof symbol !== "string" || !/^[A-Za-z_$][\w$]{2,79}$/.test(symbol)) throw new Error("Símbolo inválido.");
+    const escaped=symbol.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const definition=new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function\\s+${escaped}\\b|(?:const|let|class)\\s+${escaped}\\b)`);
+    const occurrence=new RegExp(`\\b${escaped}\\b`);
+    const definitions: Awaited<ReturnType<CodeSource["read"]>>[]=[];
+    const tests: Awaited<ReturnType<CodeSource["read"]>>[]=[];
+    for (const file of (await this.files()).filter(f=>/\.(ts|tsx)$/.test(f))) {
+      const isTest=file.includes("/tests/") || file.includes(".test.");
+      if (isTest && tests.length>=2) continue;
+      if (!isTest && definitions.length>=3) continue;
+      const lines=(await this.content(file)).split("\n");
+      const index=lines.findIndex(line=>isTest ? occurrence.test(line) : definition.test(line));
+      if(index<0) continue;
+      const start=Math.max(1,index+1-3);
+      (isTest?tests:definitions).push(await this.read(file,start,start+139));
+    }
+    this.searches.push(`symbol:${symbol}`);
+    return {symbol,definitions,tests,partial:true,
+      guidance:"Fragmentos leídos, no funciones ejecutadas. Si no termina el cuerpo, continuar con read_code. Los tests sin mención literal del símbolo no están incluidos: buscar también por endpoint y comportamiento."};
+  }
   async search(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
       throw new Error("Búsqueda entre 3 y 120 caracteres.");

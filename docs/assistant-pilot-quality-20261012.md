@@ -1,5 +1,13 @@
 # Prueba del piloto: calidad del diagnóstico
 
+## Seguimiento general de símbolos y revisión del borrador
+
+Se incorporó inspect_symbol para localizar definiciones y tests por el nombre de la función en el catálogo autorizado, aunque los archivos tengan otros nombres. Devuelve hasta tres definiciones y dos fragmentos de tests, con rangos reales de lectura y redacción de secretos. Los fragmentos son parciales; debe continuar con read_code si no contienen el cuerpo completo y buscar tests por endpoint/comportamiento si no mencionan el símbolo.
+
+Antes de entregar una respuesta válida se solicita una revisión del borrador: comprobar requisitos centrales, seguir funciones delegadas y no sostener en el resumen lo que declara no haber inspeccionado. Esto es una revisión del modelo, no una garantía automática de corrección semántica. La evidencia sigue validándose después. Se reservan dos rondas adicionales (máximo 14); tiempo, tokens y 24 consultas de herramientas mantienen sus límites. Si no alcanza para revisar el borrador, no se guarda una propuesta sin esa revisión.
+
+Pasaron 26 pruebas, TypeScript y empaquetado del asistente, incluidos los tres símbolos de la vista previa y un recorrido simulado borrador → lectura de definición → conclusión. Repetir la consulta «Vista previa de consumo interno» después del despliegue para verificar uso real por el modelo. No se ejecutó OpenAI en la validación local.
+
 Mantener ambos servicios del piloto en `fix/assistant-diagnostic-format`. Esta actualización conserva la corrección de formato y no modifica producción.
 
 ## Consulta 1: descuento general
