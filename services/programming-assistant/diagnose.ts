@@ -131,7 +131,7 @@ export async function diagnose(
         model: options.model,
         messages,
         tools,
-        tool_choice: round >= 9 ? "none" : "auto",
+        tool_choice: round >= 9 && !(evidenceCorrections > 0 && calls < 24) ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -186,7 +186,7 @@ export async function diagnose(
           role: "user",
           content: JSON.stringify({
             validationError:
-              "Las referencias deben estar completamente contenidas en rangos devueltos por read_code. search_code solo localiza archivos; sus resultados no habilitan citas. Corregí el diagnóstico usando exclusivamente líneas realmente leídas. Si no alcanzan para sostener la conclusión, indicá falta_informacion, pedí la información necesaria y no afirmes una causa confirmada.",
+              "Cada línea citada debe estar cubierta por read_code; se pueden unir lecturas contiguas, nunca atravesar huecos sin leer. search_code solo localiza archivos; sus resultados no habilitan citas. Usá las herramientas para leer el rango faltante cuando esté dentro del catálogo, o corregí la referencia y su explicación para citar únicamente lo leído. No mantengas una conclusión que la cita corregida no respalde. Si no alcanza la evidencia, indicá falta_informacion sin afirmar una causa confirmada.",
             invalidEvidence,
             missingEvidence,
             allowedReadRanges: [...source.readRanges].map(([path, ranges]) => ({

@@ -16,6 +16,38 @@ async function fixture() {
   return new CodeSource(directory, "a".repeat(40));
 }
 describe("read-only code investigator", () => {
+  it("can read missing evidence during a late correction without bypassing validation", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","late.ts"),"const first=1;\nconst second=2;");
+    const report={summary:"Resumen",certainty:"sustentado_en_codigo",cause:"Causa",proposal:"Propuesta",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[{path:"server/late.ts",start:1,end:2,explanation:"Dos valores"}]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      const current=round++;
+      if (current===9) expect(request.tool_choice).toBe("none");
+      if (current===10) expect(request.tool_choice).toBe("auto");
+      if (current===9 || current===11) return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+      const line=current===10?2:1;
+      return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:`read-${current}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/late.ts",start:line,end:line})}}]}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
+    expect(round).toBe(12);
+    expect(result.calls).toBe(10);
+    expect(result.report.evidence).toEqual(report.evidence);
+  });
+  it("accepts contiguous or overlapping reads but rejects every unread gap", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","ranges.ts"),"a\nb\nc\nd\ne\nf");
+    await source.read("server/ranges.ts",3,4);
+    await source.read("server/ranges.ts",1,2);
+    expect(source.validates({path:"server/ranges.ts",start:1,end:4})).toBe(true);
+    await source.read("server/ranges.ts",6,6);
+    expect(source.validates({path:"server/ranges.ts",start:1,end:6})).toBe(false);
+    await source.read("server/ranges.ts",4,5);
+    expect(source.validates({path:"server/ranges.ts",start:1,end:6})).toBe(true);
+    expect(source.validates({path:"server/other.ts",start:1,end:6})).toBe(false);
+    expect(source.validates({path:"server/ranges.ts",start:0,end:6})).toBe(false);
+    expect(source.validates({path:"server/ranges.ts",start:1,end:7})).toBe(false);
+  });
   it.each(["invalid_json", "invalid_field", "too_long"])("corrects %s without accepting the invalid report", async (kind) => {
     const source = await fixture();
     const report = {summary:"Falta comprobar",certainty:"falta_informacion",cause:"Sin evidencia suficiente",proposal:"Revisar",proposedTests:[],questions:[],dataRepair:"",limitations:Array(10).fill("Limitación"),evidence:[]};

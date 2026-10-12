@@ -44,3 +44,9 @@ Nueva consulta: «Veo una cantidad de stock que no coincide con la realidad». S
 - Los tests leídos no se presentan como ejecutados.
 
 La mejora de lenguaje se comprobará con consultas reales al modelo. Las pruebas locales verifican el estado persistido, las validaciones y el código de soporte, sin llamadas a OpenAI.
+
+## Corrección posterior: citas de lecturas contiguas
+
+Un rechazo de evidencia apareció en la nueva consulta. Sin los logs del caso no se identifica su rango concreto. La revisión encontró dos defectos reproducibles: citas que abarcan lecturas contiguas se rechazaban al exigir una única lectura, y una corrección tardía no podía usar herramientas para completar evidencia. Se validan ahora todas las líneas de la unión de lecturas, sin admitir huecos; la corrección puede volver a leer dentro de los límites existentes de consultas, tiempo y rondas. No se aceptan ni se recortan silenciosamente citas inventadas.
+
+Pasaron 20 pruebas del soporte, incluidas lecturas desordenadas/contiguas, solapamientos, huecos, líneas fuera de rango y recuperación al final de la investigación. TypeScript y empaquetado del asistente aprobados. La consulta real debe reintentarse después de que PMS y asistente estén activos en la misma revisión.

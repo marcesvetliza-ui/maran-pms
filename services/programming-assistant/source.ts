@@ -151,11 +151,15 @@ export class CodeSource {
     return { matches, limited };
   }
   validates(ref: { path: string; start: number; end: number }) {
-    return (
-      ref.end >= ref.start &&
-      (this.readRanges.get(ref.path) || []).some(
-        ([a, b]) => ref.start >= a && ref.end <= b,
-      )
-    );
+    if (!Number.isInteger(ref.start) || !Number.isInteger(ref.end) || ref.start < 1 || ref.end < ref.start) return false;
+    // A citation can cover several adjacent reads, but never an unread gap.
+    let next = ref.start;
+    for (const [start,end] of [...(this.readRanges.get(ref.path) || [])].sort((a,b)=>a[0]-b[0])) {
+      if (end < next) continue;
+      if (start > next) return false;
+      next = Math.max(next,end+1);
+      if (next > ref.end) return true;
+    }
+    return false;
   }
 }
