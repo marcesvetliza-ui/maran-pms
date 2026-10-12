@@ -68,9 +68,9 @@ export function diagnosisFailure(error: unknown) {
     };
   if ((e.message || "").includes("límite"))
     return {
-      code: "investigation_limit",
+      code: e.code === "investigation_tokens" ? "investigation_tokens" : "investigation_limit",
       message:
-        "La investigación alcanzó su límite antes de completar el diagnóstico. Acotá la consulta y solicitá otro intento.",
+        "La investigación alcanzó su límite antes de completar un diagnóstico válido. Soporte debe revisar el presupuesto del asistente; no hace falta reformular la consulta.",
     };
   if (
     (e.message || "").includes("evidencia") ||

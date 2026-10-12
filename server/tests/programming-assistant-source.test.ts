@@ -16,6 +16,35 @@ async function fixture() {
   return new CodeSource(directory, "a".repeat(40));
 }
 describe("read-only code investigator", () => {
+  it("reserves a closing phase instead of aborting when a batch exceeds research calls", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","budget.ts"),Array.from({length:30},(_,i)=>`const n${i}=${i};`).join("\n"));
+    const report={summary:"Verificación parcial",certainty:"falta_informacion",cause:"",proposal:"Continuar revisión",proposedTests:[],questions:[],dataRepair:"",limitations:["Falta inspeccionar un requisito central"],evidence:[]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      if(round++===0)return {choices:[{message:{role:"assistant",content:null,tool_calls:Array.from({length:28},(_,i)=>({id:`budget-${i}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/budget.ts",start:i+1,end:i+1})}}))}}]};
+      expect(request.tool_choice).toBe("none");
+      const toolMessages=request.messages.filter((m:any)=>m.role==="tool");
+      expect(toolMessages).toHaveLength(28);
+      expect(toolMessages.filter((m:any)=>JSON.parse(m.content).researchClosed)).toHaveLength(8);
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(result.calls).toBe(20);expect(round).toBe(3);expect(result.report.certainty).toBe("falta_informacion");
+  });
+  it("closes early on accumulated tokens and still reviews a valid partial report", async () => {
+    const source=await fixture();
+    const report={summary:"Parcial",certainty:"falta_informacion",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      const current=round++;
+      if(current===0)return {usage:{total_tokens:50000},choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"missing",type:"function",function:{name:"find_files",arguments:'{"term":"missing"}'}}]}}]};
+      expect(request.tool_choice).toBe("none");
+      return {usage:{total_tokens:1000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(round).toBe(3);expect(result.tokens).toBe(52000);
+  });
   it("finds definitions and tests across filenames without exposing excluded files", async () => {
     const source=await fixture();
     await mkdir(path.join(directory,"server/tests"));
@@ -67,7 +96,7 @@ describe("read-only code investigator", () => {
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
     expect(round).toBe(13);
-    expect(result.calls).toBe(10);
+    expect(result.calls).toBe(2);
     expect(result.report.evidence).toEqual(report.evidence);
   });
   it("accepts contiguous or overlapping reads but rejects every unread gap", async () => {

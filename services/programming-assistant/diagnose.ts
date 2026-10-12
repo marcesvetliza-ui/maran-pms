@@ -125,18 +125,23 @@ export async function diagnose(
     },
   ];
   const timeout = AbortSignal.timeout(options.timeoutMs || 180000);
+  const completedCalls=new Map<string,string>();
   let tokens = 0,
     calls = 0,
     formatCorrections = 0,
     coverageReviewed = false,
+    researchClosed = false,
     evidenceCorrections = 0;
   for (let round = 0; round < 14; round++) {
+    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 ? 24 : 20) || tokens >= 50000;
+    if(closing && !messages.some(m=>m.role==="system" && m.content==="Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."))
+      messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
     const response = await ai.chat.completions.create(
       {
         model: options.model,
         messages,
         tools,
-        tool_choice: round >= 9 && !((evidenceCorrections > 0 || coverageReviewed) && calls < 24) ? "none" : "auto",
+        tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || coverageReviewed)) ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -151,7 +156,7 @@ export async function diagnose(
     );
     tokens += response.usage?.total_tokens || 0;
     if (tokens > 100000)
-      throw new Error("Se alcanzó el límite de tokens del caso.");
+      throw Object.assign(new Error("Se alcanzó el límite de tokens del caso."),{code:"investigation_tokens"});
     if (response.choices[0]?.finish_reason === "length")
       throw new Error(
         "La respuesta superó el límite de longitud del diagnóstico.",
@@ -231,11 +236,16 @@ export async function diagnose(
     for (const call of answer.tool_calls) {
       if (call.type !== "function")
         throw new Error("Tipo de herramienta no permitido.");
-      if (++calls > 24)
-        throw new Error("Se alcanzó el límite de consultas de código.");
       let result: unknown;
       try {
         const args = JSON.parse(call.function.arguments);
+        const key=call.function.name+JSON.stringify(args,Object.keys(args).sort());
+        const prior=completedCalls.get(key);
+        if(prior) result={alreadyConsulted:true,previousToolCallId:prior,guidance:"El resultado ya está en el historial. Usá sus líneas, o pedí otro rango/símbolo si falta una parte. No se repite la lectura."};
+        else if(closing || calls >= (coverageReviewed || evidenceCorrections>0 ? 24 : 20))
+          result={researchClosed:true,guidance:"Se reservó el presupuesto restante para concluir. No se ejecutó esta consulta: usá evidencia leída y declará lo pendiente."};
+        else {
+        calls++;
         result =
           call.function.name === "inspect_symbol"
             ? await source.inspectSymbol(args.symbol)
@@ -246,6 +256,8 @@ export async function diagnose(
               : call.function.name === "read_code"
                 ? await source.read(args.path, args.start, args.end)
                 : { error: "Herramienta no permitida" };
+        completedCalls.set(key,call.id);
+        }
       } catch {
         result = {
           error:
