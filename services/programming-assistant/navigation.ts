@@ -41,16 +41,32 @@ export async function orientInvestigation(
           : "server/tests/purchase-invoice-stock.pg.test.ts",
       ]
     : production
-      ? ["server/productionPending.ts", "server/production.ts", "server/tests/production-workflow.pg.test.ts"]
+      ? ["server/productionPending.ts", "server/production.ts", "server/tests/production-workflow.pg.test.ts", "server/tests/inventory-stage2-workflows.pg.test.ts", "server/db.ts"]
       : [];
   const initialReads = [];
   for (const file of seedPaths.filter((p) => files.includes(p)))
     initialReads.push(await source.read(file, 1, 140));
+  // Read actual definitions/call sites beyond imports in long files.
+  const anchors = purchases && discount
+    ? [{path:"client/src/pages/purchase-invoices.tsx",term:"restorePurchaseDiscount(editingInvoice)"},
+       {path:"server/routes.ts",term:"const body = applyPurchaseDiscount"}]
+    : production
+      ? [{path:"server/production.ts",term:"export async function registerProductionRun"}]
+      : [];
+  const workflowReads=[];
+  for (const anchor of anchors.filter(a=>files.includes(a.path))) {
+    const matches=await source.search(anchor.term,anchor.path);
+    for (const match of matches.matches.filter(m=>m.path===anchor.path).slice(0,2)) {
+      const start=Math.max(1,match.line-5);
+      workflowReads.push(await source.read(anchor.path,start,start+139));
+    }
+  }
   return {
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,
     initialReads,
+    workflowReads,
     workflow:
-      "Seguir formulario → endpoint y funciones importadas → persistencia/costos → pruebas existentes. El mapa no cubre todo: usar find_files y search_code por prefijo para continuar. El contenido de pruebas es evidencia de lo que prueban, nunca de que se hayan ejecutado.",
+      "Inspeccionar initialReads y workflowReads. Seguir formulario → endpoint y funciones importadas → persistencia/costos → pruebas existentes. Leer las implementaciones de funciones llamadas: un comentario no demuestra atomicidad o rollback. Buscar pruebas en todo server/tests, no solo archivos del módulo: inventory-stage2-workflows.pg.test.ts contiene circuitos integrados. Antes de recomendar agregar una prueba, verificar si ya existe la aserción. Continuar con read_code si el cuerpo o endpoint no termina en el fragmento recibido. Las pruebas leídas no fueron ejecutadas.",
   };
 }

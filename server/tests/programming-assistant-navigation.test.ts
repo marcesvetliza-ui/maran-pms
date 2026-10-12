@@ -13,6 +13,8 @@ describe("code navigation", () => {
     expect(result.initialReads.map(r=>r.path)).toContain("server/purchase-invoice-stock.ts");
     expect(result.initialReads.map(r=>r.path)).toContain("server/tests/purchase-invoice-discount.test.ts");
     expect(result.initialReads[0].content).toContain("restorePurchaseDiscount");
+    expect(result.workflowReads.some(r=>r.content.includes("restorePurchaseDiscount(editingInvoice)"))).toBe(true);
+    expect(result.workflowReads.filter(r=>r.path==="server/routes.ts")).toHaveLength(2);
   });
   it("does not route a reservation discount into purchase invoices", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
@@ -22,7 +24,11 @@ describe("code navigation", () => {
   it("provides pending production and its existing tests without needing a module selection", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
     const result=await orientInvestigation({module:"otro",title:"Reintento de producción",actual:"Falta materia prima y dos usuarios reintentan",expected:"Sin movimientos duplicados",steps:"",messages:[]} as SupportTicket,source);
-    expect(result.initialReads.map(r=>r.path)).toEqual(["server/productionPending.ts","server/production.ts","server/tests/production-workflow.pg.test.ts"]);
+    expect(result.initialReads.map(r=>r.path)).toEqual(["server/productionPending.ts","server/production.ts","server/tests/production-workflow.pg.test.ts","server/tests/inventory-stage2-workflows.pg.test.ts","server/db.ts"]);
+    expect(result.initialReads.find(r=>r.path.includes("stage2-workflows"))?.content).toContain("Promise.all");
+    expect(result.workflowReads[0].content).toContain("return db.transaction");
+    expect(result.workflowReads[0].content).toContain("return { run, deducted");
+    expect(source.validates({path:result.workflowReads[0].path,start:result.workflowReads[0].start,end:result.workflowReads[0].end})).toBe(true);
   });
   it("distributes content matches across backend, shared calculations, frontend and tests", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "assistant-nav-"));
