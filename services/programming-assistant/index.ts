@@ -1,4 +1,5 @@
 import { createService } from "./service";
+import {dailyInvestigationLimit} from "./budget";
 
 if (process.env.APP_ENV !== "pilot")
   throw new Error("El primer asistente solo puede arrancar con APP_ENV=pilot.");
@@ -26,6 +27,7 @@ const service = await createService({
   sourceRoot: process.env.ASSISTANT_SOURCE_ROOT || process.cwd(),
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  dailyLimit: dailyInvestigationLimit(process.env.ASSISTANT_DAILY_LIMIT),
   notification,
 });
 const server = service.app.listen(

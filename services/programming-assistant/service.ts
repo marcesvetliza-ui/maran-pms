@@ -1,4 +1,5 @@
 import { diagnosisFailure } from "./errors";
+import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -30,10 +31,12 @@ export async function createService(
     sourceRoot: string;
     apiKey?: string;
     model: string;
+    dailyLimit?: number;
     notification?: NotificationConfig;
   },
   investigator = diagnose,
 ) {
+  const dailyLimit=dailyInvestigationLimit(config.dailyLimit);
   if (config.secret.length < 32 || !/^[a-f0-9]{40}$/.test(config.version))
     throw new Error("Configurar secreto y revisión de código completos.");
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 4 });
@@ -191,10 +194,10 @@ export async function createService(
         const budget = await client.query(
           "SELECT count(*)::int AS count FROM support_runs WHERE created_at >= now()-interval '24 hours' AND kind='analyze'",
         );
-        if (budget.rows[0].count >= 10) {
+        if (budget.rows[0].count >= dailyLimit) {
           await client.query("ROLLBACK");
           return res.status(429).json({
-            error: "Límite del piloto: diez investigaciones en 24 horas",
+            error: `Límite del piloto: ${dailyLimit} investigaciones en las últimas 24 horas. Los reintentos también cuentan; la disponibilidad se recupera al salir los intentos anteriores de esa ventana.`,
           });
         }
         ticket.version = config.version;

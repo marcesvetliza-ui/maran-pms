@@ -80,3 +80,9 @@ Pasaron 28 pruebas, TypeScript y empaquetado: incluye lote de 28 herramientas li
 Una lectura de read_code en client/src que contiene una ruta literal /api/... adjunta ahora su contexto de servidor, sin depender de que el modelo encuentre el archivo por nombre. Se localiza la declaración de app/router, se lee el handler hasta la próxima ruta o el límite de fragmento, se leen hasta cuatro funciones importadas que aparecen llamadas en el handler y una prueba que menciona el endpoint. Máximo tres rutas por investigación, con fragmentos acotados; no se ejecutan llamadas HTTP ni código. Las rutas dinámicas, alias de routers no reconocidos y dependencias indirectas requieren las herramientas habituales. Los rangos anexados son lecturas reales y se validan igual que las demás citas.
 
 Pasaron 30 pruebas, TypeScript y empaquetado, incluida la ruta real de vista previa y una investigación simulada donde leer el cliente entrega evidencia del servidor. La respuesta real sigue pendiente. Se debe repetir el mismo caso, sin reformularlo.
+
+## Cupo configurable para las pruebas
+
+ASSISTANT_DAILY_LIMIT se configura solo en el servicio del asistente. Por defecto sigue en 10 investigaciones globales en las últimas 24 horas, incluyendo reintentos y fallos registrados. Admite enteros entre 1 y 30, nunca ilimitado. Para continuar las pruebas puede configurarse 20 y volver luego a 10. Esto permite más llamadas y potencial consumo de API; no aumenta los límites de tiempo/tokens de cada investigación. El 429 no llama al modelo ni borra el diagnóstico anterior. No se reinicia el cupo a medianoche: se recupera gradualmente al salir las ejecuciones de la ventana de 24 horas.
+
+Se probó la cuota con 2, 10 y 20, conservando bloqueo transaccional, idempotencia y aislamiento. Pasaron 38 pruebas del soporte, 3 con PostgreSQL, TypeScript y empaquetado. Mantener ambos servicios en la misma revisión y esperar sus despliegues antes de reintentar.

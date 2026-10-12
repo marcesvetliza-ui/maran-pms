@@ -7,7 +7,7 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
 (process.env.DATABASE_URL ? describe : describe.skip)(
   "persistent assistant service",
   () => {
-    it("authenticates, isolates owners, keeps retries idempotent and enforces the diagnosis budget", async () => {
+    it.each([2,10,20])("authenticates, isolates owners, keeps retries idempotent and enforces daily budget %i", async (dailyLimit) => {
       const url = new URL(process.env.DATABASE_URL!);
       const schema = "assistant_test_" + randomUUID().replaceAll("-", "");
       const admin = new pg.Client({
@@ -37,6 +37,7 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
           sourceRoot: process.cwd(),
           apiKey: "mock-only",
           model: "mock",
+          dailyLimit,
         },
         async () => ({
           report,
@@ -122,8 +123,8 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
         );
         expect(count.rows[0].count).toBe(2);
         await service.pool.query(
-          "INSERT INTO support_runs(id,owner,request_id,case_id,kind) SELECT gen_random_uuid(),'owner1',gen_random_uuid(),$1,'analyze' FROM generate_series(1,9)",
-          [ticket.id],
+          "INSERT INTO support_runs(id,owner,request_id,case_id,kind) SELECT gen_random_uuid(),'owner1',gen_random_uuid(),$1,'analyze' FROM generate_series(1,$2::int)",
+          [ticket.id,dailyLimit-2],
         );
         expect(
           (
