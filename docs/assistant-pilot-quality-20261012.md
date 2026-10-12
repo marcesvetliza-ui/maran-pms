@@ -86,3 +86,9 @@ Pasaron 30 pruebas, TypeScript y empaquetado, incluida la ruta real de vista pre
 ASSISTANT_DAILY_LIMIT se configura solo en el servicio del asistente. Por defecto sigue en 10 investigaciones globales en las últimas 24 horas, incluyendo reintentos y fallos registrados. Admite enteros entre 1 y 30, nunca ilimitado. Para continuar las pruebas puede configurarse 20 y volver luego a 10. Esto permite más llamadas y potencial consumo de API; no aumenta los límites de tiempo/tokens de cada investigación. El 429 no llama al modelo ni borra el diagnóstico anterior. No se reinicia el cupo a medianoche: se recupera gradualmente al salir las ejecuciones de la ventana de 24 horas.
 
 Se probó la cuota con 2, 10 y 20, conservando bloqueo transaccional, idempotencia y aislamiento. Pasaron 38 pruebas del soporte, 3 con PostgreSQL, TypeScript y empaquetado. Mantener ambos servicios en la misma revisión y esperar sus despliegues antes de reintentar.
+
+## Evidencia de tests del investigador
+
+La respuesta real confundió un test de descubrimiento de código del propio asistente con evidencia de ejecución operativa. inspectSymbol y traceEndpoint excluyen ahora las pruebas programming-assistant, programming-support y programming-diagnosis de sus candidatos de evidencia. Siguen disponibles para lectura explícita si se investiga el propio asistente. La instrucción distingue estas pruebas de los tests del negocio y exige comprobar el catch del endpoint y la responsabilidad de cada función. No elimina ni cambia los tests operativos.
+
+Pasaron 30 pruebas, TypeScript y empaquetado. El test de búsqueda comprueba que un archivo del investigador con el mismo símbolo no se incluya como test operativo. La evaluación semántica del modelo sigue abierta; esta actualización no demuestra que la consulta real ya esté resuelta.

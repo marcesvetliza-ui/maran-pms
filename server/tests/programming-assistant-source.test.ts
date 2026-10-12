@@ -77,6 +77,7 @@ describe("read-only code investigator", () => {
     await mkdir(path.join(directory,"server/tests"));
     await writeFile(path.join(directory,"server","generic.ts"),"export async function unitFactor(){return 0.001;}");
     await writeFile(path.join(directory,"server/tests","unrelated.test.ts"),"expect(unitFactor()).toBe(0.001);");
+    await writeFile(path.join(directory,"server/tests","programming-assistant-trace.test.ts"),"source.inspectSymbol('unitFactor');");
     await writeFile(path.join(directory,"server","secrets.ts"),"export function unitFactor(){return 'private';}");
     const result=await source.inspectSymbol("unitFactor");
     expect(result.definitions.map(r=>r.path)).toEqual(["server/generic.ts"]);

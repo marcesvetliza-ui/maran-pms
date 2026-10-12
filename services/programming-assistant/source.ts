@@ -2,6 +2,8 @@ import { readdir, realpath, readFile } from "node:fs/promises";
 import path from "node:path";
 // This service exposes code inspection only. No shell, imports, tests or database tools.
 const roots = ["server", "client/src", "shared", "docs"];
+// Investigator tests verify code discovery, not the behavior of hotel operations.
+const investigatorTest = (p:string) => /programming-(?:assistant|diagnosis|support)/.test(path.basename(p));
 const allowed = (p: string) =>
   !p
     .split("/")
@@ -117,6 +119,7 @@ export class CodeSource {
     const tests: Awaited<ReturnType<CodeSource["read"]>>[]=[];
     for (const file of (await this.files()).filter(f=>/\.(ts|tsx)$/.test(f))) {
       const isTest=file.includes("/tests/") || file.includes(".test.");
+      if(isTest && investigatorTest(file)) continue;
       if (isTest && tests.length>=limits.maxTests) continue;
       if (!isTest && definitions.length>=limits.maxDefinitions) continue;
       const lines=(await this.content(file)).split("\n");
@@ -141,6 +144,7 @@ export class CodeSource {
     for(const file of (await this.files()).filter(f=>f.startsWith("server/") && /\.tsx?$/.test(f))){
       const text=await this.content(file),lines=text.split("\n");
       if(file.includes("/tests/")){
+        if(investigatorTest(file))continue;
         const index=lines.findIndex(line=>line.includes(endpoint));
         if(index>=0 && tests.length<1){const start=Math.max(1,index-8);tests.push(await this.read(file,start,start+59));}
         continue;
