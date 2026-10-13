@@ -1285,7 +1285,7 @@ export function registerReservationsRoutes(app: Express) {
         SELECT id, tipo_comprobante, punto_venta, numero, fecha_emision,
                cliente_razon_social, cliente_cuit, cliente_condicion_iva,
                monto_total, monto_acreditado, estado, items, cae, modo_ficticio,
-               source_charge_ids, source_charge_amounts, cash_forma_pago,
+               source_charge_ids, source_charge_amounts, credit_reapplication_intent, cash_forma_pago,
                COALESCE((
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
@@ -1924,6 +1924,7 @@ export function registerReservationsRoutes(app: Express) {
       }
       const existing = await storage.getCharge(req.params.id);
       if (!existing) return res.status(404).json({ error: "Cargo no encontrado" });
+      if (String(existing.id).startsWith("checkout-discount:")) return res.status(409).json({ error: "El descuento está vinculado a una prefactura emitida y no puede anularse como un cargo." });
       if (existing.status === "anulado") return res.status(400).json({ error: "El cargo ya está anulado" });
       if (existing.reservationId) {
         const reservation = await storage.getReservation(existing.reservationId);
@@ -2082,6 +2083,7 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
+      if (String(charge.id).startsWith("checkout-discount:")) return res.status(409).json({ error: "El descuento de prefactura no puede transferirse a otra reserva." });
       if (charge.reservationId === targetReservationId) {
         return res.status(400).json({ error: "Cannot transfer to the same reservation" });
       }

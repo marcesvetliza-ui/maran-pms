@@ -1,3 +1,4 @@
+import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement} from './creditNoteAccountMovement';
 import type { Express } from "express";
 import fs from "fs";
@@ -114,6 +115,7 @@ function parseInvoiceSourceAmounts(invoice: any): Record<string, number> {
         : 0;
       if (value > 0) result[id] = Math.max(0, value - Math.max(0, grossCredit - debitReversal));
     }
+    for (const [id, amount] of Object.entries(checkoutDiscountFromInvoice(invoice)?.sourceAmounts || {})) result[id] = (result[id] || 0) + Number(amount);
     return result;
   }
 
@@ -1049,6 +1051,7 @@ export function registerBillingRoutes(app: Express) {
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      let checkoutDiscount: CheckoutDiscount | undefined;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
       }
@@ -1269,6 +1272,22 @@ export function registerBillingRoutes(app: Express) {
         normalizedSourceChargeIds = [`payment:${paymentId}`];
         sanitizedSourceChargeAmounts = { [`payment:${paymentId}`]: existingPaymentAmount };
       }
+      if (req.body.checkoutDiscount !== undefined) {
+        if (!reservationId || paymentId || groupId || !creditOperationId || !["FA", "FB", "FC", "FM", "FMB"].includes(tipoComprobante)) {
+          return res.status(400).json({ error: "El descuento requiere una prefactura de reserva y una operación recuperable." });
+        }
+        try {
+          const input = req.body.checkoutDiscount;
+          checkoutDiscount = calculateCheckoutDiscount(input.originalSourceAmounts || {}, {
+            type: input.type, value: Number(input.value), reason: input.reason });
+          const originals = input.originalSourceAmounts;
+          const ids = Object.keys(originals);
+          if (ids.length !== normalizedSourceChargeIds.length || ids.some(id => !normalizedSourceChargeIds.includes(id) ||
+              Math.abs(Number(originals[id]) - checkoutDiscount!.sourceAmounts[id] - Number(sanitizedSourceChargeAmounts[id])) > 0.009)) {
+            throw new Error("El descuento no coincide con los cargos de la prefactura.");
+          }
+        } catch (error) { return res.status(400).json({ error: (error as Error).message }); }
+      }
       const normalizeVat = (value: unknown) => String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
       const vatCondition = normalizeVat(cliente?.condicionIva);
       const cuitDigits = String(cliente?.cuit || "").replace(/\D/g, "");
@@ -1351,7 +1370,7 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
-        if (reservationId && !folioId) {
+        if (reservationId && (!folioId || req.body.checkoutDiscount !== undefined)) {
           const reservationFolio = await storage.getOrCreateFolio("reservation", reservationId);
           folioId = reservationFolio.id;
         }
@@ -1405,6 +1424,7 @@ export function registerBillingRoutes(app: Express) {
           const previous = prior.rows[0] as any;
           if (previous) {
             const snapshot = previous.credit_reapplication_intent;
+            if (!!snapshot?.checkoutDiscount !== !!checkoutDiscount) throw new FolioInvoiceValidationError("El descuento no coincide con el intento original", 409);
             const requestIdentity = {
               tipoComprobante,
               recipient: {
@@ -1418,6 +1438,7 @@ export function registerBillingRoutes(app: Express) {
               sourceChargeAmounts: sanitizedSourceChargeAmounts,
               invoiceTotal: Number(invoiceTotal.toFixed(2)),
               payments: normalized,
+              ...(checkoutDiscount ? { checkoutDiscount } : {}),
             };
             const storedIdentity = Object.fromEntries(Object.keys(requestIdentity)
               .map(key => [key, snapshot?.[key]]));
@@ -1549,6 +1570,7 @@ export function registerBillingRoutes(app: Express) {
             payments: normalized,
             ordinaryAdvances,
             settlement,
+            ...(checkoutDiscount ? { checkoutDiscount } : {}),
             ...(ordinaryAdvanceAmount > 0.009
               ? { ordinaryAdvanceAmount: Number(ordinaryAdvanceAmount.toFixed(2)) }
               : {}),
@@ -1599,7 +1621,7 @@ export function registerBillingRoutes(app: Express) {
         }
 
         const priorInvoices = await db.execute(sql`
-          SELECT source_charge_ids, source_charge_amounts, items, monto_total, monto_acreditado,
+          SELECT source_charge_ids, source_charge_amounts, credit_reapplication_intent, items, monto_total, monto_acreditado,
                  COALESCE((
                    SELECT jsonb_agg(nc.source_charge_amounts)
                    FROM sales_invoices nc
@@ -1638,13 +1660,21 @@ export function registerBillingRoutes(app: Express) {
           }
         }
 
+        if (checkoutDiscount) {
+          const pendingTotal = Object.entries(originalAmounts).reduce((sum, [id, amount]) => sum + Math.max(0, amount - (alreadyInvoiced[id] || 0)), 0);
+          if (Math.abs(pendingTotal - checkoutDiscount.originalTotal) > 0.02) throw new FolioInvoiceValidationError("El descuento debe aplicarse a todos los cargos pendientes de la reserva", 409);
+          const payments = await storage.getPayments(reservationId);
+          const collected = payments.filter((payment: any) => payment.status !== "anulado").reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0);
+          const operationalTotal = accommodationTotal + getOperationalReservationCharges(charges).reduce((sum: number, charge: any) => sum + Number(charge.amount || 0), 0);
+          if (checkoutDiscount.amount > operationalTotal - collected + 0.02) throw new FolioInvoiceValidationError("El descuento supera el saldo pendiente después de los cobros registrados", 409);
+        }
         for (const [id, amount] of Object.entries(sanitizedSourceChargeAmounts)) {
           const original = originalAmounts[id];
           const pending = original - (alreadyInvoiced[id] || 0);
           if (!Number.isFinite(original) || original <= 0) {
               throw new FolioInvoiceValidationError(`El cargo seleccionado (${id}) no existe o no es facturable`);
           }
-          if (Number(amount) > pending + 0.02) {
+          if (Number(amount) + (checkoutDiscount?.sourceAmounts[id] || 0) > pending + 0.02) {
               throw new FolioInvoiceValidationError(
                 `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)`,
                 409
@@ -1845,7 +1875,8 @@ export function registerBillingRoutes(app: Express) {
             : undefined,
           sourceChargeIds: normalizedSourceChargeIds.length > 0 ? normalizedSourceChargeIds : undefined,
           sourceChargeAmounts: Object.keys(sanitizedSourceChargeAmounts).length > 0 ? sanitizedSourceChargeAmounts : undefined,
-          observaciones: typeof observaciones === "string" ? observaciones.trim() || undefined : undefined,
+          observaciones: [typeof observaciones === "string" ? observaciones.trim() : "",
+            checkoutDiscount ? `Descuento ${checkoutDiscount.type === "percent" ? checkoutDiscount.value + "%" : "$" + checkoutDiscount.amount.toFixed(2)}: ${checkoutDiscount.reason}. Total original $${checkoutDiscount.originalTotal.toFixed(2)}; descuento $${checkoutDiscount.amount.toFixed(2)}.` : ""].filter(Boolean).join("\n") || undefined,
           recoveryInvoiceId: spaRecoveryInvoiceId ?? paymentRecoveryInvoiceId,
           creditReapplicationIntent: creditIntent,
           beforeDraftInsert: reservationId && creditIntent &&
