@@ -108,6 +108,31 @@ beforeEach(() => {
 });
 
 describe("reservation zero-rate API guard", () => {
+  it("does not use an incoming group flag to bypass the zero-rate guard",async()=>{
+    await withServer(async(baseUrl)=>{
+      const result=await request(baseUrl,'PATCH',{groupId:'claimed-group',isGroup:true,finalRatePerNight:'0'});
+      expect(result.status).toBe(400);expect(result.body.error).toMatch(/motivo/i);
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+    });
+  });
+  it("moves an existing zero-rate group reservation without requiring a courtesy reason",async()=>{
+    state.reservation={...baseReservation,groupId:'group-master',finalRatePerNight:'0',totalRoomAmount:'0'};
+    await withServer(async(baseUrl)=>{
+      const result=await request(baseUrl,'PATCH',{roomId:'room-2'});
+      expect(result.status).toBe(200);
+      expect(storage.updateReservation).toHaveBeenCalledWith('reservation-zero',expect.objectContaining({roomId:'room-2'}));
+      expect(state.reservation.finalRatePerNight).toBe('0');
+      expect(state.reservation.specialRateReason).toBeNull();
+    });
+  });
+  it("allows a linked group rate of zero but still rejects negative and invalid rates",async()=>{
+    state.reservation={...baseReservation,groupId:'group-master'};
+    await withServer(async(baseUrl)=>{
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'0',totalRoomAmount:'0'})).status).toBe(200);
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'-1'})).status).toBe(400);
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'not-a-rate'})).status).toBe(400);
+    });
+  });
   it("uses the persisted group link when extending from the generic reservation editor", async () => {
     state.reservation = {
       ...baseReservation,

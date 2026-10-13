@@ -946,7 +946,8 @@ export function ReservationFormDialog({
       return;
     }
     const effectiveRate = parseReservationRate(formData.finalRatePerNight);
-    const requiresRateReason = formData.ratePlanId === "__special__" || isZeroReservationRate(effectiveRate);
+    const linkedZeroGroup = Boolean((reservation as any)?.groupId) && isZeroReservationRate(effectiveRate);
+    const requiresRateReason = !linkedZeroGroup && (formData.ratePlanId === "__special__" || isZeroReservationRate(effectiveRate));
     if (requiresRateReason && !formData.specialRateReason?.trim()) {
       toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa $0 para guardar.", variant: "destructive" });
       return;
@@ -954,7 +955,7 @@ export function ReservationFormDialog({
     mutation.mutate({
       ...formData,
       ratePlanId: formData.ratePlanId === "__special__" ? null : (formData.ratePlanId || null),
-      specialRateReason: requiresRateReason
+      specialRateReason: linkedZeroGroup ? (formData.specialRateReason || null) : requiresRateReason
         ? (formData.specialRateReason || null) : null,
       roomId: finalRoomId,
       roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
@@ -1262,7 +1263,7 @@ export function ReservationFormDialog({
                 isZeroReservationRate(parseReservationRate(formData.finalRatePerNight))) && (
                 <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-1">
                   <div className="space-y-1.5">
-                    <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+                    <Label>Motivo de tarifa especial {Boolean((reservation as any)?.groupId)&&isZeroReservationRate(formData.finalRatePerNight)?<span className="font-normal text-muted-foreground">(opcional: cobro grupal)</span>:<span className="text-destructive">*</span>} <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
                     <Textarea
                       placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..."
                       value={formData.specialRateReason || ""}

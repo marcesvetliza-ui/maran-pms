@@ -477,7 +477,7 @@ export function registerReservationsRoutes(app: Express) {
         : String(existing.specialRateReason ?? "").trim();
       const rateError = hasRate && (req.body.finalRatePerNight === null || req.body.finalRatePerNight === "")
         ? "La tarifa asignada por noche no puede quedar vacía."
-        : getReservationRateValidationError(effectiveRate, effectiveReason);
+        : getReservationRateValidationError(effectiveRate, effectiveReason, {allowZeroWithoutReason:!!linkedGroupId});
       if (rateError) return res.status(400).json({ error: rateError });
       if (hasReason) {
         req.body.specialRateReason = effectiveReason || null;
