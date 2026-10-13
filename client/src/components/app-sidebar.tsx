@@ -478,11 +478,11 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-white shrink-0">
-            <img src="/branding/xenia-icon.png" alt="" className="h-10 w-10 object-contain" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground shrink-0">
+            <Hotel className="h-6 w-6" />
           </div>
           <div className="flex flex-col flex-1 min-w-0">
-            <span className="text-lg font-semibold text-sidebar-foreground leading-tight">Xenia PMS</span>
+            <span className="text-lg font-semibold text-sidebar-foreground leading-tight">Maran Suites</span>
             <span className="text-xs text-muted-foreground">Sistema de Gestión</span>
           </div>
           <TurnoAlert />

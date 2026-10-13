@@ -134,10 +134,10 @@ function PosSelector({ configs, onSelect }: { configs: any[]; onSelect: (id: str
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="max-w-sm w-full">
         <div className="text-center mb-8">
-          <div className="mx-auto w-60 rounded-lg bg-white px-3 mb-4">
-            <img src="/branding/xenia-compact.png" alt="Xenia PMS" className="w-full h-auto" />
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mb-4">
+            <Monitor className="w-7 h-7 text-primary" />
           </div>
-          <h1 className="text-xl font-bold">Xenia PMS</h1>
+          <h1 className="text-xl font-bold">Maran Suites & Towers</h1>
           <p className="text-base font-medium mt-3">Seleccioná tu punto de venta</p>
           <p className="text-sm text-muted-foreground mt-1">Se usará durante toda la sesión para facturación y caja</p>
         </div>

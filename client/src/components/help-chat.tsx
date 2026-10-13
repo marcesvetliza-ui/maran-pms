@@ -9,7 +9,7 @@ interface ChatMessage {
 
 const WELCOME_MESSAGE: ChatMessage = {
   role: "assistant",
-  content: "¡Hola! Soy el asistente de Xenia PMS. Podés preguntarme cómo hacer cualquier cosa en el sistema: reservas, check-in, caja, reportes, y más.",
+  content: "¡Hola! Soy el asistente de Maran Suite. Podés preguntarme cómo hacer cualquier cosa en el sistema: reservas, check-in, caja, reportes, y más.",
 };
 
 export default function HelpChat() {
