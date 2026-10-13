@@ -2550,6 +2550,7 @@ export default function RestaurantPage() {
           <p className="text-muted-foreground">Gestiona mesas, pedidos y menu</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <InventoryPendingConsumptions area="restaurant" readOnly compact label="Consumos pendientes de stock"/>
           <Link href="/mozo">
             <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-mozo">
               <Smartphone className="h-4 w-4" />
@@ -2602,7 +2603,6 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
-      <InventoryPendingConsumptions area="restaurant" readOnly/>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="floor" data-testid="tab-floor">
