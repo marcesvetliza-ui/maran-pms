@@ -110,6 +110,7 @@ const menuSections = [
         subItems: [
           { label: "Hab. Ocupadas",   icon: BedDouble,     href: "/rooms?tab=ocupadas", resourceKey: "sidebar:/rooms?tab=ocupadas" },
           { label: "Planilla Diaria", icon: ClipboardList, href: "/daily-report",       resourceKey: "sidebar:/daily-report" },
+          {label:"Planilla diaria Housekeeping",icon:ClipboardList,href:"/housekeeping-daily-report",resourceKey:"sidebar:/housekeeping-daily-report"},
           { label: "Reporte INDEC",   icon: ClipboardList, href: "/admin/indec",        resourceKey: "sidebar:/admin/indec" },
         ],
       },

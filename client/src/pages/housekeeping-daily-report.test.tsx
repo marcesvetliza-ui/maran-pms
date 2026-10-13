@@ -1,0 +1,23 @@
+import {it,expect,vi,afterEach} from 'vitest';
+import {render,screen,waitFor,fireEvent,cleanup} from '@testing-library/react';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+import HousekeepingDailyReport from './housekeeping-daily-report';
+import {apiRequest} from '@/lib/queryClient';
+vi.mock('@/lib/queryClient',()=>({apiRequest:vi.fn()}));
+vi.mock('@/lib/date-utils',()=>({getArgentinaToday:()=> '2026-10-13'}));
+afterEach(()=>{cleanup();vi.clearAllMocks();});
+it('shows operational dates and requests, prints, and changes date without monetary columns',async()=>{
+ const row={reservationId:'test',roomNumber:'201',roomStatus:'dirty',guestName:'Prueba Ana',bedTypeNotes:'MATRIMONIAL',numberOfGuests:2,checkInDate:'2026-10-13',checkOutDate:'2026-10-15',status:'confirmed',earlyCheckIn:true,earlyCheckInTime:'09:00',lateCheckOut:false,lateCheckOutTime:null,turnover:true,observations:[{text:'Almohada extra',priority:'high'}]};
+ vi.mocked(apiRequest).mockImplementation(async(_method,url)=>({json:async()=>({date:url.split('date=')[1],checkOuts:[],checkIns:[row]})}) as any);
+ const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
+ render(<QueryClientProvider client={client}><HousekeepingDailyReport/></QueryClientProvider>);
+ expect(await screen.findByText('Almohada extra')).toBeTruthy();
+ expect(screen.getByText('Early check-in · 09:00')).toBeTruthy();
+ expect(screen.getByText('Sale / entra')).toBeTruthy();
+ expect(screen.getByText('15/10/2026')).toBeTruthy();
+ for(const label of ['Costo','Tarifa','Saldo','Importe'])expect(screen.queryByRole('columnheader',{name:label})).toBeNull();
+ const print=vi.spyOn(window,'print').mockImplementation(()=>{});
+ fireEvent.click(screen.getByRole('button',{name:'Imprimir'}));expect(print).toHaveBeenCalledOnce();print.mockRestore();
+ fireEvent.change(screen.getByLabelText('Fecha'),{target:{value:'2026-10-14'}});
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('GET','/api/housekeeping/daily-report?date=2026-10-14'));
+});

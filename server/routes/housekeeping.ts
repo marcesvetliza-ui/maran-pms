@@ -1,5 +1,6 @@
 import { lostFoundShippingSchema, lostFoundStatusUpdateSchema } from "@shared/lostFoundDelivery";
 import type { Express } from "express";
+import {registerHousekeepingDailyReport} from '../housekeepingDailyReport';
 import { storage } from "../db-storage";
 import { db,withDatabaseTransaction } from "../db";
 import { lostFoundItems, reservations, safeBoxOpenings, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
@@ -9,6 +10,7 @@ import {hideInventoryCosts} from "../inventoryAccess";
 import { eq, desc, like, and, or, ilike, sql, type SQL } from "drizzle-orm";
 
 export function registerHousekeepingRoutes(app: Express) {
+  registerHousekeepingDailyReport(app);
   app.get("/api/housekeeping/inventory", requireAuth, requirePermission('sidebar:/housekeeping'), async (req,res) => {
     try {
       const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping');

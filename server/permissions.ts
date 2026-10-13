@@ -59,6 +59,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
     "admin", "manager", "ama_de_llaves", "housekeeping", "reception",
     "responsable_area", "jefe_recepcion", "comercial", "spa",
   ],
+  "sidebar:/housekeeping-daily-report": ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion"],
   "sidebar:/admin/indec": [
     "admin", "manager", "resp_deposito", "resp_administracion", "responsable_area", "jefe_recepcion",
   ],
@@ -332,6 +333,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:group/reportes-recepcion": { label: "Reportes", section: "PMS — Recepción" },
   "sidebar:/rooms?tab=ocupadas": { label: "Hab. Ocupadas", section: "PMS — Recepción" },
   "sidebar:/daily-report": { label: "Planilla Diaria", section: "PMS — Recepción" },
+  "sidebar:/housekeeping-daily-report": {label:"Planilla diaria Housekeeping",section:"PMS — Recepción"},
   "sidebar:/admin/indec": { label: "Reporte INDEC", section: "PMS — Recepción" },
   "sidebar:/rate-plans": { label: "Tarifas", section: "PMS — Recepción" },
   "sidebar:/guests": { label: "Huéspedes", section: "PMS — Recepción" },
