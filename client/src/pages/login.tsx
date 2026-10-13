@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Hotel, LogIn, AlertCircle, ShieldCheck } from "lucide-react";
+import { LogIn, AlertCircle, ShieldCheck } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface LoginForm {
@@ -82,11 +82,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <Card className="w-full max-w-md" data-testid="card-login">
         <CardHeader className="text-center space-y-4 pb-2">
-          <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-            <Hotel className="w-8 h-8 text-primary" />
+          <div className="mx-auto w-full max-w-xs rounded-lg bg-white px-3">
+            <img src="/branding/xenia-horizontal.png" alt="Xenia PMS" className="w-full h-auto" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold" data-testid="text-hotel-name">Maran Suites & Towers</h1>
+            <h1 className="text-2xl font-bold" data-testid="text-hotel-name">Xenia PMS</h1>
             <p className="text-sm text-muted-foreground mt-1">Sistema de Gestión Hotelera</p>
           </div>
         </CardHeader>

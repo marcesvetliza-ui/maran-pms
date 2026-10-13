@@ -1461,7 +1461,7 @@ export function registerReportsRoutes(app: Express) {
       const data = await dataRes.json() as any;
 
       const wb = new ExcelJS.Workbook();
-      wb.creator = "Maran Suite System";
+      wb.creator = "Xenia PMS";
       const ws = wb.addWorksheet(tipo);
 
       ws.addRow(["Hotel Maran Suites & Towers"]);

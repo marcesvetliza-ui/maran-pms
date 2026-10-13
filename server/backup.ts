@@ -107,7 +107,7 @@ export async function sendBackupByEmail(targetEmail: string, type: string = "man
   const result = await sendEmailWithPdfAttachment({
     to: targetEmail,
     subject: `[Maran] Backup automático de base de datos — ${dateStr} ${timeStr} hs`,
-    body: `Adjunto encontrás el backup completo de la base de datos del sistema Maran Suite System generado el ${dateStr} a las ${timeStr} hs.\n\nEste email es automático, no respondas.`,
+    body: `Adjunto encontrás el backup completo de la base de datos del sistema Xenia PMS generado el ${dateStr} a las ${timeStr} hs.\n\nEste email es automático, no respondas.`,
     attachmentFilename: filename,
     attachmentBuffer: sqlBuffer,
     attachmentContentType: "application/sql",
