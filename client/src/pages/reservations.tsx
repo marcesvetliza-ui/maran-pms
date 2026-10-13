@@ -70,7 +70,6 @@ import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { ReservationWaitlistDialog } from "@/components/ReservationWaitlistDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -6069,7 +6068,6 @@ export default function ReservationsPage() {
           <p className="text-muted-foreground">Gestiona todas las reservaciones del hotel</p>
         </div>
         <div className="flex items-center gap-2">
-          <EmitirComprobanteButton area="recepcion" />
           <Button variant="outline" onClick={() => setWaitlistOpen(true)} data-testid="button-reservation-waitlist">
             <Clock className="mr-2 h-4 w-4" />
             Lista de Espera
