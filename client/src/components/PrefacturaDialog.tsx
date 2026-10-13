@@ -1,3 +1,4 @@
+import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
 import { useQuery } from "@tanstack/react-query";
@@ -108,6 +109,7 @@ export interface SelectedFolioItem {
 }
 
 type InvoiceSource = {
+  credit_reapplication_intent?: unknown;
   source_charge_ids?: unknown;
   source_charge_amounts?: unknown;
   credit_source_charge_amounts?: unknown;
@@ -136,6 +138,7 @@ export function getInvoicedAmountsByCharge(invoices: InvoiceSource[]): Record<st
   const amounts: Record<string, number> = {};
 
   for (const invoice of invoices) {
+    for (const [id, amount] of Object.entries(checkoutDiscountFromInvoice(invoice)?.sourceAmounts || {})) amounts[id] = (amounts[id] || 0) + Number(amount);
     const total = parseFloat(String(invoice.monto_total || 0)) || 0;
     const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;
     const explicit = parseJsonValue(invoice.source_charge_amounts);
@@ -541,6 +544,10 @@ export function PrefacturaDialog({
     { id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" },
   ]);
   const [invoiceObservations, setInvoiceObservations] = useState("");
+  const [showDiscount, setShowDiscount] = useState(false);
+  const [discountType, setDiscountType] = useState<"percent" | "fixed">("percent");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
   // Safe default is to apply released credit. Staff can explicitly opt out
   // before submitting, in which case the advance remains available.
   const [applyReleasedCredit, setApplyReleasedCredit] = useState(true);
@@ -671,6 +678,7 @@ export function PrefacturaDialog({
       setPaymentRows([{ id: newRowId(), amount: "", method: "efectivo", reference: "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" }]);
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
+      setShowDiscount(false); setDiscountValue(""); setDiscountReason("");
       setApplyReleasedCredit(true);
       setShowCreditDetail(false);
       const key = settlementOperationKey(reservationId);
@@ -1004,7 +1012,7 @@ export function PrefacturaDialog({
   // por ley, no a quién se le factura.
   const applyFacturaTNetAmount = (items: SelectedFolioItem[]): SelectedFolioItem[] =>
     tipo === "FT" ? items.map(item => ({ ...item, amount: Number((item.amount / 1.21).toFixed(2)) })) : items;
-  const selectedItems = applyFacturaTNetAmount(folio
+  const selectedItemsBeforeDiscount = applyFacturaTNetAmount(folio
     ? getSelectedFolioItems(selectedIds, folio, itemDescriptions, remainingAmountsByCharge)
     : []);
   const allBillableItems = applyFacturaTNetAmount(folio
@@ -1014,6 +1022,17 @@ export function PrefacturaDialog({
     folio?.payments || [],
     safeEmittedInvoices,
   );
+  let checkoutDiscount: ReturnType<typeof calculateCheckoutDiscount> | null = null;
+  let discountError = "";
+  if (showDiscount) {
+    try {
+      checkoutDiscount = calculateCheckoutDiscount(
+        Object.fromEntries(selectedItemsBeforeDiscount.map(item => [item.id, item.amount])),
+        { type: discountType, value: Number(discountValue.replace(",", ".")), reason: discountReason });
+    } catch (error) { discountError = (error as Error).message; }
+  }
+  const selectedItems = selectedItemsBeforeDiscount.map(item => ({ ...item,
+    amount: Number((item.amount - (checkoutDiscount?.sourceAmounts[item.id] || 0)).toFixed(2)) }));
   const totalSelected = getSelectedFolioTotal(selectedItems);
   const selectedPaymentApplications = buildAppliedPaymentApplications(
     applyReleasedCredit ? availableAdvancePayments : [],
@@ -1051,6 +1070,9 @@ export function PrefacturaDialog({
   const invoiceSourceAmounts = Object.fromEntries(invoiceItemsToEmit.map(item => [item.id, item.amount]));
   const invoiceSourceIds = invoiceItemsToEmit.map(item => item.id);
   const isFiscalTipo = !NON_FISCAL.has(tipo);
+  useEffect(() => {
+    if (tipo === "FT" || NON_FISCAL.has(tipo)) setShowDiscount(false);
+  }, [tipo]);
   const isFacturaA = tipo === "FA" || tipo === "FM";
   const facturaANeedsCuit = isFacturaA && cuit.replace(/\D/g, "").length !== 11;
   const ambiente: string = billingConfig?.arcaAmbiente ?? "ficticio";
@@ -1182,6 +1204,18 @@ export function PrefacturaDialog({
     if (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
+    }
+    if (showDiscount && (discountError || tipo === "FT" || !isFiscalTipo)) {
+      setSubmitError(discountError || "El descuento requiere una factura A, B o C."); return;
+    }
+    if (checkoutDiscount && Math.abs(checkoutDiscount.originalTotal - getSelectedFolioTotal(allBillableItems)) > 0.01) {
+      setSubmitError("El descuento es sobre el total pendiente: seleccioná todos los cargos de la reserva."); return;
+    }
+    if (checkoutDiscount && checkoutDiscount.amount > operationalBalance + 0.01) {
+      setSubmitError("El descuento supera el saldo pendiente después de los cobros registrados. Revisá los anticipos antes de continuar."); return;
+    }
+    if (checkoutDiscount && invoiceAmount < totalSelected - 0.01) {
+      setSubmitError("Para aplicar el descuento, completá el cobro del total o elegí Cuenta Corriente."); return;
     }
     const balanceOwed = selectedBalance;
     // When the folio is already fully covered (zero or negative balance), skip the
@@ -1406,6 +1440,10 @@ export function PrefacturaDialog({
         : [];
       const invoiceRequest = invoiceItems.length > 0 ? {
           tipoComprobante: tipo,
+          ...(checkoutDiscount ? { checkoutDiscount: {
+            type: checkoutDiscount.type, value: checkoutDiscount.value, reason: checkoutDiscount.reason,
+            originalSourceAmounts: Object.fromEntries(selectedItemsBeforeDiscount.map(item => [item.id, item.amount])),
+          } } : {}),
           cliente: {
             razonSocial: razonSocial || "Consumidor Final",
             cuit: cuit || undefined,
@@ -1828,6 +1866,28 @@ export function PrefacturaDialog({
               {!isFiscalTipo && <p className="mt-2 text-xs text-muted-foreground">Comprobante interno, sin CAE</p>}
             </section>
 
+            {!hasPendingSubmission && !alreadyPaidAndInvoiced && (
+              <div className="rounded-lg border p-3 space-y-3">
+                <Button variant="outline" size="sm" onClick={() => setShowDiscount(!showDiscount)} disabled={isSubmitting || tipo === "FT" || !isFiscalTipo}>
+                  {showDiscount ? <X className="mr-1 h-4 w-4" /> : <Plus className="mr-1 h-4 w-4" />}
+                  {showDiscount ? "Quitar descuento" : "Agregar descuento"}
+                </Button>
+                {showDiscount && <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div><Label>Tipo de descuento</Label><Select value={discountType} onValueChange={v => setDiscountType(v as "percent" | "fixed")}>
+                      <SelectTrigger aria-label="Tipo de descuento"><SelectValue /></SelectTrigger><SelectContent>
+                        <SelectItem value="percent">Porcentaje</SelectItem><SelectItem value="fixed">Importe fijo</SelectItem>
+                      </SelectContent></Select></div>
+                    <div><Label htmlFor="checkout-discount-value">{discountType === "percent" ? "Porcentaje (%)" : "Importe ($)"}</Label>
+                      <Input id="checkout-discount-value" inputMode="decimal" value={discountValue} onChange={e => setDiscountValue(e.target.value)} /></div>
+                    <div><Label htmlFor="checkout-discount-reason">Motivo del descuento *</Label>
+                      <Input id="checkout-discount-reason" maxLength={500} value={discountReason} onChange={e => setDiscountReason(e.target.value)} /></div>
+                  </div>
+                  {discountError ? <p className="text-sm text-destructive" role="alert">{discountError}</p> :
+                    <p className="text-sm" data-testid="checkout-discount-summary">Total original: ${fmtMoney(checkoutDiscount!.originalTotal)} · Descuento: −${fmtMoney(checkoutDiscount!.amount)} · Total final: ${fmtMoney(totalSelected)}</p>}
+                </>}
+              </div>
+            )}
             {/* Live financial summary; the charge table below can remain collapsed. */}
             {folio && (
               <section className="overflow-hidden rounded-lg border bg-card" aria-label="Resumen de cuenta">

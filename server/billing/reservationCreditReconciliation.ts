@@ -1,3 +1,4 @@
+import { checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { getAvailableReservationAdvancePayments, parseReservationInvoiceRef } from "@shared/reservationFolio";
@@ -315,6 +316,26 @@ export async function reconcileReservationCreditInvoice(invoiceId: number): Prom
           )::text
           WHERE id = ${allocation.paymentId}
         `);
+      }
+      const discount = checkoutDiscountFromInvoice(invoice);
+      if (discount) {
+        if (!invoice.folio_id || discount.amount <= 0 || !Number.isFinite(discount.amount)) throw new Error("El descuento no tiene un folio válido");
+        const folio = await tx.execute(sql`SELECT id FROM folios WHERE id = ${String(invoice.folio_id)} AND entity_type = 'reservation' AND entity_id = ${String(invoice.reserva_id)} FOR UPDATE`);
+        if (folio.rows.length !== 1) throw new Error("El folio del descuento no pertenece a la reserva");
+        // Invoice row lock plus deterministic keys makes recovery exactly once.
+        const chargeId = `checkout-discount:${invoiceId}`;
+        const description = `Descuento en prefactura: ${discount.reason} [descuento:${invoiceId}]`;
+        await tx.execute(sql`INSERT INTO charges (id, reservation_id, description, amount, date, category, status)
+          VALUES (${chargeId}, ${String(invoice.reserva_id)}, ${description}, ${(-discount.amount).toFixed(2)}, CURRENT_DATE, 'adjustment', 'active')
+          ON CONFLICT (id) DO NOTHING`);
+        await tx.execute(sql`INSERT INTO folio_movements (id, folio_id, type, amount, description, source_type, source_id, registered_by)
+          VALUES (${chargeId}, ${String(invoice.folio_id)}, 'discount', ${discount.amount.toFixed(2)}, ${description}, 'checkout_discount', ${String(invoiceId)}, ${invoice.operador || null})
+          ON CONFLICT (id) DO NOTHING`);
+        await tx.execute(sql`UPDATE folios SET
+          total_charges = (SELECT COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('charge','transfer_in')),0) FROM folio_movements WHERE folio_id = ${String(invoice.folio_id)}),
+          total_payments = (SELECT COALESCE(SUM(amount::numeric) FILTER (WHERE type IN ('payment','advance','discount','transfer_out','void')),0) FROM folio_movements WHERE folio_id = ${String(invoice.folio_id)}),
+          balance = (SELECT COALESCE(SUM(CASE WHEN type IN ('charge','transfer_in') THEN amount::numeric WHEN type IN ('payment','advance','discount','transfer_out','void') THEN -amount::numeric ELSE 0 END),0) FROM folio_movements WHERE folio_id = ${String(invoice.folio_id)})
+          WHERE id = ${String(invoice.folio_id)}`);
       }
       const completed = { ...intent, payments: allocations, status: "completed" };
       const updated = await tx.execute(sql`

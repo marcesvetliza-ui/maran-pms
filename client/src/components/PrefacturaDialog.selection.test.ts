@@ -239,3 +239,13 @@ describe("PrefacturaDialog selected folio projection", () => {
     expect(isArgentineNationality(undefined, undefined)).toBe(false);
   });
 });
+
+describe("discounted source capacity", () => {
+  it("does not offer the forgiven amount again, including after a credit note", () => {
+    const invoice = { monto_total: 90, source_charge_amounts: { accommodation: 90 },
+      credit_reapplication_intent: { checkoutDiscount: { sourceAmounts: { accommodation: 10 } } } };
+    expect(getInvoicedAmountsByCharge([invoice])).toEqual({ accommodation: 100 });
+    expect(getInvoicedAmountsByCharge([{ ...invoice, monto_acreditado: 90, credit_source_charge_amounts: [{ accommodation: 90 }] }]))
+      .toEqual({ accommodation: 10 });
+  });
+});

@@ -403,3 +403,26 @@ describe("PrefacturaDialog recipient selection", () => {
     });
   });
 });
+
+describe("discount in prefactura", () => {
+  it("updates invoice, payment and immutable request with percent discount", async () => {
+    const fetchMock = buildFetchMock(); vi.stubGlobal("fetch", fetchMock);
+    window.sessionStorage.clear();
+    const user = userEvent.setup();
+    render(<Wrapper><PrefacturaDialog open onClose={vi.fn()} reservationId={reservation.id} reservation={reservation} mode="billing" /></Wrapper>);
+    await user.click(await screen.findByRole("button", { name: "Agregar descuento" }));
+    await user.type(screen.getByLabelText("Porcentaje (%)"), "10");
+    await user.type(screen.getByLabelText("Motivo del descuento *"), "Pago en efectivo");
+    await waitFor(() => expect(screen.getByTestId("text-importe-a-facturar")).toHaveTextContent("252"));
+    expect(screen.getByTestId("input-payment-amount-0")).toHaveValue(252);
+    await user.click(screen.getByTestId("button-registrar-emitir"));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, opts]) => String(url).includes("/api/payments") && opts?.method === "POST")).toBe(true));
+    const call = fetchMock.mock.calls.find(([url, opts]) => String(url).includes("/api/billing/invoices") && opts?.method === "POST")!;
+    const body = JSON.parse(String(call[1]?.body));
+    expect(body.checkoutDiscount).toEqual({ type: "percent", value: 10, reason: "Pago en efectivo", originalSourceAmounts: { accommodation: 200, "charge-recipient-test": 80 } });
+    expect(body.sourceChargeAmounts).toEqual({ accommodation: 180, "charge-recipient-test": 72 });
+    expect(body.items.reduce((sum: number, row: any) => sum + row.subtotal, 0)).toBe(252);
+    const payment = fetchMock.mock.calls.find(([url, opts]) => String(url).includes("/api/payments") && opts?.method === "POST")!;
+    expect(JSON.parse(String(payment[1]?.body)).amount).toBe("252.00");
+  });
+});

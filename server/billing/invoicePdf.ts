@@ -1,3 +1,4 @@
+import { checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import type { GroupInvoiceComposition } from "@shared/groupInvoiceComposition";
@@ -774,10 +775,16 @@ export async function generarFacturaPDF(
 
     y += caeH + 2;
 
-    // Observaciones (free text, empty by default)
-    box(x0, y, W, 22);
+    const checkoutDiscount = checkoutDiscountFromInvoice(factura);
+    const discountNote = checkoutDiscount
+      ? `Total original $${checkoutDiscount.originalTotal.toFixed(2)} · Descuento $${checkoutDiscount.amount.toFixed(2)} · Total final $${montoTotal.toFixed(2)}. Motivo: ${checkoutDiscount.reason}` : "";
+    doc.font("Helvetica").fontSize(7.5);
+    const observationsHeight = discountNote ? Math.max(22, doc.heightOfString(discountNote, { width: W - 90 }) + 14) : 22;
+    if (y + observationsHeight + 20 > doc.page.height - 20) { doc.addPage(); y = 42; }
+    box(x0, y, W, observationsHeight);
     doc.font("Helvetica-Bold").fontSize(7.5).text("Observaciones:", x0 + 6, y + 7);
-    y += 22;
+    if (discountNote) doc.font("Helvetica").text(discountNote, x0 + 82, y + 7, { width: W - 90 });
+    y += observationsHeight;
 
     // Footer timestamp
     const _ts = formatArgentinaDateTime(new Date());
