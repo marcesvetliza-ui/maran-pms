@@ -1403,14 +1403,15 @@ export default function InventoryPage() {
             </Card>
           ) : (
             <div className="border rounded-md overflow-x-auto">
-              <table className="w-full table-fixed min-w-[680px]">
+              <table className="w-full table-fixed min-w-[1080px]">
                 <thead className="bg-muted/50">
                   <tr className="text-left">
-                    <th className="p-3 font-medium w-[28%]">Articulo</th>
-                    <th className="p-3 font-medium w-[23%]">Subagrupamiento</th>
-                    <th className="p-3 font-medium text-right">Stock</th>
-                    <th className="p-3 font-medium text-right">Min</th>
-                    <th className="p-3 font-medium text-right">Costo</th><th className="p-2 w-32"><span className="sr-only">Detalle</span></th>
+                    <th className="p-3 font-medium">Articulo</th>
+                    <th className="p-3 font-medium w-[24%]">Subagrupamiento</th>
+                    <th className="px-2 py-3 w-32 font-medium text-right">Stock</th>
+                    <th className="px-2 py-3 w-16 font-medium text-right">Min</th>
+                    <th className="p-3 w-40 font-medium text-right">Costo</th>
+                    <th className="p-3 w-72 font-medium text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1448,19 +1449,19 @@ export default function InventoryPage() {
 
                         </div>
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="px-2 py-3 text-right tabular-nums break-words">
                         <span className={locationFilter === "all" ? "" : ["zero","critical","low"].includes(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.status || "") ? "text-red-600 font-semibold" : ""}>
                           {item.currentStock===null?"Sin información histórica":Number(item.currentStock).toLocaleString("es-AR",{maximumFractionDigits:3})}
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{item.unit}</span>
                       </td>
-                      <td className="p-3 text-right text-muted-foreground">
+                      <td className="px-2 py-3 text-right tabular-nums text-muted-foreground break-words">
                         {locationFilter === "all" ? Number(item.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}) : (locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock == null ? "—" : Number(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}))}
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right tabular-nums whitespace-nowrap">
                         {canCost && !historical ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button permission="catalog" variant="ghost" size="sm" disabled={purchaseStateMutation.isPending || item.isActive === "false"} onClick={()=>purchaseStateMutation.mutate(items.find(i=>i.id===item.id))}>{(item as any).purchaseEnabled === false ? "Habilitar compras" : "No comprar"}</Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-3"><div className="flex flex-wrap items-center justify-end gap-1"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button permission="catalog" variant="ghost" size="sm" disabled={purchaseStateMutation.isPending || item.isActive === "false"} onClick={()=>purchaseStateMutation.mutate(items.find(i=>i.id===item.id))}>{(item as any).purchaseEnabled === false ? "Habilitar compras" : "No comprar"}</Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
