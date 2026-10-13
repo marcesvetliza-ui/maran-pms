@@ -82,6 +82,15 @@ suite('checkout discount invoice endpoint', () => {
       expect(list[0].credit_reapplication_intent.checkoutDiscount.amount).toBe(10);
       const invoices = await db.execute(sql`SELECT id FROM sales_invoices WHERE reserva_id=${reservationId}`); expect(invoices.rows).toHaveLength(1);
       const reductions = await db.execute(sql`SELECT amount FROM charges WHERE reservation_id=${reservationId}`); expect(reductions.rows).toHaveLength(1); expect(Number((reductions.rows[0] as any).amount)).toBe(-10);
+      await db.execute(sql`INSERT INTO sales_invoices (tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,nota_credito_id,source_charge_amounts)
+        VALUES ('NCB',1,1,CURRENT_DATE,'Prueba','Consumidor Final',90,90,'emitida',${reservationId},${Number(issued.body.id)},${JSON.stringify({ accommodation: 90 })}::jsonb)`);
+      await db.execute(sql`UPDATE sales_invoices SET monto_acreditado=90,estado='anulada' WHERE id=${Number(issued.body.id)}`);
+      const { checkoutDiscount: _discount, ...replacement } = body;
+      expect((await post({ ...replacement, creditOperationId: randomUUID() })).status).toBe(201);
+      const leftover = await post({ ...replacement, creditOperationId: randomUUID(), sourceChargeAmounts: { accommodation: 10 },
+        items: [{ ...body.items[0], subtotal: 10, precioUnitario: 10 }], cashFormaPagoDetalle: [{ method: 'efectivo', amount: 10 }] });
+      expect(leftover.status, JSON.stringify(leftover.body)).toBe(409);
+
     } finally {
       await new Promise<void>(resolve => server!.close(() => resolve()));
       await db.execute(sql`DELETE FROM charges WHERE reservation_id=${reservationId}`);
