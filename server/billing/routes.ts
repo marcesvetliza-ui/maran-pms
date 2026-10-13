@@ -1678,6 +1678,7 @@ export function registerBillingRoutes(app: Express) {
             AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
             AND (
               si.estado IN ('emitida', 'parcial')
+              OR (si.estado = 'anulada' AND si.credit_reapplication_intent->'checkoutDiscount' IS NOT NULL)
               OR (
                 si.estado = 'autorizacion_pendiente'
                 AND (
