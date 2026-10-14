@@ -1,10 +1,20 @@
 import type { RevenueRateSuggestionConfig } from "@shared/schema";
+import type { CompetitorComparison } from "./competitorPricing";
 
 /**
  * Motor de sugerencias de tarifa. Es una función pura, de solo lectura:
  * nunca escribe en rate_plans ni en ninguna reserva. Devuelve una dirección
  * sugerida + el porcentaje + la lista de razones legibles que la explican,
  * para que un humano decida si la aplica manualmente en Planes Tarifarios.
+ *
+ * La comparación contra competencia NUNCA usa el ADR del día (una tarifa
+ * promedio realmente cobrada, mezclada con descuentos y $0) como si fuera
+ * "nuestro precio publicado": compara contra la tarifa vigente del plan
+ * tarifario (CompetitorComparison.ourPublishedRate, resuelta en
+ * server/revenue/metrics.ts por tipo de habitación y fecha), y solo usa
+ * tarifas de competencia ya filtradas por moneda/tipo de habitación/
+ * antigüedad compatibles (ver buildCompetitorComparisons) — nunca mezcla
+ * comparaciones incompatibles.
  */
 
 export type RateSuggestionDirection = "subir" | "bajar" | "mantener";
@@ -15,17 +25,11 @@ export type RateSuggestionDemandEvent = {
   impact: "alto" | "medio" | "bajo";
 };
 
-export type RateSuggestionCompetitorRate = {
-  competitorName: string;
-  rate: number;
-};
-
 export type RateSuggestionInput = {
   date: string;
   occupancyPct: number;
-  currentAdr: number | null;
   demandEvents: RateSuggestionDemandEvent[];
-  competitorRates: RateSuggestionCompetitorRate[];
+  competitorComparisons: CompetitorComparison[];
   config: RevenueRateSuggestionConfig;
 };
 
@@ -39,6 +43,7 @@ export type RateSuggestion = {
 };
 
 const IMPACT_RANK: Record<RateSuggestionDemandEvent["impact"], number> = { bajo: 1, medio: 2, alto: 3 };
+const COMPETITOR_GAP_THRESHOLD_PCT = 15;
 
 const DISCLAIMER = "Sugerencia informativa del motor de Revenue Management. No se aplica sola: hay que cargarla a mano en Planes Tarifarios si se está de acuerdo.";
 
@@ -67,25 +72,46 @@ export function suggestRateAdjustment(input: RateSuggestionInput): RateSuggestio
   if (input.config.considerDemandEvents && input.demandEvents.length > 0) {
     const topEvent = input.demandEvents.slice().sort((a, b) => IMPACT_RANK[b.impact] - IMPACT_RANK[a.impact])[0];
     reasons.push(`Evento de demanda cargado para esta fecha: "${topEvent.name}" (impacto ${topEvent.impact}).`);
-    if (topEvent.impact === "alto" && direction !== "subir") {
-      direction = "subir";
-      pct = Math.max(pct, incPct);
-      reasons.push("El evento de impacto alto por sí solo ya justifica considerar una suba, más allá de la ocupación.");
-    } else if (topEvent.impact === "alto" && direction === "subir") {
+    if (topEvent.impact === "alto") {
+      if (direction !== "subir") {
+        direction = "subir";
+        reasons.push("El evento de impacto alto por sí solo ya justifica considerar una suba, más allá de la ocupación.");
+      }
       pct = Math.max(pct, incPct);
     }
   }
 
-  if (input.config.considerCompetitorRates && input.competitorRates.length > 0 && input.currentAdr && input.currentAdr > 0) {
-    const avgCompetitor = input.competitorRates.reduce((sum, c) => sum + c.rate, 0) / input.competitorRates.length;
-    const diffPct = ((avgCompetitor - input.currentAdr) / input.currentAdr) * 100;
-    reasons.push(`Tarifa propia de referencia (ADR del día) $${input.currentAdr.toFixed(0)} vs. promedio de ${input.competitorRates.length} competidor(es) cargado(s) a mano: $${avgCompetitor.toFixed(0)} (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(0)}%).`);
-    if (diffPct >= 15 && direction !== "subir") {
-      direction = "subir";
-      pct = Math.max(pct, incPct);
-      reasons.push("La competencia está marcadamente por encima de nuestra tarifa: hay margen para subir.");
-    } else if (diffPct <= -15 && direction === "mantener") {
-      reasons.push("Nuestra tarifa ya está por encima del promedio de competencia cargado; no se sugiere subir más sin otra señal.");
+  if (input.config.considerCompetitorRates) {
+    for (const comp of input.competitorComparisons) {
+      if (comp.roomTypeId === "__unclassified__") {
+        reasons.push(`${comp.excludedCount} tarifa(s) de competencia cargada(s) sin tipo de habitación especificado: no son comparables, se excluyen.`);
+        continue;
+      }
+      if (!comp.ourPublishedRate) {
+        reasons.push(`${comp.roomTypeName}: no hay un plan tarifario vigente para esa fecha, no se puede comparar contra la competencia.`);
+        continue;
+      }
+      if (comp.compatibleRates.length === 0) {
+        const extra = comp.excludedCount > 0 ? ` (${comp.excludedCount} excluida(s): ${comp.excludedReasons.join("; ")})` : "";
+        reasons.push(`${comp.roomTypeName}: hay tarifas de competencia cargadas pero ninguna es comparable${extra}.`);
+        continue;
+      }
+
+      const avgCompetitor = comp.compatibleRates.reduce((sum, c) => sum + c.rate, 0) / comp.compatibleRates.length;
+      const diffPct = ((avgCompetitor - comp.ourPublishedRate.rate) / comp.ourPublishedRate.rate) * 100;
+      reasons.push(
+        `${comp.roomTypeName}: tarifa publicada ($${comp.ourPublishedRate.name}) $${comp.ourPublishedRate.rate.toFixed(0)} ` +
+        `vs. promedio de ${comp.compatibleRates.length} competidor(es) compatible(s) (misma moneda, mismo tipo, no desactualizados): ` +
+        `$${avgCompetitor.toFixed(0)} (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(0)}%).`,
+      );
+
+      if (diffPct >= COMPETITOR_GAP_THRESHOLD_PCT && direction !== "subir") {
+        direction = "subir";
+        pct = Math.max(pct, incPct);
+        reasons.push(`${comp.roomTypeName}: la competencia está marcadamente por encima de nuestra tarifa publicada, hay margen para subir.`);
+      } else if (diffPct <= -COMPETITOR_GAP_THRESHOLD_PCT && direction === "mantener") {
+        reasons.push(`${comp.roomTypeName}: nuestra tarifa ya está por encima del promedio de competencia cargado; no se sugiere subir más sin otra señal.`);
+      }
     }
   }
 

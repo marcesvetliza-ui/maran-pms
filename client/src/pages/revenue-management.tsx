@@ -30,16 +30,26 @@ type RevenueDayMetrics = {
   isForecast: boolean;
   roomsAvailable: number;
   roomsSold: number;
+  ratedRoomNights: number;
+  roomsWithMissingRate: number;
   occupancyPct: number;
   directRoomRevenue: number;
-  groupChargesRevenue: number;
+  otherGroupChargesRevenue: number;
   totalRevenue: number;
   adr: number;
   revpar: number;
 };
 
+const RATE_SOURCE_LABELS: Record<string, string> = {
+  final_rate_per_night: "Tarifa directa",
+  total_room_amount_prorated: "Prorrateada (monto total / noches)",
+  group_block_agreed_rate: "Tarifa pactada de grupo (por noche)",
+  zero_with_reason: "$0 confirmado (cortesía/canje)",
+  missing_rate: "Sin tarifa — dato faltante",
+};
+
 type RevenueDayDetail = RevenueDayMetrics & {
-  reservations: Array<{ reservationId: string; roomId: string; roomNumber: string; status: string; nightlyRate: number; rateSource: string }>;
+  reservations: Array<{ reservationId: string; roomId: string; roomNumber: string; status: string; nightlyRate: number; rateSource: string; countsForAdr: boolean }>;
   groupCharges: Array<{ id: string; groupId: string; description: string; amount: number; category: string }>;
 };
 
@@ -152,12 +162,15 @@ function BoardTab({ from, to }: { from: string; to: string }) {
     if (days.length === 0) return null;
     const totalRevenue = days.reduce((s, d) => s + d.totalRevenue, 0);
     const totalSold = days.reduce((s, d) => s + d.roomsSold, 0);
+    const totalRated = days.reduce((s, d) => s + d.ratedRoomNights, 0);
+    const totalMissingRate = days.reduce((s, d) => s + d.roomsWithMissingRate, 0);
     const totalAvailable = days.reduce((s, d) => s + d.roomsAvailable, 0);
     return {
       occupancyPct: totalAvailable > 0 ? (totalSold / totalAvailable) * 100 : 0,
       totalRevenue,
-      adr: totalSold > 0 ? totalRevenue / totalSold : 0,
+      adr: totalRated > 0 ? totalRevenue / totalRated : 0,
       revpar: totalAvailable > 0 ? totalRevenue / totalAvailable : 0,
+      totalMissingRate,
     };
   }, [data]);
 
@@ -188,6 +201,16 @@ function BoardTab({ from, to }: { from: string; to: string }) {
         </div>
       ) : null}
 
+      {summary && summary.totalMissingRate > 0 && (
+        <Card className="border-amber-300">
+          <CardContent className="pt-4 text-sm text-muted-foreground">
+            {summary.totalMissingRate} habitación-noche(s) en este rango no tienen tarifa determinable (ni tarifa directa, ni monto
+            total, ni tarifa pactada de grupo, ni motivo de $0) — cuentan para ocupación pero se excluyen del cálculo de ADR para no
+            diluirlo con un dato desconocido. Revisá el detalle de cada día para identificarlas.
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="pt-6">
           <Table>
@@ -209,14 +232,19 @@ function BoardTab({ from, to }: { from: string; to: string }) {
                     {formatDisplayDate(day.date)}
                     {day.isForecast && <Badge variant="outline" className="ml-2">forecast</Badge>}
                   </TableCell>
-                  <TableCell>{day.occupancyPct.toFixed(0)}%</TableCell>
+                  <TableCell>
+                    {day.occupancyPct.toFixed(0)}%
+                    {day.roomsWithMissingRate > 0 && (
+                      <Badge variant="outline" className="ml-2 text-amber-700 border-amber-400">{day.roomsWithMissingRate} sin tarifa</Badge>
+                    )}
+                  </TableCell>
                   <TableCell>{day.roomsSold}/{day.roomsAvailable}</TableCell>
                   <TableCell>{formatCurrency(day.adr)}</TableCell>
                   <TableCell>{formatCurrency(day.revpar)}</TableCell>
                   <TableCell>
                     {formatCurrency(day.totalRevenue)}
-                    {day.groupChargesRevenue > 0 && (
-                      <span className="text-xs text-muted-foreground ml-1">(incl. {formatCurrency(day.groupChargesRevenue)} de grupos)</span>
+                    {day.otherGroupChargesRevenue > 0 && (
+                      <span className="text-xs text-muted-foreground ml-1">(+ {formatCurrency(day.otherGroupChargesRevenue)} de extras de grupo, no incluido)</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -253,27 +281,36 @@ function DayDetailContent({ date }: { date: string }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>Ocupación: <strong>{data.occupancyPct.toFixed(0)}%</strong> ({data.roomsSold}/{data.roomsAvailable})</div>
-            <div>ADR: <strong>{formatCurrency(data.adr)}</strong></div>
-            <div>Ingreso directo de habitaciones: <strong>{formatCurrency(data.directRoomRevenue)}</strong></div>
+            <div>ADR: <strong>{formatCurrency(data.adr)}</strong> ({data.ratedRoomNights} habitación-noche con tarifa determinable)</div>
+            <div>Ingreso de alojamiento: <strong>{formatCurrency(data.directRoomRevenue)}</strong></div>
             <div>RevPAR: <strong>{formatCurrency(data.revpar)}</strong></div>
           </div>
 
           <div>
-            <h4 className="font-medium text-sm mb-2">Reservas que ocupan este día ({data.reservations.length})</h4>
+            <h4 className="font-medium text-sm mb-2">
+              Reservas que ocupan este día ({data.reservations.length})
+              {data.roomsWithMissingRate > 0 && (
+                <Badge variant="outline" className="ml-2 text-amber-700 border-amber-400">{data.roomsWithMissingRate} sin tarifa determinable</Badge>
+              )}
+            </h4>
             <Table>
               <TableHeader>
-                <TableRow><TableHead>Habitación</TableHead><TableHead>Estado</TableHead><TableHead>Tarifa</TableHead></TableRow>
+                <TableRow><TableHead>Habitación</TableHead><TableHead>Estado</TableHead><TableHead>Tarifa</TableHead><TableHead>Origen del dato</TableHead></TableRow>
               </TableHeader>
               <TableBody>
                 {data.reservations.map(r => (
                   <TableRow key={r.reservationId}>
                     <TableCell>{r.roomNumber}</TableCell>
                     <TableCell>{r.status}</TableCell>
-                    <TableCell>{formatCurrency(r.nightlyRate)}{r.nightlyRate === 0 && <span className="text-xs text-muted-foreground ml-1">(ver cargos de grupo)</span>}</TableCell>
+                    <TableCell>{formatCurrency(r.nightlyRate)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {RATE_SOURCE_LABELS[r.rateSource] || r.rateSource}
+                      {!r.countsForAdr && <span className="text-amber-700"> · excluida del ADR</span>}
+                    </TableCell>
                   </TableRow>
                 ))}
                 {data.reservations.length === 0 && (
-                  <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Sin reservas este día</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Sin reservas este día</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -282,11 +319,11 @@ function DayDetailContent({ date }: { date: string }) {
           {data.groupCharges.length > 0 && (
             <div>
               <h4 className="font-medium text-sm mb-2">
-                Cargos de grupo este día ({formatCurrency(data.groupChargesRevenue)})
+                Otros cargos de grupo este día — no son alojamiento ({formatCurrency(data.otherGroupChargesRevenue)})
               </h4>
               <p className="text-xs text-muted-foreground mb-2">
-                Habitaciones de un grupo con tarifa pactada suelen cargarse en $0 a nivel de reserva; la plata real queda
-                registrada acá, no se descarta como "regalada".
+                Alimentos, bebidas, eventos, transporte, spa, lavandería u otros cargados al folio grupal. Nunca se suman al
+                ingreso de alojamiento ni a ADR/RevPAR — se muestran acá solo como contexto.
               </p>
               <Table>
                 <TableHeader>
@@ -321,6 +358,8 @@ function PaceTab({ defaultDate }: { defaultDate: string }) {
     previousYear: Array<{ snapshotDate: string; leadDays: number; roomsSold: number; roomRevenue: number }>;
     yoyAvailable: boolean;
     message: string | null;
+    trackingStartDate: string | null;
+    missingSnapshotDates: string[];
   }>({
     queryKey: ["/api/revenue/pace", stayDate],
     queryFn: async () => (await apiRequest("GET", `/api/revenue/pace/${stayDate}`)).json(),
@@ -337,6 +376,16 @@ function PaceTab({ defaultDate }: { defaultDate: string }) {
         <>
           {!data.yoyAvailable && (
             <Card><CardContent className="pt-6 text-sm text-muted-foreground">{data.message}</CardContent></Card>
+          )}
+
+          {data.missingSnapshotDates.length > 0 && (
+            <Card className="border-amber-300">
+              <CardContent className="pt-4 text-sm text-muted-foreground">
+                Hay {data.missingSnapshotDates.length} día(s) sin captura de snapshot desde que arrancó el seguimiento
+                ({data.trackingStartDate ? formatDisplayDate(data.trackingStartDate) : "—"}): {data.missingSnapshotDates.slice(0, 10).map(formatDisplayDate).join(", ")}
+                {data.missingSnapshotDates.length > 10 ? "…" : ""}. Son huecos reales de historial (el módulo no corrió ese día), no datos en $0.
+              </CardContent>
+            </Card>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -3833,6 +3833,31 @@ export const insertRevenuePaceSnapshotSchema = createInsertSchema(revenuePaceSna
 export type InsertRevenuePaceSnapshot = z.infer<typeof insertRevenuePaceSnapshotSchema>;
 export type RevenuePaceSnapshot = typeof revenuePaceSnapshots.$inferSelect;
 
+// Un registro por snapshotDate: define explícitamente cómo y cuándo se
+// capturó cada día (mecanismo auditable, no implícito). Se escribe dentro de
+// la MISMA transacción que las filas de revenuePaceSnapshots de ese día: si
+// el proceso se interrumpe a mitad de camino, Postgres descarta todo (ni el
+// log ni las filas de snapshot quedan a medias) — por eso "status" acá
+// siempre refleja un intento que o bien no llegó a confirmarse (no existe
+// fila) o se completó por entero ("completed"). También es la fuente para
+// detectar huecos reales de historial (días sin captura).
+export type RevenuePaceSnapshotRunStatus = "completed";
+
+export const revenuePaceSnapshotRuns = pgTable("revenue_pace_snapshot_runs", {
+  snapshotDate: date("snapshot_date").primaryKey(),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at").notNull().defaultNow(),
+  status: text("status").$type<RevenuePaceSnapshotRunStatus>().notNull().default("completed"),
+  daysCaptured: integer("days_captured").notNull().default(0),
+  horizonDays: integer("horizon_days").notNull().default(0),
+}, table => [check("revenue_pace_snapshot_runs_status_check", sql`${table.status} = 'completed'`)]);
+
+export const insertRevenuePaceSnapshotRunSchema = createInsertSchema(revenuePaceSnapshotRuns).omit({
+  startedAt: true, completedAt: true,
+});
+export type InsertRevenuePaceSnapshotRun = z.infer<typeof insertRevenuePaceSnapshotRunSchema>;
+export type RevenuePaceSnapshotRun = typeof revenuePaceSnapshotRuns.$inferSelect;
+
 // Configuración (fila única, id=1) del motor de sugerencias de tarifa.
 // El motor solo lee esta config y produce texto explicativo: nunca escribe
 // en rate_plans ni aplica nada automáticamente.

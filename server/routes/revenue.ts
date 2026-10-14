@@ -7,6 +7,7 @@ import {
   revenueDemandEvents,
   competitorRates,
   revenueRateSuggestionConfig,
+  roomTypes,
   insertRevenueDemandEventSchema,
   insertCompetitorRateSchema,
   insertRevenueRateSuggestionConfigSchema,
@@ -19,6 +20,8 @@ import {
   ensureTodayPaceSnapshot,
   captureDailyPaceSnapshot,
   getPaceForStayDate,
+  loadRatePlansForRoomTypes,
+  buildCompetitorComparisons,
 } from "../revenue/metrics";
 import { suggestRateAdjustment } from "../revenue/suggestions";
 
@@ -171,28 +174,30 @@ export function registerRevenueRoutes(app: Express) {
   app.get("/api/revenue/suggestions", requirePermission(REVENUE_READ), async (req, res) => {
     try {
       const { from, to } = parseRange(req);
-      const [days, events, rates, configRows] = await Promise.all([
+      const [days, events, rateRows, configRows, roomTypeRows] = await Promise.all([
         computeRevenueBoard(from, to),
         db.select().from(revenueDemandEvents).where(and(lt(revenueDemandEvents.startDate, to), gte(revenueDemandEvents.endDate, from))),
         db.select().from(competitorRates).where(and(gte(competitorRates.stayDate, from), lt(competitorRates.stayDate, to))),
         db.select().from(revenueRateSuggestionConfig).where(eq(revenueRateSuggestionConfig.id, 1)).limit(1),
+        db.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes),
       ]);
       const config = configRows[0];
       if (!config) return res.status(500).json({ error: "Falta la configuración del motor de sugerencias" });
+
+      const roomTypeNameById = new Map(roomTypeRows.map(rt => [rt.id, rt.name]));
+      const roomTypeIdsWithCompetitorData = [...new Set(rateRows.map(r => r.roomTypeId).filter((id): id is string => !!id))];
+      const ratePlansByRoomType = await loadRatePlansForRoomTypes(roomTypeIdsWithCompetitorData);
 
       const suggestions = days.map(day => {
         const dayEvents = events
           .filter(ev => ev.startDate <= day.date && day.date <= ev.endDate)
           .map(ev => ({ name: ev.name, category: ev.category, impact: ev.impact }));
-        const dayRates = rates
-          .filter(r => r.stayDate === day.date)
-          .map(r => ({ competitorName: r.competitorName, rate: Number(r.rate) }));
+        const competitorComparisons = buildCompetitorComparisons(day.date, rateRows, roomTypeNameById, ratePlansByRoomType);
         return suggestRateAdjustment({
           date: day.date,
           occupancyPct: day.occupancyPct,
-          currentAdr: day.adr > 0 ? day.adr : null,
           demandEvents: dayEvents,
-          competitorRates: dayRates,
+          competitorComparisons,
           config,
         });
       });

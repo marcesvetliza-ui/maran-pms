@@ -1,39 +1,76 @@
-import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
-import { db } from "../db";
-import { groupCharges, maintenanceBlocks, reservations, revenuePaceSnapshots, rooms } from "@shared/schema";
+import { and, asc, eq, gt, gte, inArray, isNotNull, lt, lte } from "drizzle-orm";
+import { db, withDatabaseTransaction } from "../db";
+import {
+  groupCharges, groupReservationLinks, groupRoomBlocks, maintenanceBlocks,
+  ratePlans, reservations, revenuePaceSnapshotRuns, revenuePaceSnapshots, rooms,
+} from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { addCalendarDays } from "@shared/nightAuditDate";
+import { parseReservationRate } from "@shared/reservationRate";
+import { classifyReservationRate } from "@shared/nightAudit";
+import type { RatePlanRow } from "./competitorPricing";
+export { buildCompetitorComparisons, pickApplicableRatePlan } from "./competitorPricing";
+export type { ResolvedRatePlan, RatePlanRow, CompetitorRateRow, CompetitorComparison } from "./competitorPricing";
 
 /**
  * Fuente de verdad propia para Revenue Management. No reutiliza ninguna de
  * las 4 fórmulas de ADR/RevPAR/ocupación que ya coexisten en el sistema
  * (server/reports/routes.ts ingresosAlojamiento/kpis, getExecutiveStats,
  * getReportOccupancy/getReportRevenueByRoomType) porque esas 4 divergen
- * entre sí y ninguna suma group_charges — así que replicarlas perpetuaría
- * el mismo gap. Metodología:
+ * entre sí. Metodología:
+ *
  *  - Días pasados: solo reservas checked_in/checked_out cuentan como "vendidas"
  *    (ingreso real, igual que ingresosAlojamiento).
  *  - Días de hoy en adelante: cualquier estado salvo cancelled/no_show cuenta
  *    como "vendido" (pipeline/forecast, igual criterio que /api/reports/forecast).
- *  - Tarifa de esa noche: final_rate_per_night si es > 0, sino total_room_amount
- *    prorrateado por noches (mismo criterio que /api/reports/ocupacion).
- *  - Ingreso grupal: cuando una habitación de un grupo se carga a $0 porque la
- *    tarifa se pactó a nivel de grupo, esa plata vive en group_charges, no en
- *    la reserva. Se suma group_charges.amount del día (TODAS las categorías,
- *    sin filtrar: la tabla no estandariza "category" — ver
- *    computeGroupOperationalLedger, que tampoco filtra) como "ingreso de
- *    grupo" aparte, para no mostrar esas habitaciones como regaladas sin
- *    inventar un prorrateo por noche que el esquema no soporta.
+ *  - Universo de habitaciones: roomsAvailable (denominador) y roomsSold
+ *    (numerador) se calculan sobre el MISMO conjunto de habitaciones
+ *    operativas (isOperationalInventoryRoom) — una reserva sobre una
+ *    habitación virtual/inactiva no infla la ocupación.
+ *  - Ingreso de alojamiento, por noche y reserva, en este orden:
+ *      1) final_rate_per_night si es > 0 (dato directo).
+ *      2) total_room_amount prorrateado por `nights` si es > 0 (prorrateo
+ *         exacto: se conoce la cantidad real de noches, no es una suposición).
+ *      3) si la reserva pertenece a un grupo (group_reservation_links) y hay
+ *         un group_room_blocks con agreedRate + rango de fechas que cubre
+ *         esta noche para el mismo tipo de habitación: se usa agreedRate
+ *         como tarifa de ESA noche (se interpreta como tarifa por noche, no
+ *         por estadía — el esquema no lo aclara, es un supuesto explícito).
+ *      4) si no hay nada de lo anterior: se clasifica con
+ *         classifyReservationRate (shared/nightAudit.ts) — "zeroWithReason"
+ *         (comp/cortesía confirmado, cuenta como $0 real) vs. dato faltante
+ *         ("missing_rate": cuenta para ocupación pero se EXCLUYE del
+ *         denominador de ADR para no diluir el promedio con un supuesto $0
+ *         que en realidad es "no sabemos").
+ *  - group_charges NUNCA se suma a ingresos de alojamiento: la única UI que
+ *    los carga (client/src/pages/group-detail.tsx) solo ofrece categorías
+ *    de extras (alimentos/bebidas/eventos/transporte/spa/lavandería/otros,
+ *    nunca "alojamiento"), y así lo confirma también
+ *    computeGroupOperationalLedger, que los trata como "groupCharges"
+ *    separado de "accommodation". Se exponen aparte como
+ *    otherGroupChargesRevenue — informativo, nunca entra a ADR/RevPAR.
  */
+
+const STALE_COMPETITOR_RATE_AFTER_DAYS = 7;
+const PACE_HORIZON_DAYS = 400;
+
+export type RateSource =
+  | "final_rate_per_night"
+  | "total_room_amount_prorated"
+  | "group_block_agreed_rate"
+  | "zero_with_reason"
+  | "missing_rate";
 
 export type RevenueDayMetrics = {
   date: string;
   isForecast: boolean;
   roomsAvailable: number;
   roomsSold: number;
+  ratedRoomNights: number;
+  roomsWithMissingRate: number;
   occupancyPct: number;
   directRoomRevenue: number;
-  groupChargesRevenue: number;
+  otherGroupChargesRevenue: number;
   totalRevenue: number;
   adr: number;
   revpar: number;
@@ -45,7 +82,8 @@ export type RevenueDayReservationDetail = {
   roomNumber: string;
   status: string;
   nightlyRate: number;
-  rateSource: "final_rate_per_night" | "total_room_amount_prorated";
+  rateSource: RateSource;
+  countsForAdr: boolean;
 };
 
 export type RevenueDayGroupChargeDetail = {
@@ -84,17 +122,6 @@ function enumerateDates(from: string, toExclusive: string): string[] {
   return dates;
 }
 
-function nightlyRateOf(r: { finalRatePerNight: string | null; totalRoomAmount: string | null; nights: number }): {
-  rate: number;
-  source: "final_rate_per_night" | "total_room_amount_prorated";
-} {
-  const final = Number(r.finalRatePerNight) || 0;
-  if (final > 0) return { rate: final, source: "final_rate_per_night" };
-  const nights = Number(r.nights) || 0;
-  const total = Number(r.totalRoomAmount) || 0;
-  return { rate: nights > 0 ? total / nights : 0, source: "total_room_amount_prorated" };
-}
-
 function statusSoldOnDay(status: string, isForecast: boolean): boolean {
   return isForecast ? !FORECAST_EXCLUDED_STATUSES.has(status) : ACTUAL_STATUSES.has(status);
 }
@@ -102,18 +129,65 @@ function statusSoldOnDay(status: string, isForecast: boolean): boolean {
 type RawReservationRow = {
   id: string;
   roomId: string;
+  roomTypeId: string;
   status: string;
   checkInDate: string;
   checkOutDate: string;
   finalRatePerNight: string | null;
   totalRoomAmount: string | null;
   nights: number;
+  specialRateReason: string | null;
 };
+
+type GroupBlockRow = {
+  groupId: string;
+  roomTypeId: string;
+  agreedRate: string | null;
+  blockCheckInDate: string | null;
+  blockCheckOutDate: string | null;
+};
+
+function resolveNightlyRate(
+  r: RawReservationRow,
+  date: string,
+  groupIdByReservationId: Map<string, string>,
+  groupBlockRows: GroupBlockRow[],
+): { rate: number; source: RateSource; countsForAdr: boolean } {
+  const direct = parseReservationRate(r.finalRatePerNight);
+  if (direct !== null && direct > 0) return { rate: direct, source: "final_rate_per_night", countsForAdr: true };
+
+  const totalAmount = parseReservationRate(r.totalRoomAmount);
+  const nights = Number(r.nights) || 0;
+  if (totalAmount !== null && totalAmount > 0 && nights > 0) {
+    return { rate: totalAmount / nights, source: "total_room_amount_prorated", countsForAdr: true };
+  }
+
+  const groupId = groupIdByReservationId.get(r.id);
+  if (groupId) {
+    const block = groupBlockRows.find(b =>
+      b.groupId === groupId && b.roomTypeId === r.roomTypeId &&
+      b.blockCheckInDate !== null && b.blockCheckOutDate !== null &&
+      b.blockCheckInDate <= date && date < b.blockCheckOutDate,
+    );
+    if (block) {
+      const agreed = parseReservationRate(block.agreedRate);
+      if (agreed !== null && agreed > 0) {
+        return { rate: agreed, source: "group_block_agreed_rate", countsForAdr: true };
+      }
+    }
+  }
+
+  const classification = classifyReservationRate(r.finalRatePerNight, r.specialRateReason);
+  if (classification === "zeroWithReason") {
+    return { rate: 0, source: "zero_with_reason", countsForAdr: true };
+  }
+  return { rate: 0, source: "missing_rate", countsForAdr: false };
+}
 
 async function loadRangeData(from: string, toExclusive: string) {
   const today = todayArgentina();
 
-  const [roomRows, blockRows, resRows, chargeRows] = await Promise.all([
+  const [roomRows, blockRows, resRows, chargeRows, groupLinkRows, groupBlockRows] = await Promise.all([
     db.select({
       id: rooms.id,
       roomNumber: rooms.roomNumber,
@@ -129,20 +203,40 @@ async function loadRangeData(from: string, toExclusive: string) {
     db.select({
       id: reservations.id,
       roomId: reservations.roomId,
+      roomTypeId: reservations.roomTypeId,
       status: reservations.status,
       checkInDate: reservations.checkInDate,
       checkOutDate: reservations.checkOutDate,
       finalRatePerNight: reservations.finalRatePerNight,
       totalRoomAmount: reservations.totalRoomAmount,
       nights: reservations.nights,
+      specialRateReason: reservations.specialRateReason,
     }).from(reservations)
       .where(and(lt(reservations.checkInDate, toExclusive), gt(reservations.checkOutDate, from))),
     db.select().from(groupCharges)
       .where(and(gte(groupCharges.date, from), lt(groupCharges.date, toExclusive))),
+    db.select({
+      groupId: groupReservationLinks.groupId,
+      reservationId: groupReservationLinks.reservationId,
+    }).from(groupReservationLinks),
+    db.select({
+      groupId: groupRoomBlocks.groupId,
+      roomTypeId: groupRoomBlocks.roomTypeId,
+      agreedRate: groupRoomBlocks.agreedRate,
+      blockCheckInDate: groupRoomBlocks.blockCheckInDate,
+      blockCheckOutDate: groupRoomBlocks.blockCheckOutDate,
+    }).from(groupRoomBlocks)
+      .where(and(
+        isNotNull(groupRoomBlocks.agreedRate),
+        isNotNull(groupRoomBlocks.blockCheckInDate),
+        isNotNull(groupRoomBlocks.blockCheckOutDate),
+      )),
   ]);
 
   const operationalRooms = roomRows.filter(isOperationalInventoryRoom);
+  const operationalRoomIds = new Set(operationalRooms.map(r => r.id));
   const roomNumberById = new Map(roomRows.map(r => [r.id, r.roomNumber]));
+  const groupIdByReservationId = new Map(groupLinkRows.map(l => [l.reservationId, l.groupId]));
 
   const chargesByDate = new Map<string, typeof chargeRows>();
   for (const charge of chargeRows) {
@@ -151,11 +245,49 @@ async function loadRangeData(from: string, toExclusive: string) {
     chargesByDate.set(charge.date, list);
   }
 
-  return { today, operationalRooms, blockRows, resRows: resRows as RawReservationRow[], chargesByDate, roomNumberById };
+  return {
+    today, operationalRooms, operationalRoomIds, blockRows,
+    resRows: resRows as RawReservationRow[], chargesByDate, roomNumberById,
+    groupIdByReservationId, groupBlockRows: groupBlockRows as GroupBlockRow[],
+  };
+}
+
+function aggregateDay(
+  date: string,
+  isForecast: boolean,
+  roomsAvailable: number,
+  nightsToday: RawReservationRow[],
+  chargesByDate: Map<string, Array<{ amount: string }>>,
+  groupIdByReservationId: Map<string, string>,
+  groupBlockRows: GroupBlockRow[],
+): RevenueDayMetrics {
+  const resolved = nightsToday.map(r => resolveNightlyRate(r, date, groupIdByReservationId, groupBlockRows));
+  const directRevenue = resolved.reduce((sum, res) => sum + res.rate, 0);
+  const ratedRoomNights = resolved.filter(res => res.countsForAdr).length;
+  const roomsWithMissingRate = resolved.length - ratedRoomNights;
+  const otherGroupRevenue = (chargesByDate.get(date) ?? []).reduce((sum, c) => sum + Number(c.amount), 0);
+  const totalRevenue = directRevenue;
+  const roomsSold = resolved.length;
+
+  return {
+    date,
+    isForecast,
+    roomsAvailable,
+    roomsSold,
+    ratedRoomNights,
+    roomsWithMissingRate,
+    occupancyPct: roomsAvailable > 0 ? round2((roomsSold / roomsAvailable) * 100) : 0,
+    directRoomRevenue: round2(directRevenue),
+    otherGroupChargesRevenue: round2(otherGroupRevenue),
+    totalRevenue: round2(totalRevenue),
+    adr: ratedRoomNights > 0 ? round2(totalRevenue / ratedRoomNights) : 0,
+    revpar: roomsAvailable > 0 ? round2(totalRevenue / roomsAvailable) : 0,
+  };
 }
 
 export async function computeRevenueBoard(from: string, toExclusive: string): Promise<RevenueDayMetrics[]> {
-  const { today, operationalRooms, blockRows, resRows, chargesByDate } = await loadRangeData(from, toExclusive);
+  const { today, operationalRooms, operationalRoomIds, blockRows, resRows, chargesByDate, groupIdByReservationId, groupBlockRows } =
+    await loadRangeData(from, toExclusive);
   const dates = enumerateDates(from, toExclusive);
 
   return dates.map(date => {
@@ -165,33 +297,22 @@ export async function computeRevenueBoard(from: string, toExclusive: string): Pr
       !blockRows.some(b => b.roomId === room.id && b.blockFrom <= date && date < b.blockTo),
     ).length;
 
+    // Mismo universo que roomsAvailable: una reserva sobre una habitación que
+    // ya no es operativa (virtual/inactiva) no cuenta como "vendida" acá,
+    // igual que esa habitación no cuenta como "disponible" arriba.
     const nightsToday = resRows.filter(r =>
+      operationalRoomIds.has(r.roomId) &&
       statusSoldOnDay(r.status, isForecast) && r.checkInDate <= date && date < r.checkOutDate,
     );
 
-    const directRevenue = nightsToday.reduce((sum, r) => sum + nightlyRateOf(r).rate, 0);
-    const groupRevenue = (chargesByDate.get(date) ?? []).reduce((sum, c) => sum + Number(c.amount), 0);
-    const totalRevenue = directRevenue + groupRevenue;
-    const roomsSold = nightsToday.length;
-
-    return {
-      date,
-      isForecast,
-      roomsAvailable,
-      roomsSold,
-      occupancyPct: roomsAvailable > 0 ? round2((roomsSold / roomsAvailable) * 100) : 0,
-      directRoomRevenue: round2(directRevenue),
-      groupChargesRevenue: round2(groupRevenue),
-      totalRevenue: round2(totalRevenue),
-      adr: roomsSold > 0 ? round2(totalRevenue / roomsSold) : 0,
-      revpar: roomsAvailable > 0 ? round2(totalRevenue / roomsAvailable) : 0,
-    };
+    return aggregateDay(date, isForecast, roomsAvailable, nightsToday, chargesByDate, groupIdByReservationId, groupBlockRows);
   });
 }
 
 export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetail> {
   const toExclusive = addCalendarDays(date, 1);
-  const { today, operationalRooms, blockRows, resRows, chargesByDate, roomNumberById } = await loadRangeData(date, toExclusive);
+  const { today, operationalRooms, operationalRoomIds, blockRows, resRows, chargesByDate, roomNumberById, groupIdByReservationId, groupBlockRows } =
+    await loadRangeData(date, toExclusive);
   const isForecast = date >= today;
 
   const roomsAvailable = operationalRooms.filter(room =>
@@ -199,18 +320,22 @@ export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetai
   ).length;
 
   const nightsToday = resRows.filter(r =>
+    operationalRoomIds.has(r.roomId) &&
     statusSoldOnDay(r.status, isForecast) && r.checkInDate <= date && date < r.checkOutDate,
   );
 
+  const metrics = aggregateDay(date, isForecast, roomsAvailable, nightsToday, chargesByDate, groupIdByReservationId, groupBlockRows);
+
   const reservationDetails: RevenueDayReservationDetail[] = nightsToday.map(r => {
-    const { rate, source } = nightlyRateOf(r);
+    const resolution = resolveNightlyRate(r, date, groupIdByReservationId, groupBlockRows);
     return {
       reservationId: r.id,
       roomId: r.roomId,
       roomNumber: roomNumberById.get(r.roomId) ?? "?",
       status: r.status,
-      nightlyRate: round2(rate),
-      rateSource: source,
+      nightlyRate: round2(resolution.rate),
+      rateSource: resolution.source,
+      countsForAdr: resolution.countsForAdr,
     };
   });
 
@@ -223,65 +348,129 @@ export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetai
     category: c.category,
   }));
 
-  const directRevenue = reservationDetails.reduce((sum, r) => sum + r.nightlyRate, 0);
-  const groupRevenue = groupChargeDetails.reduce((sum, c) => sum + c.amount, 0);
-  const totalRevenue = directRevenue + groupRevenue;
-  const roomsSold = reservationDetails.length;
-
   return {
-    date,
-    isForecast,
-    roomsAvailable,
-    roomsSold,
-    occupancyPct: roomsAvailable > 0 ? round2((roomsSold / roomsAvailable) * 100) : 0,
-    directRoomRevenue: round2(directRevenue),
-    groupChargesRevenue: round2(groupRevenue),
-    totalRevenue: round2(totalRevenue),
-    adr: roomsSold > 0 ? round2(totalRevenue / roomsSold) : 0,
-    revpar: roomsAvailable > 0 ? round2(totalRevenue / roomsAvailable) : 0,
+    ...metrics,
     reservations: reservationDetails,
     groupCharges: groupChargeDetails,
   };
 }
 
+// ==================== TARIFA PUBLICADA (para comparar vs. competencia) ====================
+// No existe en el resto del sistema ninguna función que resuelva "la tarifa
+// vigente para un tipo de habitación en una fecha dada" (confirmado por
+// relevamiento: ni server/routes/publicBooking.ts ni storage.getRatePlansByRoomType
+// filtran por validFrom/validTo). Esto es intencionalmente DISTINTO del ADR:
+// el ADR es la tarifa promedio realmente cobrada (incluye descuentos, $0,
+// forecast); esto es el precio de lista vigente del plan tarifario. La parte
+// pura (elegir el plan vigente, filtrar competencia compatible) vive en
+// ./competitorPricing.ts — acá solo la consulta a la base.
+
+export async function loadRatePlansForRoomTypes(roomTypeIds: string[]): Promise<Map<string, RatePlanRow[]>> {
+  const map = new Map<string, RatePlanRow[]>();
+  if (roomTypeIds.length === 0) return map;
+  const rows = await db.select({
+    id: ratePlans.id, roomTypeId: ratePlans.roomTypeId, name: ratePlans.name,
+    baseRate: ratePlans.baseRate, currency: ratePlans.currency,
+    validFrom: ratePlans.validFrom, validTo: ratePlans.validTo,
+  }).from(ratePlans).where(inArray(ratePlans.roomTypeId, roomTypeIds));
+  for (const row of rows) {
+    const list = map.get(row.roomTypeId) ?? [];
+    list.push(row);
+    map.set(row.roomTypeId, list);
+  }
+  return map;
+}
+
 // ==================== PACE SNAPSHOTS ====================
 // Una fila por (snapshotDate, stayDate). Se captura de forma perezosa: la
 // primera consulta al módulo cada día dispara la captura de ese día si no
-// existe todavía (no hay scheduler/cron en este backend). Esto es
-// equivalente en espíritu al guard idempotente de Night Audit
-// (nightAuditAlreadyRan), pero vive enteramente dentro del módulo de Revenue
-// para no tocar server/night-audit.ts. Queda pensado para que, el día que
-// haya un cron real (p.ej. Railway), simplemente llame a este mismo POST.
+// existe todavía (no hay scheduler/cron en este backend) — equivalente en
+// espíritu al guard idempotente de Night Audit, pero vive enteramente acá
+// para no tocar server/night-audit.ts.
+//
+// Garantías: TODA la captura de un día (cálculo + upsert de cada stayDate
+// del horizonte + el registro de corrida en revenue_pace_snapshot_runs)
+// corre dentro de UNA sola transacción de base de datos. Si el proceso se
+// interrumpe a mitad de camino (crash, caída de conexión), Postgres
+// descarta la transacción entera: no quedan filas parciales de
+// revenue_pace_snapshots para ese día, y tampoco se escribe el registro de
+// corrida — así, un reintento posterior (disparado por el mismo guard
+// perezoso) vuelve a encontrar "no hay nada para hoy" y recaptura todo
+// desde cero, nunca mezclando un estado a medio capturar con uno completo.
+// El registro en revenue_pace_snapshot_runs solo existe, por construcción,
+// para un día cuya captura terminó por completo — es la fuente para
+// detectar huecos reales de historial (ver findMissingSnapshotDates).
 
-const PACE_HORIZON_DAYS = 400;
-
-export async function captureDailyPaceSnapshot(horizonDays = PACE_HORIZON_DAYS): Promise<{ snapshotDate: string; daysCaptured: number }> {
+export async function captureDailyPaceSnapshot(
+  horizonDays = PACE_HORIZON_DAYS,
+  testOnlyFailAfterUpsertCount?: number,
+): Promise<{ snapshotDate: string; daysCaptured: number }> {
   const snapshotDate = todayArgentina();
   const toExclusive = addCalendarDays(snapshotDate, horizonDays);
-  const metrics = await computeRevenueBoard(snapshotDate, toExclusive);
 
-  for (const day of metrics) {
-    await db.insert(revenuePaceSnapshots).values({
+  return withDatabaseTransaction(async () => {
+    const metrics = await computeRevenueBoard(snapshotDate, toExclusive);
+
+    let upserted = 0;
+    for (const day of metrics) {
+      await db.insert(revenuePaceSnapshots).values({
+        snapshotDate,
+        stayDate: day.date,
+        roomsSold: day.roomsSold,
+        roomRevenue: day.totalRevenue.toFixed(2),
+      }).onConflictDoUpdate({
+        target: [revenuePaceSnapshots.snapshotDate, revenuePaceSnapshots.stayDate],
+        set: { roomsSold: day.roomsSold, roomRevenue: day.totalRevenue.toFixed(2) },
+      });
+      upserted += 1;
+      // Seam exclusivo para tests: ningún endpoint pasa este argumento.
+      if (testOnlyFailAfterUpsertCount !== undefined && upserted >= testOnlyFailAfterUpsertCount) {
+        throw new Error("[solo test] captura interrumpida a propósito antes de completar el día");
+      }
+    }
+
+    await db.insert(revenuePaceSnapshotRuns).values({
       snapshotDate,
-      stayDate: day.date,
-      roomsSold: day.roomsSold,
-      roomRevenue: day.totalRevenue.toFixed(2),
+      daysCaptured: metrics.length,
+      horizonDays,
     }).onConflictDoUpdate({
-      target: [revenuePaceSnapshots.snapshotDate, revenuePaceSnapshots.stayDate],
-      set: { roomsSold: day.roomsSold, roomRevenue: day.totalRevenue.toFixed(2) },
+      target: revenuePaceSnapshotRuns.snapshotDate,
+      set: { daysCaptured: metrics.length, horizonDays, completedAt: new Date() },
     });
-  }
 
-  return { snapshotDate, daysCaptured: metrics.length };
+    return { snapshotDate, daysCaptured: metrics.length };
+  });
 }
 
 export async function ensureTodayPaceSnapshot(): Promise<void> {
   const snapshotDate = todayArgentina();
-  const existing = await db.select({ id: revenuePaceSnapshots.id }).from(revenuePaceSnapshots)
-    .where(eq(revenuePaceSnapshots.snapshotDate, snapshotDate)).limit(1);
+  const existing = await db.select({ snapshotDate: revenuePaceSnapshotRuns.snapshotDate })
+    .from(revenuePaceSnapshotRuns).where(eq(revenuePaceSnapshotRuns.snapshotDate, snapshotDate)).limit(1);
   if (existing.length === 0) {
     await captureDailyPaceSnapshot();
   }
+}
+
+async function findTrackingStartDate(): Promise<string | null> {
+  const rows = await db.select({ snapshotDate: revenuePaceSnapshotRuns.snapshotDate })
+    .from(revenuePaceSnapshotRuns).orderBy(asc(revenuePaceSnapshotRuns.snapshotDate)).limit(1);
+  return rows[0]?.snapshotDate ?? null;
+}
+
+async function findMissingSnapshotDates(fromDate: string, toDateInclusive: string): Promise<string[]> {
+  if (fromDate > toDateInclusive) return [];
+  const rows = await db.select({ snapshotDate: revenuePaceSnapshotRuns.snapshotDate }).from(revenuePaceSnapshotRuns)
+    .where(and(gte(revenuePaceSnapshotRuns.snapshotDate, fromDate), lte(revenuePaceSnapshotRuns.snapshotDate, toDateInclusive)));
+  const present = new Set(rows.map(r => r.snapshotDate));
+  const missing: string[] = [];
+  let cur = fromDate;
+  let guard = 0;
+  while (cur <= toDateInclusive && guard < 3660) {
+    if (!present.has(cur)) missing.push(cur);
+    cur = addCalendarDays(cur, 1);
+    guard += 1;
+  }
+  return missing;
 }
 
 export type PacePoint = { snapshotDate: string; leadDays: number; roomsSold: number; roomRevenue: number };
@@ -292,6 +481,8 @@ export type PaceReport = {
   previousYear: PacePoint[];
   yoyAvailable: boolean;
   message: string | null;
+  trackingStartDate: string | null;
+  missingSnapshotDates: string[];
 };
 
 function leadDaysBetween(stayDate: string, snapshotDate: string): number {
@@ -302,15 +493,19 @@ function leadDaysBetween(stayDate: string, snapshotDate: string): number {
 
 export async function getPaceForStayDate(stayDate: string): Promise<PaceReport> {
   const lastYearStayDate = addCalendarDays(stayDate, -365);
+  const today = todayArgentina();
 
-  const [currentRows, previousRows] = await Promise.all([
+  const [currentRows, previousRows, trackingStartDate] = await Promise.all([
     db.select().from(revenuePaceSnapshots)
       .where(eq(revenuePaceSnapshots.stayDate, stayDate))
       .orderBy(asc(revenuePaceSnapshots.snapshotDate)),
     db.select().from(revenuePaceSnapshots)
       .where(eq(revenuePaceSnapshots.stayDate, lastYearStayDate))
       .orderBy(asc(revenuePaceSnapshots.snapshotDate)),
+    findTrackingStartDate(),
   ]);
+
+  const missingSnapshotDates = trackingStartDate ? await findMissingSnapshotDates(trackingStartDate, today) : [];
 
   const toPoints = (rows: typeof currentRows, stay: string): PacePoint[] => rows.map(r => ({
     snapshotDate: r.snapshotDate,
@@ -331,5 +526,7 @@ export async function getPaceForStayDate(stayDate: string): Promise<PaceReport> 
     message: yoyAvailable
       ? null
       : "Todavía no hay historial de hace un año para esta fecha (el snapshot diario arrancó recién). La comparación interanual va a estar disponible automáticamente a medida que se acumule un año de datos.",
+    trackingStartDate,
+    missingSnapshotDates,
   };
 }
