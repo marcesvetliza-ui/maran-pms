@@ -964,8 +964,10 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/guests/:id", async (req, res) => {
+  app.patch("/api/guests/:id", requireAuth, async (req, res) => {
     try {
+      const allowedFields = ["firstName", "lastName", "email", "phone", "documentType", "documentNumber", "nationality", "nationalityCode", "notes", "vatCondition", "cuilCuit", "estadoCivil", "procedencia", "fechaIngresoArgentina", "fechaSalidaArgentina", "esEmpresaGrande", "montoBaseFce", "direccion", "provincia", "localidad", "codigoPostal", "fechaNacimiento", "sexo", "segment", "companyId", "agencyId", "vehiculoPatente", "vehiculoMarca", "vehiculoModelo", "vehiculoColor", "tipoPersona", "condicionVentaPredeterminada", "isActive", "stayProfile"];
+      req.body = Object.fromEntries(Object.entries(req.body).filter(([field, value]) => allowedFields.includes(field) && value !== undefined));
       if (req.body.stayProfile !== undefined) {
         const parsed = guestStayProfileSchema.safeParse(req.body.stayProfile);
         if (!parsed.success) return res.status(400).json({ error: "Revisá los datos de vehículos, familiares y mascotas." });
