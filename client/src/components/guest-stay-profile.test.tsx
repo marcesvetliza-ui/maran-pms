@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { emptyStayProfile } from "@shared/guestStayProfile";
-import { GuestStayProfileEditor, StaySelectionEditor, SelectedFamilyCompanions, useStayDraft, ReservationStayDetails } from "./guest-stay-profile";
+import { GuestStayProfileEditor, StaySelectionEditor, SelectedFamilyCompanions, useStayDraft, ReservationStayDetails, ReservationGuestCount } from "./guest-stay-profile";
 import { GuestFormDialog } from "@/pages/guests";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), toast: vi.fn() }));
@@ -64,6 +64,28 @@ it("al abrir una reserva conserva sus selecciones y muestra un conflicto sin per
   await waitFor(()=>expect(mocks.toast).toHaveBeenCalledWith(expect.objectContaining({description:"Otra persona actualizó estos datos"})));
   expect(screen.getByText("Guardar datos de la estadía")).toBeTruthy();expect(car.checked).toBe(false);
   expect(mocks.api.mock.calls[1][2]).toMatchObject({version:2,selection:{vehicles:[]}});
+});
+it("actualiza la cantidad visible de la reserva inmediatamente después de guardar un familiar",async()=>{
+  let details={...emptyStayProfile(),guestId:"guest",version:0,numberOfGuests:1,companionCount:0};
+  mocks.api.mockImplementation(async(method:string,_path:string,body:any)=>{
+    if(method==="PUT")details={...body.selection,guestId:"guest",version:1,numberOfGuests:2,companionCount:1};
+    return {json:async()=>details};
+  });
+  render(<><ReservationGuestCount reservationId="r" guestId="guest" fallback={1}/><ReservationStayDetails reservationId="r" guestId="guest"/></>,{wrapper});
+  await screen.findByText(/Ana Prueba.*Hija/);expect(screen.getByText("1 persona(s)")).toBeTruthy();
+  fireEvent.click(screen.getByText(/Ana Prueba.*Hija/));fireEvent.click(screen.getByText("Guardar datos de la estadía"));
+  await screen.findByText("2 persona(s)");
+});
+it("permite corregir una reserva anterior sin volver a seleccionar familiares",async()=>{
+  let details={...profile,guestId:"guest",version:1,numberOfGuests:1,companionCount:1};
+  mocks.api.mockImplementation(async(method:string)=>{
+    if(method==="PUT")details={...details,version:2,numberOfGuests:2};
+    return {json:async()=>details};
+  });
+  render(<><ReservationGuestCount reservationId="r" guestId="guest" fallback={1}/><ReservationStayDetails reservationId="r" guestId="guest"/></>,{wrapper});
+  fireEvent.click(await screen.findByText("Actualizar cantidad a 2 huéspedes"));
+  await screen.findByText("2 persona(s)");
+  expect(mocks.api.mock.calls.find(([method])=>method==="PUT")?.[2]).toMatchObject({version:1,selection:profile});
 });
 it("editar un perfil conserva el vehículo anterior, permite agregar otro y no borra al cerrar",()=>{
   function Editor(){const [value,setValue]=useState(profile);return <><GuestStayProfileEditor value={value} onChange={setValue}/><output>{JSON.stringify(value)}</output></>;}

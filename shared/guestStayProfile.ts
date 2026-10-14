@@ -21,6 +21,7 @@ export type GuestStayProfile = z.infer<typeof guestStayProfileSchema>;
 export type FamilyMember = GuestStayProfile["family"][number];
 export const emptyStayProfile = (): GuestStayProfile => ({ vehicles: [], family: [], pets: [] });
 export type StaySelection = GuestStayProfile & { version: number; guestId: string };
+export type StayDetailsView = StaySelection & { numberOfGuests: number; companionCount: number };
 export function getGuestStayProfile(guest?: { stayProfile?: GuestStayProfile | null; vehiculoPatente?: string | null; vehiculoMarca?: string | null; vehiculoModelo?: string | null; vehiculoColor?: string | null } | null): GuestStayProfile {
   if (guest?.stayProfile) return guest.stayProfile;
   return { ...emptyStayProfile(), vehicles: guest?.vehiculoPatente ? [{ id: "legacy-vehicle", plate: guest.vehiculoPatente, brand: guest.vehiculoMarca || "", model: guest.vehiculoModelo || "", color: guest.vehiculoColor || "" }] : [] };

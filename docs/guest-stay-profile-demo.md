@@ -17,7 +17,12 @@ Después de aprobar, trasladar únicamente el commit de esta funcionalidad.
   la ficha del titular para futuras visitas.
 - Familiares, autos y mascotas de una reserva son snapshots: editar la agenda
   no cambia estadías existentes. Las mascotas no generan cargos y los vehículos
-  no asignan cupos de cochera. La cantidad de huéspedes y la tarifa no se cambian.
+  no asignan cupos de cochera. La tarifa no se cambia. Al guardar familiares o
+  acompañantes se sincroniza la cantidad: titular más acompañantes. Una cantidad
+  mayor previamente registrada se conserva si todavía faltan nombres por cargar.
+  Quitar personas reduce el total cuando la lista anterior estaba completa.
+  Las reservas previas con menos huéspedes que personas identificadas muestran
+  una opción explícita para actualizar la cantidad, sin alterar otras estadías.
 - Lo seleccionado antes del ingreso se presenta como previsto para la reserva;
   recepción verifica quiénes y qué llegaron.
 - Crear la reserva y guardar estas selecciones se realiza en una transacción.
