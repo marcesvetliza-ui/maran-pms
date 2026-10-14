@@ -40,6 +40,20 @@ describe("code navigation", () => {
     expect(result.workflowReads.some(read=>read.path.startsWith("client/src/pages/") && read.content.includes("parseApiError("))).toBe(true);
     expect(result.workflowReads.every(read=>source.validates(read))).toBe(true);
   });
+  it("reads the exact room-move case through PATCH, overlap validation and persistence", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"reservas",title:"Disponibilidad al cambiar de habitación",actual:"Intento cambiar una reserva a una habitación que tiene otra reserva con fechas superpuestas",expected:"Que rechace el cambio sin modificar la reserva original. Si una reserva sale el mismo día que entra la otra, debería permitirlo",steps:"",messages:[]} as SupportTicket,source);
+    expect(result.endpointContext[0].method).toBe("PATCH");
+    const handler=result.endpointContext[0].handlers.map(read=>read.content).join("\n");
+    expect(handler).toContain("storage.checkOverbooking");
+    expect(handler).toContain("return res.status(409)");
+    expect(handler).toContain("storage.updateReservation");
+    expect(result.endpointContext[0].callers.length).toBeGreaterThan(0);
+    expect(result.workflowReads.some(read=>read.content.includes("async checkOverbooking"))).toBe(true);
+    expect(result.workflowReads.some(read=>read.content.includes("withDatabaseTransaction"))).toBe(true);
+    expect(result.initialReads.some(read=>read.path==="server/tests/room-availability.test.ts")).toBe(true);
+    expect([...result.workflowReads,...result.endpointContext[0].handlers].every(read=>source.validates(read))).toBe(true);
+  });
   it("does not route a reservation discount into purchase invoices", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
     const result=await orientInvestigation({module:"otro",title:"Descuento general",actual:"Reserva de habitación con descuento",expected:"Conservar la tarifa",steps:"",messages:[]} as SupportTicket,source);

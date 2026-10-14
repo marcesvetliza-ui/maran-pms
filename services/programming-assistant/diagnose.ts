@@ -52,7 +52,7 @@ export const diagnosisOutputSchema = {
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type:"function",
-    function:{name:"trace_endpoint",description:"Leer un endpoint real, sus llamadas desde pantallas, funciones importadas y pruebas operativas. Usar para seguir un flujo aunque la función tenga otro nombre. No ejecuta endpoints ni pruebas.",parameters:{type:"object",properties:{endpoint:{type:"string"}},required:["endpoint"],additionalProperties:false}},
+    function:{name:"trace_endpoint",description:"Leer un endpoint real, sus llamadas desde pantallas, funciones importadas y pruebas operativas. Usar para seguir un flujo aunque la función tenga otro nombre. No ejecuta endpoints ni pruebas.",parameters:{type:"object",properties:{endpoint:{type:"string"},method:{type:"string",enum:["GET","POST","PUT","PATCH","DELETE"]}},required:["endpoint"],additionalProperties:false}},
   },
   {
     type:"function",
@@ -255,7 +255,7 @@ export async function diagnose(
         calls++;
         result =
           call.function.name === "trace_endpoint"
-            ? await source.traceEndpoint(args.endpoint)
+            ? await source.traceEndpoint(args.endpoint, { method: args.method })
             : call.function.name === "inspect_symbol"
             ? await source.inspectSymbol(args.symbol)
             : call.function.name === "find_files"

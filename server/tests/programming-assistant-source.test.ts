@@ -33,6 +33,42 @@ describe("read-only code investigator", () => {
     expect([...result.callers,...result.handlers,...result.tests,...result.dependencies.flatMap(d=>d.definitions)].every(r=>source.validates(r))).toBe(true);
     await expect(source.traceEndpoint("https://example.com")).rejects.toThrow();
   });
+  it("distinguishes PATCH from GET and follows a templated caller across a long handler", async () => {
+    const source=await fixture();
+    await mkdir(path.join(directory,"client/src"),{recursive:true});
+    await writeFile(path.join(directory,"client/src","move.ts"),'apiRequest("PATCH", `/api/example/${reservation.id}`, {roomId});');
+    await writeFile(path.join(directory,"server","route.ts"),[
+      'app.get("/api/example/:id", (_req,res)=>res.json({readOnly:true}));',
+      'app.patch("/api/example/:id", async (req,res)=>{',
+      ...Array.from({length:170},()=>"// other validation"),
+      'if (overlap) return res.status(409).json({error:"ocupada"});',
+      'return storage.updateReservation(req.params.id,req.body);',
+      '});',
+      'app.post("/api/other", (_req,res)=>res.json({other:true}));',
+    ].join("\n"));
+    const result=await source.traceEndpoint("/api/example/:id",{method:"PATCH",includeTests:false});
+    expect(result.method).toBe("PATCH");
+    expect(result.handlers.map(read=>read.content).join("\n")).not.toContain("readOnly:true");
+    expect(result.handlers.map(read=>read.content).join("\n")).toContain("storage.updateReservation");
+    expect(result.callers[0].content).toContain("${reservation.id}");
+    expect([...result.callers,...result.handlers].every(read=>source.validates(read))).toBe(true);
+    await expect(source.traceEndpoint("/api/example/:id",{method:"TRACE"})).rejects.toThrow();
+  });
+  it("reads methods in classes without treating the next method as its body", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","storage.ts"),[
+      'class Storage {',
+      '  async checkOverbooking(){',
+      '    return reservations.some(r=>r.checkIn < end && r.checkOut > start);',
+      '  }',
+      '  async unrelated(){ return "not relevant"; }',
+      '}',
+    ].join("\n"));
+    const result=await source.inspectSymbol("checkOverbooking");
+    expect(result.definitions).toHaveLength(1);
+    expect(result.definitions[0].content).toContain("r.checkOut > start");
+    expect(result.definitions[0].content).not.toContain("not relevant");
+  });
   it("delivers server evidence automatically after reading a frontend API call", async () => {
     const source=await fixture();
     await mkdir(path.join(directory,"client/src"),{recursive:true});

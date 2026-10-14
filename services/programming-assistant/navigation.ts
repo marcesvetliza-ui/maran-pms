@@ -8,6 +8,7 @@ export async function orientInvestigation(
   const files = await source.files();
   const text =
     `${ticket.module} ${ticket.title} ${ticket.actual} ${ticket.expected} ${ticket.steps} ${ticket.messages?.map((m) => m.text).join(" ") || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const roomMove = /cambi|modific|asigna|move|change/.test(text) && /habitacion|room/.test(text) && /reserva|reservation|disponib|superpuest|overlap/.test(text);
   const discount = /descuento|discount/.test(text);
   // Users describe invoice amounts and item costs without saying "compra".
   // This is a navigation hint, not a conclusion about the invoice or its behavior.
@@ -44,7 +45,7 @@ export async function orientInvestigation(
       ]
     : production
       ? ["server/productionPending.ts", "server/production.ts", "server/tests/production-workflow.pg.test.ts", "server/tests/inventory-stage2-workflows.pg.test.ts", "server/db.ts"]
-      : [];
+      : roomMove ? ["shared/room-availability.ts", "server/tests/room-availability.test.ts"] : [];
   const initialReads = [];
   for (const file of seedPaths.filter((p) => files.includes(p)))
     initialReads.push(await source.read(file, 1, 140));
@@ -65,7 +66,13 @@ export async function orientInvestigation(
   }
   const endpointContext = inventoryPreview
     ? [await source.traceEndpoint("/api/inventory/recipe-stock-preview", { includeTests: !errorFlow })]
-    : [];
+    : roomMove ? [await source.traceEndpoint("/api/reservations/:id", { method: "PATCH", includeTests: false })] : [];
+  if (roomMove) {
+    for (const symbol of ["checkOverbooking", "updateReservation"]) {
+      const code = await source.inspectSymbol(symbol, {maxDefinitions:1,maxTests:0,lines:140});
+      workflowReads.push(...code.definitions);
+    }
+  }
   if (errorFlow && endpointContext.some(context => context.callers.some(read => /\bapiRequest\s*\(/.test(read.content))) && files.includes("client/src/lib/queryClient.ts")) {
     workflowReads.push(await source.read("client/src/lib/queryClient.ts", 1, 40));
     // Read the existing presentation helper, not just transport, plus one real use.
@@ -78,7 +85,7 @@ export async function orientInvestigation(
     }
   }
   return {
-    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : undefined,
+    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración; si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : undefined,
     endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,

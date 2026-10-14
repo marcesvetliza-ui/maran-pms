@@ -113,7 +113,7 @@ export class CodeSource {
   async inspectSymbol(symbol: string, limits={maxDefinitions:3,maxTests:2,lines:140}) {
     if (typeof symbol !== "string" || !/^[A-Za-z_$][\w$]{2,79}$/.test(symbol)) throw new Error("Símbolo inválido.");
     const escaped=symbol.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-    const definition=new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function\\s+${escaped}\\b|(?:const|let|class)\\s+${escaped}\\b)`);
+    const definition=new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:(?:private|protected|public)\\s+)?(?:async\\s+)?(?:function\\s+${escaped}\\b|(?:const|let|class)\\s+${escaped}\\b|${escaped}\\s*\\()`);
     const occurrence=new RegExp(`\\b${escaped}\\b`);
     const definitions: Awaited<ReturnType<CodeSource["read"]>>[]=[];
     const tests: Awaited<ReturnType<CodeSource["read"]>>[]=[];
@@ -127,7 +127,8 @@ export class CodeSource {
       if(index<0) continue;
       const start=Math.max(1,index+1-3);
       // A short function must not drag in the next unrelated operation.
-      const following = isTest ? -1 : lines.findIndex((line, i) => i > index && /^(?:export\s+)?(?:async\s+)?(?:function|class|const|let)\s+[A-Za-z_$]/.test(line));
+      const indent = lines[index].match(/^\s*/)?.[0].length || 0;
+      const following = isTest ? -1 : lines.findIndex((line, i) => i > index && (line.match(/^\s*/)?.[0].length || 0) <= indent && /^\s*(?:export\s+)?(?:(?:private|protected|public)\s+)?(?:async\s+)?(?:(?:function|class|const|let)\s+[A-Za-z_$]|[A-Za-z_$][\w$]*\s*\()/.test(line));
       const end = Math.min(start + limits.lines - 1, following < 0 ? lines.length : following);
       (isTest?tests:definitions).push(await this.read(file,start,end));
     }
@@ -135,10 +136,12 @@ export class CodeSource {
     return {symbol,definitions,tests,partial:true,
       guidance:"Fragmentos leídos, no funciones ejecutadas. Si no termina el cuerpo, continuar con read_code. Los tests sin mención literal del símbolo no están incluidos: buscar también por endpoint y comportamiento."};
   }
-  async traceEndpoint(endpoint: string, options = { includeTests: true }) {
+  async traceEndpoint(endpoint: string, options: { includeTests?: boolean; method?: string } = {}) {
     if(typeof endpoint!=="string" || !/^\/api\/[A-Za-z0-9_/:.-]{1,180}$/.test(endpoint)) throw new Error("Endpoint inválido.");
     const escaped=endpoint.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-    const route=new RegExp(`\\b(?:app|router)\\.(?:get|post|put|patch|delete)\\s*\\(\\s*['\"]${escaped}['\"]`);
+    const method = options.method?.toUpperCase();
+    if (method && !["GET","POST","PUT","PATCH","DELETE"].includes(method)) throw new Error("Método inválido.");
+    const route=new RegExp(`\\b(?:app|router)\\.${method ? method.toLowerCase() : "(?:get|post|put|patch|delete)"}\\s*\\(\\s*['\"]${escaped}['\"]`);
     const nextRoute=/\b(?:app|router)\.(?:get|post|put|patch|delete)\s*\(/;
     const callers:Awaited<ReturnType<CodeSource["read"]>>[]=[];
     const handlers:Awaited<ReturnType<CodeSource["read"]>>[]=[];
@@ -148,7 +151,7 @@ export class CodeSource {
     for(const file of (await this.files()).filter(f=>f.startsWith("server/") && /\.tsx?$/.test(f))){
       const text=await this.content(file),lines=text.split("\n");
       if(file.includes("/tests/")){
-        if(!options.includeTests || investigatorTest(file))continue;
+        if(options.includeTests === false || investigatorTest(file))continue;
         const index=lines.findIndex(line=>line.includes(endpoint));
         if(index>=0 && tests.length<1){const start=Math.max(1,index-8);tests.push(await this.read(file,start,start+59));}
         continue;
@@ -157,9 +160,13 @@ export class CodeSource {
       const index=lines.findIndex(line=>route.test(line));
       if(index<0)continue;
       const following=lines.findIndex((line,i)=>i>index && nextRoute.test(line));
-      const end=Math.min(index+80,following<0?lines.length:following);
-      const handler=await this.read(file,index+1,end);
-      handlers.push(handler);
+      const end=Math.min(index+(method ? 280 : 80),following<0?lines.length:following);
+      const routeReads: Awaited<ReturnType<CodeSource["read"]>>[]=[];
+      for(let start=index+1;start<=end;){
+        const read=await this.read(file,start,Math.min(start+139,end));
+        routeReads.push(read);handlers.push(read);start=read.end+1;
+      }
+      const handler={content:routeReads.map(read=>read.content).join("\n")};
       for(const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['\"][^'\"]+['\"]/g)){
         for(const part of match[1].split(',')){
           if(/^\s*type\b/.test(part))continue;
@@ -173,7 +180,12 @@ export class CodeSource {
     for(const file of (await this.files()).filter(f=>f.startsWith("client/src/") && /\.tsx?$/.test(f) && !f.includes(".test."))) {
       if(callers.length>=2)break;
       const lines=(await this.content(file)).split("\n");
-      const index=lines.findIndex(line=>line.includes(endpoint));
+      const canonical=(value:string)=>value.split("?")[0].replace(/\$\{[^}]+\}/g,":id").replace(/:[A-Za-z_][\w]*/g,":id");
+      const index=lines.findIndex((line,i)=>{
+        const urls=[...line.matchAll(/['"`](\/api\/[^'"`\n]{1,300})['"`]/g)].map(match=>match[1]);
+        if(!urls.some(url=>canonical(url)===canonical(endpoint)))return false;
+        return !method || lines.slice(Math.max(0,i-3),i+4).join("\n").includes(`"${method}"`) || lines.slice(Math.max(0,i-3),i+4).join("\n").includes(`'${method}'`);
+      });
       if(index>=0){const start=Math.max(1,index+1-12);callers.push(await this.read(file,start,start+69));}
     }
     for(const symbol of [...symbols].slice(0,4))dependencies.push(await this.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80}));
@@ -190,7 +202,7 @@ export class CodeSource {
       }
     }
     for(const symbol of [...extra].slice(0,2))dependencies.push(await this.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80}));
-    return {endpoint,callers,handlers,dependencies,tests,partial:true,guidance:"Fragmentos realmente leídos. Continuar cuerpos parciales con read_code; no ejecutar ni inferir ausencia de otros tests."};
+    return {endpoint,method,callers,handlers,dependencies,tests,partial:true,guidance:"Fragmentos realmente leídos. Continuar cuerpos parciales con read_code; no ejecutar ni inferir ausencia de otros tests."};
   }
   async search(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
