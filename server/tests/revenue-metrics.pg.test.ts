@@ -10,6 +10,7 @@ import {
   captureDailyPaceSnapshot,
   ensureTodayPaceSnapshot,
   getPaceForStayDate,
+  loadReferenceRatePlanRows,
 } from "../revenue/metrics";
 
 afterAll(() => pool.end());
@@ -572,6 +573,47 @@ describe("pace snapshots", () => {
     }
   });
 
+  it("dos capturas simultáneas para el mismo día no se pisan: solo una calcula, la otra espera y reutiliza el resultado ya confirmado", async () => {
+    const prefix = randomUUID();
+    const roomTypeId = prefix + "-type";
+    const roomId = prefix + "-101";
+    const snapshotDate = today;
+    try {
+      await db.execute(sql`INSERT INTO room_types(id, code, name) VALUES (${roomTypeId}, ${prefix}, 'Prueba Concurrencia')`);
+      await db.execute(sql`INSERT INTO rooms(id, room_number, room_type_id, is_virtual, is_active, status)
+        VALUES (${roomId}, ${roomId}, ${roomTypeId}, false, true, 'available')`);
+
+      const [resultA, resultB] = await Promise.all([
+        captureDailyPaceSnapshot(6),
+        captureDailyPaceSnapshot(6),
+      ]);
+
+      // Exactamente una de las dos hizo el cálculo; la otra quedó bloqueada
+      // por el advisory lock y, al despertar, reutilizó el resultado ya
+      // confirmado en vez de recalcular y pisarlo.
+      expect([resultA.alreadyCompleted, resultB.alreadyCompleted].sort()).toEqual([false, true]);
+      expect(resultA.daysCaptured).toBe(resultB.daysCaptured);
+      expect(resultA.daysCaptured).toBe(6);
+
+      const runRows = (await db.execute(
+        sql`SELECT count(*)::int AS count FROM revenue_pace_snapshot_runs WHERE snapshot_date = ${snapshotDate}`,
+      )).rows as any[];
+      // Nunca dos filas de corrida para el mismo día, sea cual sea el orden real de ejecución.
+      expect(runRows[0].count).toBe(1);
+
+      const snapshotRows = (await db.execute(
+        sql`SELECT count(*)::int AS count FROM revenue_pace_snapshots WHERE snapshot_date = ${snapshotDate}`,
+      )).rows as any[];
+      expect(snapshotRows[0].count).toBeGreaterThanOrEqual(6);
+    } finally {
+      await db.execute(sql`DELETE FROM reservations WHERE room_id = ${roomId}`);
+      await db.execute(sql`DELETE FROM rooms WHERE id = ${roomId}`);
+      await db.execute(sql`DELETE FROM room_types WHERE id = ${roomTypeId}`);
+      await db.execute(sql`DELETE FROM revenue_pace_snapshots WHERE snapshot_date = ${snapshotDate}`);
+      await db.execute(sql`DELETE FROM revenue_pace_snapshot_runs WHERE snapshot_date = ${snapshotDate}`);
+    }
+  });
+
   it("getPaceForStayDate expone huecos reales de historial cuando faltan días de captura", async () => {
     const stayDate = addCalendarDays(today, 50);
     const gapDate = addCalendarDays(today, -2);
@@ -589,5 +631,33 @@ describe("pace snapshots", () => {
 
       throw rollback();
     })).rejects.toThrow("rollback");
+  });
+});
+
+describe("loadReferenceRatePlanRows", () => {
+  it("devuelve solo los tipos de habitación que tienen un plan de referencia configurado, con los datos reales del plan", async () => {
+    const prefix = randomUUID();
+    await expect(withDatabaseTransaction(async () => {
+      const roomTypeId = await seedRoomType(prefix);
+      const otherRoomTypeId = await seedRoomType(prefix + "-other");
+      const ratePlanId = prefix + "-plan";
+      await db.execute(sql`INSERT INTO rate_plans(id, name, room_type_id, base_rate, rate_2pax, currency, refundable)
+        VALUES (${ratePlanId}, 'BAR', ${roomTypeId}, 45000, 48000, 'ARS', 'true')`);
+      await db.execute(sql`INSERT INTO revenue_reference_rate_plans(room_type_id, rate_plan_id) VALUES (${roomTypeId}, ${ratePlanId})`);
+
+      const map = await loadReferenceRatePlanRows([roomTypeId, otherRoomTypeId]);
+      expect(map.has(roomTypeId)).toBe(true);
+      expect(map.get(roomTypeId)?.id).toBe(ratePlanId);
+      expect(map.get(roomTypeId)?.rate2pax).toBe("48000.00");
+      // El otro tipo de habitación no tiene configuración: no aparece en el mapa.
+      expect(map.has(otherRoomTypeId)).toBe(false);
+
+      throw rollback();
+    })).rejects.toThrow("rollback");
+  });
+
+  it("devuelve un mapa vacío si no se piden tipos de habitación", async () => {
+    const map = await loadReferenceRatePlanRows([]);
+    expect(map.size).toBe(0);
   });
 });

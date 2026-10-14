@@ -19,7 +19,8 @@ function comparison(overrides: Partial<CompetitorComparison>): CompetitorCompari
   return {
     roomTypeId: "rt-1",
     roomTypeName: "Doble Standard",
-    ourPublishedRate: { ratePlanId: "p1", name: "Estándar", rate: 10000, currency: "ARS" },
+    referenceConfigured: true,
+    ourPublishedRate: { ratePlanId: "p1", name: "Estándar", rate: 10000, currency: "ARS", refundable: true },
     compatibleRates: [],
     excludedCount: 0,
     excludedReasons: [],
@@ -107,15 +108,15 @@ describe("suggestRateAdjustment", () => {
       occupancyPct: 60,
       demandEvents: [],
       competitorComparisons: [comparison({
-        ourPublishedRate: { ratePlanId: "p1", name: "Estándar", rate: 10000, currency: "ARS" },
-        compatibleRates: [{ competitorName: "Hotel Rival", rate: 13000 }],
+        ourPublishedRate: { ratePlanId: "p1", name: "Estándar", rate: 10000, currency: "ARS", refundable: true },
+        compatibleRates: [{ competitorName: "Hotel Rival", rate: 13000, occupancy: 2, ourRate: 10000 }],
       })],
       config: baseConfig,
     });
     expect(result.direction).toBe("subir");
     expect(result.reasons.some(r => r.includes("competidor"))).toBe(true);
-    expect(result.reasons.some(r => r.includes("13000") || r.includes("13.000"))).toBe(true);
-    // Nunca debe aparecer la palabra ADR: compara contra la tarifa publicada, no el promedio cobrado.
+    expect(result.reasons.some(r => r.includes("+30%"))).toBe(true);
+    // Nunca debe aparecer la palabra ADR: compara contra la tarifa de referencia, no el promedio cobrado.
     expect(result.reasons.some(r => /\bADR\b/.test(r))).toBe(false);
   });
 
@@ -125,7 +126,7 @@ describe("suggestRateAdjustment", () => {
       occupancyPct: 60,
       demandEvents: [],
       competitorComparisons: [comparison({
-        compatibleRates: [{ competitorName: "Hotel Rival", rate: 13000 }],
+        compatibleRates: [{ competitorName: "Hotel Rival", rate: 13000, occupancy: 2, ourRate: 10000 }],
       })],
       config: { ...baseConfig, considerCompetitorRates: false },
     });
@@ -133,15 +134,27 @@ describe("suggestRateAdjustment", () => {
     expect(result.reasons.some(r => r.includes("competidor"))).toBe(false);
   });
 
-  it("si no hay plan tarifario vigente para un tipo de habitación, lo dice explícitamente en vez de omitirlo en silencio", () => {
+  it("si el tipo de habitación no tiene plan de referencia CONFIGURADO, lo dice explícitamente (no confunde con 'no vigente')", () => {
     const result = suggestRateAdjustment({
       date: "2026-12-24",
       occupancyPct: 60,
       demandEvents: [],
-      competitorComparisons: [comparison({ ourPublishedRate: null, compatibleRates: [] })],
+      competitorComparisons: [comparison({ referenceConfigured: false, ourPublishedRate: null, compatibleRates: [] })],
       config: baseConfig,
     });
-    expect(result.reasons.some(r => r.includes("Doble Standard") && r.includes("no hay un plan tarifario vigente"))).toBe(true);
+    expect(result.reasons.some(r => r.includes("Doble Standard") && r.includes("no hay un plan tarifario de referencia configurado"))).toBe(true);
+  });
+
+  it("si el plan de referencia está configurado pero no vigente para esta fecha, lo dice explícitamente (distinto de 'no configurado')", () => {
+    const result = suggestRateAdjustment({
+      date: "2026-12-24",
+      occupancyPct: 60,
+      demandEvents: [],
+      competitorComparisons: [comparison({ referenceConfigured: true, ourPublishedRate: null, compatibleRates: [] })],
+      config: baseConfig,
+    });
+    expect(result.reasons.some(r => r.includes("Doble Standard") && r.includes("no está vigente para esta fecha"))).toBe(true);
+    expect(result.reasons.some(r => r.includes("no hay un plan tarifario de referencia configurado"))).toBe(false);
   });
 
   it("si hay tarifas de competencia cargadas pero ninguna compatible, lo dice explícitamente con el motivo de exclusión", () => {
@@ -165,7 +178,7 @@ describe("suggestRateAdjustment", () => {
       date: "2026-12-24",
       occupancyPct: 60,
       demandEvents: [],
-      competitorComparisons: [comparison({ roomTypeId: "__unclassified__", excludedCount: 3, ourPublishedRate: null })],
+      competitorComparisons: [comparison({ roomTypeId: "__unclassified__", referenceConfigured: false, excludedCount: 3, ourPublishedRate: null })],
       config: baseConfig,
     });
     expect(result.reasons.some(r => r.includes("sin tipo de habitación especificado"))).toBe(true);
