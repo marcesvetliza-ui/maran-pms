@@ -165,6 +165,20 @@ describe("read-only code investigator", () => {
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
     expect(round).toBe(3);expect(result.tokens).toBe(52000);
   });
+  it("reserves the draft and coverage review based on measured prompt cost before 50k", async () => {
+    const source=await fixture();
+    const report={summary:"Parcial",certainty:"falta_informacion",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      const current=round++;
+      if(current===0)return {usage:{total_tokens:36000,prompt_tokens:35000},choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"missing",type:"function",function:{name:"find_files",arguments:'{"term":"missing"}'}}]}}]};
+      expect(request.tool_choice).toBe("none");
+      if(current===2)expect(JSON.stringify(request.messages)).toContain('Antes de entregar el diagnóstico');
+      return {usage:{total_tokens:8000,prompt_tokens:7000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(round).toBe(3);expect(result.tokens).toBe(52000);expect(result.calls).toBe(1);
+  });
   it("finds definitions and tests across filenames without exposing excluded files", async () => {
     const source=await fixture();
     await mkdir(path.join(directory,"server/tests"));

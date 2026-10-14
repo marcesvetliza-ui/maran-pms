@@ -1,4 +1,5 @@
 import { orientInvestigation } from "./navigation";
+import { compactContext, investigationCase, reserveClosure } from "./context";
 import OpenAI from "openai";
 import {
   diagnosisSchema,
@@ -123,7 +124,7 @@ export async function diagnose(
     {
       role: "user",
       content: JSON.stringify({
-        case: ticket,
+        case: investigationCase(ticket),
         orientation,
         rulesDocument: "docs/programming-assistant-rules.md",
       }),
@@ -132,6 +133,7 @@ export async function diagnose(
   const timeout = AbortSignal.timeout(options.timeoutMs || 180000);
   const completedCalls=new Map<string,string>();
   const tracedEndpoints=new Set<string>(orientation.endpointContext.map(context => context.endpoint));
+  let measuredPromptTokens = 0;
   let tokens = 0,
     calls = 0,
     formatCorrections = 0,
@@ -142,13 +144,14 @@ export async function diagnose(
   try {
   for (let round = 0; round < 14; round++) {
     rounds = round + 1;
-    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 ? 24 : 20) || tokens >= 50000;
+    const context = compactContext(messages);
+    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
     if(closing && !messages.some(m=>m.role==="system" && m.content==="Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."))
       messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
     const response = await ai.chat.completions.create(
       {
         model: options.model,
-        messages,
+        messages: compactContext(messages),
         tools,
         tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || coverageReviewed)) ? "none" : "auto",
         max_completion_tokens: 4200,
@@ -164,6 +167,7 @@ export async function diagnose(
       { signal: timeout },
     );
     tokens += response.usage?.total_tokens || 0;
+    measuredPromptTokens = response.usage?.prompt_tokens || measuredPromptTokens;
     if (tokens > 100000)
       throw Object.assign(new Error("Se alcanzó el límite de tokens del caso."),{code:"investigation_tokens"});
     if (response.choices[0]?.finish_reason === "length")
