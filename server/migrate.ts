@@ -6,6 +6,7 @@ import {ensureProductionPendingSchema} from "./productionPending";
 import {ensureAgreedInventoryTaxonomy} from "./inventoryTaxonomy";
 import {ensureInventoryLocationSchema} from "./inventoryLocations";
 import {ensureInventoryStage2Schema} from "./inventoryStage2Schema";
+import {ensureRevenueManagementSchema} from "./revenueManagementSchema";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } from "./reservationPaymentRequest";
 import { db, pool } from "./db";
@@ -4999,5 +5000,6 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     logger.info("Carga inicial de inventario verificada", result);
   }
   await ensureCcManualTrackingSchema();
+  await ensureRevenueManagementSchema();
   logger.info("Migraciones incrementales completadas.");
 }

@@ -108,8 +108,8 @@ describe("grantPermission / revokePermission", () => {
 });
 
 describe("INITIAL_ROLE_PERMISSIONS — catálogo inicial del sidebar", () => {
-  it("tiene los 53 resourceKey del sidebar, incluida la planilla de Housekeeping", () => {
-    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(53);
+  it("tiene los 54 resourceKey del sidebar, incluida la planilla de Housekeeping", () => {
+    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(54);
   });
   it("habilita la planilla operativa a Housekeeping y Recepción sin otorgarla a roles ajenos",()=>{
     expect(INITIAL_ROLE_PERMISSIONS['sidebar:/housekeeping-daily-report']).toEqual(expect.arrayContaining(['housekeeping','ama_de_llaves','reception']));
