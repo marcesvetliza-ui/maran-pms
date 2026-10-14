@@ -1,8 +1,9 @@
-import { and, asc, eq, gt, gte, inArray, isNotNull, lt, lte } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, lt, lte, sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "../db";
 import {
   groupCharges, groupReservationLinks, groupRoomBlocks, maintenanceBlocks,
-  ratePlans, reservations, revenuePaceSnapshotRuns, revenuePaceSnapshots, rooms,
+  ratePlans, reservations, revenuePaceSnapshotRuns, revenuePaceSnapshots,
+  revenueReferenceRatePlans, rooms,
 } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { addCalendarDays } from "@shared/nightAuditDate";
@@ -365,14 +366,18 @@ export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetai
 // pura (elegir el plan vigente, filtrar competencia compatible) vive en
 // ./competitorPricing.ts — acá solo la consulta a la base.
 
+const RATE_PLAN_COLUMNS = {
+  id: ratePlans.id, roomTypeId: ratePlans.roomTypeId, name: ratePlans.name,
+  baseRate: ratePlans.baseRate,
+  rate1pax: ratePlans.rate1pax, rate2pax: ratePlans.rate2pax, rate3pax: ratePlans.rate3pax, rate4pax: ratePlans.rate4pax,
+  currency: ratePlans.currency, refundable: ratePlans.refundable,
+  validFrom: ratePlans.validFrom, validTo: ratePlans.validTo,
+};
+
 export async function loadRatePlansForRoomTypes(roomTypeIds: string[]): Promise<Map<string, RatePlanRow[]>> {
   const map = new Map<string, RatePlanRow[]>();
   if (roomTypeIds.length === 0) return map;
-  const rows = await db.select({
-    id: ratePlans.id, roomTypeId: ratePlans.roomTypeId, name: ratePlans.name,
-    baseRate: ratePlans.baseRate, currency: ratePlans.currency,
-    validFrom: ratePlans.validFrom, validTo: ratePlans.validTo,
-  }).from(ratePlans).where(inArray(ratePlans.roomTypeId, roomTypeIds));
+  const rows = await db.select(RATE_PLAN_COLUMNS).from(ratePlans).where(inArray(ratePlans.roomTypeId, roomTypeIds));
   for (const row of rows) {
     const list = map.get(row.roomTypeId) ?? [];
     list.push(row);
@@ -381,38 +386,77 @@ export async function loadRatePlansForRoomTypes(roomTypeIds: string[]): Promise<
   return map;
 }
 
+// ==================== PLAN TARIFARIO DE REFERENCIA (configurado a mano) ====================
+// Reemplaza cualquier heurística automática: la comparación contra
+// competencia de un tipo de habitación solo se activa si hay una fila en
+// revenue_reference_rate_plans para ese tipo (ver server/routes/revenue.ts,
+// permiso api:revenue:configure). Sin esa fila, buildCompetitorComparisons
+// excluye el tipo de habitación con el motivo explícito.
+
+export async function loadReferenceRatePlanRows(roomTypeIds: string[]): Promise<Map<string, RatePlanRow>> {
+  const map = new Map<string, RatePlanRow>();
+  if (roomTypeIds.length === 0) return map;
+  const rows = await db.select({ roomTypeId: revenueReferenceRatePlans.roomTypeId, plan: RATE_PLAN_COLUMNS })
+    .from(revenueReferenceRatePlans)
+    .innerJoin(ratePlans, eq(ratePlans.id, revenueReferenceRatePlans.ratePlanId))
+    .where(inArray(revenueReferenceRatePlans.roomTypeId, roomTypeIds));
+  for (const row of rows) {
+    map.set(row.roomTypeId, row.plan);
+  }
+  return map;
+}
+
 // ==================== PACE SNAPSHOTS ====================
-// Una fila por (snapshotDate, stayDate). Se captura de forma perezosa: la
-// primera consulta al módulo cada día dispara la captura de ese día si no
-// existe todavía (no hay scheduler/cron en este backend) — equivalente en
-// espíritu al guard idempotente de Night Audit, pero vive enteramente acá
-// para no tocar server/night-audit.ts.
+// Cuándo se captura cada día, en una sola frase: una vez por día calendario
+// (America/Argentina/Buenos_Aires), disparada por la primera lectura del
+// tablero o del pace report ese día (no hay scheduler/cron en este backend;
+// POST /api/revenue/pace/capture-snapshot queda disponible para cablear uno
+// más adelante). "Una vez" es una garantía real, no solo la intención:
 //
-// Garantías: TODA la captura de un día (cálculo + upsert de cada stayDate
-// del horizonte + el registro de corrida en revenue_pace_snapshot_runs)
-// corre dentro de UNA sola transacción de base de datos. Si el proceso se
-// interrumpe a mitad de camino (crash, caída de conexión), Postgres
-// descarta la transacción entera: no quedan filas parciales de
-// revenue_pace_snapshots para ese día, y tampoco se escribe el registro de
-// corrida — así, un reintento posterior (disparado por el mismo guard
-// perezoso) vuelve a encontrar "no hay nada para hoy" y recaptura todo
-// desde cero, nunca mezclando un estado a medio capturar con uno completo.
-// El registro en revenue_pace_snapshot_runs solo existe, por construcción,
-// para un día cuya captura terminó por completo — es la fuente para
-// detectar huecos reales de historial (ver findMissingSnapshotDates).
+//  - Completa y transaccional: TODA la captura de un día (cálculo + upsert
+//    de cada stayDate del horizonte + el registro de corrida en
+//    revenue_pace_snapshot_runs) corre dentro de UNA sola transacción. Si el
+//    proceso se interrumpe a mitad de camino, Postgres descarta todo — no
+//    quedan filas parciales ni un registro de corrida a medias.
+//  - Sin carreras: antes de calcular nada, la transacción toma un advisory
+//    lock de Postgres con clave (snapshotDate), mismo mecanismo que ya usa
+//    el resto del código para serializar escrituras concurrentes
+//    (server/productionPending.ts, server/inventoryLocations.ts). Si dos
+//    requests disparan la captura del mismo día al mismo tiempo, la segunda
+//    queda bloqueada hasta que la primera termine (commit o rollback) y
+//    libera el lock. Al despertar, vuelve a chequear revenue_pace_snapshot_runs:
+//    si la primera ya completó el día, la segunda NO recalcula ni
+//    sobrescribe nada — devuelve el resultado ya confirmado tal cual quedó.
+//  - El registro en revenue_pace_snapshot_runs solo existe, por
+//    construcción, para un día cuya captura terminó por completo — es la
+//    fuente para detectar huecos reales de historial (ver
+//    findMissingSnapshotDates).
+
+const PACE_SNAPSHOT_LOCK_SALT = 90210;
 
 export async function captureDailyPaceSnapshot(
   horizonDays = PACE_HORIZON_DAYS,
   testOnlyFailAfterUpsertCount?: number,
-): Promise<{ snapshotDate: string; daysCaptured: number }> {
+): Promise<{ snapshotDate: string; daysCaptured: number; alreadyCompleted: boolean }> {
   const snapshotDate = todayArgentina();
   const toExclusive = addCalendarDays(snapshotDate, horizonDays);
 
   return withDatabaseTransaction(async () => {
-    const metrics = await computeRevenueBoard(snapshotDate, toExclusive);
+    await db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('revenue_pace_snapshot:' || ${snapshotDate}, ${PACE_SNAPSHOT_LOCK_SALT}))`);
+
+    // Doble chequeo DESPUÉS de tomar el lock: si otra captura concurrente ya
+    // completó este día mientras esperábamos, no la recalculamos ni la
+    // pisamos — se devuelve tal cual quedó.
+    const existingRun = await db.select({ daysCaptured: revenuePaceSnapshotRuns.daysCaptured })
+      .from(revenuePaceSnapshotRuns).where(eq(revenuePaceSnapshotRuns.snapshotDate, snapshotDate)).limit(1);
+    if (existingRun.length > 0) {
+      return { snapshotDate, daysCaptured: existingRun[0].daysCaptured, alreadyCompleted: true };
+    }
+
+    const metricsForDays = await computeRevenueBoard(snapshotDate, toExclusive);
 
     let upserted = 0;
-    for (const day of metrics) {
+    for (const day of metricsForDays) {
       await db.insert(revenuePaceSnapshots).values({
         snapshotDate,
         stayDate: day.date,
@@ -431,14 +475,14 @@ export async function captureDailyPaceSnapshot(
 
     await db.insert(revenuePaceSnapshotRuns).values({
       snapshotDate,
-      daysCaptured: metrics.length,
+      daysCaptured: metricsForDays.length,
       horizonDays,
     }).onConflictDoUpdate({
       target: revenuePaceSnapshotRuns.snapshotDate,
-      set: { daysCaptured: metrics.length, horizonDays, completedAt: new Date() },
+      set: { daysCaptured: metricsForDays.length, horizonDays, completedAt: new Date() },
     });
 
-    return { snapshotDate, daysCaptured: metrics.length };
+    return { snapshotDate, daysCaptured: metricsForDays.length, alreadyCompleted: false };
   });
 }
 

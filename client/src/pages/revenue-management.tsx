@@ -60,7 +60,7 @@ type DemandEvent = {
 
 type CompetitorRate = {
   id: string; competitorName: string; roomTypeId: string | null; stayDate: string;
-  rate: string; currency: string; sourceNote: string | null;
+  rate: string; currency: string; refundable: boolean | null; occupancy: number | null; sourceNote: string | null;
 };
 
 type RoomType = { id: string; name: string };
@@ -550,7 +550,10 @@ function DemandEventsTab({ from, to, canWrite, toast }: { from: string; to: stri
 
 function CompetitorRatesTab({ from, to, canWrite, toast }: { from: string; to: string; canWrite: boolean; toast: ReturnType<typeof useToast>["toast"] }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ competitorName: "", roomTypeId: "", stayDate: from, rate: "", currency: "ARS", sourceNote: "" });
+  const [form, setForm] = useState({
+    competitorName: "", roomTypeId: "", stayDate: from, rate: "", currency: "ARS",
+    refundable: "", occupancy: "", sourceNote: "",
+  });
 
   const { data: roomTypes } = useQuery<RoomType[]>({
     queryKey: ["/api/room-types"],
@@ -567,11 +570,13 @@ function CompetitorRatesTab({ from, to, canWrite, toast }: { from: string; to: s
       ...form,
       roomTypeId: form.roomTypeId || null,
       rate: form.rate,
+      refundable: form.refundable === "" ? null : form.refundable === "true",
+      occupancy: form.occupancy === "" ? null : Number(form.occupancy),
     })).json(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/revenue/competitor-rates"] });
       setOpen(false);
-      setForm({ competitorName: "", roomTypeId: "", stayDate: from, rate: "", currency: "ARS", sourceNote: "" });
+      setForm({ competitorName: "", roomTypeId: "", stayDate: from, rate: "", currency: "ARS", refundable: "", occupancy: "", sourceNote: "" });
       toast({ title: "Tarifa de competencia cargada" });
     },
     onError: (e: any) => toast({ title: "No se pudo cargar la tarifa", description: e?.message, variant: "destructive" }),
@@ -610,6 +615,36 @@ function CompetitorRatesTab({ from, to, canWrite, toast }: { from: string; to: s
                 <div><Label>Fecha de estadía</Label><Input type="date" value={form.stayDate} onChange={e => setForm({ ...form, stayDate: e.target.value })} /></div>
                 <div><Label>Tarifa</Label><Input type="number" value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} data-testid="input-competitor-rate" /></div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>¿Reembolsable?</Label>
+                  <Select value={form.refundable || "__unknown__"} onValueChange={v => setForm({ ...form, refundable: v === "__unknown__" ? "" : v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unknown__">No sé / no cargar</SelectItem>
+                      <SelectItem value="true">Sí</SelectItem>
+                      <SelectItem value="false">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Ocupación (pax)</Label>
+                  <Select value={form.occupancy || "__unknown__"} onValueChange={v => setForm({ ...form, occupancy: v === "__unknown__" ? "" : v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unknown__">No sé / no cargar</SelectItem>
+                      <SelectItem value="1">1 pax</SelectItem>
+                      <SelectItem value="2">2 pax</SelectItem>
+                      <SelectItem value="3">3 pax</SelectItem>
+                      <SelectItem value="4">4 pax</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Reembolsable y ocupación son las condiciones que el motor de sugerencias necesita para comparar de forma justa.
+                Si no las cargás, esta tarifa queda igual guardada acá como referencia manual, pero el motor no la va a usar.
+              </p>
               <div><Label>Fuente / notas</Label><Textarea value={form.sourceNote} onChange={e => setForm({ ...form, sourceNote: e.target.value })} placeholder="Ej: visto en Booking el 10/10" /></div>
             </div>
             <DialogFooter>
@@ -623,17 +658,23 @@ function CompetitorRatesTab({ from, to, canWrite, toast }: { from: string; to: s
         <CardContent className="pt-6">
           <Table>
             <TableHeader>
-              <TableRow><TableHead>Competidor</TableHead><TableHead>Tipo de hab.</TableHead><TableHead>Fecha</TableHead><TableHead>Tarifa</TableHead><TableHead>Fuente</TableHead>{canWrite && <TableHead></TableHead>}</TableRow>
+              <TableRow>
+                <TableHead>Competidor</TableHead><TableHead>Tipo de hab.</TableHead><TableHead>Fecha</TableHead>
+                <TableHead>Tarifa</TableHead><TableHead>Reemb.</TableHead><TableHead>Pax</TableHead>
+                <TableHead>Fuente</TableHead>{canWrite && <TableHead></TableHead>}
+              </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                <TableRow><TableCell colSpan={6}><Skeleton className="h-6" /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={8}><Skeleton className="h-6" /></TableCell></TableRow>
               ) : (data || []).map(rate => (
                 <TableRow key={rate.id} data-testid={`row-competitor-rate-${rate.id}`}>
                   <TableCell>{rate.competitorName}</TableCell>
                   <TableCell>{roomTypeName(rate.roomTypeId)}</TableCell>
                   <TableCell>{formatDisplayDate(rate.stayDate)}</TableCell>
                   <TableCell>{formatCurrency(Number(rate.rate))}</TableCell>
+                  <TableCell>{rate.refundable === null ? <span className="text-amber-700 text-xs">sin cargar</span> : rate.refundable ? "Sí" : "No"}</TableCell>
+                  <TableCell>{rate.occupancy === null ? <span className="text-amber-700 text-xs">sin cargar</span> : `${rate.occupancy} pax`}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{rate.sourceNote}</TableCell>
                   {canWrite && (
                     <TableCell><Button size="sm" variant="ghost" onClick={() => deleteMutation.mutate(rate.id)}>Eliminar</Button></TableCell>
@@ -641,7 +682,7 @@ function CompetitorRatesTab({ from, to, canWrite, toast }: { from: string; to: s
                 </TableRow>
               ))}
               {!isLoading && (data || []).length === 0 && (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Sin tarifas de competencia cargadas en este rango</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground">Sin tarifas de competencia cargadas en este rango</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -731,6 +772,8 @@ function SuggestionsTab({ from, to, canConfigure, toast }: { from: string; to: s
         </Card>
       )}
 
+      <ReferenceRatePlansCard canConfigure={canConfigure} toast={toast} />
+
       <Card>
         <CardHeader><CardTitle className="text-sm">Sugerencias con movimiento ({nonNeutral.length} de {data?.suggestions.length || 0} días)</CardTitle></CardHeader>
         <CardContent>
@@ -763,5 +806,71 @@ function SuggestionsTab({ from, to, canConfigure, toast }: { from: string; to: s
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// ==================== PLAN TARIFARIO DE REFERENCIA ====================
+
+type ReferenceRatePlanRow = {
+  roomTypeId: string;
+  roomTypeName: string;
+  configuredRatePlanId: string | null;
+  availablePlans: Array<{ id: string; name: string }>;
+};
+
+function ReferenceRatePlansCard({ canConfigure, toast }: { canConfigure: boolean; toast: ReturnType<typeof useToast>["toast"] }) {
+  const { data, isLoading } = useQuery<ReferenceRatePlanRow[]>({
+    queryKey: ["/api/revenue/reference-rate-plans"],
+    queryFn: async () => (await apiRequest("GET", "/api/revenue/reference-rate-plans")).json(),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ roomTypeId, ratePlanId }: { roomTypeId: string; ratePlanId: string | null }) =>
+      (await apiRequest("PUT", `/api/revenue/reference-rate-plans/${roomTypeId}`, { ratePlanId })).json(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue/reference-rate-plans"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/revenue/suggestions"] });
+      toast({ title: "Plan de referencia actualizado" });
+    },
+    onError: (e: any) => toast({ title: "No se pudo guardar el plan de referencia", description: e?.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Plan tarifario de referencia por tipo de habitación</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">
+          El motor de sugerencias nunca elige un plan automáticamente: compara contra el plan que se configure acá. Mientras un
+          tipo de habitación no tenga uno configurado, sus tarifas de competencia quedan excluidas de la comparación (igual se
+          ven en la pestaña de Tarifas de Competencia como referencia manual).
+        </p>
+        {isLoading ? <Skeleton className="h-20" /> : (
+          <div className="space-y-2">
+            {(data || []).map(row => (
+              <div key={row.roomTypeId} className="flex items-center gap-3" data-testid={`row-reference-plan-${row.roomTypeId}`}>
+                <span className="text-sm w-48">{row.roomTypeName}</span>
+                <Select
+                  value={row.configuredRatePlanId || "__none__"}
+                  onValueChange={v => saveMutation.mutate({ roomTypeId: row.roomTypeId, ratePlanId: v === "__none__" ? null : v })}
+                  disabled={!canConfigure}
+                >
+                  <SelectTrigger className="w-64"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin configurar (excluido del motor)</SelectItem>
+                    {row.availablePlans.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {!row.configuredRatePlanId && <Badge variant="outline" className="text-amber-700 border-amber-400">sin configurar</Badge>}
+              </div>
+            ))}
+            {!isLoading && (data || []).length === 0 && (
+              <p className="text-sm text-muted-foreground">No hay tipos de habitación cargados.</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
