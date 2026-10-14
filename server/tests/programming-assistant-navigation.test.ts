@@ -16,6 +16,17 @@ describe("code navigation", () => {
     expect(result.workflowReads.some(r=>r.content.includes("restorePurchaseDiscount(editingInvoice)"))).toBe(true);
     expect(result.workflowReads.filter(r=>r.path==="server/routes.ts")).toHaveLength(2);
   });
+  it("supplies the real preview flow without guessing a function name", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"otro",title:"Vista previa de consumo interno",actual:"Receta con 500 gramos y tres porciones",expected:"1,5 kg sin mover stock, avisar si falta equivalencia",steps:"",messages:[]} as SupportTicket,source);
+    const context=result.endpointContext[0];
+    expect(context.endpoint).toBe("/api/inventory/recipe-stock-preview");
+    expect(context.callers[0].path).toBe("client/src/pages/inventory.tsx");
+    expect(context.dependencies.map(d=>d.symbol)).toContain("inventoryUnitFactor");
+    expect(context.tests[0].path).toBe("server/tests/inventory-stage2-workflows.pg.test.ts");
+    expect(context.tests[0].content).toContain("quantity:'1.500'");
+    expect(context.tests[0].content).toContain("toBe(409)");
+  });
   it("does not route a reservation discount into purchase invoices", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
     const result=await orientInvestigation({module:"otro",title:"Descuento general",actual:"Reserva de habitación con descuento",expected:"Conservar la tarifa",steps:"",messages:[]} as SupportTicket,source);

@@ -126,7 +126,10 @@ export class CodeSource {
       const index=lines.findIndex(line=>isTest ? occurrence.test(line) : definition.test(line));
       if(index<0) continue;
       const start=Math.max(1,index+1-3);
-      (isTest?tests:definitions).push(await this.read(file,start,start+limits.lines-1));
+      // A short function must not drag in the next unrelated operation.
+      const following = isTest ? -1 : lines.findIndex((line, i) => i > index && /^(?:export\s+)?(?:async\s+)?(?:function|class|const|let)\s+[A-Za-z_$]/.test(line));
+      const end = Math.min(start + limits.lines - 1, following < 0 ? lines.length : following);
+      (isTest?tests:definitions).push(await this.read(file,start,end));
     }
     this.searches.push(`symbol:${symbol}`);
     return {symbol,definitions,tests,partial:true,
@@ -137,6 +140,7 @@ export class CodeSource {
     const escaped=endpoint.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     const route=new RegExp(`\\b(?:app|router)\\.(?:get|post|put|patch|delete)\\s*\\(\\s*['\"]${escaped}['\"]`);
     const nextRoute=/\b(?:app|router)\.(?:get|post|put|patch|delete)\s*\(/;
+    const callers:Awaited<ReturnType<CodeSource["read"]>>[]=[];
     const handlers:Awaited<ReturnType<CodeSource["read"]>>[]=[];
     const dependencies:Awaited<ReturnType<CodeSource["inspectSymbol"]>>[]=[];
     const tests:Awaited<ReturnType<CodeSource["read"]>>[]=[];
@@ -166,8 +170,27 @@ export class CodeSource {
         }
       }
     }
+    for(const file of (await this.files()).filter(f=>f.startsWith("client/src/") && /\.tsx?$/.test(f) && !f.includes(".test."))) {
+      if(callers.length>=2)break;
+      const lines=(await this.content(file)).split("\n");
+      const index=lines.findIndex(line=>line.includes(endpoint));
+      if(index>=0){const start=Math.max(1,index+1-12);callers.push(await this.read(file,start,start+69));}
+    }
     for(const symbol of [...symbols].slice(0,4))dependencies.push(await this.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80}));
-    return {endpoint,handlers,dependencies,tests,partial:true,guidance:"Fragmentos realmente leídos. Continuar cuerpos parciales con read_code; no ejecutar ni inferir ausencia de otros tests."};
+    // Follow one further import hop (e.g. unitFactor -> inventoryUnitFactor).
+    const extra=new Set<string>();
+    for(const dependency of dependencies)for(const definition of dependency.definitions){
+      const text=await this.content(definition.path);
+      for(const match of text.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"][^'"]+['"]/g))for(const part of match[1].split(',')){
+        if(/^\s*type\b/.test(part))continue;
+        const [original,alias]=part.trim().split(/\s+as\s+/),local=alias||original;
+        if(!/^[A-Za-z_$][\w$]{2,79}$/.test(original) || symbols.has(original))continue;
+        const escapedLocal=local.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+        if(new RegExp(`\\b${escapedLocal}\\s*\\(`).test(definition.content))extra.add(original);
+      }
+    }
+    for(const symbol of [...extra].slice(0,2))dependencies.push(await this.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80}));
+    return {endpoint,callers,handlers,dependencies,tests,partial:true,guidance:"Fragmentos realmente leídos. Continuar cuerpos parciales con read_code; no ejecutar ni inferir ausencia de otros tests."};
   }
   async search(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)

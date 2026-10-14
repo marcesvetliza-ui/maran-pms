@@ -14,11 +14,12 @@ export async function orientInvestigation(
   const purchases = /compra|proveedor|purchase/.test(text) ||
     (discount && /factura|fact-[abc]|invoice/.test(text) && /stock|articul|unitari/.test(text));
   const production = /produccion|production/.test(text);
+  const inventoryPreview = /vista previa|preview/.test(text) && /consumo|receta|ingredient|porcion|stock|inventario/.test(text);
   const terms = purchases
     ? ["purchase", "compras"]
     : production
       ? ["production", "inventoryStockEngine", "inventorySafety"]
-    : ticket.module === "inventario"
+    : ticket.module === "inventario" || inventoryPreview
       ? ["inventory", "stock"]
       : ticket.module === "grupos"
         ? ["group"]
@@ -61,7 +62,11 @@ export async function orientInvestigation(
       workflowReads.push(await source.read(anchor.path,start,start+139));
     }
   }
+  const endpointContext = inventoryPreview
+    ? [await source.traceEndpoint("/api/inventory/recipe-stock-preview")]
+    : [];
   return {
+    endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,
     initialReads,

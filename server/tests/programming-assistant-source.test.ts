@@ -21,11 +21,16 @@ describe("read-only code investigator", () => {
     const result=await source.traceEndpoint("/api/inventory/recipe-stock-preview");
     expect(result.handlers[0].path).toBe("server/inventoryStage2Routes.ts");
     expect(result.handlers[0].content).toContain("res.json");
+    expect(result.callers[0].path).toBe("client/src/pages/inventory.tsx");
+    expect(result.callers[0].content).toContain("recipe-stock-preview");
+    expect(result.callers[0].content).toContain("Error al cargar receta");
     expect(result.dependencies.map(d=>d.symbol)).toEqual(expect.arrayContaining(["unitFactor","planIngredientsWithActualQuantities","convertInventoryQuantity"]));
     expect(result.dependencies.every(d=>d.definitions.length>0)).toBe(true);
+    expect(result.dependencies.find(d=>d.symbol==="inventoryUnitFactor")?.definitions[0].content).toContain("equivalencia");
+    expect(result.dependencies.find(d=>d.symbol==="unitFactor")?.definitions[0].content).not.toContain("async function consumeStockLines");
     expect(result.tests[0].content).toContain("sin mover stock");
     expect(result.tests[0].content).toContain("falta equivalencia");
-    expect([...result.handlers,...result.tests,...result.dependencies.flatMap(d=>d.definitions)].every(r=>source.validates(r))).toBe(true);
+    expect([...result.callers,...result.handlers,...result.tests,...result.dependencies.flatMap(d=>d.definitions)].every(r=>source.validates(r))).toBe(true);
     await expect(source.traceEndpoint("https://example.com")).rejects.toThrow();
   });
   it("delivers server evidence automatically after reading a frontend API call", async () => {
@@ -42,6 +47,36 @@ describe("read-only code investigator", () => {
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
     expect(result.report.certainty).toBe("sustentado_en_codigo");expect(result.readFiles).toContain("server/endpoint.ts");
+  });
+  it("delivers callers when the investigation starts at the backend", async () => {
+    const source=await fixture();
+    await mkdir(path.join(directory,"client/src"),{recursive:true});
+    await writeFile(path.join(directory,"client/src","consumer.ts"),"async function showPreview(){return fetch('/api/example-preview');}");
+    await writeFile(path.join(directory,"server","route.ts"),"app.post('/api/example-preview', (_req,res)=>res.json({quantity:1.5}));");
+    const report={summary:"Vista previa",certainty:"sustentado_en_codigo",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[{path:"client/src/consumer.ts",start:1,end:1,explanation:"Llamada real"}]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      if(round++===0)return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"backend",type:"function",function:{name:"read_code",arguments:'{"path":"server/route.ts","start":1,"end":1}'}}]}}]};
+      if(round===2)expect(JSON.parse(request.messages.at(-1).content).endpointContext[0].callers[0].content).toContain("showPreview");
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
+    expect(result.readFiles).toContain("client/src/consumer.ts");
+  });
+  it("exposes a read-only explicit endpoint tracing tool", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","route.ts"),"app.post('/api/example', (_req,res)=>res.json({ok:true}));");
+    const report={summary:"Inspección",certainty:"sustentado_en_codigo",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[{path:"server/route.ts",start:1,end:1,explanation:"Handler"}]};
+    let round=0;
+    const client={chat:{completions:{create:async(request:any)=>{
+      if(round++===0){
+        expect(request.tools.some((tool:any)=>tool.function.name==="trace_endpoint")).toBe(true);
+        return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"trace",type:"function",function:{name:"trace_endpoint",arguments:'{"endpoint":"/api/example"}'}}]}}]};
+      }
+      if(round===2)expect(JSON.parse(request.messages.at(-1).content).handlers[0].content).toContain("ok:true");
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
   });
   it("reserves a closing phase instead of aborting when a batch exceeds research calls", async () => {
     const source=await fixture();
