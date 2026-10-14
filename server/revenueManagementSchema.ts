@@ -53,4 +53,17 @@ export async function ensureRevenueManagementSchema() {
     updated_by varchar
   )`);
   await db.execute(sql`INSERT INTO revenue_rate_suggestion_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+
+  // Un registro por snapshotDate, escrito en la MISMA transacción que las
+  // filas de revenue_pace_snapshots de ese día — ver server/revenue/metrics.ts
+  // captureDailyPaceSnapshot(). Su sola existencia certifica que la captura
+  // de ese día terminó por completo.
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS revenue_pace_snapshot_runs (
+    snapshot_date date PRIMARY KEY,
+    started_at timestamp NOT NULL DEFAULT now(),
+    completed_at timestamp NOT NULL DEFAULT now(),
+    status text NOT NULL DEFAULT 'completed' CHECK(status = 'completed'),
+    days_captured integer NOT NULL DEFAULT 0,
+    horizon_days integer NOT NULL DEFAULT 0
+  )`);
 }
