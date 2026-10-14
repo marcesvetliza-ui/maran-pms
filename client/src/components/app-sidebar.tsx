@@ -55,6 +55,7 @@ import {
   FileWarning,
   Receipt,
   ShieldCheck,
+  LineChart,
 } from "lucide-react";
 import { useAuth } from "@/App";
 import {
@@ -188,6 +189,7 @@ const menuSections = [
       { label: "Operaciones", icon: Activity,   href: "/operaciones", resourceKey: "sidebar:/operaciones" },
       { label: "Ejecutivo",   icon: TrendingUp, href: "/executive",   resourceKey: "sidebar:/executive" },
       { label: "Reportes",    icon: BarChart2,  href: "/reports",     resourceKey: "sidebar:/reports" },
+      { label: "Revenue Management", icon: LineChart, href: "/revenue-management", resourceKey: "sidebar:/revenue-management" },
     ],
   },
 

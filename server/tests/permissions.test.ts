@@ -108,8 +108,9 @@ describe("grantPermission / revokePermission", () => {
 });
 
 describe("INITIAL_ROLE_PERMISSIONS — catálogo inicial del sidebar", () => {
-  it("tiene exactamente los 52 resourceKey del sidebar de hoy (14 secciones/ítems, incluidos subítems)", () => {
-    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(52);
+  it("incluye Revenue en el catálogo del sidebar del piloto", () => {
+    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(53);
+    expect(INITIAL_ROLE_PERMISSIONS['sidebar:/revenue-management']).toEqual(expect.arrayContaining(['admin', 'manager']));
   });
 
   it("CORE_RECEPCION se aplica igual a los 10 ítems que lo comparten hoy", () => {
