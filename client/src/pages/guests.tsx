@@ -1,4 +1,6 @@
 import { formatDisplayDate } from "@shared/date-display";
+import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
+import { getGuestStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -204,6 +206,7 @@ export function GuestFormDialog({
   const { data: companies } = useQuery<Company[]>({ queryKey: ["/api/companies"] });
 
   const buildFormData = (g?: Guest): Partial<InsertGuest> => ({
+    stayProfile: getGuestStayProfile(g),
     tipoPersona: (g as any)?.tipoPersona || "fisica",
     firstName: g?.firstName || "",
     lastName: g?.lastName || "",
@@ -280,6 +283,7 @@ export function GuestFormDialog({
         // Sending null lets the API clear legacy placeholder values such as "0".
         if (!data.cuilCuit?.trim()) payload.cuilCuit = null;
         if (!data.documentNumber?.trim()) payload.documentNumber = null;
+        if (!data.fechaNacimiento) payload.fechaNacimiento = null;
         await apiRequest("PATCH", `/api/guests/${guest.id}`, payload);
         return null;
       }
@@ -326,6 +330,10 @@ export function GuestFormDialog({
       setFormErrors(errors);
       return;
     }
+    if (!isJuridica && !guestStayProfileSchema.safeParse(formData.stayProfile).success) {
+      toast({ title: "Revisá vehículos, familiares y mascotas", description: "Completá patente, nombre y apellido de familiares, nombre y especie de mascotas, y fechas válidas.", variant: "destructive" });
+      return;
+    }
     setFormErrors({});
     const payload = {
       ...formData,
@@ -338,15 +346,15 @@ export function GuestFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] sm:max-w-[1100px] max-h-[90dvh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Huésped" : "Nuevo Huésped"}</DialogTitle>
           <DialogDescription>
             {isEditing ? "Modifica los datos del huésped." : "Ingresa los datos para registrar un nuevo huésped."}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="space-y-4 py-4 px-1 overflow-y-auto min-h-0">
 
             {/* ── Toggle Tipo de Persona ── */}
             <div className="flex rounded-lg border overflow-hidden">
@@ -407,7 +415,7 @@ export function GuestFormDialog({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="cuilCuit">CUIT <span className="text-red-500">*</span></Label>
                   <Input
@@ -460,7 +468,7 @@ export function GuestFormDialog({
               </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" type="email" value={formData.email || ""} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="contacto@empresa.com" data-testid="input-email" />
@@ -487,7 +495,7 @@ export function GuestFormDialog({
                 testIdProvincia="select-guest-provincia"
                 testIdLocalidad="select-guest-localidad"
               />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="codigoPostal">Código Postal</Label>
                   <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData(prev => ({ ...prev, codigoPostal: e.target.value }))} placeholder="1043" data-testid="input-codigo-postal" />
@@ -552,7 +560,7 @@ export function GuestFormDialog({
 
             {/* ── PERSONA FÍSICA ── */}
             {!isJuridica && (<>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="firstName">Nombre <span className="text-red-500">*</span></Label>
                   <Input
@@ -583,20 +591,7 @@ export function GuestFormDialog({
                   />
                   {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={formData.email || ""} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="juan@email.com" data-testid="input-email" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="phone">Teléfono</Label>
-                  <Input id="phone" value={formData.phone || ""} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-phone" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="documentType">Tipo de Documento</Label>
                   <Select value={formData.documentType || "dni"} onValueChange={(value) => setFormData({ ...formData, documentType: value })}>
@@ -612,9 +607,10 @@ export function GuestFormDialog({
                   <Label htmlFor="documentNumber">Número de Documento</Label>
                   <Input id="documentNumber" value={formData.documentNumber || ""} onChange={(e) => setFormData({ ...formData, documentNumber: e.target.value })} placeholder="12345678" data-testid="input-document-number" />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2"><Label htmlFor="fechaNacimiento">Fecha de nacimiento</Label><Input id="fechaNacimiento" type="date" max={new Date().toISOString().slice(0,10)} value={formData.fechaNacimiento || ""} onChange={e => setFormData({ ...formData, fechaNacimiento: e.target.value })} data-testid="input-fecha-nacimiento" /></div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="cuilCuit">CUIT / CUIL</Label>
                   <Input
@@ -640,9 +636,18 @@ export function GuestFormDialog({
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={formData.email || ""} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="juan@email.com" data-testid="input-email" />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="phone">Teléfono</Label>
+                  <Input id="phone" value={formData.phone || ""} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="+54 11 1234-5678" data-testid="input-phone" />
+                </div>
               </div>
 
-              {/* Condición de venta — física */}
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">              {/* Condición de venta — física */}
               <div className="grid gap-2">
                 <Label>Condición de Venta Predeterminada</Label>
                 <Select value={(formData as any).condicionVentaPredeterminada || "contado"} onValueChange={(v) => setFormData({ ...formData, condicionVentaPredeterminada: v } as any)}>
@@ -681,6 +686,7 @@ export function GuestFormDialog({
               />
 
               {/* Datos migratorios — solo para extranjeros (Ley 25.871) */}
+</div>
               {formData.nationality && formData.nationality !== "Argentina" && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3 space-y-3">
                   <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
@@ -723,7 +729,7 @@ export function GuestFormDialog({
                 testIdProvincia="select-guest-provincia"
                 testIdLocalidad="select-guest-localidad"
               />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="codigoPostal">Código Postal</Label>
                   <Input id="codigoPostal" value={formData.codigoPostal || ""} onChange={(e) => setFormData(prev => ({ ...prev, codigoPostal: e.target.value }))} placeholder="3100" data-testid="input-codigo-postal" />
@@ -778,34 +784,11 @@ export function GuestFormDialog({
                 </Popover>
               </div>
 
-              {/* Vehículo */}
-              <div className="pt-2 border-t">
-                <Label className="text-sm font-medium text-muted-foreground">Datos del Vehículo (opcional)</Label>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="vehiculoPatente">Patente</Label>
-                  <Input id="vehiculoPatente" value={formData.vehiculoPatente || ""} onChange={(e) => setFormData({ ...formData, vehiculoPatente: e.target.value.toUpperCase() })} placeholder="ABC 123" data-testid="input-vehiculo-patente" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="vehiculoMarca">Marca</Label>
-                  <Input id="vehiculoMarca" value={formData.vehiculoMarca || ""} onChange={(e) => setFormData({ ...formData, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-vehiculo-marca" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="vehiculoModelo">Modelo</Label>
-                  <Input id="vehiculoModelo" value={formData.vehiculoModelo || ""} onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-vehiculo-modelo" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="vehiculoColor">Color</Label>
-                  <Input id="vehiculoColor" value={formData.vehiculoColor || ""} onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-vehiculo-color" />
-                </div>
-              </div>
+              <GuestStayProfileEditor value={getGuestStayProfile(formData)} onChange={stayProfile => setFormData(prev => ({ ...prev, stayProfile }))} />
             </>)}
 
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 bg-background border-t pt-3">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>

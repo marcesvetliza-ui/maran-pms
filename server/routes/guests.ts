@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth, requirePermission } from "../auth";
+import { guestStayProfileSchema } from "@shared/guestStayProfile";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
 import { guests, reservations, roomTypes as roomTypesTable, accountMovements, type AccountEntityType } from "../../shared/schema";
@@ -933,6 +934,13 @@ export function registerGuestsRoutes(app: Express) {
 
   app.post("/api/guests", async (req, res) => {
     try {
+      if (req.body.stayProfile !== undefined) {
+        const parsed = guestStayProfileSchema.safeParse(req.body.stayProfile);
+        if (!parsed.success) return res.status(400).json({ error: "Revisá los datos de vehículos, familiares y mascotas." });
+        req.body.stayProfile = parsed.data;
+        const vehicle = parsed.data.vehicles[0];
+        Object.assign(req.body, { vehiculoPatente: vehicle?.plate || null, vehiculoMarca: vehicle?.brand || null, vehiculoModelo: vehicle?.model || null, vehiculoColor: vehicle?.color || null });
+      }
       const documentNumber = normalizeGuestDocumentNumber(req.body.documentNumber);
       // If a document number is provided, check for an existing guest to avoid duplicates.
       if (documentNumber) {
@@ -958,6 +966,13 @@ export function registerGuestsRoutes(app: Express) {
 
   app.patch("/api/guests/:id", async (req, res) => {
     try {
+      if (req.body.stayProfile !== undefined) {
+        const parsed = guestStayProfileSchema.safeParse(req.body.stayProfile);
+        if (!parsed.success) return res.status(400).json({ error: "Revisá los datos de vehículos, familiares y mascotas." });
+        req.body.stayProfile = parsed.data;
+        const vehicle = parsed.data.vehicles[0];
+        Object.assign(req.body, { vehiculoPatente: vehicle?.plate || null, vehiculoMarca: vehicle?.brand || null, vehiculoModelo: vehicle?.model || null, vehiculoColor: vehicle?.color || null });
+      }
       const documentNumber = req.body.documentNumber === undefined
         ? ""
         : normalizeGuestDocumentNumber(req.body.documentNumber);

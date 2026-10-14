@@ -1,3 +1,4 @@
+import { StaySelectionEditor, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useMemo, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
 import { isZeroReservationRate, parseReservationRate } from "@shared/reservationRate";
@@ -45,6 +46,7 @@ export default function NewReservationPage() {
   const isFromPlanning = !!prefilledRoomId;
 
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
+  const stayDraft = useStayDraft(selectedGuest?.id);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(prefilledRoomTypeId);
@@ -284,6 +286,7 @@ export default function NewReservationPage() {
       const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         reservationCode: "",
         guestId: selectedGuest!.id,
+        stayDetailsInput: stayDraft.request,
         companyId: selectedCompany?.id || null,
         agencyId: selectedAgency?.id || null,
         roomTypeId: selectedRoomTypeId,
@@ -823,7 +826,7 @@ export default function NewReservationPage() {
                       </span>
                     </div>
                   )}
-                  <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2">
                     <Button type="button" size="sm" variant="outline" onClick={() => { setShowNrChargeForm(false); setNrChargePresetLabel(""); setNrChargeDesc(""); setNrChargeAmount(""); setNrChargeQty(1); setNrChargeRecurring(false); }}>Cancelar</Button>
                     <Button type="button" size="sm" onClick={() => {
                       if (!nrChargeDesc || !nrChargeAmount) return;
@@ -857,6 +860,7 @@ export default function NewReservationPage() {
         </div>
       </div>
 
+      <StaySelectionEditor guestId={selectedGuest?.id || ""} value={stayDraft.value} onChange={stayDraft.onChange} />
       <Card className="bg-muted/50">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Resumen de Reserva</CardTitle>

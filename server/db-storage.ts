@@ -1277,6 +1277,10 @@ export class DatabaseStorage implements IStorage {
       await db.execute(sql`SELECT id FROM reservations WHERE id=${id} FOR UPDATE`);
       const existing = await this.getReservation(id);
       if (!existing) return undefined;
+      if (reservation.guestId && reservation.guestId !== existing.guestId) {
+        reservation = { ...reservation, stayDetails: null };
+        await db.delete(reservationCompanions).where(and(eq(reservationCompanions.reservationId, id), isNotNull(reservationCompanions.profileMemberId)));
+      }
       const preparationAck=(reservation as any)._housekeepingPreparationAck;
       const warning=preparationMoveWarning(existing.housekeepingPreparation??null,existing.roomId,(reservation as any).roomId,preparationAck);
       if(warning)throw Object.assign(new Error(warning.error),{statusCode:409,response:warning});

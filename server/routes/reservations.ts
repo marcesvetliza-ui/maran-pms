@@ -1,5 +1,6 @@
 import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
+import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs";
@@ -7,7 +8,7 @@ import path from "path";
 import { assetPath } from "../utils/assetPath";
 import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
-import { db, pool } from "../db";
+import { db, pool, withDatabaseTransaction } from "../db";
 import type { PoolClient } from "pg";
 import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
@@ -131,6 +132,7 @@ export function calculateGroupPersonalExtrasCap(input: {
 }
 
 export function registerReservationsRoutes(app: Express) {
+  registerGuestStayRoutes(app);
   registerManualChargeActionRoutes(app);
 
   // ── PDF confirmation download ───────────────────────────────────────────────
@@ -315,6 +317,10 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/reservations", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
+      const stayDetailsInput = req.body.stayDetailsInput;
+      delete req.body.stayDetailsInput;
+      delete req.body.stayDetails;
+      if (stayDetailsInput !== undefined && (!staySelectionRequestSchema.safeParse(stayDetailsInput).success || stayDetailsInput.guestId !== req.body.guestId || stayDetailsInput.version !== 0)) return res.status(400).json({ error: "Revisá los familiares, vehículos y mascotas seleccionados para el titular." });
       const contextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
@@ -381,6 +387,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const reservation = await storage.createReservation(data, async (reservation) => {
+        if (stayDetailsInput) await saveStayDetails(reservation.id, stayDetailsInput);
 
         // Keep the durable reservation history as the source for rate chronology.
         // Only record an initial assignment when the create request supplied a
@@ -444,6 +451,8 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   app.patch("/api/reservations/:id", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
+    delete req.body.stayDetails;
+    delete req.body.stayDetailsInput;
     try {
       const preparationAck=req.body.acknowledgeHousekeepingPreparation;
       delete req.body.acknowledgeHousekeepingPreparation;
@@ -3628,36 +3637,64 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.post("/api/reservations/:id/companions", requireAuth, async (req, res) => {
+  async function mutateStayCompanion<T>(reservationId: string, action: () => Promise<T>) {
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT id FROM reservations WHERE id = ${reservationId} FOR UPDATE`);
+      const [reservation] = await db.select().from(reservations).where(eq(reservations.id, reservationId));
+      if (!reservation) throw Object.assign(new Error("Reserva no encontrada"), { statusCode: 404 });
+      const result = await action();
+      const details = reservation.stayDetails || { family: [], vehicles: [], pets: [], guestId: reservation.guestId, version: 0 };
+      await db.update(reservations).set({ stayDetails: { ...details, version: details.version + 1 } }).where(eq(reservations.id, reservationId));
+      return result;
+    });
+  }
+  app.post("/api/reservations/:id/companions", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
       const body = { ...req.body, reservationId: req.params.id };
+      delete body.profileMemberId;
       if (!body.dateOfBirth) delete body.dateOfBirth;
       const parsed = insertReservationCompanionSchema.safeParse(body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-      const companion = await storage.addReservationCompanion(parsed.data);
+      const companion = await mutateStayCompanion(req.params.id, async () => {
+        const existing = await storage.getReservationCompanions(req.params.id);
+        const duplicate = existing.find(row => row.profileMemberId && parsed.data.documentNumber && row.documentNumber === parsed.data.documentNumber && row.documentType.toLowerCase() === parsed.data.documentType?.toLowerCase());
+        return duplicate || storage.addReservationCompanion(parsed.data);
+      });
       res.status(201).json(companion);
     } catch {
       res.status(500).json({ error: "Error adding companion" });
     }
   });
 
-  app.patch("/api/reservations/:id/companions/:companionId", requireAuth, async (req, res) => {
+  app.patch("/api/reservations/:id/companions/:companionId", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
       const body = { ...req.body };
+      delete body.reservationId;
+      delete body.profileMemberId;
       if (!body.dateOfBirth) delete body.dateOfBirth;
-      const updated = await storage.updateReservationCompanion(req.params.companionId, body);
+      const parsed = insertReservationCompanionSchema.omit({ reservationId: true, profileMemberId: true }).partial().safeParse(body);
+      if (!parsed.success) return res.status(400).json({ error: "Revisá los datos del acompañante." });
+      const updated = await mutateStayCompanion(req.params.id, async () => {
+        const [row] = await db.select().from(reservationCompanions).where(and(eq(reservationCompanions.id, req.params.companionId), eq(reservationCompanions.reservationId, req.params.id)));
+        if (!row) throw Object.assign(new Error("Acompañante no encontrado"), { statusCode: 404 });
+        return storage.updateReservationCompanion(row.id, parsed.data);
+      });
       res.json(updated);
-    } catch {
-      res.status(500).json({ error: "Error updating companion" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Error updating companion" });
     }
   });
 
-  app.delete("/api/reservations/:id/companions/:companionId", requireAuth, async (req, res) => {
+  app.delete("/api/reservations/:id/companions/:companionId", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
-      await storage.deleteReservationCompanion(req.params.companionId);
+      await mutateStayCompanion(req.params.id, async () => {
+        const [row] = await db.select().from(reservationCompanions).where(and(eq(reservationCompanions.id, req.params.companionId), eq(reservationCompanions.reservationId, req.params.id)));
+        if (!row) throw Object.assign(new Error("Acompañante no encontrado"), { statusCode: 404 });
+        await storage.deleteReservationCompanion(row.id);
+      });
       res.json({ ok: true });
-    } catch {
-      res.status(500).json({ error: "Error deleting companion" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Error deleting companion" });
     }
   });
 

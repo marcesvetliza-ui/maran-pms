@@ -1,3 +1,5 @@
+import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
+import { emptyStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -78,6 +80,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const [newGuest, setNewGuest] = useState({
+    stayProfile: emptyStayProfile(),
     tipoPersona: "fisica" as "fisica" | "juridica",
     firstName: initialCreateGuest?.firstName || "",
     lastName: initialCreateGuest?.lastName || "",
@@ -128,7 +131,9 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
   const handleCreateGuest = () => {
     if (!newGuest.firstName) return;
     if (!isJuridicaGuest && !newGuest.lastName) return;
+    if (!isJuridicaGuest && !guestStayProfileSchema.safeParse(newGuest.stayProfile).success) return;
     onCreateNew({
+      stayProfile: isJuridicaGuest ? emptyStayProfile() : newGuest.stayProfile,
       tipoPersona: newGuest.tipoPersona,
       firstName: newGuest.firstName,
       lastName: isJuridicaGuest && !newGuest.lastName ? "-" : newGuest.lastName,
@@ -159,6 +164,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
       companyId: null,
     } as any);
     setNewGuest({
+      stayProfile: emptyStayProfile(),
       tipoPersona: "fisica",
       firstName: "", lastName: "", email: "", phone: "",
       documentType: "dni", documentNumber: "",
@@ -566,35 +572,13 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
                   </div>
                 )}
               </div>
-              <div className="border-t pt-3">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wide">Datos del Vehículo (opcional)</Label>
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Patente</Label>
-                    <Input value={newGuest.vehiculoPatente} onChange={(e) => setNewGuest({ ...newGuest, vehiculoPatente: e.target.value })} placeholder="ABC 123" data-testid="input-guest-vehiculo-patente" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Marca</Label>
-                    <Input value={newGuest.vehiculoMarca} onChange={(e) => setNewGuest({ ...newGuest, vehiculoMarca: e.target.value })} placeholder="Toyota" data-testid="input-guest-vehiculo-marca" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Modelo</Label>
-                    <Input value={newGuest.vehiculoModelo} onChange={(e) => setNewGuest({ ...newGuest, vehiculoModelo: e.target.value })} placeholder="Corolla" data-testid="input-guest-vehiculo-modelo" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Color</Label>
-                    <Input value={newGuest.vehiculoColor} onChange={(e) => setNewGuest({ ...newGuest, vehiculoColor: e.target.value })} placeholder="Blanco" data-testid="input-guest-vehiculo-color" />
-                  </div>
-                </div>
-              </div>
+              <GuestStayProfileEditor value={newGuest.stayProfile} onChange={stayProfile => setNewGuest(prev => ({ ...prev, stayProfile }))} />
             </>)}
 
             <Button
               type="button"
               onClick={handleCreateGuest}
-              disabled={isJuridicaGuest ? (!newGuest.firstName || !newGuest.cuilCuit) : (!newGuest.firstName || !newGuest.lastName)}
+              disabled={isJuridicaGuest ? (!newGuest.firstName || !newGuest.cuilCuit) : (!newGuest.firstName || !newGuest.lastName || !guestStayProfileSchema.safeParse(newGuest.stayProfile).success)}
               className="w-full"
               data-testid="button-create-guest"
             >

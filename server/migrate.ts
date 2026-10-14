@@ -6,6 +6,7 @@ import {ensureProductionPendingSchema} from "./productionPending";
 import {ensureAgreedInventoryTaxonomy} from "./inventoryTaxonomy";
 import {ensureInventoryLocationSchema} from "./inventoryLocations";
 import {ensureInventoryStage2Schema} from "./inventoryStage2Schema";
+import { ensureGuestStaySchema } from "./guestStaySchema";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL } from "./reservationPaymentRequest";
 import { db, pool } from "./db";
@@ -4985,6 +4986,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     FROM applied CROSS JOIN (VALUES ('reception'),('jefe_recepcion')) AS roles(role)
     ON CONFLICT DO NOTHING`);
   await ensureInventoryStage2Schema();
+  await ensureGuestStaySchema();
   await ensureInventoryLocationSchema();
   await ensureProductionPendingSchema();
   await ensureInventoryCountWarehouseSchema();

@@ -1,3 +1,4 @@
+import { StaySelectionEditor, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -108,6 +109,8 @@ export function QuickReservationDialog({
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [guestId, setGuestId] = useState("");
+  const stayDraft = useStayDraft(guestId);
+  useEffect(() => { if (!open) stayDraft.reset(); }, [open]);
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [checkOutDate, setCheckOutDate] = useState("");
   const [bedConfig, setBedConfig] = useState("");
@@ -191,7 +194,7 @@ export function QuickReservationDialog({
 
   const mutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", data);
+      const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", { ...data, stayDetailsInput: stayDraft.request });
       return res.json();
     },
     onSuccess: () => {
@@ -582,6 +585,7 @@ export function QuickReservationDialog({
             <Textarea placeholder="Notas o pedidos especiales..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="input-notes-quick" />
           </div>
         </div>
+        <StaySelectionEditor guestId={guestId} value={stayDraft.value} onChange={stayDraft.onChange} />
         <DialogFooter>
           <Button variant="outline" onClick={() => { onOpenChange(false); resetForm(); }} data-testid="button-cancel-quick">Volver</Button>
           <Button onClick={handleSubmit} disabled={mutation.isPending} data-testid="button-create-quick">

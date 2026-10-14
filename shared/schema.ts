@@ -1,4 +1,5 @@
 import type {InventoryAreaKey} from "./inventoryAreas";
+import type { GuestStayProfile, StaySelection } from "./guestStayProfile";
 import type { LostFoundShippingDetails } from "./lostFoundDelivery";
 import { sql } from "drizzle-orm";
 import { pgTable, pgSequence, text, varchar, integer, bigint, date, timestamp, decimal, boolean, serial, numeric, jsonb, uniqueIndex, primaryKey, index, check, unique } from "drizzle-orm/pg-core";
@@ -189,6 +190,7 @@ export type GuestSex = "masculino" | "femenino" | "otro" | "no_especifica";
 export type GuestSegment = "LEISURE" | "CORP" | "SPORT" | "CONGRESS" | "OTHER";
 
 export const guests = pgTable("guests", {
+  stayProfile: jsonb("stay_profile").$type<GuestStayProfile>(),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   codigo: text("codigo").unique(),
   firstName: text("first_name").notNull(),
@@ -270,6 +272,7 @@ export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "air
 
 export type HousekeepingPreparation = {roomId:string; state:'prepared'|'review'; note:string; markedAt:string; markedBy:string; previousRoomId?:string|null; movedAt?:string; movedBy?:string};
 export const reservations = pgTable("reservations", {
+  stayDetails: jsonb("stay_details").$type<StaySelection>(),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),
   reservationCode: text("reservation_code").notNull(),
@@ -3499,6 +3502,7 @@ export type QuoteConditions = typeof quoteConditions.$inferSelect;
 
 // Reservation Companions
 export const reservationCompanions = pgTable("reservation_companions", {
+  profileMemberId: varchar("profile_member_id", { length: 100 }),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   reservationId: varchar("reservation_id").notNull().references(() => reservations.id, { onDelete: "cascade" }),
   firstName: varchar("first_name", { length: 100 }).notNull(),

@@ -1,3 +1,4 @@
+import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -603,6 +604,8 @@ export function ReservationFormDialog({
 
   // Preferencias del huésped seleccionado (solo lectura, para mostrarlo en el form)
   const selectedGuestIdForPrefs = formData.guestId;
+  const stayDraft = useStayDraft(formData.guestId);
+  useEffect(() => { if (!open) stayDraft.reset(); }, [open]);
   const { data: selectedGuestPrefs } = useQuery<any[]>({
     queryKey: ["/api/guests", selectedGuestIdForPrefs, "preferences"],
     queryFn: () => fetch(`/api/guests/${selectedGuestIdForPrefs}/preferences`).then(r => r.json()),
@@ -835,6 +838,7 @@ export function ReservationFormDialog({
       const res = await apiRequestWithGroupInventoryWarning("POST", "/api/reservations", {
         ...data,
         reservationCode: data.reservationCode || generatedCode?.code || `RES-${Date.now()}`,
+        stayDetailsInput: stayDraft.request,
       });
       const created = await res.json();
       // Reservation is confirmed in DB at this point.
@@ -2047,7 +2051,8 @@ export function ReservationFormDialog({
 
             {/* Acompañantes — solo en nueva reserva */}
             {!isEditing && (
-              <div className="rounded-lg border overflow-hidden">
+              <StaySection title="Acompañantes" summary={`${pendingCompanions.length + stayDraft.value.selection.family.length} incluidos`}>
+                <SelectedFamilyCompanions value={stayDraft.value} onChange={stayDraft.onChange} />
                 <div className="flex items-center justify-between px-3 py-2.5 bg-muted/40">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Acompañantes</span>
@@ -2195,7 +2200,7 @@ export function ReservationFormDialog({
                   </div>
                 )}
 
-                {pendingCompanions.length === 0 && !showCompanionForm ? (
+                {pendingCompanions.length === 0 && stayDraft.value.selection.family.length === 0 && !showCompanionForm ? (
                   <div className="px-3 py-4 text-center text-xs text-muted-foreground">
                     Sin acompañantes (opcional)
                   </div>
@@ -2226,8 +2231,9 @@ export function ReservationFormDialog({
                     ))}
                   </ul>
                 )}
-              </div>
+              </StaySection>
             )}
+            {!isEditing && <StaySelectionEditor guestId={formData.guestId || ""} value={stayDraft.value} onChange={stayDraft.onChange} />}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -2543,6 +2549,7 @@ export function ReservationDetailDialog({
       apiRequest("POST", `/api/reservations/${reservation.id}/companions`, data),
     onSuccess: () => {
       refetchCompanions();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id, "stay-details"] });
       setShowAddCompanion(false);
       setNewCompanion(emptyComp);
       toast({ title: "Acompañante agregado" });
@@ -2555,6 +2562,7 @@ export function ReservationDetailDialog({
       apiRequest("PATCH", `/api/reservations/${reservation.id}/companions/${id}`, data),
     onSuccess: () => {
       refetchCompanions();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id, "stay-details"] });
       setEditingCompanionId(null);
       setEditCompanionData(emptyComp);
       toast({ title: "Acompañante actualizado" });
@@ -2567,6 +2575,7 @@ export function ReservationDetailDialog({
       apiRequest("DELETE", `/api/reservations/${reservation.id}/companions/${id}`, undefined),
     onSuccess: () => {
       refetchCompanions();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id, "stay-details"] });
       toast({ title: "Acompañante eliminado" });
     },
   });
@@ -2578,6 +2587,7 @@ export function ReservationDetailDialog({
     },
     onSuccess: (data) => {
       refetchCompanions();
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id, "stay-details"] });
       toast({ title: `Perfil creado: ${data?.guest?.firstName} ${data?.guest?.lastName}` });
     },
     onError: () => toast({ title: "Error al crear perfil de huésped", variant: "destructive" }),
@@ -3353,7 +3363,7 @@ export function ReservationDetailDialog({
             )}
 
             {/* Companions Section */}
-            <div className="border rounded-lg overflow-hidden">
+            <StaySection title="Acompañantes" summary={`${companions.length} incluidos`}>
               <div className="flex items-center justify-between px-4 py-3 bg-muted/40">
                 <div className="flex items-center gap-2">
                   <UserCheck className="h-4 w-4 text-muted-foreground" />
@@ -3663,8 +3673,9 @@ export function ReservationDetailDialog({
                   ))}
                 </ul>
               )}
-            </div>
+            </StaySection>
 
+            <ReservationStayDetails reservationId={reservation.id} guestId={reservation.guestId} />
             {(reservation.contactName || reservation.contactPhone) && (
               <div className="rounded-lg border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto de la Reserva</p>
