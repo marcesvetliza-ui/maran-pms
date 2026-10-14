@@ -9,12 +9,16 @@ import type { CompetitorComparison } from "./competitorPricing";
  *
  * La comparación contra competencia NUNCA usa el ADR del día (una tarifa
  * promedio realmente cobrada, mezclada con descuentos y $0) como si fuera
- * "nuestro precio publicado": compara contra la tarifa vigente del plan
- * tarifario (CompetitorComparison.ourPublishedRate, resuelta en
- * server/revenue/metrics.ts por tipo de habitación y fecha), y solo usa
- * tarifas de competencia ya filtradas por moneda/tipo de habitación/
- * antigüedad compatibles (ver buildCompetitorComparisons) — nunca mezcla
- * comparaciones incompatibles.
+ * "nuestro precio publicado": compara contra el plan tarifario de
+ * REFERENCIA configurado a mano por tipo de habitación (nunca un plan
+ * elegido automáticamente), y solo usa tarifas de competencia ya
+ * verificadas como compatibles — misma moneda, mismo tipo de habitación,
+ * misma condición de reembolso, mismo tramo de ocupación, no desactualizadas
+ * (ver buildCompetitorComparisons). Mientras un tipo de habitación no tenga
+ * plan de referencia configurado, o una tarifa de competencia no tenga
+ * cargadas sus condiciones, quedan excluidos del motor con el motivo
+ * explícito — igual siguen visibles como referencia manual en la pantalla
+ * de Tarifas de Competencia.
  */
 
 export type RateSuggestionDirection = "subir" | "bajar" | "mantener";
@@ -87,8 +91,12 @@ export function suggestRateAdjustment(input: RateSuggestionInput): RateSuggestio
         reasons.push(`${comp.excludedCount} tarifa(s) de competencia cargada(s) sin tipo de habitación especificado: no son comparables, se excluyen.`);
         continue;
       }
+      if (!comp.referenceConfigured) {
+        reasons.push(`${comp.roomTypeName}: no hay un plan tarifario de referencia configurado para este tipo de habitación — configuralo para habilitar la comparación.`);
+        continue;
+      }
       if (!comp.ourPublishedRate) {
-        reasons.push(`${comp.roomTypeName}: no hay un plan tarifario vigente para esa fecha, no se puede comparar contra la competencia.`);
+        reasons.push(`${comp.roomTypeName}: el plan de referencia configurado no está vigente para esta fecha, no se puede comparar contra la competencia.`);
         continue;
       }
       if (comp.compatibleRates.length === 0) {
@@ -97,13 +105,19 @@ export function suggestRateAdjustment(input: RateSuggestionInput): RateSuggestio
         continue;
       }
 
-      const avgCompetitor = comp.compatibleRates.reduce((sum, c) => sum + c.rate, 0) / comp.compatibleRates.length;
-      const diffPct = ((avgCompetitor - comp.ourPublishedRate.rate) / comp.ourPublishedRate.rate) * 100;
+      // Cada tarifa compatible ya trae su propio "ourRate" (puede ser un
+      // tramo de ocupación distinto del mismo plan de referencia), así que
+      // el gap se promedia por fila en vez de mezclar tramos en un único
+      // "nuestro precio" — evita comparar, por ejemplo, 1 pax de un lado
+      // contra 3 pax del otro.
+      const diffPcts = comp.compatibleRates.map(c => ((c.rate - c.ourRate) / c.ourRate) * 100);
+      const avgDiffPct = diffPcts.reduce((sum, d) => sum + d, 0) / diffPcts.length;
       reasons.push(
-        `${comp.roomTypeName}: tarifa publicada ($${comp.ourPublishedRate.name}) $${comp.ourPublishedRate.rate.toFixed(0)} ` +
-        `vs. promedio de ${comp.compatibleRates.length} competidor(es) compatible(s) (misma moneda, mismo tipo, no desactualizados): ` +
-        `$${avgCompetitor.toFixed(0)} (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(0)}%).`,
+        `${comp.roomTypeName}: tarifa de referencia (plan "${comp.ourPublishedRate.name}") ` +
+        `vs. promedio de ${comp.compatibleRates.length} competidor(es) compatible(s) (misma moneda, mismo tipo, misma condición de reembolso, mismo tramo de ocupación, no desactualizados): ` +
+        `${avgDiffPct >= 0 ? "+" : ""}${avgDiffPct.toFixed(0)}% respecto a nuestra tarifa en el tramo correspondiente.`,
       );
+      const diffPct = avgDiffPct;
 
       if (diffPct >= COMPETITOR_GAP_THRESHOLD_PCT && direction !== "subir") {
         direction = "subir";

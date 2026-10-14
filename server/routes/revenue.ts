@@ -7,7 +7,9 @@ import {
   revenueDemandEvents,
   competitorRates,
   revenueRateSuggestionConfig,
+  revenueReferenceRatePlans,
   roomTypes,
+  ratePlans,
   insertRevenueDemandEventSchema,
   insertCompetitorRateSchema,
   insertRevenueRateSuggestionConfigSchema,
@@ -20,7 +22,7 @@ import {
   ensureTodayPaceSnapshot,
   captureDailyPaceSnapshot,
   getPaceForStayDate,
-  loadRatePlansForRoomTypes,
+  loadReferenceRatePlanRows,
   buildCompetitorComparisons,
 } from "../revenue/metrics";
 import { suggestRateAdjustment } from "../revenue/suggestions";
@@ -186,13 +188,13 @@ export function registerRevenueRoutes(app: Express) {
 
       const roomTypeNameById = new Map(roomTypeRows.map(rt => [rt.id, rt.name]));
       const roomTypeIdsWithCompetitorData = [...new Set(rateRows.map(r => r.roomTypeId).filter((id): id is string => !!id))];
-      const ratePlansByRoomType = await loadRatePlansForRoomTypes(roomTypeIdsWithCompetitorData);
+      const referenceRatePlanRowByRoomType = await loadReferenceRatePlanRows(roomTypeIdsWithCompetitorData);
 
       const suggestions = days.map(day => {
         const dayEvents = events
           .filter(ev => ev.startDate <= day.date && day.date <= ev.endDate)
           .map(ev => ({ name: ev.name, category: ev.category, impact: ev.impact }));
-        const competitorComparisons = buildCompetitorComparisons(day.date, rateRows, roomTypeNameById, ratePlansByRoomType);
+        const competitorComparisons = buildCompetitorComparisons(day.date, rateRows, roomTypeNameById, referenceRatePlanRowByRoomType);
         return suggestRateAdjustment({
           date: day.date,
           occupancyPct: day.occupancyPct,
@@ -228,6 +230,60 @@ export function registerRevenueRoutes(app: Express) {
       res.json(row);
     } catch (e: any) {
       res.status(400).json({ error: e?.issues ? "Revisá los valores de configuración" : (e?.message || "No se pudo actualizar la configuración") });
+    }
+  });
+
+  // ── Plan tarifario de referencia por tipo de habitación ───────────────────
+  // Reemplaza cualquier heurística automática: sin esta configuración, ese
+  // tipo de habitación queda excluido de la comparación contra competencia
+  // en el motor de sugerencias (ver buildCompetitorComparisons).
+  app.get("/api/revenue/reference-rate-plans", requirePermission(REVENUE_READ), async (req, res) => {
+    try {
+      const [roomTypeRows, planRows, configRows] = await Promise.all([
+        db.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes),
+        db.select({ id: ratePlans.id, roomTypeId: ratePlans.roomTypeId, name: ratePlans.name }).from(ratePlans),
+        db.select().from(revenueReferenceRatePlans),
+      ]);
+      const configByRoomType = new Map(configRows.map(c => [c.roomTypeId, c]));
+      const result = roomTypeRows.map(rt => ({
+        roomTypeId: rt.id,
+        roomTypeName: rt.name,
+        configuredRatePlanId: configByRoomType.get(rt.id)?.ratePlanId ?? null,
+        availablePlans: planRows.filter(p => p.roomTypeId === rt.id).map(p => ({ id: p.id, name: p.name })),
+      }));
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: "No se pudo consultar la configuración de planes de referencia" });
+    }
+  });
+
+  app.put("/api/revenue/reference-rate-plans/:roomTypeId", requirePermission(REVENUE_CONFIGURE), async (req, res) => {
+    try {
+      const { roomTypeId } = req.params;
+      const { ratePlanId } = req.body as { ratePlanId: string | null };
+
+      if (ratePlanId === null || ratePlanId === undefined || ratePlanId === "") {
+        await db.delete(revenueReferenceRatePlans).where(eq(revenueReferenceRatePlans.roomTypeId, roomTypeId));
+        await audit(req, "update", "revenue", `Plan de referencia desconfigurado para el tipo de habitación ${roomTypeId}`, { entityType: "revenue_reference_rate_plan", entityId: roomTypeId });
+        return res.json({ roomTypeId, configuredRatePlanId: null });
+      }
+
+      const [plan] = await db.select({ id: ratePlans.id, roomTypeId: ratePlans.roomTypeId })
+        .from(ratePlans).where(eq(ratePlans.id, ratePlanId)).limit(1);
+      if (!plan || plan.roomTypeId !== roomTypeId) {
+        return res.status(400).json({ error: "El plan tarifario elegido no corresponde a este tipo de habitación" });
+      }
+
+      await db.insert(revenueReferenceRatePlans).values({
+        roomTypeId, ratePlanId, updatedBy: req.user?.id || null,
+      }).onConflictDoUpdate({
+        target: revenueReferenceRatePlans.roomTypeId,
+        set: { ratePlanId, updatedAt: new Date(), updatedBy: req.user?.id || null },
+      });
+      await audit(req, "update", "revenue", `Plan de referencia configurado para el tipo de habitación ${roomTypeId}`, { entityType: "revenue_reference_rate_plan", entityId: roomTypeId, details: { ratePlanId } });
+      res.json({ roomTypeId, configuredRatePlanId: ratePlanId });
+    } catch (e: any) {
+      res.status(400).json({ error: e?.message || "No se pudo guardar el plan de referencia" });
     }
   });
 }

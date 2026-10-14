@@ -29,6 +29,13 @@ export async function ensureRevenueManagementSchema() {
     created_at timestamp NOT NULL DEFAULT now()
   )`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS competitor_rates_stay_date_idx ON competitor_rates(stay_date)`);
+  // Condiciones necesarias para comparar de forma justa (reembolsabilidad,
+  // tramo de ocupación). Nullable: mientras falten, la fila sigue siendo
+  // válida como referencia manual pero el motor la excluye explícitamente.
+  await db.execute(sql`ALTER TABLE competitor_rates ADD COLUMN IF NOT EXISTS refundable boolean`);
+  await db.execute(sql`ALTER TABLE competitor_rates ADD COLUMN IF NOT EXISTS occupancy integer`);
+  await db.execute(sql`ALTER TABLE competitor_rates DROP CONSTRAINT IF EXISTS competitor_rates_occupancy_check`);
+  await db.execute(sql`ALTER TABLE competitor_rates ADD CONSTRAINT competitor_rates_occupancy_check CHECK(occupancy IS NULL OR occupancy BETWEEN 1 AND 4)`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS revenue_pace_snapshots (
     id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -65,5 +72,15 @@ export async function ensureRevenueManagementSchema() {
     status text NOT NULL DEFAULT 'completed' CHECK(status = 'completed'),
     days_captured integer NOT NULL DEFAULT 0,
     horizon_days integer NOT NULL DEFAULT 0
+  )`);
+
+  // Plan tarifario de referencia por tipo de habitación, configurado a mano.
+  // Sin fila acá, ese tipo de habitación queda excluido de la comparación
+  // contra competencia en el motor de sugerencias (ver competitorPricing.ts).
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS revenue_reference_rate_plans (
+    room_type_id varchar PRIMARY KEY REFERENCES room_types(id),
+    rate_plan_id varchar NOT NULL REFERENCES rate_plans(id),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_by varchar
   )`);
 }

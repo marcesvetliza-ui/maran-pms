@@ -3797,6 +3797,12 @@ export type RevenueDemandEvent = typeof revenueDemandEvents.$inferSelect;
 
 // Carga manual de tarifas de competidores. Sin scraping: el dato lo ingresa
 // un operador a partir de lo que ve en OTAs/webs de la competencia.
+// refundable/occupancy quedan nullable a propósito: son las "condiciones"
+// necesarias para una comparación justa contra nuestra tarifa publicada
+// (misma reembolsabilidad, mismo tramo de ocupación). Mientras el operador
+// no las cargue, la fila sigue siendo válida como referencia manual en la
+// pantalla de Tarifas de Competencia, pero el motor de sugerencias la
+// excluye explícitamente — ver buildCompetitorComparisons.
 export const competitorRates = pgTable("competitor_rates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   competitorName: text("competitor_name").notNull(),
@@ -3804,10 +3810,13 @@ export const competitorRates = pgTable("competitor_rates", {
   stayDate: date("stay_date").notNull(),
   rate: decimal("rate", { precision: 12, scale: 2 }).notNull(),
   currency: text("currency").notNull().default("ARS"),
+  refundable: boolean("refundable"),
+  occupancy: integer("occupancy"),
   sourceNote: text("source_note"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, table => [check("competitor_rates_rate_check", sql`${table.rate} >= 0`),
+  check("competitor_rates_occupancy_check", sql`${table.occupancy} IS NULL OR ${table.occupancy} BETWEEN 1 AND 4`),
   index("competitor_rates_stay_date_idx").on(table.stayDate)]);
 
 export const insertCompetitorRateSchema = createInsertSchema(competitorRates).omit({
@@ -3859,6 +3868,25 @@ export const insertRevenuePaceSnapshotRunSchema = createInsertSchema(revenuePace
 });
 export type InsertRevenuePaceSnapshotRun = z.infer<typeof insertRevenuePaceSnapshotRunSchema>;
 export type RevenuePaceSnapshotRun = typeof revenuePaceSnapshotRuns.$inferSelect;
+
+// Plan tarifario de referencia por tipo de habitación, configurado a mano
+// por un administrador (api:revenue:configure). Reemplaza cualquier
+// heurística automática ("el plan más reciente") para decidir contra qué
+// tarifa propia se compara la competencia: mientras un tipo de habitación
+// no tenga fila acá, su comparación queda excluida del motor (igual criterio
+// que las condiciones faltantes en competitor_rates — nunca se adivina).
+export const revenueReferenceRatePlans = pgTable("revenue_reference_rate_plans", {
+  roomTypeId: varchar("room_type_id").primaryKey().references(() => roomTypes.id),
+  ratePlanId: varchar("rate_plan_id").notNull().references(() => ratePlans.id),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by"),
+});
+
+export const insertRevenueReferenceRatePlanSchema = createInsertSchema(revenueReferenceRatePlans).omit({
+  updatedAt: true,
+});
+export type InsertRevenueReferenceRatePlan = z.infer<typeof insertRevenueReferenceRatePlanSchema>;
+export type RevenueReferenceRatePlan = typeof revenueReferenceRatePlans.$inferSelect;
 
 // Configuración (fila única, id=1) del motor de sugerencias de tarifa.
 // El motor solo lee esta config y produce texto explicativo: nunca escribe
