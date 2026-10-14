@@ -47,6 +47,7 @@ const PreIngresoPage = lazy(() => import("@/pages/pre-ingreso"));
 const ChatbotDashboardPage = lazy(() => import("@/pages/chatbot-dashboard"));
 const HospitalityPage = lazy(() => import("@/pages/hospitality"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
+const RevenueManagementPage = lazy(() => import("@/pages/revenue-management"));
 const DashboardExecutivePage = lazy(() => import("@/pages/dashboard-executive"));
 const CashRegisterPage = lazy(() => import("@/pages/cash-register"));
 const SourceCodePage = lazy(() => import("@/pages/source-code"));
@@ -253,6 +254,7 @@ function Router() {
         <Route path="/chatbot" component={ChatbotDashboardPage} />
         <Route path="/hospitality" component={HospitalityPage} />
         <Route path="/reports" component={ReportsPage} />
+        <Route path="/revenue-management" component={RevenueManagementPage} />
         <Route path="/executive" component={DashboardExecutivePage} />
         <Route path="/cash-register" component={CashRegisterPage} />
         <Route path="/admin" component={AdminPage} />

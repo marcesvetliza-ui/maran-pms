@@ -45,6 +45,7 @@ import { registerChannexRoutes } from "./routes/channex";
 import { registerPlanningRoutes } from "./routes/planning";
 import { registerPackagesRoutes } from "./routes/packages";
 import { registerRoomsRoutes } from "./routes/rooms";
+import { registerRevenueRoutes } from "./routes/revenue";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
 import { audit } from "./audit";
 import { registerGuestsRoutes } from "./routes/guests";
@@ -4034,6 +4035,7 @@ export async function registerRoutes(
   registerEventsRoutes(app);
   registerPresupuestosRoutes(app);
   registerRoomsRoutes(app);
+  registerRevenueRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);
   registerChannexRoutes(app);

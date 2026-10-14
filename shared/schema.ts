@@ -3759,3 +3759,97 @@ export const inventoryLocationPolicies = pgTable("inventory_location_policies", 
   isExpected: boolean("is_expected").notNull().default(true),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, table => ({pairPrimary: primaryKey({columns:[table.warehouseId,table.itemId]})}));
+
+// ==================== REVENUE MANAGEMENT ====================
+// v1: tablero de ocupación/ADR/RevPAR, pace report, calendario de demanda,
+// tarifas de competencia (carga manual) y motor de sugerencias explicable.
+// El motor de sugerencias nunca escribe en rate_plans: solo informa.
+
+export type RevenueDemandEventCategory = "feriado" | "evento_ciudad" | "otro";
+export type RevenueDemandEventImpact = "alto" | "medio" | "bajo";
+
+export const revenueDemandEvents = pgTable("revenue_demand_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  category: text("category").$type<RevenueDemandEventCategory>().notNull().default("otro"),
+  impact: text("impact").$type<RevenueDemandEventImpact>().notNull().default("medio"),
+  notes: text("notes"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, table => [check("revenue_demand_events_category_check", sql`${table.category} IN ('feriado','evento_ciudad','otro')`),
+  check("revenue_demand_events_impact_check", sql`${table.impact} IN ('alto','medio','bajo')`),
+  check("revenue_demand_events_date_range_check", sql`${table.endDate} >= ${table.startDate}`),
+  index("revenue_demand_events_range_idx").on(table.startDate, table.endDate)]);
+
+export const insertRevenueDemandEventSchema = createInsertSchema(revenueDemandEvents, {
+  category: z.enum(["feriado", "evento_ciudad", "otro"]),
+  impact: z.enum(["alto", "medio", "bajo"]),
+}).omit({
+  id: true, createdAt: true, updatedAt: true,
+});
+export type InsertRevenueDemandEvent = z.infer<typeof insertRevenueDemandEventSchema>;
+export type RevenueDemandEvent = typeof revenueDemandEvents.$inferSelect;
+
+// Carga manual de tarifas de competidores. Sin scraping: el dato lo ingresa
+// un operador a partir de lo que ve en OTAs/webs de la competencia.
+export const competitorRates = pgTable("competitor_rates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  competitorName: text("competitor_name").notNull(),
+  roomTypeId: varchar("room_type_id").references(() => roomTypes.id),
+  stayDate: date("stay_date").notNull(),
+  rate: decimal("rate", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("ARS"),
+  sourceNote: text("source_note"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, table => [check("competitor_rates_rate_check", sql`${table.rate} >= 0`),
+  index("competitor_rates_stay_date_idx").on(table.stayDate)]);
+
+export const insertCompetitorRateSchema = createInsertSchema(competitorRates).omit({
+  id: true, createdAt: true,
+});
+export type InsertCompetitorRate = z.infer<typeof insertCompetitorRateSchema>;
+export type CompetitorRate = typeof competitorRates.$inferSelect;
+
+// Una fila por (snapshotDate, stayDate): "al día snapshotDate, la fecha
+// stayDate tenía esta cantidad de habitaciones vendidas e ingreso". Permite
+// reconstruir pace reports reales a futuro sin inventar historial retroactivo.
+export const revenuePaceSnapshots = pgTable("revenue_pace_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  snapshotDate: date("snapshot_date").notNull(),
+  stayDate: date("stay_date").notNull(),
+  roomsSold: integer("rooms_sold").notNull().default(0),
+  roomRevenue: decimal("room_revenue", { precision: 12, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, table => [unique("revenue_pace_snapshots_snapshot_stay_key").on(table.snapshotDate, table.stayDate),
+  index("revenue_pace_snapshots_stay_date_idx").on(table.stayDate)]);
+
+export const insertRevenuePaceSnapshotSchema = createInsertSchema(revenuePaceSnapshots).omit({
+  id: true, createdAt: true,
+});
+export type InsertRevenuePaceSnapshot = z.infer<typeof insertRevenuePaceSnapshotSchema>;
+export type RevenuePaceSnapshot = typeof revenuePaceSnapshots.$inferSelect;
+
+// Configuración (fila única, id=1) del motor de sugerencias de tarifa.
+// El motor solo lee esta config y produce texto explicativo: nunca escribe
+// en rate_plans ni aplica nada automáticamente.
+export const revenueRateSuggestionConfig = pgTable("revenue_rate_suggestion_config", {
+  id: integer("id").primaryKey().default(1),
+  highOccupancyThresholdPct: decimal("high_occupancy_threshold_pct", { precision: 5, scale: 2 }).notNull().default("80"),
+  lowOccupancyThresholdPct: decimal("low_occupancy_threshold_pct", { precision: 5, scale: 2 }).notNull().default("40"),
+  increaseSuggestionPct: decimal("increase_suggestion_pct", { precision: 5, scale: 2 }).notNull().default("10"),
+  decreaseSuggestionPct: decimal("decrease_suggestion_pct", { precision: 5, scale: 2 }).notNull().default("10"),
+  considerDemandEvents: boolean("consider_demand_events").notNull().default(true),
+  considerCompetitorRates: boolean("consider_competitor_rates").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by"),
+}, table => [check("revenue_rate_suggestion_config_single_row_check", sql`${table.id} = 1`)]);
+
+export const insertRevenueRateSuggestionConfigSchema = createInsertSchema(revenueRateSuggestionConfig).omit({
+  updatedAt: true,
+});
+export type InsertRevenueRateSuggestionConfig = z.infer<typeof insertRevenueRateSuggestionConfigSchema>;
+export type RevenueRateSuggestionConfig = typeof revenueRateSuggestionConfig.$inferSelect;

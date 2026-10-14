@@ -153,6 +153,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "sidebar:/reports": [
     "admin", "manager", "ama_de_llaves", "resp_administracion", "responsable_area", "jefe_recepcion", "comercial",
   ],
+  "sidebar:/revenue-management": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
 
   // ── CONFIGURACIÓN ────────────────────────────────────────────────────────
   // Comparte resourceKey con el AdminRoute de App.tsx ("/administration") —
@@ -250,6 +251,15 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:reports:forecast": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
   "api:reports:export-pdf": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
   "api:reports:export-excel": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+
+  // Revenue Management (tablero/pace/sugerencias de solo lectura vs. carga
+  // manual de calendario de demanda/tarifas de competencia vs. configuración
+  // del motor de sugerencias) — permisos separados a propósito, igual que
+  // api:reports:* y api:inventory:*.
+  "api:revenue:read": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:revenue:events-write": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:revenue:competitor-write": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
+  "api:revenue:configure": ["admin", "manager"],
 
   // server/routes.ts — GET /api/dashboard/breakfasts, lista de desayunos.
   "api:dashboard:breakfasts": ["admin", "manager", "ama_de_llaves", "restaurant", "reception", "jefe_recepcion"],
@@ -374,6 +384,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:/operaciones": { label: "Operaciones", section: "Gerencia & Revenue" },
   "sidebar:/executive": { label: "Ejecutivo", section: "Gerencia & Revenue" },
   "sidebar:/reports": { label: "Reportes", section: "Gerencia & Revenue" },
+  "sidebar:/revenue-management": { label: "Revenue Management", section: "Gerencia & Revenue" },
 
   "sidebar:/administration": { label: "Configuración", section: "Configuración" },
   "sidebar:/admin/room-types/integrity": { label: "Reparar tipos de habitación", section: "Configuración" },
@@ -422,6 +433,11 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:forecast": { label: "Forecast", section: "API — Reportes" },
   "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
+
+  "api:revenue:read": { label: "Ver tablero, pace report y sugerencias", section: "API — Revenue Management" },
+  "api:revenue:events-write": { label: "Cargar calendario de demanda", section: "API — Revenue Management" },
+  "api:revenue:competitor-write": { label: "Cargar tarifas de competencia", section: "API — Revenue Management" },
+  "api:revenue:configure": { label: "Configurar motor de sugerencias", section: "API — Revenue Management" },
   "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
   "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
   "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },
