@@ -40,11 +40,15 @@ suite("Selecciones de estadía con PostgreSQL real", () => {
     await pool!.query("INSERT INTO room_types(id,code,name) VALUES($1,$2,'Prueba')", [prefix, prefix]);
     await pool!.query("INSERT INTO rooms(id,room_number,room_type_id,status) VALUES($1,$2,$1,'available')", [prefix, prefix]);
     service = await import("../guestStayDetails");
-    const app = express(); app.use(express.json()); service.registerGuestStayRoutes(app);
-    server = http.createServer(app); await new Promise<void>(resolve => server.listen(0,"127.0.0.1",resolve)); base = `http://127.0.0.1:${(server.address() as any).port}`;
+    const app = express(); app.use(express.json()); app.use((req,_res,next) => { req.user = {id:prefix,username:"Prueba",role:"admin"} as any; req.isAuthenticated = () => Boolean(req.headers["x-role"]); next(); });
+    server = http.createServer(app);
+    const { registerRoutes } = await import("../routes"); await registerRoutes(server,app);
+    await new Promise<void>(resolve => server.listen(0,"127.0.0.1",resolve)); base = `http://127.0.0.1:${(server.address() as any).port}`;
   });
   afterAll(async () => {
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    await pool!.query("DELETE FROM reservation_changelog WHERE reservation_id IN(SELECT id FROM reservations WHERE reservation_code LIKE $1)", [`${prefix}%`]);
+    await pool!.query("DELETE FROM audit_logs WHERE entity_id IN(SELECT id FROM reservations WHERE reservation_code LIKE $1)", [`${prefix}%`]);
     await pool!.query("DELETE FROM reservations WHERE reservation_code LIKE $1", [`${prefix}%`]);
     await pool!.query("DELETE FROM guests WHERE id IN($1,$2)", [prefix,`${prefix}-other`]);
     await pool!.query("DELETE FROM rooms WHERE id=$1", [prefix]); await pool!.query("DELETE FROM room_types WHERE id=$1", [prefix]);
@@ -59,6 +63,22 @@ suite("Selecciones de estadía con PostgreSQL real", () => {
     expect((await pool!.query("SELECT first_name, profile_member_id FROM reservation_companions WHERE reservation_id=$1",[id])).rows).toEqual([{first_name:"Ana",profile_member_id:"daughter"}]);
     expect((await pool!.query("SELECT id FROM guests WHERE id LIKE $1",[`${prefix}%`])).rows).toHaveLength(2);
     expect((await request(id)).body.vehicles[0].plate).toBe("ABC123");
+  });
+  it("la API completa guarda la edición del perfil y lo conserva al crear una reserva", async () => {
+    await pool!.query("UPDATE guests SET stay_profile=null,vehiculo_patente=null,vehiculo_marca=null,vehiculo_modelo=null,vehiculo_color=null WHERE id=$1",[prefix]);
+    const headers={"Content-Type":"application/json","x-role":"reception"};
+    const updated=await fetch(`${base}/api/guests/${prefix}`,{method:"PATCH",headers,body:JSON.stringify({stayProfile:profile,vehiculoPatente:"",vehiculoMarca:"",vehiculoModelo:"",vehiculoColor:"",id:"no-se-debe-cambiar"})});
+    expect(updated.status).toBe(200);expect(await updated.json()).toMatchObject({id:prefix,stayProfile:profile,vehiculoPatente:"ABC123"});
+    const reloaded=await fetch(`${base}/api/guests/${prefix}`,{headers});expect((await reloaded.json()).stayProfile).toEqual(profile);
+    const created=await fetch(`${base}/api/reservations`,{method:"POST",headers,body:JSON.stringify({reservationCode:`${prefix}-profile-route`,guestId:prefix,roomTypeId:prefix,roomId:prefix,checkInDate:"2032-01-01",checkOutDate:"2032-01-03",nights:2,finalRatePerNight:"100",totalRoomAmount:"200",status:"confirmed",numberOfGuests:1,stayDetailsInput:input(0,emptyStayProfile())})});
+    expect(created.status).toBe(201);const row=await created.json();expect((await request(row.id)).body).toMatchObject(emptyStayProfile());
+    expect((await (await fetch(`${base}/api/guests/${prefix}`,{headers})).json()).stayProfile).toEqual(profile);
+  });
+  it("la ruta completa valida perfiles inválidos y conserva el perfil previamente guardado",async()=>{
+    const headers={"Content-Type":"application/json","x-role":"reception"};
+    const response=await fetch(`${base}/api/guests/${prefix}`,{method:"PATCH",headers,body:JSON.stringify({stayProfile:{...profile,pets:[{...profile.pets[0],species:""}]}})});
+    expect(response.status).toBe(400);
+    expect((await (await fetch(`${base}/api/guests/${prefix}`,{headers})).json()).stayProfile).toEqual(profile);
   });
   it("editar la ficha habitual no reescribe los datos de una estadía", async () => {
     const id = await reservation(); await service.saveStayDetails(id,input());
