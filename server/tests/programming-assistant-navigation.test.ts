@@ -35,6 +35,9 @@ describe("code navigation", () => {
     expect(result.endpointContext[0].tests).toEqual([]);
     expect(result.workflowReads.find(read=>read.path==="client/src/lib/queryClient.ts")?.content).toContain("await throwIfResNotOk(res)");
     expect(result.workflowReads[0].content).toContain("res.status");
+    expect(result.workflowReads.some(read=>read.content.includes("export function parseApiError"))).toBe(true);
+    expect(result.workflowReads.some(read=>read.content.includes("return String(parsed.error)"))).toBe(true);
+    expect(result.workflowReads.some(read=>read.path.startsWith("client/src/pages/") && read.content.includes("parseApiError("))).toBe(true);
     expect(result.workflowReads.every(read=>source.validates(read))).toBe(true);
   });
   it("does not route a reservation discount into purchase invoices", async () => {

@@ -68,9 +68,17 @@ export async function orientInvestigation(
     : [];
   if (errorFlow && endpointContext.some(context => context.callers.some(read => /\bapiRequest\s*\(/.test(read.content))) && files.includes("client/src/lib/queryClient.ts")) {
     workflowReads.push(await source.read("client/src/lib/queryClient.ts", 1, 40));
+    // Read the existing presentation helper, not just transport, plus one real use.
+    const parser = await source.inspectSymbol("parseApiError", { maxDefinitions: 1, maxTests: 0, lines: 100 });
+    workflowReads.push(...parser.definitions);
+    if (parser.definitions.length) {
+      const examples = await source.search("parseApiError(", "client/src/pages/");
+      const example = examples.matches.find(match => !match.path.includes(".test."));
+      if (example) workflowReads.push(await source.read(example.path, Math.max(1, example.line - 3), example.line + 3));
+    }
   }
   return {
-    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : undefined,
+    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : undefined,
     endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,
