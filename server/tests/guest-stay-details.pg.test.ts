@@ -117,12 +117,34 @@ suite("Selecciones de estadía con PostgreSQL real", () => {
   it("un fallo al recordar datos revierte también la selección y los acompañantes", async () => {
     const id = await reservation(); const invalidRemember = {...emptyStayProfile(), vehicles:Array.from({length:10},(_,i)=>({...profile.vehicles[0],id:`extra${i}`}))};
     await expect(service.saveStayDetails(id,{...input(),remember:invalidRemember})).rejects.toThrow();
-    expect((await service.readStayDetails(id)).version).toBe(0); expect((await pool!.query("SELECT id FROM reservation_companions WHERE reservation_id=$1",[id])).rows).toHaveLength(0);
+    expect((await service.readStayDetails(id)).version).toBe(0); expect((await service.readStayDetails(id)).numberOfGuests).toBe(1); expect((await pool!.query("SELECT id FROM reservation_companions WHERE reservation_id=$1",[id])).rows).toHaveLength(0);
   });
   it("valida datos y permisos en el servidor", async () => {
     const id = await reservation(); expect((await request(id,input(),"housekeeping")).status).toBe(403); expect((await request(id,undefined,"housekeeping")).status).toBe(403);
     expect((await request(id,input(0,{...profile,vehicles:[{...profile.vehicles[0],plate:""}]}))).status).toBe(400);
     expect((await request(id,input(0,{...profile,family:[{...profile.family[0],dateOfBirth:"2015-02-30"}]}))).status).toBe(400);
+  });
+  it("contabiliza titular y familiares y no modifica importes de alojamiento",async()=>{
+    const id=await reservation();await pool!.query("UPDATE reservations SET final_rate_per_night=85,total_room_amount=170 WHERE id=$1",[id]);
+    expect((await request(id,input())).body.numberOfGuests).toBe(2);
+    const row=(await pool!.query("SELECT number_of_guests,final_rate_per_night,total_room_amount FROM reservations WHERE id=$1",[id])).rows[0];
+    expect(row).toEqual({number_of_guests:2,final_rate_per_night:"85.00",total_room_amount:"170.00"});
+    expect((await request(id,input(1,emptyStayProfile()))).body.numberOfGuests).toBe(1);
+  });
+  it("incluye acompañantes ocasionales, no cuenta autos o mascotas y conserva personas sin identificar",async()=>{
+    const id=await reservation();await pool!.query("INSERT INTO reservation_companions(reservation_id,first_name,last_name) VALUES($1,'Amigo','Prueba')",[id]);
+    expect((await request(id,input())).body.numberOfGuests).toBe(3);
+    const incomplete=await reservation();await pool!.query("UPDATE reservations SET number_of_guests=4 WHERE id=$1",[incomplete]);
+    expect((await request(incomplete,input())).body.numberOfGuests).toBe(4);
+    expect((await request(incomplete,input(1,{...profile,family:[]}))).body.numberOfGuests).toBe(4);
+    const onlyPets=await reservation();expect((await request(onlyPets,input(0,{...profile,family:[]}))).body.numberOfGuests).toBe(1);
+  });
+  it("agregar y quitar acompañantes desde la API actualiza también la cantidad",async()=>{
+    const id=await reservation();const headers={"Content-Type":"application/json","x-role":"reception"};
+    const response=await fetch(`${base}/api/reservations/${id}/companions`,{method:"POST",headers,body:JSON.stringify({firstName:"Amigo",lastName:"Prueba"})});expect(response.status).toBe(201);const row=await response.json();
+    expect((await request(id)).body.numberOfGuests).toBe(2);
+    const deleted=await fetch(`${base}/api/reservations/${id}/companions/${row.id}`,{method:"DELETE",headers});expect(deleted.status).toBe(200);
+    expect((await request(id)).body.numberOfGuests).toBe(1);
   });
   it("crear una reserva y sus selecciones se confirma en una sola transacción", async () => {
     const { storage } = await import("../db-storage");

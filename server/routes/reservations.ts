@@ -1,5 +1,6 @@
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
+import { guestCountAfterCompanionChange } from "@shared/reservationGuestCount";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs";
@@ -387,7 +388,12 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       const reservation = await storage.createReservation(data, async (reservation) => {
-        if (stayDetailsInput) await saveStayDetails(reservation.id, stayDetailsInput);
+        if (stayDetailsInput) {
+          const details = await saveStayDetails(reservation.id, stayDetailsInput);
+          reservation.numberOfGuests = details.numberOfGuests;
+          const { numberOfGuests: _count, companionCount: _companions, ...snapshot } = details;
+          reservation.stayDetails = snapshot;
+        }
 
         // Keep the durable reservation history as the source for rate chronology.
         // Only record an initial assignment when the create request supplied a
@@ -3642,9 +3648,11 @@ export function registerReservationsRoutes(app: Express) {
       await db.execute(sql`SELECT id FROM reservations WHERE id = ${reservationId} FOR UPDATE`);
       const [reservation] = await db.select().from(reservations).where(eq(reservations.id, reservationId));
       if (!reservation) throw Object.assign(new Error("Reserva no encontrada"), { statusCode: 404 });
+      const before = await storage.getReservationCompanions(reservationId);
       const result = await action();
+      const after = await storage.getReservationCompanions(reservationId);
       const details = reservation.stayDetails || { family: [], vehicles: [], pets: [], guestId: reservation.guestId, version: 0 };
-      await db.update(reservations).set({ stayDetails: { ...details, version: details.version + 1 } }).where(eq(reservations.id, reservationId));
+      await db.update(reservations).set({ stayDetails: { ...details, version: details.version + 1 }, numberOfGuests: guestCountAfterCompanionChange(reservation.numberOfGuests, before.length, after.length) }).where(eq(reservations.id, reservationId));
       return result;
     });
   }

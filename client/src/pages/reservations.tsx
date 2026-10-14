@@ -1,4 +1,4 @@
-import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, useStayDraft } from "@/components/guest-stay-profile";
+import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -3349,7 +3349,7 @@ export function ReservationDetailDialog({
               </div>
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Huéspedes</p>
-                <p className="font-medium">{reservation.numberOfGuests} persona(s)</p>
+                <p className="font-medium"><ReservationGuestCount reservationId={reservation.id} guestId={reservation.guestId} fallback={reservation.numberOfGuests} /></p>
               </div>
             </div>
 

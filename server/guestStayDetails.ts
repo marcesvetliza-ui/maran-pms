@@ -5,20 +5,22 @@ import { db, withDatabaseTransaction } from "./db";
 import { guests, reservations, reservationCompanions } from "@shared/schema";
 import { emptyStayProfile, getGuestStayProfile, guestStayProfileSchema, mergeStayProfiles, type StaySelection } from "@shared/guestStayProfile";
 import { requireAuth, requirePermission } from "./auth";
+import { guestCountAfterCompanionChange } from "@shared/reservationGuestCount";
+import type { StayDetailsView } from "@shared/guestStayProfile";
 
 export const staySelectionRequestSchema = z.object({ guestId: z.string().min(1), version: z.number().int().nonnegative(), selection: guestStayProfileSchema, remember: guestStayProfileSchema.optional() }).strict();
 function conflict(message: string, statusCode = 409) { return Object.assign(new Error(message), { statusCode }); }
 
-export async function readStayDetails(reservationId: string): Promise<StaySelection> {
+export async function readStayDetails(reservationId: string): Promise<StayDetailsView> {
   const [reservation] = await db.select().from(reservations).where(eq(reservations.id, reservationId));
   if (!reservation) throw conflict("Reserva no encontrada", 404);
   const companions = await db.select().from(reservationCompanions).where(eq(reservationCompanions.reservationId, reservationId));
   const saved = reservation.stayDetails;
-  return { ...emptyStayProfile(), ...saved, guestId: reservation.guestId, version: saved?.version || 0,
+  return { ...emptyStayProfile(), ...saved, guestId: reservation.guestId, version: saved?.version || 0, numberOfGuests: reservation.numberOfGuests, companionCount: companions.length,
     family: companions.filter(row => row.profileMemberId).map(row => ({ id: row.profileMemberId!, firstName: row.firstName, lastName: row.lastName, documentType: row.documentType, documentNumber: row.documentNumber || "", dateOfBirth: row.dateOfBirth || "", nationality: row.nationality || "", relationship: saved?.family.find(member => member.id === row.profileMemberId)?.relationship || "" })) };
 }
 
-export async function saveStayDetails(reservationId: string, input: unknown): Promise<StaySelection> {
+export async function saveStayDetails(reservationId: string, input: unknown): Promise<StayDetailsView> {
   const request = staySelectionRequestSchema.parse(input);
   return withDatabaseTransaction(async () => {
     await db.execute(sql`SELECT id FROM reservations WHERE id = ${reservationId} FOR UPDATE`);
@@ -37,7 +39,9 @@ export async function saveStayDetails(reservationId: string, input: unknown): Pr
       else await db.insert(reservationCompanions).values({ reservationId, profileMemberId: member.id, firstName: member.firstName, lastName: member.lastName, documentType: member.documentType, documentNumber: member.documentNumber || null, dateOfBirth: member.dateOfBirth || null, nationality: member.nationality || null });
     }
     const details = { ...request.selection, guestId: current.guestId, version: current.version + 1 };
-    await db.update(reservations).set({ stayDetails: details }).where(eq(reservations.id, reservationId));
+    const finalCompanions = await db.select({ id: reservationCompanions.id }).from(reservationCompanions).where(eq(reservationCompanions.reservationId, reservationId));
+    const numberOfGuests = guestCountAfterCompanionChange(current.numberOfGuests, existing.length, finalCompanions.length);
+    await db.update(reservations).set({ stayDetails: details, numberOfGuests }).where(eq(reservations.id, reservationId));
     if (request.remember && Object.values(request.remember).some(rows => rows.length > 0)) {
       await db.execute(sql`SELECT id FROM guests WHERE id = ${current.guestId} FOR UPDATE`);
       const [guest] = await db.select().from(guests).where(eq(guests.id, current.guestId));

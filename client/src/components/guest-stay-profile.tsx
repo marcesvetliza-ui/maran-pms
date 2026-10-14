@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiRequest, parseApiError, queryClient } from "@/lib/queryClient";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, parseApiError } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import type { Guest } from "@shared/schema";
-import { emptyStayProfile, getGuestStayProfile, guestStayProfileSchema, type GuestStayProfile, type StaySelection } from "@shared/guestStayProfile";
+import { emptyStayProfile, getGuestStayProfile, guestStayProfileSchema, type GuestStayProfile, type StaySelection, type StayDetailsView } from "@shared/guestStayProfile";
 
 type Kind = keyof GuestStayProfile;
 const labels: Record<Kind, string> = { vehicles: "Vehículos", family: "Grupo familiar", pets: "Mascotas" };
@@ -77,7 +77,7 @@ export function StaySelectionEditor({ guestId, value, onChange }: { guestId: str
       const selected = value.selection[kind];
       const available = [...selected, ...profile[kind].filter(row => !selected.some(item => item.id === row.id))];
       return <StaySection key={kind} title={labels[kind]} summary={`${selected.length} seleccionados · ${profile[kind].length} habituales`}>
-        {kind === "family" && <p className="text-xs text-muted-foreground">Los seleccionados se incluyen en Acompañantes. Revisá la cantidad de huéspedes de la reserva; no se modifica automáticamente.</p>}
+        {kind === "family" && <p className="text-xs text-muted-foreground">Los seleccionados se incluyen en Acompañantes. Al guardar, la cantidad de huéspedes tendrá en cuenta al titular y a todos los acompañantes, sin modificar la tarifa.</p>}
         {!available.length && <p className="text-sm text-muted-foreground">Sin datos registrados</p>}
         {available.map(row => <label key={row.id} className={`flex items-start gap-3 border rounded p-3 text-sm ${selected.some(item => item.id === row.id) ? "bg-primary/5" : "text-muted-foreground"}`}>
           <input type="checkbox" className="mt-1" checked={selected.some(item => item.id === row.id)} onChange={event => onChange({ ...value, selection: { ...value.selection, [kind]: event.target.checked ? [...selected, row] : selected.filter(item => item.id !== row.id) }, remember: { ...value.remember, [kind]: event.target.checked ? value.remember[kind] : value.remember[kind].filter(item => item.id !== row.id) } })} />
@@ -97,19 +97,29 @@ export function StaySelectionEditor({ guestId, value, onChange }: { guestId: str
   </div>;
 }
 
+export function useReservationStayDetailsQuery(reservationId: string, guestId: string) {
+  return useQuery<StayDetailsView>({ queryKey: ["/api/reservations", reservationId, "stay-details", guestId], queryFn: async () => (await apiRequest("GET", `/api/reservations/${reservationId}/stay-details`)).json() });
+}
+export function ReservationGuestCount({ reservationId, guestId, fallback }: { reservationId: string; guestId: string; fallback: number }) {
+  const query = useReservationStayDetailsQuery(reservationId, guestId);
+  return <>{query.data?.numberOfGuests ?? fallback} persona(s)</>;
+}
 export function ReservationStayDetails({ reservationId, guestId }: { reservationId: string; guestId: string }) {
+  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const query = useQuery<StaySelection>({ queryKey: ["/api/reservations", reservationId, "stay-details", guestId], queryFn: async () => (await apiRequest("GET", `/api/reservations/${reservationId}/stay-details`)).json() });
+  const query = useReservationStayDetailsQuery(reservationId, guestId);
   const [draft, setDraft] = useState<StayDraft | null>(null);
   const [draftVersion, setDraftVersion] = useState<number | null>(null);
   useEffect(() => { setDraft(null); setDraftVersion(null); }, [reservationId, guestId]);
-  const mutation = useMutation({ mutationFn: async () => (await apiRequest("PUT", `/api/reservations/${reservationId}/stay-details`, { guestId, version: draftVersion, ...draft })).json(), onSuccess: async (saved: StaySelection) => {
+  const mutation = useMutation({ mutationFn: async () => (await apiRequest("PUT", `/api/reservations/${reservationId}/stay-details`, { guestId, version: draftVersion ?? query.data!.version, ...(draft || { selection: { family: query.data!.family, vehicles: query.data!.vehicles, pets: query.data!.pets }, remember: emptyStayProfile() }) })).json(), onSuccess: async (saved: StayDetailsView) => {
     queryClient.setQueryData(["/api/reservations", reservationId, "stay-details", guestId], saved);
     setDraft(null);
     setDraftVersion(null);
     await queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId, "companions"] });
     await queryClient.invalidateQueries({ queryKey: ["/api/guests", guestId] });
     await queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+    await queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+    await queryClient.invalidateQueries({ predicate: query => Array.isArray(query.queryKey) && query.queryKey[0] === "/api/planning" });
     toast({ title: "Datos de la estadía guardados" });
   }, onError: error => toast({ title: "No se pudieron guardar los datos", description: parseApiError(error), variant: "destructive" }) });
   if (query.isLoading) return <p className="text-sm">Cargando datos de la estadía…</p>;
@@ -117,6 +127,10 @@ export function ReservationStayDetails({ reservationId, guestId }: { reservation
   if (!query.data) return null;
   const value = draft || { selection: { family: query.data.family, vehicles: query.data.vehicles, pets: query.data.pets }, remember: emptyStayProfile() };
   return <div className="space-y-3">
+    {query.data.numberOfGuests < query.data.companionCount + 1 && <div className="rounded-md border border-amber-300 p-3 text-sm space-y-2">
+      <p>Hay {query.data.companionCount + 1} personas identificadas, pero la reserva indica {query.data.numberOfGuests}.</p>
+      {!draft && <Button type="button" variant="outline" disabled={mutation.isPending} onClick={() => mutation.mutate()}>Actualizar cantidad a {query.data.companionCount + 1} huéspedes</Button>}
+    </div>}
     <fieldset disabled={mutation.isPending} className="space-y-3"><StaySelectionEditor key={guestId} guestId={guestId} value={value} onChange={value => { if (!draft) setDraftVersion(query.data!.version); setDraft(value); }} /></fieldset>
     {draft && <div className="flex gap-2 flex-wrap"><Button type="button" disabled={mutation.isPending} onClick={() => mutation.mutate()}>Guardar datos de la estadía</Button><Button type="button" variant="outline" disabled={mutation.isPending} onClick={() => { setDraft(null); setDraftVersion(null); }}>Descartar cambios</Button></div>}
     <Button type="button" size="sm" variant="ghost" disabled={mutation.isPending} onClick={async () => { await query.refetch(); setDraft(null); setDraftVersion(null); }}>Actualizar datos guardados</Button>
