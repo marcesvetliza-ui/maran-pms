@@ -78,6 +78,28 @@ describe("read-only code investigator", () => {
     }}}};
     await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
   });
+  it("does not repeat an endpoint graph already supplied in orientation", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const ticket={version:source.version,module:"inventario",title:"Error al cargar receta",actual:"Consumo interno: la pantalla muestra error",expected:"Seguir el mensaje de equivalencia",steps:"",messages:[]} as SupportTicket;
+    const report={summary:"Error genérico en pantalla",certainty:"sustentado_en_codigo",cause:"El catch no muestra el detalle",proposal:"Mostrar error",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[]};
+    let round=0, reference:any;
+    const client={chat:{completions:{create:async(request:any)=>{
+      if(round++===0){
+        const context=JSON.parse(request.messages[1].content).orientation.endpointContext[0];
+        reference=context.callers[0]; report.evidence=[{path:reference.path,start:reference.start,end:reference.end,explanation:"Catch del cliente"}] as any;
+        return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"frontend-again",type:"function",function:{name:"read_code",arguments:JSON.stringify({path:reference.path,start:reference.start,end:reference.end})}}]}}]};
+      }
+      if(round===2)expect(JSON.parse(request.messages.at(-1).content).endpointContext).toBeUndefined();
+      return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
+    }}}};
+    expect((await diagnose(ticket,source,{apiKey:"unused",model:"mock"},client as any)).report.certainty).toBe("sustentado_en_codigo");
+  });
+  it("attaches safe budget counters to a token-limit failure", async () => {
+    const source=await fixture();
+    const client={chat:{completions:{create:async()=>({usage:{total_tokens:100001},choices:[]})}}};
+    await expect(diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any))
+      .rejects.toMatchObject({code:"investigation_tokens",investigation:{rounds:1,calls:0,tokens:100001,phase:"research"}});
+  });
   it("reserves a closing phase instead of aborting when a batch exceeds research calls", async () => {
     const source=await fixture();
     await writeFile(path.join(directory,"server","budget.ts"),Array.from({length:30},(_,i)=>`const n${i}=${i};`).join("\n"));

@@ -1,4 +1,4 @@
-import { diagnosisFailure } from "./errors";
+import { diagnosisFailure, investigationMetrics } from "./errors";
 import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
@@ -291,6 +291,8 @@ export async function createService(
           console.warn("Investigación del asistente fallida", {
             caseId: ticket.id,
             code: failure.code,
+            model: config.model,
+            investigation: investigationMetrics(error),
           });
           ticket.status = "failed";
           ticket.lastError = failure.message;

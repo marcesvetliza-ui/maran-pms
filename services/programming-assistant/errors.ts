@@ -68,7 +68,7 @@ export function diagnosisFailure(error: unknown) {
     };
   if ((e.message || "").includes("límite"))
     return {
-      code: e.code === "investigation_tokens" ? "investigation_tokens" : "investigation_limit",
+      code: ["investigation_tokens", "investigation_rounds", "diagnosis_length"].includes(e.code || "") ? e.code! : "investigation_limit",
       message:
         "La investigación alcanzó su límite antes de completar un diagnóstico válido. Soporte debe revisar el presupuesto del asistente; no hace falta reformular la consulta.",
     };
@@ -87,4 +87,12 @@ export function diagnosisFailure(error: unknown) {
     message:
       "No se pudo completar el diagnóstico. Soporte debe revisar el fallo registrado en el servicio del asistente.",
   };
+}
+
+/** Only bounded counters and known phases may be written to service logs. */
+export function investigationMetrics(error: unknown) {
+  const data = (error as any)?.investigation;
+  if (!data || !["research", "closing", "coverage_review"].includes(data.phase)) return undefined;
+  if ([data.rounds, data.calls, data.tokens].some(value => typeof value !== "number" || !Number.isFinite(value) || value < 0)) return undefined;
+  return { rounds: data.rounds, calls: data.calls, tokens: data.tokens, phase: data.phase };
 }

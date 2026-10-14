@@ -14,7 +14,8 @@ export async function orientInvestigation(
   const purchases = /compra|proveedor|purchase/.test(text) ||
     (discount && /factura|fact-[abc]|invoice/.test(text) && /stock|articul|unitari/.test(text));
   const production = /produccion|production/.test(text);
-  const inventoryPreview = /vista previa|preview/.test(text) && /consumo|receta|ingredient|porcion|stock|inventario/.test(text);
+  const inventoryPreview = /vista previa|preview|consumo interno|internal consumption/.test(text) && /consumo|receta|recipe|ingredient|porcion|stock|inventario/.test(text);
+  const errorFlow = inventoryPreview && /error|mensaje|pantalla|interfaz/.test(text);
   const terms = purchases
     ? ["purchase", "compras"]
     : production
@@ -63,9 +64,13 @@ export async function orientInvestigation(
     }
   }
   const endpointContext = inventoryPreview
-    ? [await source.traceEndpoint("/api/inventory/recipe-stock-preview")]
+    ? [await source.traceEndpoint("/api/inventory/recipe-stock-preview", { includeTests: !errorFlow })]
     : [];
+  if (errorFlow && endpointContext.some(context => context.callers.some(read => /\bapiRequest\s*\(/.test(read.content))) && files.includes("client/src/lib/queryClient.ts")) {
+    workflowReads.push(await source.read("client/src/lib/queryClient.ts", 1, 40));
+  }
   return {
+    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : undefined,
     endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,

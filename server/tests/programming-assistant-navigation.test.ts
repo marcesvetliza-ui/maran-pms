@@ -27,6 +27,16 @@ describe("code navigation", () => {
     expect(context.tests[0].content).toContain("quantity:'1.500'");
     expect(context.tests[0].content).toContain("toBe(409)");
   });
+  it("focuses the exact equivalence-error question on frontend transport instead of broad stock tests", async () => {
+    const source=new CodeSource(process.cwd(),"a".repeat(40));
+    const result=await orientInvestigation({module:"inventario",title:"Error de equivalencia al cargar receta",actual:"En Consumo Interno cargo una receta que usa un ingrediente en cajas, sin equivalencia configurada. La pantalla muestra Error al cargar receta",expected:"Que explique qué equivalencia falta. Investigá cómo el error del endpoint llega a la pantalla y cómo se muestra",steps:"",messages:[]} as SupportTicket,source);
+    expect(result.investigationFocus).toContain("catch de la pantalla");
+    expect(result.endpointContext[0].callers[0].content).toContain("Error al cargar receta");
+    expect(result.endpointContext[0].tests).toEqual([]);
+    expect(result.workflowReads.find(read=>read.path==="client/src/lib/queryClient.ts")?.content).toContain("await throwIfResNotOk(res)");
+    expect(result.workflowReads[0].content).toContain("res.status");
+    expect(result.workflowReads.every(read=>source.validates(read))).toBe(true);
+  });
   it("does not route a reservation discount into purchase invoices", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
     const result=await orientInvestigation({module:"otro",title:"Descuento general",actual:"Reserva de habitación con descuento",expected:"Conservar la tarifa",steps:"",messages:[]} as SupportTicket,source);

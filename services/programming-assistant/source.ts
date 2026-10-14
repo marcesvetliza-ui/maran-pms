@@ -135,7 +135,7 @@ export class CodeSource {
     return {symbol,definitions,tests,partial:true,
       guidance:"Fragmentos leídos, no funciones ejecutadas. Si no termina el cuerpo, continuar con read_code. Los tests sin mención literal del símbolo no están incluidos: buscar también por endpoint y comportamiento."};
   }
-  async traceEndpoint(endpoint: string) {
+  async traceEndpoint(endpoint: string, options = { includeTests: true }) {
     if(typeof endpoint!=="string" || !/^\/api\/[A-Za-z0-9_/:.-]{1,180}$/.test(endpoint)) throw new Error("Endpoint inválido.");
     const escaped=endpoint.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     const route=new RegExp(`\\b(?:app|router)\\.(?:get|post|put|patch|delete)\\s*\\(\\s*['\"]${escaped}['\"]`);
@@ -148,7 +148,7 @@ export class CodeSource {
     for(const file of (await this.files()).filter(f=>f.startsWith("server/") && /\.tsx?$/.test(f))){
       const text=await this.content(file),lines=text.split("\n");
       if(file.includes("/tests/")){
-        if(investigatorTest(file))continue;
+        if(!options.includeTests || investigatorTest(file))continue;
         const index=lines.findIndex(line=>line.includes(endpoint));
         if(index>=0 && tests.length<1){const start=Math.max(1,index-8);tests.push(await this.read(file,start,start+59));}
         continue;

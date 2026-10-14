@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diagnosisFailure } from "../../services/programming-assistant/errors";
+import { diagnosisFailure, investigationMetrics } from "../../services/programming-assistant/errors";
 describe("safe diagnosis failures", () => {
   it("distinguishes exhausted credit from request rate limits", () => {
     expect(
@@ -21,5 +21,19 @@ describe("safe diagnosis failures", () => {
   it("distinguishes invalid reports and timeouts", () => {
     expect(diagnosisFailure({ name: "ZodError" }).code).toBe("report_format");
     expect(diagnosisFailure({ name: "TimeoutError" }).code).toBe("timeout");
+  });
+});
+
+describe("investigation metrics", () => {
+  it("distinguishes the exact exhausted resource", () => {
+    for (const code of ["investigation_tokens", "investigation_rounds", "diagnosis_length"]) {
+      expect(diagnosisFailure({code,message:"Se alcanzó el límite"}).code).toBe(code);
+    }
+  });
+  it("logs counters without arbitrary provider content", () => {
+    expect(investigationMetrics({ investigation: { rounds: 12, calls: 20, tokens: 60000, phase: "closing", payload: "secret-provider-payload" } }))
+      .toEqual({ rounds: 12, calls: 20, tokens: 60000, phase: "closing" });
+    expect(investigationMetrics({investigation:{rounds:1,calls:0,tokens:100,phase:"secret-provider-payload"}})).toBeUndefined();
+    expect(investigationMetrics({investigation:{rounds:1,calls:0,tokens:"secret-provider-payload",phase:"research"}})).toBeUndefined();
   });
 });
