@@ -1712,7 +1712,7 @@ export function registerBillingRoutes(app: Express) {
           }
           if (Number(amount) + (checkoutDiscount?.sourceAmounts[id] || 0) > pending + 0.02) {
               throw new FolioInvoiceValidationError(
-                `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)`,
+                `Este cargo ya está facturado o tiene una emisión en curso. No queda saldo suficiente para facturar el importe seleccionado ($${Math.max(0, pending).toFixed(2)} disponible). Actualizá la prefactura para ver su estado.`,
                 409
               );
           }

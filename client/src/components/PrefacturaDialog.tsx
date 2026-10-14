@@ -1690,7 +1690,7 @@ export function PrefacturaDialog({
       } catch {
         // Verification failed; preserve the original operation for safe retry.
       }
-      setSubmitError(err.message || "Error inesperado");
+      setSubmitError(parseApiError(err));
     } finally {
       submission.current!.release();
       setIsSubmitting(false);
