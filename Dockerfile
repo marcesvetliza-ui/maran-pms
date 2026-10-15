@@ -19,6 +19,7 @@ RUN npm install --legacy-peer-deps --ignore-scripts
 COPY . .
 
 # Build using the globally-installed tsx
+ARG VITE_SPA_FUNDING_UI
 RUN tsx script/build.ts
 
 # ── Stage 2: production ──────────────────────────────────────────────────────

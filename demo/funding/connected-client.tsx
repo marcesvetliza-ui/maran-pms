@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from "react";
 import {createRoot} from "react-dom/client";
 import {QueryClient,QueryClientProvider} from "@tanstack/react-query";
-import {SpaFundingConnectedPanel} from "../../client/src/components/spa/spa-funding-connected-panel";
+import {SpaFundingGate} from "../../client/src/components/spa/spa-funding-gate";
 import "../../client/src/index.css";
 const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
 function Demo(){
@@ -17,7 +17,7 @@ function Demo(){
   <p className="rounded border p-3">Datos sintéticos · Preparación, caja y stock en PostgreSQL local · Emisor simulado · Sin ARCA real.</p>
   {error&&<p role="alert">{error}</p>}
   <label>Escenario<select className="ml-2 rounded border bg-background p-2" aria-label="Escenario" value={id} onChange={e=>setId(e.target.value)}><option value="">Seleccionar</option>{scenarios.map(s=><option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
-  {id&&<SpaFundingConnectedPanel key={id} accountId={id} userId="connected-reviewer" canWrite/>}
+  {id&&<SpaFundingGate key={id} enabled accountId={id} userId="connected-reviewer" canWrite canAdopt><p>Cuenta sin vincular</p></SpaFundingGate>}
  </main>;
 }
 createRoot(document.getElementById("root")!).render(<QueryClientProvider client={queryClient}><Demo/></QueryClientProvider>);

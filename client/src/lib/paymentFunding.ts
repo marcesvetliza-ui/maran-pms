@@ -70,6 +70,8 @@ function verifyOperation(operation: FundingOperation, expectedId: string) {
 export const collectionShiftsSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1) }));
 export const preparedDocumentSchema = z.object({ documentId: z.string().min(1), totalCents: cents.positive() });
 export const fundingApi = {
+  enrollment: (id: string) => call(`/spa/${encodeURIComponent(id)}/enrollment`, z.object({ adopted: z.boolean() })),
+  adoptUnbilled: (id: string) => call(`/spa/${encodeURIComponent(id)}/adopt-unbilled`, z.object({ accountId: z.string().min(1) }), {}),
   collectionShifts: (id: string) => call(`/spa/${encodeURIComponent(id)}/collection-shifts`, collectionShiftsSchema),
   prepareDocument: (id: string) => call(`/spa/${encodeURIComponent(id)}/prepare-document`, preparedDocumentSchema, {}),
   scope: (id: string) => call(`/scopes/spa/${encodeURIComponent(id)}`, projectionSchema),

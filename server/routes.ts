@@ -376,10 +376,10 @@ export async function registerRoutes(
     res.json({ role, resourceKeys: permissionsForRole(role) });
   });
 
-  // Prepared ordering only. Deliberately disabled until joint binding/client
-  // review and explicit authorization; no DDL, reads or routes in this call.
-  const { mountConfiguredOperationalSpaFunding } = await import("./billing/funding/operational/mount");
-  await mountConfiguredOperationalSpaFunding(app);
+  // Explicit homologation opt-in, before every legacy financial writer.
+  // With the flag absent, no bindings/DB/credentials are loaded by this call.
+  const { mountSpaFundingFromEnvironment } = await import("./billing/funding/operational/activation");
+  await mountSpaFundingFromEnvironment(app);
 
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));

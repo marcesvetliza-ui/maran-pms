@@ -9,7 +9,7 @@ import { legacyFundingScopes, lockLegacyFundingScopes, releaseAfterLegacyRespons
 
 /** Mount BEFORE legacy billing/SPA/payment routes. No default enable, DDL or
  * implicit production connection. Caller provides trusted auth, fiscal gateway
- * and transaction-bound inventory closure. This module is NOT mounted in main.
+ * and transaction-bound inventory closure; runtime activation is homologation-only.
  */
 export function mountPaymentFunding(app:Express,options:{
   enabled:boolean; pool:Pool; fiscal: FiscalGateway; firstSpaClose:FirstSpaClose;

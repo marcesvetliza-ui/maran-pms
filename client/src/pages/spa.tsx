@@ -1,5 +1,5 @@
 import {useLocation} from "wouter";
-import { SpaFundingConnectedPanel } from "@/components/spa/spa-funding-connected-panel";
+import { SpaFundingGate } from "@/components/spa/spa-funding-gate";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -3497,15 +3497,16 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </DialogTitle>
           </DialogHeader>
           {selectedAccount && selectedAppointment && (
-            import.meta.env.VITE_SPA_FUNDING_UI === "true" ? (
-              <SpaFundingConnectedPanel key={selectedAccount.id} accountId={selectedAccount.id}
+              <SpaFundingGate key={selectedAccount.id} accountId={selectedAccount.id}
+                enabled={import.meta.env.VITE_SPA_FUNDING_UI === "true"}
                 userId={user?.id ?? ""} canWrite={!!user && hasPermission("funding:write")}
+                canAdopt={!!user && hasPermission("funding:historical")}
                 onCompleted={() => {
                   void queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment"] });
                   void queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
                   void queryClient.invalidateQueries({ queryKey: ["/api/folios", "spa_account", selectedAccount.id] });
-                }} />
-            ) : <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                }}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Left: Charges */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -3910,6 +3911,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 )}
               </div>
             </div>
+            </SpaFundingGate>
           )}
           {/* Add Charge Dialog — nested inside Folio dialog to avoid Radix aria-hidden blocking inputs on desktop */}
           <Dialog

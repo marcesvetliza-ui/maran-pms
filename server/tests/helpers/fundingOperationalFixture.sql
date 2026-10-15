@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS funding_demo.billing_config(id int PRIMARY KEY,arca_a
  cuit text,punto_venta_homolog int);
 INSERT INTO funding_demo.billing_config VALUES(1,'homologacion','20111111112',NULL,99) ON CONFLICT(id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS funding_demo.pos_configs(id int PRIMARY KEY,numero int,area text,activo bool,tipo text);
+ALTER TABLE funding_demo.billing_config ADD COLUMN IF NOT EXISTS arca_cert text,
+ ADD COLUMN IF NOT EXISTS arca_key text;
+UPDATE funding_demo.billing_config SET arca_cert='SYNTHETIC_NOT_A_CERTIFICATE',arca_key='SYNTHETIC_NOT_A_KEY' WHERE id=1;
 INSERT INTO funding_demo.pos_configs VALUES(1,3,'spa',true,'online') ON CONFLICT(id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS funding_demo.provider_authorizations(identity_key text PRIMARY KEY,cae text,expiry timestamptz);
 CREATE TABLE IF NOT EXISTS funding_demo.inventory_items(id text PRIMARY KEY,name text,is_active text,unit text,current_stock numeric,cost_price numeric);

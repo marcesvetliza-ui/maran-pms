@@ -4,17 +4,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { SpaFundingConnectedPanel } from "./spa-funding-connected-panel";
 const scope={kind:"spa",id:"spa-connected"};
-let prepared:boolean, denied:boolean, shiftFailure:boolean;
+let prepared:boolean, denied:boolean, shiftFailure:boolean, unadopted:boolean, adoptionFailure:boolean;
 let calls:Array<{url:string;body:unknown}>;
 const response=(data:unknown)=>new Response(JSON.stringify({ok:true,data}));
-function mount(canWrite=true) {
+function mount(canWrite=true,canAdopt=false) {
  const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}});
- return render(<QueryClientProvider client={client}><SpaFundingConnectedPanel accountId={scope.id} userId="u1" canWrite={canWrite}/></QueryClientProvider>);
+ return render(<QueryClientProvider client={client}><SpaFundingConnectedPanel accountId={scope.id} userId="u1" canWrite={canWrite} canAdopt={canAdopt}/></QueryClientProvider>);
 }
 beforeEach(()=>{
- sessionStorage.clear();prepared=false;denied=false;shiftFailure=false;calls=[];
+ sessionStorage.clear();prepared=false;denied=false;shiftFailure=false;unadopted=false;adoptionFailure=false;calls=[];
  vi.stubGlobal("fetch",vi.fn(async(url:string,init?:RequestInit)=>{
   const body=init?.body?JSON.parse(init.body as string):undefined;calls.push({url,body});
+  if(url.endsWith("/adopt-unbilled")) {
+   if(adoptionFailure) return new Response(JSON.stringify({ok:false,error:{code:"HISTORY_REVIEW_REQUIRED",message:"Hay historia fiscal: requiere conciliación."}}),{status:409});
+   unadopted=false;return response({accountId:scope.id});
+  }
+  if(unadopted) return new Response(JSON.stringify({ok:false,error:{code:"SCOPE_NOT_ADOPTED",message:"Falta vincular la cuenta."}}),{status:409});
   if(url.endsWith("/collection-shifts")) return shiftFailure?new Response("Not found",{status:404}):response([{id:"my-shift",label:"Mi caja SPA"}]);
   if(url.endsWith("/prepare-document")) {
    if(denied)return new Response(JSON.stringify({ok:false,error:{code:"FISCAL_PREPARATION_REQUIRED",message:"Falta condición IVA en la ficha."}}),{status:409});
@@ -26,6 +31,23 @@ beforeEach(()=>{
 });
 afterEach(()=>vi.unstubAllGlobals());
 describe("conexión de preparación fiscal y cajas autorizadas",()=>{
+ it("vincula sólo mediante confirmación explícita y luego habilita preparar, sin emitir ni cobrar",async()=>{
+  unadopted=true;const user=userEvent.setup();mount(true,true);
+  const button=await screen.findByRole("button",{name:"Vincular cuenta al nuevo circuito"});
+  expect(calls.every(call=>call.body===undefined)).toBe(true);
+  await user.click(button);
+  expect(await screen.findByRole("button",{name:"Preparar comprobante"})).toBeInTheDocument();
+  expect(calls.filter(call=>call.body!==undefined)).toEqual([{url:"/api/payment-funding/spa/spa-connected/adopt-unbilled",body:{}}]);
+ });
+ it("no ofrece vinculación al rol sin permiso y conserva rechazo por historia fiscal",async()=>{
+  unadopted=true;const view=mount(true,false);
+  expect(await screen.findByText(/Un operador con permisos/)).toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"Vincular cuenta al nuevo circuito"})).not.toBeInTheDocument();
+  view.unmount();adoptionFailure=true;const user=userEvent.setup();mount(true,true);
+  await user.click(await screen.findByRole("button",{name:"Vincular cuenta al nuevo circuito"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Hay historia fiscal");
+  expect(screen.queryByRole("button",{name:"Preparar comprobante"})).not.toBeInTheDocument();
+ });
  it("prepara sólo mediante body vacío, recarga el documento persistido y muestra su receptor",async()=>{
   const user=userEvent.setup();mount();
   const button=await screen.findByRole("button",{name:"Preparar comprobante"});

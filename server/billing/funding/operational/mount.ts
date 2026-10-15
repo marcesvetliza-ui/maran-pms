@@ -7,10 +7,12 @@ import { PersistentFiscalGateway, type FiscalTransport } from "./fiscalGateway";
 import { createFirstSpaClose } from "./spaClosure";
 import { prepareSpaDocument } from "./preparation";
 import { sessionFundingActor } from "./access";
+import { checkSpaHomologation } from "./homologation";
+import { SqlFundingAdapter } from "../adapters";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
- * Operational activation remains opt-in after joint review; configured mounting defaults off.
+ * Operational activation remains explicit and restricted to homologation.
  */
 export function mountOperationalSpaFunding(app:Express,options:{
  enabled?:boolean;pool:Pool;authenticate:RequestHandler;
@@ -46,8 +48,35 @@ export function mountOperationalSpaFunding(app:Express,options:{
    fiscal:new PersistentFiscalGateway(options.pool,options.transport,schema),firstSpaClose:createFirstSpaClose(schema),
  })!;
  // Reviewed additive endpoints used by the connected SPA client remain independently gated.
- // Isolated tests opt in explicitly; neither this gate nor the main mount is a UI flag.
+ // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
  if(options.reviewedExtensions!==true) return service;
+ app.get("/api/payment-funding/spa/:accountId/enrollment",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const adopted=(await options.pool.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[req.params.accountId])).rowCount!==0;
+     res.json({ok:true,data:{adopted}});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/adopt-unbilled",options.authenticate,async(req,res)=>{
+   try {
+     const who=actor(req);requirePermission(who,"funding:historical");requirePermission(who);
+     if(!req.body || Object.keys(req.body).length)
+       throw new FundingError("INVALID_REQUEST","La vinculación sólo acepta el ID de cuenta y un body vacío.",422);
+     const scope={kind:"spa" as const,id:req.params.accountId};
+     await service.store.transaction(scope,null,async c=>{
+       // Same scope lock as the legacy fence: no payment can race the import.
+       await checkSpaHomologation(c,schema);
+       if((await c.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[scope.id])).rowCount) return;
+       // No history callback: any prior invoice, NC or fiscal payment reference
+       // fails closed. Existing payments must identify the exact Caja/folio IDs.
+       const adapter=service.adapter(scope);
+       if(!(adapter instanceof SqlFundingAdapter)) throw new Error("Missing SQL SPA adapter");
+       await adapter.adoptScope(c,scope);
+       await service.store.event(c,null,`adopted:spa:${scope.id}`,"unbilled_spa_adopted",{scopeKey:`spa:${scope.id}`},who.id);
+     });
+     res.json({ok:true,data:{accountId:scope.id}});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
  // Server-prepared documents and authorized shifts; no browser-supplied fiscal snapshots.
  app.get("/api/payment-funding/spa/:accountId/collection-shifts",options.authenticate,async(req,res)=>{
    try {
@@ -70,10 +99,8 @@ export function mountOperationalSpaFunding(app:Express,options:{
  });
  return service;
 }
-
-/** The real server calls this with its default false, after session middleware
- * and before legacy writers. Changing it requires a later explicit review;
- * no environment variable or VITE flag can turn it on accidentally.
+/** Explicit runtime opt-in, after session middleware and before legacy writers.
+ * The UI build flag alone never enables the financial backend.
  */
 export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=false,reviewedExtensions=false) {
  if(!enabled) return null;
@@ -84,6 +111,8 @@ export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=f
  const ready=(await pool.query(`SELECT to_regclass('payment_funding.fiscal_claims') IS NOT NULL
    AND to_regclass('payment_funding.scopes') IS NOT NULL AS ready`)).rows[0].ready;
  if(!ready) throw new Error("Funding schema requires explicit reviewed installation before opt-in.");
+ const client=await pool.connect();
+ try {await checkSpaHomologation(client);} finally {client.release();}
  return mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
    transport:configuredArcaTransport(),reviewedExtensions});
 }

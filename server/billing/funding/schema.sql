@@ -1,5 +1,5 @@
--- Explicit installation only in the isolated disposable database.
--- NOT imported by startup, migrate.ts or the operational application.
+-- Explicit reviewed installation (homologation command or isolated tests).
+-- NOT imported by startup or migrate.ts. No automatic operational adoption.
 CREATE SCHEMA IF NOT EXISTS payment_funding;
 CREATE TABLE IF NOT EXISTS payment_funding.scopes (
   kind text NOT NULL CHECK(kind IN ('reservation','spa')), id text NOT NULL,

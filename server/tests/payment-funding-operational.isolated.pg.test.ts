@@ -106,6 +106,52 @@ it("default-disabled mounting registers nothing and touches neither DB nor trans
  expect(mountOperationalSpaFunding(app,{pool:null as any,transport:null as any,authenticate:null as any,hasPermission:null as any})).toBeNull();
  expect(app._router?.stack?.length??0).toBe(before);
 });
+async function unadoptedFixture() {
+ const f=await fixture(true);
+ // Roll back only this fixture's synthetic adoption, leaving real-source IDs.
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[f.scope.id]);
+ await pool.query("DELETE FROM payment_funding.receipts WHERE scope_id=$1",[f.scope.id]);
+ await pool.query("DELETE FROM payment_funding.scopes WHERE id=$1",[f.scope.id]);
+ return f;
+}
+it("explicit unbilled adoption imports exact source links once without creating cash or authorizing",async()=>{
+ const f=await unadoptedFixture(),before=await financialCounts(f.scope),n=sends;
+ const url=`/spa/${f.scope.id}/adopt-unbilled`;
+ expect((await http(`/spa/${f.scope.id}/enrollment`)).body.data).toEqual({adopted:false});
+ expect((await http(url,{})).status).toBe(200);
+ expect((await http(`/spa/${f.scope.id}/enrollment`)).body.data).toEqual({adopted:true});
+ expect((await http(url,{})).status).toBe(200);
+ const projection=await service.scope(f.scope,actor);
+ expect(projection.receipts).toHaveLength(1);
+ expect(projection.receipts[0]).toMatchObject({sourcePaymentId:`${f.scope.id}:S1`,freeCents:500_000});
+ expect(projection.documents).toHaveLength(0);expect(projection.operations).toHaveLength(0);
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
+ expect((await pool.query("SELECT count(*)::int AS n FROM payment_funding.events WHERE event_key=$1",[`adopted:spa:${f.scope.id}`])).rows[0].n).toBe(1);
+});
+it("adoption rejects fiscal history and ambiguous Caja links without partial scope or receipt writes",async()=>{
+ for(const reason of ["history","cash"]) {
+   const f=await unadoptedFixture(),id=f.scope.id,before=await financialCounts(f.scope);
+   if(reason==="history") await pool.query("INSERT INTO funding_demo.sales_invoices(estado,spa_account_id) VALUES('emitida',$1)",[id]);
+   else await pool.query("UPDATE funding_demo.folio_movements SET cash_movement_id=NULL WHERE source_id=$1",[`${id}:S1`]);
+   const result=await http(`/spa/${id}/adopt-unbilled`,{});
+   expect(result.status).toBe(409);
+   expect(result.body.error.code).toBe(reason==="history"?"HISTORY_REVIEW_REQUIRED":"PAYMENT_LINK_AMBIGUOUS");
+   expect((await pool.query("SELECT 1 FROM payment_funding.scopes WHERE id=$1",[id])).rowCount).toBe(0);
+   expect((await pool.query("SELECT 1 FROM payment_funding.receipts WHERE scope_id=$1",[id])).rowCount).toBe(0);
+   expect(await financialCounts(f.scope)).toEqual(before);
+ }
+});
+it("adoption requires authenticated operator permissions and server homologation; body cannot import history",async()=>{
+ const f=await unadoptedFixture(),url=`/spa/${f.scope.id}/adopt-unbilled`;
+ expect((await http(url,{}, {"x-session":"no"})).status).toBe(401);
+ expect((await http(url,{}, {"x-role":"reader"})).status).toBe(403);
+ expect((await http(url,{importHistory:true})).status).toBe(422);
+ await pool.query("UPDATE funding_demo.billing_config SET arca_ambiente='produccion' WHERE id=1");
+ try {
+   const r=await http(url,{});expect(r.status).toBe(503);expect(r.body.error.code).toBe("FISCAL_ENVIRONMENT_BLOCKED");
+ } finally {await pool.query("UPDATE funding_demo.billing_config SET arca_ambiente='homologacion' WHERE id=1");}
+ expect((await pool.query("SELECT 1 FROM payment_funding.scopes WHERE id=$1",[f.scope.id])).rowCount).toBe(0);
+});
 it("funding uses one lease per concurrent series and excludes legacy while both pool slots are occupied",async()=>{
  const fixtures=[await fixture(),await fixture()];
  const reservations=[await reserve(fixtures[0]),await reserve(fixtures[1])];
