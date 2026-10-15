@@ -1,3 +1,4 @@
+import revenueGuideUrl from "@/assets/guias/tutorial-revenue-management.pdf?url";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/App";
@@ -120,13 +121,20 @@ export default function RevenueManagementPage() {
       </div>
 
       <Tabs defaultValue="tablero">
-        <TabsList>
-          <TabsTrigger value="tablero" data-testid="tab-tablero">Tablero</TabsTrigger>
-          <TabsTrigger value="pace" data-testid="tab-pace">Pace</TabsTrigger>
-          <TabsTrigger value="demanda" data-testid="tab-demanda">Calendario de demanda</TabsTrigger>
-          <TabsTrigger value="competencia" data-testid="tab-competencia">Tarifas de competencia</TabsTrigger>
-          <TabsTrigger value="sugerencias" data-testid="tab-sugerencias">Sugerencias</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center gap-2">
+          <TabsList className="h-auto flex-wrap justify-start">
+            <TabsTrigger value="tablero" data-testid="tab-tablero">Tablero</TabsTrigger>
+            <TabsTrigger value="pace" data-testid="tab-pace">Pace</TabsTrigger>
+            <TabsTrigger value="demanda" data-testid="tab-demanda">Calendario de demanda</TabsTrigger>
+            <TabsTrigger value="competencia" data-testid="tab-competencia">Tarifas de competencia</TabsTrigger>
+            <TabsTrigger value="sugerencias" data-testid="tab-sugerencias">Sugerencias</TabsTrigger>
+          </TabsList>
+          <Button asChild variant="outline" size="sm">
+            <a href={revenueGuideUrl} target="_blank" rel="noopener noreferrer" data-testid="button-revenue-guide" aria-label="Abrir guía de uso de Revenue Management en PDF (nueva pestaña)">
+              Guía de uso PDF
+            </a>
+          </Button>
+        </div>
 
         <TabsContent value="tablero">
           <BoardTab from={from} to={to} />
