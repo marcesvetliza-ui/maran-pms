@@ -27,14 +27,14 @@ export class SqlFundingAdapter implements FundingAdapter {
     if (rows.length!==1) throw new FundingError("FOLIO_LINK_AMBIGUOUS","Falta un folio unívoco para esta cuenta.");
     return rows[0];
   }
-  async assertScope(c:PoolClient,scope:Scope,operationId?:string) {
+  async assertScope(c:PoolClient,scope:Scope,operationId?:string,verifiedAdoption=false) {
     await this.folio(c,scope);
     if (this.kind!=="spa") return;
     const a=(await c.query(`SELECT * FROM ${this.s}.spa_accounts WHERE id=$1`,[scope.id])).rows[0];
     if (!a) throw new FundingError("NOT_FOUND","Cuenta SPA inexistente.",404);
     if (!["open","closed"].includes(a.status) || ["room","room_charge","cuenta_habitacion"].includes(a.charged_to))
       throw new FundingError("UNSUPPORTED_SETTLEMENT","La cuenta no corresponde al circuito directo SPA.");
-    if (a.invoice_id) {
+    if (a.invoice_id && !verifiedAdoption) {
       const owned=operationId && (await c.query("SELECT 1 FROM payment_funding.operations WHERE id=$1 AND invoice->>'invoiceId'=$2",[operationId,String(a.invoice_id)])).rowCount;
       if (!owned) throw new FundingError("DOCUMENT_ALREADY_ISSUED","La cuenta SPA ya tiene factura. No se factura de nuevo para cobrar.");
     }
@@ -72,7 +72,7 @@ export class SqlFundingAdapter implements FundingAdapter {
   }
   /** Explicit adoption only; never invoked by preview or by a generic request. */
   async adoptScope(c:PoolClient,scope:Scope,importVerifiedHistory?:(client:PoolClient)=>Promise<void>) {
-    await this.assertScope(c,scope);
+    await this.assertScope(c,scope,undefined,Boolean(importVerifiedHistory));
     const already=(await c.query("SELECT 1 FROM payment_funding.scopes WHERE kind=$1 AND id=$2",[scope.kind,scope.id])).rowCount;
     if (already) throw new FundingError("SCOPE_ALREADY_ADOPTED","El folio ya fue adoptado.");
     const payments=(await c.query(`SELECT *,round(amount*100)::bigint AS cents FROM ${this.paymentTable} WHERE ${this.ownerColumn}=$1 AND status='active' ORDER BY id`,[scope.id])).rows;

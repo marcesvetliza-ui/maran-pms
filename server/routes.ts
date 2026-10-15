@@ -375,6 +375,11 @@ export async function registerRoutes(
     res.json({ role, resourceKeys: permissionsForRole(role) });
   });
 
+  // Prepared ordering only. Deliberately disabled until joint binding/client
+  // review and explicit authorization; no DDL, reads or routes in this call.
+  const { mountConfiguredOperationalSpaFunding } = await import("./billing/funding/operational/mount");
+  await mountConfiguredOperationalSpaFunding(app);
+
   app.use("/api/system-users", requireRole(["admin"]));
   app.use("/api/system-settings", requireRole(["admin"]));
 

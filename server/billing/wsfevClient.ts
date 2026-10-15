@@ -153,7 +153,8 @@ function buildServiceDates(fecha: string): string {
  */
 export async function feCompConsultar(
   req: FECompConsulta,
-  ambiente: "homologacion" | "produccion"
+  ambiente: "homologacion" | "produccion",
+  expected?: { total: number; fecha: string; docTipo: number; docNro: string }
 ): Promise<FECAEResult | null> {
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
@@ -170,7 +171,16 @@ export async function feCompConsultar(
   if (faultM) throw new Error(`WSFEV1 Fault al consultar comprobante: ${faultM[1]}`);
 
   const existing = parseCaeResult(response);
-  if (existing) return existing;
+  if (existing) {
+    if (expected) {
+      const field=(name:string)=>response.match(new RegExp(`<${name}>([^<]+)</${name}>`))?.[1];
+      if(Number(field("ImpTotal"))!==expected.total || field("CbteFch")!==expected.fecha ||
+        Number(field("DocTipo"))!==expected.docTipo || field("DocNro")!==expected.docNro ||
+        field("MonId")!=="PES" || Number(field("MonCotiz"))!==1)
+        throw new Error("ARCA: el comprobante consultado no coincide con la identidad fiscal persistida.");
+    }
+    return existing;
+  }
 
   // ARCA reports R / code 602 when the requested voucher does not exist.
   // Do not treat an unrecognized answer as "not found": it is safer to leave

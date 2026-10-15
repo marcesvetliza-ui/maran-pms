@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, pool } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { salesInvoices, invoiceCounters } from "@shared/schema";
 import { getBillingConfig } from "./billingConfig";
@@ -331,13 +331,45 @@ async function freeStaleRejectedDraft(
 }
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
+  const config=await getBillingConfig();
+  if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
+  const environment=(config as any).arcaAmbiente??"ficticio";
+  // Funding never uses ficticio. Preserve the existing synthetic emitter and
+  // its independent counters without taking an operational series lock.
+  if(environment==="ficticio") return emitirFacturaUnlocked(data,config);
+  const issuer=String((config as any).arcaCuit??config.cuit).replace(/\D/g,"");
+  const pv=data.puntoVentaOverride??(environment==="homologacion"?(config.puntoVentaHomolog??99):config.puntoVenta);
+  const c=await pool.connect();
+  try {
+    // Same lock as persistent funding numbering. Holds across legacy ARCA I/O;
+    // the funding claim itself commits BEFORE any authorization network call.
+    await c.query("SELECT pg_advisory_lock(hashtextextended($1,0))",
+      [`funding-fiscal:${environment}:${issuer}:${data.tipoComprobante}:${pv}`]);
+    if((await c.query("SELECT to_regclass('payment_funding.fiscal_claims') AS table_name")).rows[0].table_name) {
+      const pending=await c.query(`SELECT operation_id FROM payment_funding.fiscal_claims
+        WHERE status<>'authorized' AND identity->>'environment'=$1 AND identity->>'issuer'=$2
+          AND identity->>'tipo'=$3 AND identity->>'puntoVenta'=$4 LIMIT 1`,
+        [environment,issuer,data.tipoComprobante,String(pv)]);
+      if(pending.rowCount) throw Object.assign(new Error("La serie fiscal tiene una operación de financiación pendiente. Recuperá esa misma operación."),{statusCode:409});
+    }
+    return await emitirFacturaUnlocked(data,config);
+  } finally {
+    // Explicit unlock also on throw. Do not return a session lock to the pool.
+    try {
+      await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))",
+        [`funding-fiscal:${environment}:${issuer}:${data.tipoComprobante}:${pv}`]);
+      c.release();
+    } catch(error) {c.release(error as Error);}
+  }
+}
+
+async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<ReturnType<typeof getBillingConfig>>): Promise<typeof salesInvoices.$inferSelect> {
   if (isUnsupportedSaleType(data.tipoComprobante)) {
     throw Object.assign(
       new Error("Este tipo de comprobante no está habilitado para emisión. Utilice Factura A o Factura B."),
       { statusCode: 400 },
     );
   }
-  const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = isNonFiscalTipo(data.tipoComprobante);
   const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
