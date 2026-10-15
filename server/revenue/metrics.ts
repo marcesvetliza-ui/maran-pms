@@ -3,15 +3,15 @@ import { db, withDatabaseTransaction } from "../db";
 import {
   groupCharges, groupReservationLinks, groupRoomBlocks, maintenanceBlocks,
   ratePlans, reservations, revenuePaceSnapshotRuns, revenuePaceSnapshots,
-  revenueReferenceRatePlans, rooms,
+  revenueReferenceRatePlans, roomTypes, rooms,
 } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { addCalendarDays } from "@shared/nightAuditDate";
 import { parseReservationRate } from "@shared/reservationRate";
 import { classifyReservationRate } from "@shared/nightAudit";
-import type { RatePlanRow } from "./competitorPricing";
+import type { ReferenceRatePlanRow } from "./competitorPricing";
 export { buildCompetitorComparisons, pickApplicableRatePlan } from "./competitorPricing";
-export type { ResolvedRatePlan, RatePlanRow, CompetitorRateRow, CompetitorComparison } from "./competitorPricing";
+export type { ResolvedRatePlan, RatePlanRow, ReferenceRatePlanRow, CompetitorRateRow, CompetitorComparison } from "./competitorPricing";
 
 /**
  * Fuente de verdad propia para Revenue Management. No reutiliza ninguna de
@@ -366,42 +366,34 @@ export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetai
 // pura (elegir el plan vigente, filtrar competencia compatible) vive en
 // ./competitorPricing.ts — acá solo la consulta a la base.
 
-const RATE_PLAN_COLUMNS = {
-  id: ratePlans.id, roomTypeId: ratePlans.roomTypeId, name: ratePlans.name,
-  baseRate: ratePlans.baseRate,
-  rate1pax: ratePlans.rate1pax, rate2pax: ratePlans.rate2pax, rate3pax: ratePlans.rate3pax, rate4pax: ratePlans.rate4pax,
-  currency: ratePlans.currency, refundable: ratePlans.refundable,
-  validFrom: ratePlans.validFrom, validTo: ratePlans.validTo,
-};
-
-export async function loadRatePlansForRoomTypes(roomTypeIds: string[]): Promise<Map<string, RatePlanRow[]>> {
-  const map = new Map<string, RatePlanRow[]>();
-  if (roomTypeIds.length === 0) return map;
-  const rows = await db.select(RATE_PLAN_COLUMNS).from(ratePlans).where(inArray(ratePlans.roomTypeId, roomTypeIds));
-  for (const row of rows) {
-    const list = map.get(row.roomTypeId) ?? [];
-    list.push(row);
-    map.set(row.roomTypeId, list);
-  }
-  return map;
-}
-
 // ==================== PLAN TARIFARIO DE REFERENCIA (configurado a mano) ====================
 // Reemplaza cualquier heurística automática: la comparación contra
 // competencia de un tipo de habitación solo se activa si hay una fila en
 // revenue_reference_rate_plans para ese tipo (ver server/routes/revenue.ts,
 // permiso api:revenue:configure). Sin esa fila, buildCompetitorComparisons
-// excluye el tipo de habitación con el motivo explícito.
+// excluye el tipo de habitación con el motivo explícito. roomTypeBaseOccupancy
+// se trae con JOIN a room_types porque es la única configuración real que
+// justifica usar baseRate como tarifa de un tramo de ocupación sin tramo
+// propio publicado (ver rateForOccupancy en competitorPricing.ts).
 
-export async function loadReferenceRatePlanRows(roomTypeIds: string[]): Promise<Map<string, RatePlanRow>> {
-  const map = new Map<string, RatePlanRow>();
+export async function loadReferenceRatePlanRows(roomTypeIds: string[]): Promise<Map<string, ReferenceRatePlanRow>> {
+  const map = new Map<string, ReferenceRatePlanRow>();
   if (roomTypeIds.length === 0) return map;
-  const rows = await db.select({ roomTypeId: revenueReferenceRatePlans.roomTypeId, plan: RATE_PLAN_COLUMNS })
+  const rows = await db.select({
+    roomTypeId: revenueReferenceRatePlans.roomTypeId,
+    includesBreakfast: revenueReferenceRatePlans.includesBreakfast,
+    roomTypeBaseOccupancy: roomTypes.baseOccupancy,
+    id: ratePlans.id, name: ratePlans.name, baseRate: ratePlans.baseRate,
+    rate1pax: ratePlans.rate1pax, rate2pax: ratePlans.rate2pax, rate3pax: ratePlans.rate3pax, rate4pax: ratePlans.rate4pax,
+    currency: ratePlans.currency, refundable: ratePlans.refundable,
+    validFrom: ratePlans.validFrom, validTo: ratePlans.validTo,
+  })
     .from(revenueReferenceRatePlans)
     .innerJoin(ratePlans, eq(ratePlans.id, revenueReferenceRatePlans.ratePlanId))
+    .innerJoin(roomTypes, eq(roomTypes.id, revenueReferenceRatePlans.roomTypeId))
     .where(inArray(revenueReferenceRatePlans.roomTypeId, roomTypeIds));
   for (const row of rows) {
-    map.set(row.roomTypeId, row.plan);
+    map.set(row.roomTypeId, { ...row, roomTypeBaseOccupancy: Number(row.roomTypeBaseOccupancy) });
   }
   return map;
 }

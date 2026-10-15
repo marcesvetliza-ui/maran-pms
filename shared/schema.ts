@@ -3795,12 +3795,14 @@ export type RevenueDemandEvent = typeof revenueDemandEvents.$inferSelect;
 
 // Carga manual de tarifas de competidores. Sin scraping: el dato lo ingresa
 // un operador a partir de lo que ve en OTAs/webs de la competencia.
-// refundable/occupancy quedan nullable a propósito: son las "condiciones"
-// necesarias para una comparación justa contra nuestra tarifa publicada
-// (misma reembolsabilidad, mismo tramo de ocupación). Mientras el operador
-// no las cargue, la fila sigue siendo válida como referencia manual en la
-// pantalla de Tarifas de Competencia, pero el motor de sugerencias la
-// excluye explícitamente — ver buildCompetitorComparisons.
+// refundable/occupancy/breakfastIncluded/taxesIncluded quedan nullable a
+// propósito: son las "condiciones" necesarias para una comparación justa
+// contra nuestra tarifa publicada (misma reembolsabilidad, mismo tramo de
+// ocupación, mismo desayuno incluido/no incluido, mismos impuestos
+// incluidos/no incluidos). Mientras el operador no las cargue, la fila sigue
+// siendo válida como referencia manual en la pantalla de Tarifas de
+// Competencia, pero el motor de sugerencias la excluye explícitamente — ver
+// buildCompetitorComparisons.
 export const competitorRates = pgTable("competitor_rates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   competitorName: text("competitor_name").notNull(),
@@ -3810,6 +3812,8 @@ export const competitorRates = pgTable("competitor_rates", {
   currency: text("currency").notNull().default("ARS"),
   refundable: boolean("refundable"),
   occupancy: integer("occupancy"),
+  breakfastIncluded: boolean("breakfast_included"),
+  taxesIncluded: boolean("taxes_included"),
   sourceNote: text("source_note"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -3873,9 +3877,16 @@ export type RevenuePaceSnapshotRun = typeof revenuePaceSnapshotRuns.$inferSelect
 // tarifa propia se compara la competencia: mientras un tipo de habitación
 // no tenga fila acá, su comparación queda excluida del motor (igual criterio
 // que las condiciones faltantes en competitor_rates — nunca se adivina).
+// includesBreakfast vive acá (no en rate_plans, que no tiene este concepto)
+// porque es quien declara a qué representa el plan elegido como referencia;
+// impuestos incluidos NO se agrega como columna porque ya es un invariante
+// fijo del sistema (client/src/pages/rate-plans.tsx: "Todas las tarifas
+// incluyen IVA") — no hay nada que configurar ahí, ver OUR_RATES_INCLUDE_TAXES
+// en server/revenue/competitorPricing.ts.
 export const revenueReferenceRatePlans = pgTable("revenue_reference_rate_plans", {
   roomTypeId: varchar("room_type_id").primaryKey().references(() => roomTypes.id),
   ratePlanId: varchar("rate_plan_id").notNull().references(() => ratePlans.id),
+  includesBreakfast: boolean("includes_breakfast").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   updatedBy: varchar("updated_by"),
 });

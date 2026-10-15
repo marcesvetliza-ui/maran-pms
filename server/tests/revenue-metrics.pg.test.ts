@@ -649,8 +649,30 @@ describe("loadReferenceRatePlanRows", () => {
       expect(map.has(roomTypeId)).toBe(true);
       expect(map.get(roomTypeId)?.id).toBe(ratePlanId);
       expect(map.get(roomTypeId)?.rate2pax).toBe("48000.00");
+      // seedRoomType no especifica baseOccupancy: usa el default real de la columna (2).
+      expect(map.get(roomTypeId)?.roomTypeBaseOccupancy).toBe(2);
+      expect(map.get(roomTypeId)?.includesBreakfast).toBe(false);
       // El otro tipo de habitación no tiene configuración: no aparece en el mapa.
       expect(map.has(otherRoomTypeId)).toBe(false);
+
+      throw rollback();
+    })).rejects.toThrow("rollback");
+  });
+
+  it("trae el baseOccupancy real del tipo de habitación y el includesBreakfast configurado", async () => {
+    const prefix = randomUUID();
+    await expect(withDatabaseTransaction(async () => {
+      const roomTypeId = prefix + "-type";
+      await db.execute(sql`INSERT INTO room_types(id, code, name, base_occupancy) VALUES (${roomTypeId}, ${prefix}, 'Suite Triple', 3)`);
+      const ratePlanId = prefix + "-plan";
+      await db.execute(sql`INSERT INTO rate_plans(id, name, room_type_id, base_rate, currency, refundable)
+        VALUES (${ratePlanId}, 'BAR', ${roomTypeId}, 60000, 'ARS', 'true')`);
+      await db.execute(sql`INSERT INTO revenue_reference_rate_plans(room_type_id, rate_plan_id, includes_breakfast)
+        VALUES (${roomTypeId}, ${ratePlanId}, true)`);
+
+      const map = await loadReferenceRatePlanRows([roomTypeId]);
+      expect(map.get(roomTypeId)?.roomTypeBaseOccupancy).toBe(3);
+      expect(map.get(roomTypeId)?.includesBreakfast).toBe(true);
 
       throw rollback();
     })).rejects.toThrow("rollback");

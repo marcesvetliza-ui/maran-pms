@@ -36,6 +36,10 @@ export async function ensureRevenueManagementSchema() {
   await db.execute(sql`ALTER TABLE competitor_rates ADD COLUMN IF NOT EXISTS occupancy integer`);
   await db.execute(sql`ALTER TABLE competitor_rates DROP CONSTRAINT IF EXISTS competitor_rates_occupancy_check`);
   await db.execute(sql`ALTER TABLE competitor_rates ADD CONSTRAINT competitor_rates_occupancy_check CHECK(occupancy IS NULL OR occupancy BETWEEN 1 AND 4)`);
+  // Desayuno e impuestos incluidos/no incluidos — mismo criterio: nullable,
+  // referencia manual mientras falten, afuera del motor hasta cargarlas.
+  await db.execute(sql`ALTER TABLE competitor_rates ADD COLUMN IF NOT EXISTS breakfast_included boolean`);
+  await db.execute(sql`ALTER TABLE competitor_rates ADD COLUMN IF NOT EXISTS taxes_included boolean`);
 
   await db.execute(sql`CREATE TABLE IF NOT EXISTS revenue_pace_snapshots (
     id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -80,7 +84,9 @@ export async function ensureRevenueManagementSchema() {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS revenue_reference_rate_plans (
     room_type_id varchar PRIMARY KEY REFERENCES room_types(id),
     rate_plan_id varchar NOT NULL REFERENCES rate_plans(id),
+    includes_breakfast boolean NOT NULL DEFAULT false,
     updated_at timestamp NOT NULL DEFAULT now(),
     updated_by varchar
   )`);
+  await db.execute(sql`ALTER TABLE revenue_reference_rate_plans ADD COLUMN IF NOT EXISTS includes_breakfast boolean NOT NULL DEFAULT false`);
 }
