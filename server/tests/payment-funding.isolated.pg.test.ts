@@ -217,6 +217,79 @@ test("NC replay never releases the prior funds again; restoration is not self-re
   const ref=(await pool.query("SELECT invoice_ref FROM funding_demo.payments WHERE id=$1",[`${s.id}:P-D`])).rows[0].invoice_ref;
   assert.equal(JSON.parse(ref).reapplications,undefined);
 });
+
+// Minimal ledgers from Codex's review/folio-funding reproduction. No source DB.
+async function creditNoteFixture(capacities:number[],total=capacities.reduce((n,a)=>n+a,0)) {
+  const scope:Scope={kind:"reservation",id:`nc-${randomUUID()}`},documentId=`${scope.id}:F`;
+  await service.store.transaction(scope,null,async c=>{
+    await c.query("INSERT INTO payment_funding.scopes(kind,id) VALUES($1,$2)",[scope.kind,scope.id]);
+    await c.query(`INSERT INTO payment_funding.documents(id,scope_kind,scope_id,original_cents,total_cents,status,snapshot)
+      VALUES($1,$2,$3,$4,$4,'issued','{}')`,[documentId,scope.kind,scope.id,total]);
+    for(const [i,capacity] of capacities.entries()) {
+      const receiptId=`${scope.id}:P${i}`;
+      await c.query(`INSERT INTO payment_funding.receipts(id,scope_kind,scope_id,source_payment_id,original_cents,effective_cents,method,cash_movement_id,folio_movement_id)
+        VALUES($1,$2,$3,$1,$4,$4,'efectivo',$5,$6)`,[receiptId,scope.kind,scope.id,capacity,`${receiptId}:cash`,`${receiptId}:folio`]);
+      await c.query(`INSERT INTO payment_funding.applications(id,receipt_id,document_id,application_key,amount_cents,original_cents,status,origin)
+        VALUES($1,$2,$3,$2,$4,$4,'applied','legacy_verified')`,[randomUUID(),receiptId,documentId,capacity]);
+    }
+  });
+  return {scope,documentId};
+}
+async function creditNoteState(scope:Scope,documentId:string) {
+  return {
+    applications:(await pool.query("SELECT * FROM payment_funding.applications WHERE document_id=$1 ORDER BY receipt_id,id",[documentId])).rows,
+    document:(await pool.query("SELECT * FROM payment_funding.documents WHERE id=$1",[documentId])).rows[0],
+    events:(await pool.query("SELECT event_key,kind,payload FROM payment_funding.events WHERE payload->>'scopeKey'=$1 ORDER BY seq",[`reservation:${scope.id}`])).rows,
+    balances:(await pool.query("SELECT * FROM payment_funding.balances WHERE scope_id=$1 ORDER BY id",[scope.id])).rows,
+  };
+}
+for(const [count,nc,expected] of [[3,10_000,[3334,3333,3333]],[2,10_001,[5001,5000]]] as const) {
+  test(`NC conserves exactly ${nc} cents across ${count} payments, with deterministic replay`,async()=>{
+    const {scope,documentId}=await creditNoteFixture(Array(count).fill(10_000_000));
+    const proof={creditNoteId:`${scope.id}:NC`,documentId,amountCents:nc};
+    await reconcileVerifiedCreditNote(service,scope,proof,demoActor);
+    const state=await creditNoteState(scope,documentId);
+    const releases=state.events.filter(e=>e.kind==="nc_release");
+    assert.deepEqual(releases.map(e=>e.payload.amountCents),expected);
+    assert.equal(releases.reduce((n,e)=>n+e.payload.amountCents,0),nc);
+    assert.equal(Number(state.document.total_cents),count*10_000_000-nc);
+    assert.equal(state.balances.reduce((n,r)=>n+Number(r.free_cents),0),nc);
+    await Promise.all([reconcileVerifiedCreditNote(service,scope,proof,demoActor),reconcileVerifiedCreditNote(second,scope,proof,demoActor)]);
+    assert.deepEqual(await creditNoteState(scope,documentId),state);
+    await assert.rejects(reconcileVerifiedCreditNote(service,scope,{...proof,amountCents:nc+1},demoActor),(e:any)=>e.code==="IDEMPOTENCY_CONFLICT");
+  });
+}
+test("successive NCs include restored live coverage, exclude reversals, and respect exhausted capacity",async()=>{
+  const {scope,documentId}=await creditNoteFixture([1,2,3]);
+  const reconcile=(id:string,n:number)=>reconcileVerifiedCreditNote(service,scope,{creditNoteId:`${scope.id}:${id}`,documentId,amountCents:n},demoActor);
+  await reconcile("NC1",4);
+  let state=await creditNoteState(scope,documentId);
+  assert.equal(state.applications.filter(a=>a.status==="applied").reduce((n,a)=>n+Number(a.amount_cents),0),2);
+  // Replace one remaining application with explicit restored coverage. The
+  // reversed original must not be released again by the following NC.
+  const live=state.applications.find(a=>a.status==="applied");
+  await service.store.transaction(scope,null,async c=>{
+    await c.query("UPDATE payment_funding.applications SET status='reversed' WHERE id=$1",[live.id]);
+    await c.query(`INSERT INTO payment_funding.applications(id,receipt_id,document_id,application_key,amount_cents,original_cents,status,origin)
+      VALUES($1,$2,$3,'restore',1,1,'applied','restore_coverage')`,[randomUUID(),live.receipt_id,documentId]);
+  });
+  await reconcile("NC2",2);
+  const final=await creditNoteState(scope,documentId);
+  assert.equal(Number(final.document.total_cents),0);
+  assert.ok(final.applications.every(a=>a.status==="reversed"));
+  assert.equal(final.events.filter(e=>e.kind==="nc_release").reduce((n,e)=>n+e.payload.amountCents,0),6);
+});
+test("partially uncovered NC fails explicitly when coverage is insufficient, without partial releases",async()=>{
+  const {scope,documentId}=await creditNoteFixture([2,3],10);
+  const before=await creditNoteState(scope,documentId);
+  await assert.rejects(reconcileVerifiedCreditNote(service,scope,{creditNoteId:`${scope.id}:too-large`,documentId,amountCents:6},demoActor),
+    (e:any)=>e.code==="NC_RECONCILIATION_REQUIRED");
+  assert.deepEqual(await creditNoteState(scope,documentId),before);
+  await reconcileVerifiedCreditNote(service,scope,{creditNoteId:`${scope.id}:fits`,documentId,amountCents:3},demoActor);
+  const after=await creditNoteState(scope,documentId);
+  assert.equal(after.events.filter(e=>e.kind==="nc_release").reduce((n,e)=>n+e.payload.amountCents,0),3);
+  assert.equal(Number(after.document.total_cents),7);
+});
 test("SQL aggregate trigger rejects direct over-allocation, even outside the service",async()=>{
   const s=await fixture("spa");
   await stageSyntheticDocument(pool,s,`${s.id}:X`,9_500_000);

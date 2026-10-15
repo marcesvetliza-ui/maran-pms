@@ -3,6 +3,18 @@ name: SPA settlement safety
 description: Financial consistency rules for closing a SPA appointment at creation
 ---
 
+Legacy ownership protection must cover the whole awaited write, including
+requests whose HTTP client disconnects; a precheck alone does not exclude
+concurrent adoption.
+
+**Why:** A writer can pass an unadopted check, pause, and then alter a folio after
+another transaction adopts and reserves it. A disconnected client does not prove
+that the database writer has stopped.
+
+**How to apply:** Coordinate adoption and legacy writes with the same ownership
+lock, keep it until the writer finishes, and resolve the owner from persisted
+item/payment identities rather than trusting a body account ID.
+
 Cargo a habitación closes the SPA folio by transferring one charge to the occupied room folio; it must never create a Caja movement. Voucher SPA closes against one direct payment and one non-fiscal Caja movement. A fiscal SPA invoice must claim its SPA folio before contacting ARCA. Only a designated settlement finalizer may create genuinely new SPA payments and Caja movements; invoicing existing collections must reuse their identities without repeating either.
 
 **Why:** Invoice authorization and local linking are separate failure points. Without a durable pre-authorization claim, a process interruption can emit a duplicate fiscal document; with more than one Caja writer, recovery and normal linking can duplicate income.

@@ -16,3 +16,4 @@ if ! psql -h "$base/socket" -p 55439 -U "$(id -un)" -d postgres -Atc \
 fi
 # Ancestor node_modules is intentional for the existing dependencies only.
 node --import tsx --test server/tests/payment-funding.isolated.pg.test.ts
+node "$(node -p "require.resolve('vitest/package.json').replace(/package.json$/, 'vitest.mjs')")" run --config vitest.funding-isolated.config.ts

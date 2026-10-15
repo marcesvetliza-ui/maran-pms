@@ -2,6 +2,12 @@
 
 Reparto con Codex y bloqueos de dependencias reales: `docs/folio-funding-handoff.md`. La UI preparada no autoriza la habilitación operativa.
 
+Correcciones de la revisión de Codex (centavos de NC y protección legacy SPA):
+`docs/folio-funding-review-fixes.md`. Sin cambios de DTO ni endpoints del motor.
+El montaje opt-in también protege propietarios de ítems/pagos/folios y la
+revisión fiscal administrativa; deshabilita la eliminación masiva legacy de
+comprobantes no fiscales, que no identifica individualmente los folios.
+
 ## Estado y límites de habilitación
 
 Implementación en `design/folio-payment-correction`. No está montada en `server/routes.ts`, no modifica el workflow ni el servidor principal y no ejecuta DDL al iniciar la aplicación operativa. La demo separada sirve estos endpoints en el puerto **8099**, con PostgreSQL local descartable y emisor simulado. **No se contactó ARCA ni una base operativa.**

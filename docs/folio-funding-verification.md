@@ -1,5 +1,26 @@
 # Verificación del motor Folio / SPA aislado
 
+## Ampliación por revisión de Codex
+
+Las correcciones y el alcance auditado se detallan en
+`docs/folio-funding-review-fixes.md`. Sobre el código corregido se ejecutó:
+
+- `node /home/runner/workspace/node_modules/typescript/bin/tsc -p tsconfig.funding.json`: sin errores (motor y demo).
+- `bash script/test-funding-isolated.sh`: **36 pruebas aprobadas, cero fallos y cero omisiones**:
+  - 28 de motor con PostgreSQL (las 24 originales más 4 regresiones de NC).
+  - 8 de integración HTTP/almacenamiento con PostgreSQL, incluidos PATCH/DELETE
+    reales SPA, comportamiento no adoptado, sesión, rutas comunes, carreras
+    en ambos órdenes y desconexión del cliente durante una escritura.
+- `git diff --check`: correcto.
+
+La suite HTTP sustituye sólo el módulo de conexión/transacción por otro conectado
+al socket de la DB descartable. No sustituye almacenamiento, handlers SPA,
+middleware de autenticación ni permisos: estos últimos se inicializan con filas
+sintéticas en esa misma DB. No usa `DATABASE_URL`, sesiones operativas ni ARCA.
+
+La evidencia inicial de 24 pruebas que sigue abajo se conserva como antecedente;
+no debe confundirse con validación de adaptadores operativos.
+
 ## Evidencia ejecutada
 
 - TypeScript: `node node_modules/typescript/bin/tsc -p tsconfig.funding.json` (usando el binario existente del workspace), sin errores.
