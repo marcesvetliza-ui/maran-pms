@@ -1,5 +1,7 @@
 # Folio / SPA — contrato del backend aislado
 
+Reparto con Codex y bloqueos de dependencias reales: `docs/folio-funding-handoff.md`. La UI preparada no autoriza la habilitación operativa.
+
 ## Estado y límites de habilitación
 
 Implementación en `design/folio-payment-correction`. No está montada en `server/routes.ts`, no modifica el workflow ni el servidor principal y no ejecuta DDL al iniciar la aplicación operativa. La demo separada sirve estos endpoints en el puerto **8099**, con PostgreSQL local descartable y emisor simulado. **No se contactó ARCA ni una base operativa.**

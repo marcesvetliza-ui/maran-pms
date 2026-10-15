@@ -20,3 +20,9 @@ After CAE authorization or an ambiguous fiscal result, holds remain owned by the
 **Why:** The user explicitly requires post-CAE recovery without issuing or collecting again; releasing the holds would let another operation spend an already-authorized invoice's funding.
 
 **How to apply:** Recover the same fiscal claim, keep its snapshot immutable, and complete the same idempotent finalizer. An abort requires positive terminal rejection evidence and no unresolved new-money intent.
+
+Synthetic PostgreSQL proofs and a prepared SPA interface do not authorize enabling the operational funding flow. Real fiscal recovery, validated document preparation/history adoption, transaction-bound stock and real authorization must be connected and verified first.
+
+**Why:** The user explicitly requires all unconnected real dependencies to remain pending and blocked; a review handoff or branch push must not silently turn a demo into an operational circuit.
+
+**How to apply:** Keep operational mounting disabled and reject missing bindings. Never substitute the synthetic gateway, permissive demo actor, invented fiscal documents or no-op stock callback in a real flow.
