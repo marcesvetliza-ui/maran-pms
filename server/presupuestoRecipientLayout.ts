@@ -2,7 +2,7 @@ import type PDFDocument from "pdfkit";
 
 /** Measure with the same fonts and widths used to render the recipient block. */
 export function presupuestoRecipientLayout(
-  doc: PDFDocument,
+  doc: InstanceType<typeof PDFDocument>,
   name: string,
   details: string,
   nameWidth: number,
