@@ -30,6 +30,8 @@ Los agregados son proyecciones verificables de eventos. No se usa un JSON de fro
 
 Un movimiento de Caja de origen no puede respaldar dos receipts: vínculo de origen único por cash movement ID. Los reemplazos por corrección conservan el mismo receipt. Si el histórico presenta a la vez un cobro por factura y otro por payment sin poder demostrar cuál representa el ingreso real, no se importan ambos como fondos: el scope queda en revisión.
 
+La cobertura documental se distingue del pago operativo: un Voucher/Cierre SPA y la factura posterior pueden representar la misma obligación de la misma cuenta, no dos ventas que consuman dos veces ese cobro. Se conserva una única aplicación económica con sus representaciones documentales; el comprobante no fiscal de cierre no crea otro receipt ni una segunda aplicación monetaria. “Libre” significa disponible para aplicación documental dentro del scope verificado, no crédito libre para gastar en otros servicios.
+
 ### 2.2 Ecuaciones y controles
 
 Para cada cobro real, en centavos:
