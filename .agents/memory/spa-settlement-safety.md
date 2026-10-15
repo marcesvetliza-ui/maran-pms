@@ -14,3 +14,9 @@ Existing-payment invoicing and new collection require distinct funding modes wit
 **Why:** The user requires SPA to invoice recorded collections without duplicating Caja, using the same funding guarantees as reservation Folio corrections.
 
 **How to apply:** Reserve identified payment applications before fiscal authorization, retain them through ambiguous outcomes, and finalize existing-only invoicing without new payments, Caja movements, or folio payment entries.
+
+After CAE authorization or an ambiguous fiscal result, holds remain owned by the same durable operation until reconciliation. Age, timeout or a failed local link never releases them automatically.
+
+**Why:** The user explicitly requires post-CAE recovery without issuing or collecting again; releasing the holds would let another operation spend an already-authorized invoice's funding.
+
+**How to apply:** Recover the same fiscal claim, keep its snapshot immutable, and complete the same idempotent finalizer. An abort requires positive terminal rejection evidence and no unresolved new-money intent.

@@ -1,6 +1,6 @@
 # Folio y SPA: precisiones previas a la demo
 
-**Estado:** enfoque aprobado para desarrollo aislado; esta entrega precisa el diseño. No hay implementación, migración ni movimientos de dinero realizados.
+**Estado:** diseño implementado en un módulo aislado y demo PostgreSQL sintética; ver `docs/folio-funding-api.md` y `docs/folio-funding-verification.md`. No está habilitado en la aplicación operativa y no se migraron datos reales.
 
 Complementa `docs/folio-payment-correction-design.md`. Misma rama `design/folio-payment-correction` y base de main remoto. Sin Revenue, piloto, merge ni despliegue a main.
 
@@ -90,7 +90,7 @@ Si el operador prueba que P-C nunca existió y confirma conservar P-D cubriendo 
 2. Operación única: retirar los 60.000 aplicados y 30.000 libres de P-C; anular su evidencia de ingreso; contraasentar su pago en folio; importe efectivo de P-C=0.
 3. En la misma confirmación, evento `restore_coverage` mueve 60.000 libres de P-D a F1. Guarda receipt ID, F1, NC1, operación, importe, actor y motivo.
 4. Resultado P-D: aplicado F1=180.000, libre=0, reservado=0; P-C=0. No movimiento nuevo de Caja.
-5. SPA sigue pendiente fiscal 90.000 y deuda operativa=90.000. Sólo un cobro real posterior puede saldar esa deuda.
+5. La reserva tiene 90.000 pendientes de cobro. El origen SPA tiene 90.000 pendientes de emisión fiscal, pero no se le atribuye la deuda sin una asociación explícita pago–cargo. Sólo un cobro real posterior puede saldar la deuda de la reserva.
 
 El evento de restauración es una aplicación nueva sobre un destino explícito, no un pago nuevo ni un cálculo de “pago que coincide”. **No se guarda como reaplicación de F1 hacia sí misma en el JSON legacy**, donde la NC anterior volvería a prorratearlo.
 

@@ -11,6 +11,12 @@ Reservation credit notes must retain the original charge and add a separately au
 
 Never infer a payment-to-charge association from matching amounts, methods, dates, descriptions or row order. Preserve the established NC proration; changing it to another matching heuristic is not a financial repair.
 
+Pending collections belong to the reservation unless an explicit payment–charge application proves an area-specific attribution. Say “la reserva tiene $90.000 pendientes de cobro”, not “el SPA continúa debiendo $90.000”.
+
+**Why:** The user corrected that attribution explicitly: a SPA source pending fiscal issuance is not evidence that the reservation's remaining collection debt belongs to SPA.
+
+**How to apply:** Keep operational debt, source-level fiscal capacity and documentary payment coverage separate in API responses, demo text and financial reports.
+
 **Why:** The user explicitly requires evidence-based payment, invoice, charge and cash links and approved this correction approach before isolated development. A payment that matches a service's price does not prove it funded that service.
 
 **How to apply:** Require persisted IDs/references and explicit, auditable application decisions. Missing or contradictory links require review. Correcting a real instrument, withdrawing a nonexistent collection and re-invoicing preserved funds are separate operations.

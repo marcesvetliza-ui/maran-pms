@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e9e6dc">
+  <title>Conciliación de fondos · Hotel Maran</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="shell topbar">
+    <div class="brand" aria-label="Hotel Maran, recepción">
+      <div class="brand-mark" aria-hidden="true">M.</div>
+      <div><span class="brand-name">Hotel Maran</span><span class="brand-sub">Recepción · Supervisión</span></div>
+    </div>
+    <div class="top-meta">
+      <span class="env-label">Datos sintéticos</span>
+      <span class="pill">Demo aislada · PostgreSQL</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">Mesa de conciliación · folio y SPA</p>
+        <h1 id="page-title">Cada factura, con sus cobros a la vista.</h1>
+        <p class="intro-copy">Identifique qué recibos respaldan cada documento. Si el emisor fiscal queda en estado incierto, recupere la misma operación: el dinero reservado no se cobra otra vez.</p>
+      </div>
+      <aside class="boundary-note">
+        <strong>Límite de esta demo</strong>
+        Sin ARCA ni producción. Datos y emisor simulados en una rama aislada; las operaciones se leen del entorno sintético conectado.
+      </aside>
+    </section>
+
+    <div class="workspace">
+      <aside class="rail" aria-label="Selección y guía">
+        <section class="panel rail-panel">
+          <p class="section-kicker">Caso de trabajo</p>
+          <label for="scenario-select">Escenario PostgreSQL</label>
+          <select id="scenario-select" aria-describedby="scenario-description">
+            <option value="">Cargando escenarios…</option>
+          </select>
+          <p class="scenario-desc" id="scenario-description">Los casos disponibles vienen del servicio de demo.</p>
+          <span class="scope-badge" id="scope-badge">Ámbito pendiente</span>
+        </section>
+        <section class="panel rail-panel">
+          <p class="section-kicker">Recorrido seguro</p>
+          <ol class="rail-steps">
+            <li><span class="step-no">01</span><span>Revise recibos, aplicaciones y saldo libre.</span></li>
+            <li><span class="step-no">02</span><span>Previsualice el request preparado por el escenario.</span></li>
+            <li><span class="step-no">03</span><span>Ante incertidumbre, recupere la operación existente.</span></li>
+          </ol>
+        </section>
+        <section class="panel rail-panel">
+          <p class="section-kicker">Control de seguridad</p>
+          <p class="safety-copy">Una reserva sigue retenida después de un fallo CAE o de vínculo. No cree una segunda operación para resolverla.</p>
+        </section>
+      </aside>
+
+      <div class="main-column" id="scope-content" aria-live="polite">
+        <section class="panel overview" aria-label="Resumen financiero">
+          <div class="overview-lead">
+            <p class="section-kicker">Obligación del ámbito</p>
+            <p class="debt-value" id="debt-value">—</p>
+            <p class="debt-caption" id="debt-caption">Seleccione un escenario para consultar el saldo.</p>
+          </div>
+          <div class="metric"><span class="metric-label">Cobros registrados</span><strong class="metric-value" id="receipt-count">—</strong><span class="metric-caption">Identidades de cobro</span></div>
+          <div class="metric"><span class="metric-label">Documentos</span><strong class="metric-value" id="document-count">—</strong><span class="metric-caption">Dentro del ámbito seleccionado</span></div>
+        </section>
+
+        <section class="panel section-panel">
+          <div class="panel-heading">
+            <div><p class="section-kicker">Trazabilidad por recibo</p><h2>El dinero conserva su identidad</h2><p>Importe, medio actual y distribución; los datos anteriores quedan en la auditoría, sin cobros por coincidencia.</p></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Recibo / origen</th><th>Medio actual</th><th>Importe</th><th>Aplicado</th><th>Retenido</th><th>Libre</th></tr></thead>
+              <tbody id="receipts-body"><tr><td class="empty-row" colspan="6">Seleccione un escenario para consultar recibos.</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="lower-grid">
+          <section class="panel section-panel">
+            <div class="panel-heading"><div><p class="section-kicker">Destino de cobertura</p><h2>Documentos</h2></div></div>
+            <div class="doc-list" id="documents-list"><p class="no-data">Aún no hay documentos cargados.</p></div>
+          </section>
+          <section class="panel section-panel">
+            <div class="panel-heading"><div><p class="section-kicker">Continuidad</p><h2>Operaciones registradas</h2></div></div>
+            <div class="ops-list" id="operations-list"><p class="no-data">Aún no hay operaciones cargadas.</p></div>
+          </section>
+        </div>
+
+        <section class="panel workflow">
+          <div class="panel-heading">
+            <div><p class="section-kicker">Financiación preparada</p><h2>Previsualizar y continuar</h2><p>Se utiliza el request exacto entregado por este escenario.</p></div>
+          </div>
+          <div class="workflow-body">
+            <div class="request-summary" id="funding-request">
+              <div><p class="request-title">Request del escenario</p><div class="request-details" id="request-details"><span class="request-tag">Seleccione un escenario</span></div></div>
+              <div class="request-total"><span>Total solicitado</span><strong id="request-total">—</strong></div>
+            </div>
+            <div class="alert" id="error-alert" role="alert" aria-live="assertive"></div>
+            <div class="success-message" id="success-message" role="status"></div>
+            <div class="controls">
+              <button class="btn" id="preview-button" type="button" disabled>Previsualizar fondos</button>
+              <button class="btn secondary" id="start-button" type="button" disabled>Crear operación reservada</button>
+            </div>
+            <div class="operation-focus" id="operation-focus" hidden>
+              <div class="operation-banner"><span>Operación activa · conservar este identificador</span><code id="active-operation-id">—</code></div>
+              <div class="operation-banner"><span>Estado actual</span><strong class="status-chip" id="active-operation-status">—</strong></div>
+              <div class="operation-actions" id="operation-actions"></div>
+            </div>
+            <div class="fault-row">
+              <p class="fault-label"><strong>Simular fallo de una sola vez</strong>Arma el punto antes de autorizar o finalizar.</p>
+              <button class="btn small caution" type="button" id="fault-cae" data-point="after_cae" disabled>Después de CAE</button>
+              <button class="btn small caution" type="button" id="fault-link" data-point="finalize_after_cash" disabled>Al vincular factura</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel workflow" id="correction-panel">
+          <div class="panel-heading"><div><p class="section-kicker">Ajuste histórico explícito</p><h2>Corrección del escenario</h2><p>Previsualización y confirmación atómica del request preparado.</p></div></div>
+          <div class="workflow-body">
+            <div class="request-summary">
+              <div><p class="request-title">CorrectionRequest del escenario</p><div class="request-details" id="correction-details"><span class="request-tag">No hay corrección para este caso</span></div></div>
+              <div class="request-total"><span>Revisión</span><strong id="correction-total">—</strong></div>
+            </div>
+            <div class="alert" id="correction-error" role="alert" aria-live="assertive"></div>
+            <div class="success-message" id="correction-success" role="status"></div>
+            <div class="controls">
+              <button class="btn secondary" id="correction-preview" type="button" disabled>Previsualizar corrección</button>
+              <button class="btn" id="correction-confirm" type="button" disabled>Confirmar corrección</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel section-panel audit">
+          <div class="panel-heading"><div><p class="section-kicker">Historia que no reescribe el cierre</p><h2>Rectificaciones de turno</h2><p>Revisión, delta esperado, conteo físico original y motivo.</p></div></div>
+          <div class="audit-list" id="rectifications-list"><p class="no-data">Aún no hay rectificaciones en este ámbito.</p></div>
+        </section>
+        <section class="panel section-panel audit">
+          <div class="panel-heading"><div><p class="section-kicker">Registro de auditoría</p><h2>Eventos del ámbito</h2><p>Actividad persistida por el motor de fondos.</p></div></div>
+          <div class="events-list" id="events-list"><p class="no-data">Aún no hay eventos cargados.</p></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer class="shell footer"><div class="footer-inner"><span>Hotel Maran · Herramienta de demostración sintética</span><span>Entorno aislado · Sin conexión a ARCA / producción</span></div></footer>
+</body>
+</html>
