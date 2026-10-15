@@ -333,6 +333,9 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * detectar faltantes.
  */
 export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: string }> = {
+  "funding:read": { label: "Consultar financiación de Folio/SPA", section: "Financiación (deshabilitada)" },
+  "funding:write": { label: "Operar financiación de Folio/SPA", section: "Financiación (deshabilitada)" },
+  "funding:historical": { label: "Conciliar historia de Folio/SPA", section: "Financiación (deshabilitada)" },
   "sidebar:/": { label: "Dashboard", section: "PMS — Recepción" },
   "sidebar:/planning": { label: "Planning", section: "PMS — Recepción" },
   "sidebar:/reservations": { label: "Reservas", section: "PMS — Recepción" },

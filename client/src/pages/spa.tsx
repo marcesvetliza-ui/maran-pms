@@ -1,4 +1,5 @@
 import {useLocation} from "wouter";
+import { SpaFundingConnectedPanel } from "@/components/spa/spa-funding-connected-panel";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -599,7 +600,7 @@ export default function SpaPage() {
   const [appliedFilters, setAppliedFilters] = useState({ desde: defaultDesde, hasta: defaultHasta, treatmentId: "", professionalId: "", estado: "" });
 
   const { toast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   // Etapa 3 del ABM de usuarios: mismo resourceKey que ya gatea
   // PATCH /api/spa/accounts/:accountId/reset-nc en el servidor.
   const isAdmin = hasPermission("api:spa:reset-nc");
@@ -3496,7 +3497,15 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </DialogTitle>
           </DialogHeader>
           {selectedAccount && selectedAppointment && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            import.meta.env.VITE_SPA_FUNDING_UI === "true" ? (
+              <SpaFundingConnectedPanel key={selectedAccount.id} accountId={selectedAccount.id}
+                userId={user?.id ?? ""} canWrite={!!user && hasPermission("funding:write")}
+                onCompleted={() => {
+                  void queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment"] });
+                  void queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
+                  void queryClient.invalidateQueries({ queryKey: ["/api/folios", "spa_account", selectedAccount.id] });
+                }} />
+            ) : <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Left: Charges */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">

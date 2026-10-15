@@ -1,4 +1,5 @@
 import { resolveFiscalRecipientDocument, resolveCondicionIvaReceptorId } from "./fiscalDocument";
+import { parseConsultationResult, parseAuthorizationResult } from "./consultationResult";
 
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
@@ -69,6 +70,7 @@ async function soapPost(url: string, action: string, body: string): Promise<stri
       SOAPAction: `"http://ar.gov.afip.dif.FEV1/${action}"`,
     },
     body,
+    signal: AbortSignal.timeout(15000),
   });
   const text = await resp.text();
   if (!resp.ok) throw new Error(`WSFEV1 HTTP ${resp.status}: ${text.slice(0, 400)}`);
@@ -114,19 +116,6 @@ function buildCbtesAsocBlock(cbteAsoc: FECAERequest["cbteAsoc"]): string {
   return `<ar:CbtesAsoc>${entries}</ar:CbtesAsoc>`;
 }
 
-function parseCaeResult(response: string): FECAEResult | null {
-  const caeM = response.match(/<CAE>([^<]+)<\/CAE>/);
-  if (!caeM) return null;
-  const vtoM = response.match(/<CAEFchVto>([^<]+)<\/CAEFchVto>/);
-  const vtoStr = vtoM ? vtoM[1] : "";
-  return {
-    cae: caeM[1],
-    caeFechaVto: vtoStr
-      ? new Date(`${vtoStr.slice(0, 4)}-${vtoStr.slice(4, 6)}-${vtoStr.slice(6, 8)}T12:00:00-03:00`)
-      : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
-  };
-}
-
 function buildServiceDates(fecha: string): string {
   const year = Number(fecha.slice(0, 4));
   const month = Number(fecha.slice(4, 6));
@@ -153,7 +142,8 @@ function buildServiceDates(fecha: string): string {
  */
 export async function feCompConsultar(
   req: FECompConsulta,
-  ambiente: "homologacion" | "produccion"
+  ambiente: "homologacion" | "produccion",
+  expected?: { total: number; fecha: string; docTipo: number; docNro: string }
 ): Promise<FECAEResult | null> {
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
   const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
@@ -166,20 +156,7 @@ export async function feCompConsultar(
     `<ar:FeCompConsReq><ar:CbteTipo>${cbteTipo}</ar:CbteTipo><ar:PtoVta>${req.puntoVenta}</ar:PtoVta><ar:CbteNro>${req.numero}</ar:CbteNro></ar:FeCompConsReq>` +
     `</ar:FECompConsultar></soapenv:Body></soapenv:Envelope>`;
   const response = await soapPost(url, "FECompConsultar", envelope);
-  const faultM = response.match(/<faultstring>([^<]+)<\/faultstring>/);
-  if (faultM) throw new Error(`WSFEV1 Fault al consultar comprobante: ${faultM[1]}`);
-
-  const existing = parseCaeResult(response);
-  if (existing) return existing;
-
-  // ARCA reports R / code 602 when the requested voucher does not exist.
-  // Do not treat an unrecognized answer as "not found": it is safer to leave
-  // the local NC pending for review than to risk authorizing it twice.
-  const errorCodeM = response.match(/<Code>([^<]+)<\/Code>/);
-  if (errorCodeM?.[1] === "602") return null;
-
-  const errorM = response.match(/<Msg>([^<]+)<\/Msg>/);
-  throw new Error(`ARCA no devolvió un estado verificable para la NC pendiente${errorM ? `: ${errorM[1]}` : ""}`);
+  return parseConsultationResult(response, req, cbteTipo, expected);
 }
 
 export async function feCAESolicitar(
@@ -242,19 +219,5 @@ export async function feCAESolicitar(
 
   const resp = await soapPost(url, "FECAESolicitar", envelope);
 
-  const faultM = resp.match(/<faultstring>([^<]+)<\/faultstring>/);
-  if (faultM) throw new Error(`WSFEV1 Fault: ${faultM[1]}`);
-
-  const resultM = resp.match(/<Resultado>([^<]+)<\/Resultado>/);
-  if (resultM && resultM[1] === "R") {
-    const errM = resp.match(/<Msg>([^<]+)<\/Msg>/);
-    throw new Error(`ARCA rechazó el comprobante: ${errM ? errM[1] : "error desconocido"}`);
-  }
-
-  const result = parseCaeResult(resp);
-  if (!result) {
-    const errM = resp.match(/<Msg>([^<]+)<\/Msg>/);
-    throw new Error(`CAE no recibido de ARCA${errM ? ": " + errM[1] : ""}`);
-  }
-  return result;
+  return parseAuthorizationResult(resp, req, cbteTipo);
 }

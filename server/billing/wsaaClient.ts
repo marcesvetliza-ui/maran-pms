@@ -2,6 +2,7 @@ import forge from "node-forge";
 import { db } from "../db";
 import { billingConfig } from "@shared/schema";
 import { eq } from "drizzle-orm";
+type BillingDatabase = Omit<typeof db, "$client">;
 
 const WSAA_HOMOLOG = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms";
 const WSAA_PROD    = "https://wsaa.afip.gov.ar/ws/services/LoginCms";
@@ -67,9 +68,9 @@ async function soapPost(url: string, body: string): Promise<string> {
 }
 
 /** Lee el token persistido en DB; devuelve null si no existe o está por vencer */
-async function loadFromDb(ambiente: string): Promise<{ token: string; sign: string } | null> {
+async function loadFromDb(ambiente: string, database: BillingDatabase, requirePersistentCache: boolean): Promise<{ token: string; sign: string } | null> {
   try {
-    const rows = await db.select({
+    const rows = await database.select({
       arcaTaToken: billingConfig.arcaTaToken,
       arcaTaSign: billingConfig.arcaTaSign,
       arcaTaExpiry: billingConfig.arcaTaExpiry,
@@ -84,19 +85,23 @@ async function loadFromDb(ambiente: string): Promise<{ token: string; sign: stri
     if (expiry.getTime() - Date.now() < RENEW_BEFORE_MS) return null;
 
     return { token: row.arcaTaToken, sign: row.arcaTaSign };
-  } catch {
+  } catch (error) {
+    if (requirePersistentCache) throw error;
     return null;
   }
 }
 
 /** Persiste el token en DB con expiración de 10 horas */
-async function saveToDb(token: string, sign: string, ambiente: string): Promise<void> {
+async function saveToDb(token: string, sign: string, ambiente: string, database: BillingDatabase, requirePersistentCache: boolean): Promise<void> {
   try {
     const expiry = new Date(Date.now() + 10 * 60 * 60 * 1000);
-    await db.update(billingConfig)
+    const updated = await database.update(billingConfig)
       .set({ arcaTaToken: token, arcaTaSign: sign, arcaTaExpiry: expiry, arcaTaAmbiente: ambiente })
-      .where(eq(billingConfig.id, 1));
-  } catch {
+      .where(eq(billingConfig.id, 1)).returning({id:billingConfig.id});
+    if (requirePersistentCache && updated.length !== 1)
+      throw new Error("No se pudo persistir el ticket WSAA; no se autoriza la numeración.");
+  } catch (error) {
+    if (requirePersistentCache) throw error;
     // Silencioso: si falla el guardado, igual devolvemos el token
   }
 }
@@ -166,10 +171,12 @@ const TRANSIENT_WSAA_FAULT = /cms\.sign\.invalid|algoritmo no soportado|firma in
 export async function getTokenAuth(
   certPem: string,
   keyPem: string,
-  ambiente: "homologacion" | "produccion"
+  ambiente: "homologacion" | "produccion",
+  database: BillingDatabase = db,
+  requirePersistentCache = false,
 ): Promise<{ token: string; sign: string }> {
   // 1. Intentar desde DB (persiste entre restarts)
-  const cached = await loadFromDb(ambiente);
+  const cached = await loadFromDb(ambiente,database,requirePersistentCache);
   if (cached) return cached;
 
   // 2. Pedir nuevo token a WSAA — un reintento con TRA fresco si AFIP devuelve
@@ -193,7 +200,7 @@ export async function getTokenAuth(
   }
 
   // 3. Persistir en DB para próximos requests
-  await saveToDb(token, sign, ambiente);
+  await saveToDb(token, sign, ambiente,database,requirePersistentCache);
 
   return { token, sign };
 }

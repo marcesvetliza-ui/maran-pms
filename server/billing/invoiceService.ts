@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, pool } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { salesInvoices, invoiceCounters } from "@shared/schema";
 import { getBillingConfig } from "./billingConfig";
@@ -6,6 +6,10 @@ import { generateFakeCAE } from "./fakeArca";
 import { callARCA } from "./arcaClient";
 import { getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "@shared/schema";
+
+type BillingDatabase = Omit<typeof db, "$client">;
 
 export interface InvoiceItem {
   descripcion: string;
@@ -227,8 +231,8 @@ function round2(n: number) {
  * manual). Sin este resguardo, el contador podía devolver un número ya
  * ocupado y chocar contra la restricción única de sales_invoices.
  */
-async function getNextInvoiceNumber(tipo: string, puntoVenta: number): Promise<number> {
-  const result = await db.execute(sql`
+async function getNextInvoiceNumber(tipo: string, puntoVenta: number, database: BillingDatabase = db): Promise<number> {
+  const result = await database.execute(sql`
     INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
     VALUES (
       ${tipo}, ${puntoVenta},
@@ -256,7 +260,8 @@ async function getNextInvoiceNumberFromAfip(
   token: string,
   sign: string,
   cuit: string,
-  wsfeUrl: string
+  wsfeUrl: string,
+  database: BillingDatabase,
 ): Promise<number> {
   const cbteTipo = TIPOS_CBT_WSFE[tipo] ?? 6;
   const cuitLimpio = cuit.replace(/-/g, "");
@@ -284,7 +289,7 @@ async function getNextInvoiceNumberFromAfip(
   const proximo = ultimoAfip + 1;
 
   // Sincronizar contador local con AFIP
-  await db.execute(sql`
+  await database.execute(sql`
     INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
     VALUES (${tipo}, ${puntoVenta}, ${proximo})
     ON CONFLICT (tipo_comprobante, punto_venta)
@@ -312,8 +317,9 @@ async function freeStaleRejectedDraft(
   cuitEmisor: string,
   wsfeUrl: string,
   ambiente: "homologacion" | "produccion",
+  database: BillingDatabase,
 ): Promise<boolean> {
-  const existing = await db.execute(sql`
+  const existing = await database.execute(sql`
     SELECT id FROM sales_invoices
     WHERE tipo_comprobante = ${tipo} AND punto_venta = ${puntoVenta} AND numero = ${numero}
       AND estado = 'autorizacion_pendiente'
@@ -326,18 +332,54 @@ async function freeStaleRejectedDraft(
   const authorized = await feCompConsultar({ tipo, puntoVenta, numero, cuitEmisor, token, sign }, ambiente);
   if (authorized) return false; // ARCA sí la autorizó — no es un borrador huérfano, no se toca.
 
-  await db.delete(salesInvoices).where(eq(salesInvoices.id, Number(row.id)));
+  await database.delete(salesInvoices).where(eq(salesInvoices.id, Number(row.id)));
   return true;
 }
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
+  const config=await getBillingConfig();
+  if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
+  const environment=(config as any).arcaAmbiente??"ficticio";
+  // Funding never uses ficticio. Preserve the existing synthetic emitter and
+  // its independent counters without taking an operational series lock.
+  if(environment==="ficticio") return emitirFacturaUnlocked(data,config);
+  const issuer=String((config as any).arcaCuit??config.cuit).replace(/\D/g,"");
+  const pv=data.puntoVentaOverride??(environment==="homologacion"?(config.puntoVentaHomolog??99):config.puntoVenta);
+  const c=await pool.connect();
+  let locked=false;
+  try {
+    // Never queue on a series while occupying a pool slot. The successful
+    // owner uses THIS connection for all SQL, including WSAA and draft commits.
+    const lock=await c.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",
+      [`funding-fiscal:${environment}:${issuer}:${data.tipoComprobante}:${pv}`]);
+    locked=lock.rows[0]?.locked===true;
+    if(!locked) throw Object.assign(new Error("La serie fiscal está ocupada. Reintentá la misma operación."),{statusCode:409});
+    if((await c.query("SELECT to_regclass('payment_funding.fiscal_claims') AS table_name")).rows[0].table_name) {
+      const pending=await c.query(`SELECT operation_id FROM payment_funding.fiscal_claims
+        WHERE status<>'authorized' AND identity->>'environment'=$1 AND identity->>'issuer'=$2
+          AND identity->>'tipo'=$3 AND identity->>'puntoVenta'=$4 LIMIT 1`,
+        [environment,issuer,data.tipoComprobante,String(pv)]);
+      if(pending.rowCount) throw Object.assign(new Error("La serie fiscal tiene una operación de financiación pendiente. Recuperá esa misma operación."),{statusCode:409});
+    }
+    return await emitirFacturaUnlocked(data,config,drizzle(c,{schema}));
+  } finally {
+    // Explicit unlock also on throw. Do not return a session lock to the pool.
+    try {
+      if(locked) await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))",
+        [`funding-fiscal:${environment}:${issuer}:${data.tipoComprobante}:${pv}`]);
+      c.release();
+    } catch(error) {c.release(error as Error);}
+  }
+}
+
+async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<ReturnType<typeof getBillingConfig>>, database: BillingDatabase = db): Promise<typeof salesInvoices.$inferSelect> {
+  const db = database;
   if (isUnsupportedSaleType(data.tipoComprobante)) {
     throw Object.assign(
       new Error("Este tipo de comprobante no está habilitado para emisión. Utilice Factura A o Factura B."),
       { statusCode: 400 },
     );
   }
-  const config = await getBillingConfig();
   const ambiente = ((config as any).arcaAmbiente ?? "ficticio") as string;
   const esNoFiscal = isNonFiscalTipo(data.tipoComprobante);
   const recoverableFiscalAdjustment = Boolean(data.recoverableCreditNote || data.recoverableDebitNote || data.recoveryInvoiceId);
@@ -457,7 +499,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   if (esNoFiscal) {
     // Comprobantes no fiscales (Ticket, Vouchers, Cierres): nunca llaman a ARCA,
     // solo llevan una numeración local propia por tipo + punto de venta.
-    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
+    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta,db);
     modoFicticio = false;
     if (recoverableBeforeAuthorization && !pendingInvoice) {
       await insertPendingInvoice();
@@ -470,7 +512,8 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     const { token, sign } = await getTokenAuth(
       config.arcaCert!,
       config.arcaKey!,
-      ambiente as "homologacion" | "produccion"
+      ambiente as "homologacion" | "produccion",
+      db,
     );
 
     const wsfeUrl = ambiente === "produccion"
@@ -480,7 +523,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     // Número sincronizado con AFIP (evita desfasaje por uso previo de modo ficticio)
     if (!pendingInvoice) {
       numero = await getNextInvoiceNumberFromAfip(
-        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl
+        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl,db
       );
     }
 
@@ -506,6 +549,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
         if (err?.code !== "23505" || !(await freeStaleRejectedDraft(
           data.tipoComprobante, puntoVenta, numero, token, sign, cuitAuth, wsfeUrl,
           ambiente as "homologacion" | "produccion",
+          db,
         ))) {
           throw err;
         }
@@ -577,7 +621,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
     modoFicticio = false;
   } else {
     // Modo ficticio: usa contador local, CAE simulado
-    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta);
+    if (!pendingInvoice) numero = await getNextInvoiceNumber(data.tipoComprobante, puntoVenta,db);
     modoFicticio = true;
     if (recoverableBeforeAuthorization && !pendingInvoice) {
       await insertPendingInvoice();
