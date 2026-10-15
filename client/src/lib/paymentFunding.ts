@@ -67,7 +67,11 @@ function verifyOperation(operation: FundingOperation, expectedId: string) {
   if (operation.id !== expectedId) throw new FundingApiError("INVALID_RESPONSE", "La respuesta pertenece a otra operación. No vuelva a emitir ni cobrar.", 502, expectedId);
   return operation;
 }
+export const collectionShiftsSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1) }));
+export const preparedDocumentSchema = z.object({ documentId: z.string().min(1), totalCents: cents.positive() });
 export const fundingApi = {
+  collectionShifts: (id: string) => call(`/spa/${encodeURIComponent(id)}/collection-shifts`, collectionShiftsSchema),
+  prepareDocument: (id: string) => call(`/spa/${encodeURIComponent(id)}/prepare-document`, preparedDocumentSchema, {}),
   scope: (id: string) => call(`/scopes/spa/${encodeURIComponent(id)}`, projectionSchema),
   preview: (request: FundingRequest) => call("/previews", previewSchema, requestSchema.parse(request)),
   reserve: async (confirmation: FundingConfirmation) => verifyOperation(await call("/operations", operationSchema, confirmationSchema.parse(confirmation)), confirmation.operationId),

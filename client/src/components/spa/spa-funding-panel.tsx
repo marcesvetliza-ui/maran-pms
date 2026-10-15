@@ -18,11 +18,12 @@ const terminal = (operation: FundingOperation) => ["applied", "aborted"].include
 type Shift = { id: string; label: string };
 
 /** Only consumes the funding API. Never invokes billing, payments, Caja or legacy settlement. */
-export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted }: {
+export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument }: {
   accountId: string; userId: string; canWrite: boolean;
   // Must come from verified server data; no manual shift IDs or synthetic defaults.
   collectionShifts?: Shift[];
   onCompleted?: () => void;
+  onPrepareDocument?: () => Promise<string>;
 }) {
   const key = fundingJournalKey(userId, accountId);
   const [projection, setProjection] = useState<FundingProjection>();
@@ -67,8 +68,9 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
         if (!(e instanceof FundingApiError && e.status === 404)) throw e;
       }
     } else if (active) acceptOperation(active);
+    return data;
   }
-  async function run(task: () => Promise<void>) {
+  async function run(task: () => Promise<unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true); setError("");
@@ -101,6 +103,15 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   const active = pendingId || projection?.operations.find(item => !terminal(item))?.id;
   const locked = busy || !!active || !canWrite || fatalJournal.current;
   const resetPreview = () => setPreview(undefined);
+  async function prepareDocument() {
+    if (locked || !onPrepareDocument) return;
+    const id = await onPrepareDocument();
+    const data = await refresh();
+    if (!data?.documents.some(doc => doc.id === id && doc.status === "draft"))
+      throw new Error("El documento preparado no aparece disponible. Actualizá el folio antes de continuar.");
+    setDocumentId(id);
+    resetPreview();
+  }
   async function prepare() {
     if (!projection || locked) return;
     const applications = Object.entries(amounts).filter(([, value]) => value !== "").map(([receiptId, value]) => ({ receiptId, amountCents: pesosToCents(value) }));
@@ -198,7 +209,20 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
           {projection.documents.filter(doc => doc.status === "draft").map(doc => <option key={doc.id} value={doc.id}>{doc.id} · {fundingMoney(doc.totalCents)}</option>)}
         </select>
       </label>
-      {!projection.documents.some(doc => doc.status === "draft") && <p className="text-sm">Falta un documento fiscal validado. No se puede preparar desde este navegador.</p>}
+      {!projection.documents.some(doc => doc.status === "draft") && <div className="space-y-2">
+        <p className="text-sm">Falta preparar el comprobante con los cargos y datos fiscales guardados.</p>
+        {onPrepareDocument && <Button disabled={locked} onClick={() => void run(prepareDocument)}>Preparar comprobante</Button>}
+      </div>}
+      {projection.documents.filter(doc => doc.id === documentId).map(doc => {
+        const recipient = doc.snapshot.recipient as Record<string, unknown> | undefined;
+        return <div className="rounded border p-3 text-sm" key={doc.id}>
+          <p>Receptor: {String(recipient?.razonSocial ?? recipient?.label ?? "Revisar ficha fiscal")}</p>
+          <p>Comprobante: {({ FA: "Factura A", FB: "Factura B" } as Record<string, string>)[String(doc.snapshot.tipo ?? doc.snapshot.tipoComprobante)] ?? "Preparado por el servidor"}</p>
+          <p>Documento del receptor: {String(recipient?.cuit ?? recipient?.dni ?? "Sin identificación")}</p>
+          <p>Condición IVA: {String(recipient?.condicionIva ?? "Revisar ficha fiscal")}</p>
+          <p>Total: {fundingMoney(doc.totalCents)}</p>
+        </div>;
+      })}
       {collectionShifts.length > 0 ? <fieldset disabled={locked} className="grid gap-3 rounded border p-3 md:grid-cols-3">
         <legend>Dinero nuevo (sólo el faltante)</legend>
         <label>Importe en pesos<Input aria-label="Dinero nuevo" inputMode="decimal" value={newAmount} onChange={e => { setNewAmount(e.target.value); resetPreview(); }} /></label>

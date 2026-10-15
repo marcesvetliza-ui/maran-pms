@@ -1,5 +1,5 @@
 import {useLocation} from "wouter";
-import { SpaFundingPanel } from "@/components/spa/spa-funding-panel";
+import { SpaFundingConnectedPanel } from "@/components/spa/spa-funding-connected-panel";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -3498,7 +3498,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           </DialogHeader>
           {selectedAccount && selectedAppointment && (
             import.meta.env.VITE_SPA_FUNDING_UI === "true" ? (
-              <SpaFundingPanel key={selectedAccount.id} accountId={selectedAccount.id}
+              <SpaFundingConnectedPanel key={selectedAccount.id} accountId={selectedAccount.id}
                 userId={user?.id ?? ""} canWrite={!!user && hasPermission("funding:write")}
                 onCompleted={() => {
                   void queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment"] });

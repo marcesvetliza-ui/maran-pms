@@ -10,7 +10,7 @@ import { sessionFundingActor } from "./access";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
- * This is intentionally NOT called from server/routes.ts before joint review.
+ * Operational activation remains opt-in after joint review; configured mounting defaults off.
  */
 export function mountOperationalSpaFunding(app:Express,options:{
  enabled?:boolean;pool:Pool;authenticate:RequestHandler;
@@ -45,10 +45,10 @@ export function mountOperationalSpaFunding(app:Express,options:{
    enabled:true,pool:options.pool,authenticate:options.authenticate,actor,operationalSchema:schema,
    fiscal:new PersistentFiscalGateway(options.pool,options.transport,schema),firstSpaClose:createFirstSpaClose(schema),
  })!;
- // Proposed additive endpoints are independently gated until Codex agrees.
- // Tests opt in explicitly; neither this gate nor the main mount is a UI flag.
+ // Reviewed additive endpoints used by the connected SPA client remain independently gated.
+ // Isolated tests opt in explicitly; neither this gate nor the main mount is a UI flag.
  if(options.reviewedExtensions!==true) return service;
- // Proposed additive endpoints; not consumed by Codex's client yet.
+ // Server-prepared documents and authorized shifts; no browser-supplied fiscal snapshots.
  app.get("/api/payment-funding/spa/:accountId/collection-shifts",options.authenticate,async(req,res)=>{
    try {
      const who=actor(req);requirePermission(who,"funding:read");
@@ -75,7 +75,7 @@ export function mountOperationalSpaFunding(app:Express,options:{
  * and before legacy writers. Changing it requires a later explicit review;
  * no environment variable or VITE flag can turn it on accidentally.
  */
-export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=false) {
+export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=false,reviewedExtensions=false) {
  if(!enabled) return null;
  const [{pool},{requireAuth},{hasPermission},{configuredArcaTransport}]=await Promise.all([
    import("../../../db"),import("../../../auth"),import("../../../permissions"),import("./arcaTransport"),
@@ -85,5 +85,5 @@ export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=f
    AND to_regclass('payment_funding.scopes') IS NOT NULL AS ready`)).rows[0].ready;
  if(!ready) throw new Error("Funding schema requires explicit reviewed installation before opt-in.");
  return mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
-   transport:configuredArcaTransport()});
+   transport:configuredArcaTransport(),reviewedExtensions});
 }
