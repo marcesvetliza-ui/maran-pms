@@ -12,11 +12,14 @@ const state = vi.hoisted(() => ({
   billingConfig: { arcaAmbiente: "ficticio", puntoVenta: 1 } as any,
   schemaError: null as Error | null,
   schemaChecks: 0,
+  database: null as any,
 }));
 
-vi.mock("../db", () => ({
+vi.mock("drizzle-orm/node-postgres", () => ({drizzle: () => state.database}));
+vi.mock("../db", () => {
+ const mocked = {
   pool: { connect: async () => ({
-    query: async () => ({ rows: [{ table_name: null }], rowCount: 0 }),
+    query: async () => ({ rows: [{ table_name: null, locked: true }], rowCount: 0 }),
     release: () => {},
   }) },
   db: {
@@ -82,7 +85,10 @@ vi.mock("../db", () => ({
       },
     })),
   },
-}));
+ };
+ state.database = mocked.db;
+ return mocked;
+});
 
 vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => state.billingConfig),

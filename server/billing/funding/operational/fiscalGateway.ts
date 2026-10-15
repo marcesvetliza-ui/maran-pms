@@ -8,7 +8,7 @@ export type FiscalIdentity = {
  puntoVenta: number; numero: number; fecha: string; snapshot: any;
 };
 export interface FiscalTransport {
- lastNumber(identity: Omit<FiscalIdentity, "numero">): Promise<number>;
+  lastNumber(identity: Omit<FiscalIdentity, "numero">, client: PoolClient): Promise<number>;
  authorize(identity: FiscalIdentity): Promise<{ cae: string; caeFechaVto: Date }>;
  lookup(identity: FiscalIdentity): Promise<{ cae: string; caeFechaVto: Date } | null>;
 }
@@ -57,9 +57,11 @@ export class PersistentFiscalGateway implements FiscalGateway {
      const base = {environment:snapshot.environment,issuer:snapshot.issuer,tipo:snapshot.tipo,
        puntoVenta:snapshot.puntoVenta,fecha:snapshot.fecha,snapshot} as Omit<FiscalIdentity,"numero">;
      // Serialize this series, including local drafts, BEFORE choosing a number.
-     await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-       [`funding-fiscal:${base.environment}:${base.issuer}:${base.tipo}:${base.puntoVenta}`]);
-     const last = await this.transport.lastNumber(base);
+      const lock=await c.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
+        [`funding-fiscal:${base.environment}:${base.issuer}:${base.tipo}:${base.puntoVenta}`]);
+      if(lock.rows[0]?.locked!==true)
+        throw new FundingError("FISCAL_OPERATION_PENDING","La serie fiscal está ocupada. Reintentá la misma operación.");
+      const last = await this.transport.lastNumber(base,c);
      if (!Number.isSafeInteger(last) || last < 0) throw new Error("Invalid last fiscal number");
      const pending = await c.query(`SELECT id FROM ${this.s}.sales_invoices
        WHERE tipo_comprobante=$1 AND punto_venta=$2 AND numero>$3 AND estado<>'descartada' LIMIT 1`,

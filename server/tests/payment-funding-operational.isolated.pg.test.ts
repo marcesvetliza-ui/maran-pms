@@ -11,6 +11,11 @@ import { createFirstSpaClose } from "../billing/funding/operational/spaClosure";
 import { adoptVerifiedHistory } from "../billing/funding/operational/history";
 import { sessionFundingActor } from "../billing/funding/operational/access";
 import { type Actor, type Scope, hash } from "../billing/funding/contracts";
+import { createArcaTransport } from "../billing/funding/operational/arcaTransport";
+import { consultationFixture } from "./helpers/wsfeConsultationFixture";
+import { Pool } from "pg";
+import { FundingStore } from "../billing/funding/store";
+import { PaymentFundingService } from "../billing/funding/service";
 
 // ONLY the connection is replaced. Real auth, roles, invoice builder,
 // inventory engine, SQL adapter, gateway persistence and HTTP handlers execute.
@@ -99,6 +104,47 @@ it("default-disabled mounting registers nothing and touches neither DB nor trans
  expect(mountOperationalSpaFunding(app,{pool:null as any,transport:null as any,authenticate:null as any,hasPermission:null as any})).toBeNull();
  expect(app._router?.stack?.length??0).toBe(before);
 });
+it("funding uses one lease per concurrent series and excludes legacy while both pool slots are occupied",async()=>{
+ const fixtures=[await fixture(),await fixture()];
+ const reservations=[await reserve(fixtures[0]),await reserve(fixtures[1])];
+ const identities=await Promise.all(fixtures.map(async f=>(await service.scope(f.scope,actor)).documents[0].snapshot));
+ const limited=new Pool({...pool.options,max:2,connectionTimeoutMillis:250});
+ let arrived=0,entered!:()=>void,release!:()=>void;
+ const ready=new Promise<void>(resolve=>{entered=resolve;});
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const boundedTransport:FiscalTransport={
+   async lastNumber(_identity,client) {
+     if(++arrived===2) entered();
+     await gate;
+     // Real SQL inside the allocation transaction, without another pool loan.
+     return Number((await client.query("SELECT 0 AS n")).rows[0].n);
+   },
+   async authorize(){return {cae:"12345678901234",caeFechaVto:new Date("2026-12-31")};},
+   async lookup(){return null;},
+ };
+ const bounded=new PaymentFundingService(new FundingStore(limited),service.adapters,
+   new PersistentFiscalGateway(limited,boundedTransport,"funding_demo"));
+ const pending=Promise.all(reservations.map(r=>bounded.authorize(r.id,actor)));
+ try {
+   await ready;
+   const configModule=await import("../billing/billingConfig");
+   const {emitirFactura}=await import("../billing/invoiceService");
+   const spy=vi.spyOn(configModule,"getBillingConfig");
+   try {
+     for(const identity of identities) {
+       spy.mockResolvedValue({arcaAmbiente:"homologacion",arcaCuit:identity.issuer,puntoVentaHomolog:identity.puntoVenta} as any);
+       await expect(emitirFactura({tipoComprobante:"FB",cliente:{razonSocial:"Otro cliente",condicionIva:"consumidor_final"},items:[]}))
+         .rejects.toMatchObject({statusCode:409});
+     }
+   } finally {spy.mockRestore();}
+ } finally {release();}
+ try {
+   const results=await pending;
+   expect(results.every(r=>r.status==="authorized_pending_link")).toBe(true);
+   expect(arrived).toBe(2);expect(limited.waitingCount).toBe(0);expect(limited.idleCount).toBe(2);
+   for(const r of reservations) expect((await bounded.finalize(r.id,actor)).status).toBe("applied");
+ } finally {await limited.end();}
+},10000);
 it("existing collections use validated builder and persistent gateway; no new cash, payment or folio entries",async()=>{
  const f=await fixture(),before=await financialCounts(f.scope),r=await reserve(f),n=sends;
  const snapshot=(await service.scope(f.scope,actor)).documents[0].snapshot;
@@ -153,8 +199,19 @@ it("provider CAE survives timeout and gateway reconstruction; concurrent recover
  failAfterProvider=true;
  expect((await http(`/operations/${r.id}/authorize`,{})).body.data.status).toBe("fiscal_unknown");
  expect((await service.scope(f.scope,actor)).receipts.reduce((n,r)=>n+r.heldCents,0)).toBe(9_500_000);
- const recreated=new PersistentFiscalGateway(pool,transport,"funding_demo");
- const result=await Promise.all([recreated.lookup(r.id),recreated.lookup(r.id)]);
+ const identity=(await pool.query("SELECT identity FROM payment_funding.fiscal_claims WHERE operation_id=$1",[r.id])).rows[0].identity;
+ const originalFetch=global.fetch;
+ global.fetch=vi.fn(async(_url,options)=>{
+   expect(String((options?.headers as any)?.SOAPAction)).toContain("FECompConsultar");
+   expect(String(options?.body)).toContain(`<ar:CbteNro>${identity.numero}</ar:CbteNro>`);
+   return new Response(consultationFixture({PtoVta:String(identity.puntoVenta),CbteTipo:"6",
+     CbteDesde:String(identity.numero),CbteHasta:String(identity.numero),ImpTotal:"95000.00",
+     CbteFch:identity.fecha.replace(/-/g,"")},[],"ar"));
+ }) as any;
+ const recreated=new PersistentFiscalGateway(pool,createArcaTransport(async()=>({token:"synthetic",sign:"synthetic"})),"funding_demo");
+ let result;
+ try {result=await Promise.all([recreated.lookup(r.id),recreated.lookup(r.id)]);}
+ finally {global.fetch=originalFetch;}
  expect(result.every(r=>r.outcome==="authorized")).toBe(true);
  expect((await http(`/operations/${r.id}/resume`,{})).body.data.status).toBe("applied");
  expect(sends-n).toBe(1);expect(await financialCounts(f.scope)).toEqual(before);

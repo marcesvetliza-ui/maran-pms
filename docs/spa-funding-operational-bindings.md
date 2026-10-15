@@ -68,8 +68,15 @@ autentica ni emite. **No se invocó ese transporte contra ARCA en esta entrega.*
 `invoiceService.ts` comparte el bloqueo de serie con el gateway y rechaza emisión
 legacy cuando existe una identidad funding pendiente de esa serie. No crea otro
 liquidador. El emisor ficticio y sus contadores conservan su circuito anterior.
-Esta exclusión usa una conexión adicional y debe incluirse en la revisión de
-capacidad del pool y de todos los escritores fiscales antes de habilitar.
+Tras la revisión independiente de Codex, la exclusión legacy y toda su emisión
+usan **la misma conexión**: contador, borrador, consulta y persistencia WSAA,
+recuperación y resultado. Los commits del borrador siguen ocurriendo antes de
+emitir. Legacy y funding toman el mismo advisory lock de serie sin esperar por
+él; la contención se rechaza sin retener conexiones esperando esa serie.
+La consulta de numeración funding pasa su PoolClient a la configuración/WSAA.
+No se aumentó el pool ni se agregó otro pool operativo. Véase
+`spa-funding-bindings-review-response.md` para la evidencia con max=2 y los
+límites de esta corrección; sigue pendiente revisar todos los escritores.
 
 ### Cierre y stock reales en la transacción del finalizador
 
@@ -152,6 +159,12 @@ se informa actualmente como error de finalización y conserva `authorized_pendin
 no se transforma en emisión rechazada ni permite liberar dinero.
 
 ## Evidencia ejecutada
+
+La evidencia original siguiente corresponde a la primera entrega. La revisión
+independiente detectó dos defectos que esas 106 pruebas no cubrían. Las
+correcciones y la evidencia actualizada (**152 aprobadas**) están en
+[`spa-funding-bindings-review-response.md`](spa-funding-bindings-review-response.md).
+No confundir un resultado verde original con cobertura de esos dos casos.
 
 Entorno: PostgreSQL local por Unix socket, DB `folio_funding_synthetic`.
 Ninguna suite general que pueda consumir `DATABASE_URL` fue invocada.

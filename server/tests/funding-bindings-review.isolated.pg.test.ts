@@ -1,52 +1,148 @@
-/** Independent review reproducers. Synthetic Unix-socket DB only; no ARCA calls. */
-import { afterAll, afterEach, expect, it, vi } from "vitest";
+/** Regression tests derived from Codex's independent reproducers.
+ * Real PostgreSQL max=2, real legacy emitter, billing config and WSAA cache.
+ * Only financial readiness and the remote SOAP service are substituted. */
+import { beforeAll, afterAll, afterEach, expect, it, vi } from "vitest";
+import { getTableConfig } from "drizzle-orm/pg-core";
+import * as schema from "../../shared/schema";
+import { authorizationFixture } from "./helpers/wsfeConsultationFixture";
+import { configuredArcaTransport } from "../billing/funding/operational/arcaTransport";
 
-const control = vi.hoisted(() => {
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  return { arrivals: 0, gate, release };
-});
 vi.mock("../db", async () => {
   const { default: pg } = await import("pg");
-  const pool = new pg.Pool({ host: "/tmp/folio-funding-isolated/socket", port: 55439,
-    user: "runner", password: "", database: "folio_funding_synthetic", max: 2,
-    connectionTimeoutMillis: 250, options: "-c search_path=funding_demo,public" });
-  return { pool, db: { execute: async () => {
-    control.arrivals++;
-    if (control.arrivals === 2) control.release();
-    await control.gate;
-    return pool.query("SELECT 1 AS ultimo_numero");
-  } } };
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const tables = await import("../../shared/schema");
+  const pool = new pg.Pool({
+    host: "/tmp/folio-funding-isolated/socket", port: 55439, user: "runner", password: "",
+    database: "folio_funding_synthetic", max: 2, connectionTimeoutMillis: 250,
+    options: "-c search_path=funding_review,public",
+  });
+  return { pool, db: drizzle(pool, { schema: tables }) };
 });
-vi.mock("../billing/billingConfig", () => ({ getBillingConfig: async () => ({
-  arcaAmbiente: "homologacion", arcaCuit: "20111111112", puntoVentaHomolog: 99,
-  arcaCert: "synthetic", arcaKey: "synthetic",
-}) }));
-vi.mock("../billing/wsaaClient", () => ({ getTokenAuth: async () => ({ token: "synthetic", sign: "synthetic" }) }));
 vi.mock("../db-storage", () => ({ getArgentinaToday: () => "2026-10-15" }));
-vi.mock("../migrate", () => ({ assertFinancialSchemaReady: async () => {} }));
+vi.mock("../migrate", () => ({ assertFinancialSchemaReady: () => {} }));
+const { pool, db } = await import("../db");
+const { emitirFactura } = await import("../billing/invoiceService");
 const nativeFetch = global.fetch;
-afterEach(() => { global.fetch = nativeFetch; });
-afterAll(async () => { const { pool } = await import("../db"); await pool.end(); });
+const issuer = "20111111112";
+const data = {
+  tipoComprobante: "FB" as const,
+  cliente: { razonSocial: "Sintético", condicionIva: "consumidor_final" },
+  items: [{ descripcion: "Servicio", cantidad: 1, precioUnitario: 121,
+    alicuotaIva: "21" as const, subtotalNeto: 100, subtotal: 121 }],
+};
+const last = new Map<number, number>();
+let authorized: number[] = [];
+let barrier: (() => Promise<void>) | undefined;
+beforeAll(async () => {
+  await pool.query("DROP SCHEMA IF EXISTS funding_review CASCADE; CREATE SCHEMA funding_review");
+  for (const table of [schema.salesInvoices, schema.billingConfig, schema.invoiceCounters]) {
+    const config = getTableConfig(table);
+    const columns = config.columns.map(c => `"${c.name}" ${c.getSQLType()}${c.primary ? " PRIMARY KEY" : ""}`);
+    await pool.query(`CREATE TABLE funding_review."${config.name}" (${columns.join(",")})`);
+  }
+  await pool.query(`CREATE UNIQUE INDEX ON funding_review.invoice_counters(tipo_comprobante,punto_venta);
+    CREATE UNIQUE INDEX ON funding_review.sales_invoices(tipo_comprobante,punto_venta,numero)`);
+  await db.insert(schema.billingConfig).values({
+    id: 1, razonSocial: "Sintético", cuit: issuer, arcaAmbiente: "homologacion",
+    arcaCuit: issuer, puntoVentaHomolog: 99, arcaCert: "synthetic", arcaKey: "synthetic",
+    arcaTaToken: "synthetic", arcaTaSign: "synthetic", arcaTaAmbiente: "homologacion",
+    arcaTaExpiry: new Date(Date.now() + 12 * 60 * 60 * 1000),
+  });
+});
+afterEach(() => {
+  global.fetch = nativeFetch; vi.restoreAllMocks(); barrier = undefined;
+});
+afterAll(async () => {
+  await pool.query("DROP SCHEMA funding_review CASCADE");
+  await pool.end();
+});
+function soap() {
+  authorized = [];
+  global.fetch = vi.fn(async (_url, options) => {
+    const body = String(options?.body);
+    const pv = Number(body.match(/<ar:PtoVta>(\d+)/)?.[1]);
+    if (String((options?.headers as any)?.SOAPAction).includes("FECompUltimoAutorizado")) {
+      await barrier?.();
+      return new Response(`<Envelope><CbteNro>${last.get(pv) ?? 0}</CbteNro></Envelope>`);
+    }
+    // A missing DB cache would try WSAA with invalid synthetic certs and fail.
+    expect(body).toContain("<ar:FECAESolicitar>");
+    const number = Number(body.match(/<ar:CbteDesde>(\d+)/)?.[1]);
+    expect(number).toBe((last.get(pv) ?? 0) + 1);
+    last.set(pv, number); authorized.push(pv);
+    return new Response(authorizationFixture(pv,number));
+  }) as any;
+}
 
-it("REPRO: a standard FECompConsultar ResultGet response is not recognized by the recovery parser", async () => {
-  const { feCompConsultar } = await import("../billing/wsfevClient");
-  global.fetch = vi.fn(async () => new Response(`<soap:Envelope><soap:Body><FECompConsultarResponse xmlns="http://ar.gov.afip.dif.FEV1/"><FECompConsultarResult><ResultGet><Concepto>2</Concepto><DocTipo>96</DocTipo><DocNro>30111222</DocNro><CbteDesde>1</CbteDesde><CbteHasta>1</CbteHasta><CbteFch>20261015</CbteFch><ImpTotal>95000.00</ImpTotal><MonId>PES</MonId><MonCotiz>1</MonCotiz><Resultado>A</Resultado><CodAutorizacion>12345678901234</CodAutorizacion><EmisionTipo>CAE</EmisionTipo><FchVto>20261025</FchVto></ResultGet></FECompConsultarResult></FECompConsultarResponse></soap:Body></soap:Envelope>`, { status: 200 })) as any;
-  await expect(feCompConsultar({ tipo: "FB", puntoVenta: 99, numero: 1, cuitEmisor: "20111111112", token: "synthetic", sign: "synthetic" },
-    "homologacion", { total: 95000, fecha: "20261015", docTipo: 96, docNro: "30111222" }))
-    .rejects.toThrow(/estado verificable/);
-  expect(global.fetch).toHaveBeenCalledTimes(1);
+it("R4: distinct legacy series complete with every pool slot occupied, including persisted WSAA and draft commits", async () => {
+  soap();
+  let arrivals = 0, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  barrier = async () => { if (++arrivals === 2) release(); await gate; };
+  const connects = vi.spyOn(pool, "connect");
+  const results = await Promise.all([
+    emitirFactura({ ...data, puntoVentaOverride: 90001, spaAccountId: "synthetic-review-one" }),
+    emitirFactura({ ...data, puntoVentaOverride: 90002, spaAccountId: "synthetic-review-two" }),
+  ]);
+  expect(arrivals).toBe(2);
+  expect(results.map(r => r.estado)).toEqual(["emitida", "emitida"]);
+  expect(results.every(r => r.cae === "12345678901234" && r.numero === 1)).toBe(true);
+  // Two configuration reads + two leases. No nested borrow for WSAA/SQL.
+  expect(connects).toHaveBeenCalledTimes(4);
+  expect(pool.totalCount).toBe(2); expect(pool.waitingCount).toBe(0); expect(pool.idleCount).toBe(2);
+  expect(authorized.sort()).toEqual([90001, 90002]);
+}, 5000);
+
+it("R4: same-series contenders fail fast without authorizing, and the released series can emit its next number", async () => {
+  soap();
+  let entered!: () => void, release!: () => void;
+  const reached = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  barrier = async () => { entered(); await gate; };
+  const first = emitirFactura({ ...data, puntoVentaOverride: 90003 });
+  await reached;
+  try {
+    await expect(emitirFactura({ ...data, puntoVentaOverride: 90003 })).rejects.toMatchObject({ statusCode: 409 });
+    expect(pool.waitingCount).toBe(0);
+  } finally { release(); }
+  expect((await first).numero).toBe(1);
+  barrier = undefined;
+  expect((await emitirFactura({ ...data, puntoVentaOverride: 90003 })).numero).toBe(2);
+  expect(authorized).toEqual([90003, 90003]);
+  expect(pool.idleCount).toBe(2);
+}, 5000);
+
+it("R4: thrown authorization retains its draft but releases the connection and series lock", async () => {
+  soap();
+  const original = global.fetch;
+  global.fetch = vi.fn(async (url, options) => {
+    if (String((options?.headers as any)?.SOAPAction).includes("FECAESolicitar"))
+      throw new Error("synthetic post-send timeout");
+    return original(url, options);
+  }) as any;
+  await expect(emitirFactura({ ...data, puntoVentaOverride: 90004, spaAccountId: "synthetic-timeout" }))
+    .rejects.toThrow("synthetic post-send timeout");
+  const row = (await pool.query("SELECT * FROM sales_invoices WHERE punto_venta=90004")).rows[0];
+  expect(row.estado).toBe("autorizacion_pendiente");
+  expect(row.reconciliation_error).toContain("synthetic post-send timeout");
+  // Another session can take the same lock, proving the failed owner released it.
+  const c = await pool.connect();
+  try {
+    expect((await c.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
+      [`funding-fiscal:homologacion:${issuer}:FB:90004`])).rows[0].locked).toBe(true);
+  } finally { c.release(); }
+  expect(pool.waitingCount).toBe(0);
 });
 
-it("REPRO: two legacy emitters can exhaust their own pool while retaining series-lock connections", async () => {
-  global.fetch = vi.fn(async () => new Response("<Envelope><CbteNro>0</CbteNro></Envelope>", { status: 200 })) as any;
-  const { emitirFactura } = await import("../billing/invoiceService");
-  const data = { tipoComprobante: "FB" as const, cliente: { razonSocial: "Sintético", condicionIva: "consumidor_final" },
-    items: [{ descripcion: "Servicio", cantidad: 1, precioUnitario: 121, alicuotaIva: "21" as const, subtotalNeto: 100, subtotal: 121 }] };
-  const results = await Promise.allSettled([emitirFactura({ ...data, puntoVentaOverride: 90001 }), emitirFactura({ ...data, puntoVentaOverride: 90002 })]);
-  expect(control.arrivals).toBe(2);
-  const errors = results.filter((r): r is PromiseRejectedResult => r.status === "rejected").map(r => String(r.reason));
-  expect(errors.some(message => /timeout exceeded when trying to connect/.test(message))).toBe(true);
-  const { pool } = await import("../db");
-  expect(pool.waitingCount).toBe(0);
-}, 5000);
+it("R4: concrete funding numbering reads config and the real WSAA cache on the supplied client, even when the pool is full",async()=>{
+  soap();
+  const clients=await Promise.all([pool.connect(),pool.connect()]);
+  const connects=vi.spyOn(pool,"connect");
+  const identity={environment:"homologacion" as const,issuer,tipo:"FB" as const,puntoVenta:99,fecha:"2026-10-15",snapshot:{}};
+  try {
+    const transport=configuredArcaTransport();
+    expect(await Promise.all(clients.map(c=>transport.lastNumber(identity,c)))).toEqual([0,0]);
+    expect(connects).not.toHaveBeenCalled();
+  } finally {clients.forEach(c=>c.release());}
+  expect(pool.idleCount).toBe(2);
+});

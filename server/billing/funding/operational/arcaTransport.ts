@@ -2,19 +2,22 @@ import { feCAESolicitar, feCompConsultar } from "../../wsfevClient";
 import { FundingError } from "../contracts";
 import type { FiscalIdentity, FiscalTransport } from "./fiscalGateway";
 import { resolveFiscalRecipientDocument } from "../../fiscalDocument";
+import type { PoolClient } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "@shared/schema";
 
 type Auth = {token:string;sign:string};
 /** Config credentials are obtained server-side only, via the existing persisted
  * WSAA cache. This module does not read any credential/environment on import.
  */
-export function createArcaTransport(auth: (identity: Omit<FiscalIdentity,"numero">) => Promise<Auth>): FiscalTransport {
- const credentials=async(i:Omit<FiscalIdentity,"numero">)=>{
+export function createArcaTransport(auth: (identity: Omit<FiscalIdentity,"numero">, client?: PoolClient) => Promise<Auth>): FiscalTransport {
+ const credentials=async(i:Omit<FiscalIdentity,"numero">,client?:PoolClient)=>{
    if(i.environment!=="homologacion") throw new FundingError("FISCAL_ENVIRONMENT_BLOCKED","Emisión productiva no autorizada.",503);
-   return auth(i);
+   return auth(i,client);
  };
  return {
-   async lastNumber(i) {
-     const a=await credentials(i);
+   async lastNumber(i,client) {
+     const a=await credentials(i,client);
      const response=await fetch("https://wswhomo.afip.gov.ar/wsfev1/service.asmx",{
        method:"POST",headers:{"Content-Type":"text/xml; charset=utf-8",SOAPAction:'"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"'},
        signal:AbortSignal.timeout(10000),
@@ -44,14 +47,15 @@ export function createArcaTransport(auth: (identity: Omit<FiscalIdentity,"numero
  * normal application cache instead of performing a throw-away diagnostic login.
  */
 export function configuredArcaTransport(): FiscalTransport {
- return createArcaTransport(async identity=>{
+ return createArcaTransport(async (identity,client)=>{
    const {getBillingConfig}=await import("../../billingConfig");
    const {getTokenAuth}=await import("../../wsaaClient");
-   const config=await getBillingConfig();
+   const database=client?drizzle(client,{schema}):undefined;
+   const config=await getBillingConfig(database);
    const issuer=String(config.arcaCuit??config.cuit).replace(/\D/g,"");
    if(config.arcaAmbiente!==identity.environment || issuer!==identity.issuer ||
      config.puntoVentaHomolog!==identity.puntoVenta || !config.arcaCert || !config.arcaKey)
      throw new FundingError("FISCAL_ENVIRONMENT_BLOCKED","La configuración fiscal cambió o no está completa.",503);
-   return getTokenAuth(config.arcaCert,config.arcaKey,identity.environment);
+   return getTokenAuth(config.arcaCert,config.arcaKey,identity.environment,database);
  });
 }

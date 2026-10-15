@@ -60,3 +60,27 @@ interpreting its authorization as a different customer's invoice.
 **How to apply:** Serialize series allocation, persist identity before sending,
 block legacy issuance behind unresolved claims and validate the consulted
 recipient/date/amount/currency, not merely the presence of a CAE.
+
+A pooled fiscal lock owner must not depend on borrowing another connection from
+the same bounded pool. Same-series contention must not fill the pool with
+advisory-lock waiters.
+
+**Why:** Independent review reproduced self-exhaustion with concurrent legacy
+issuers even while funding mounting was disabled. A lock alone does not prove
+safe coordination if its holder cannot complete its own database work.
+
+**How to apply:** Keep fiscal SQL, WSAA persistence and number allocation on the
+already owned client; reject series contention without waiting on a pooled
+connection. Test bounded capacity across different series and exclusion on the
+same series, including the legacy path when funding is disabled.
+
+Fiscal recovery fixtures must reflect the consultation schema, not reuse the
+authorization response shape.
+
+**Why:** Green recovery tests hid a parser that accepted authorization fields
+but could not recognize ARCA's actual query response. Conservative holds prevent
+duplicate collection but do not by themselves prove recoverability.
+
+**How to apply:** Require exact SOAP/WSFE structure and the persisted identity;
+reject missing/contradictory evidence and never invent fiscal expiry dates.
+Exercise post-CAE recovery through the concrete parser as well as the SQL engine.
