@@ -73,7 +73,10 @@ usan **la misma conexión**: contador, borrador, consulta y persistencia WSAA,
 recuperación y resultado. Los commits del borrador siguen ocurriendo antes de
 emitir. Legacy y funding toman el mismo advisory lock de serie sin esperar por
 él; la contención se rechaza sin retener conexiones esperando esa serie.
-La consulta de numeración funding pasa su PoolClient a la configuración/WSAA.
+La preparación funding pasa su PoolClient a configuración/WSAA **antes** del
+BEGIN financiero. Confirma el ticket en una transacción de autenticación
+independiente y recién entonces comienza la numeración en esa misma conexión.
+Un rollback financiero posterior no puede revertir el ticket ya confirmado.
 No se aumentó el pool ni se agregó otro pool operativo. Véase
 `spa-funding-bindings-review-response.md` para la evidencia con max=2 y los
 límites de esta corrección; sigue pendiente revisar todos los escritores.
@@ -162,8 +165,10 @@ no se transforma en emisión rechazada ni permite liberar dinero.
 
 La evidencia original siguiente corresponde a la primera entrega. La revisión
 independiente detectó dos defectos que esas 106 pruebas no cubrían. Las
-correcciones y la evidencia actualizada (**152 aprobadas**) están en
+correcciones R3/R4 y su evidencia (**152 aprobadas**) están en
 [`spa-funding-bindings-review-response.md`](spa-funding-bindings-review-response.md).
+La revisión posterior R5 y la evidencia vigente (**159 aprobadas**) están en
+[`spa-funding-bindings-r5-response.md`](spa-funding-bindings-r5-response.md).
 No confundir un resultado verde original con cobertura de esos dos casos.
 
 Entorno: PostgreSQL local por Unix socket, DB `folio_funding_synthetic`.

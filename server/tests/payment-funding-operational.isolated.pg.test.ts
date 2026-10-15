@@ -25,10 +25,12 @@ let service:NonNullable<ReturnType<typeof mountOperationalSpaFunding>>;
 let server:ReturnType<ReturnType<typeof express>["listen"]>,base:string,sends=0,failAfterProvider=false;
 const providerKey=(i:any)=>hash({issuer:i.issuer,environment:i.environment,tipo:i.tipo,pv:i.puntoVenta,numero:i.numero});
 const transport:FiscalTransport={
- async lastNumber(i) {
-   const r=await pool.query(`SELECT COALESCE(max(numero),0)::int AS n FROM funding_demo.sales_invoices
+ async prepareNumbering(i,client) {
+  return async()=>{
+   const r=await client.query(`SELECT COALESCE(max(numero),0)::int AS n FROM funding_demo.sales_invoices
      WHERE tipo_comprobante=$1 AND punto_venta=$2 AND estado='emitida'`,[i.tipo,i.puntoVenta]);
    return r.rows[0].n;
+  };
  },
  async authorize(i) {
    sends++;
@@ -113,11 +115,13 @@ it("funding uses one lease per concurrent series and excludes legacy while both 
  const ready=new Promise<void>(resolve=>{entered=resolve;});
  const gate=new Promise<void>(resolve=>{release=resolve;});
  const boundedTransport:FiscalTransport={
-   async lastNumber(_identity,client) {
+   async prepareNumbering(_identity,client) {
+    return async()=>{
      if(++arrived===2) entered();
      await gate;
      // Real SQL inside the allocation transaction, without another pool loan.
      return Number((await client.query("SELECT 0 AS n")).rows[0].n);
+    };
    },
    async authorize(){return {cae:"12345678901234",caeFechaVto:new Date("2026-12-31")};},
    async lookup(){return null;},

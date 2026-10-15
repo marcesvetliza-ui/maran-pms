@@ -8,7 +8,9 @@ export type FiscalIdentity = {
  puntoVenta: number; numero: number; fecha: string; snapshot: any;
 };
 export interface FiscalTransport {
-  lastNumber(identity: Omit<FiscalIdentity, "numero">, client: PoolClient): Promise<number>;
+  /** Called on the owned client BEFORE the financial BEGIN. Must durably
+   * commit any new authentication ticket before returning a number lookup. */
+  prepareNumbering(identity: Omit<FiscalIdentity, "numero">, client: PoolClient): Promise<() => Promise<number>>;
  authorize(identity: FiscalIdentity): Promise<{ cae: string; caeFechaVto: Date }>;
  lookup(identity: FiscalIdentity): Promise<{ cae: string; caeFechaVto: Date } | null>;
 }
@@ -23,6 +25,12 @@ export class PersistentFiscalGateway implements FiscalGateway {
  constructor(readonly pool: Pool, readonly transport: FiscalTransport, schema = "public") {
    this.s = identifier(schema); this.store = new FundingStore(pool);
  }
+  private numberingIdentity(snapshot: any): Omit<FiscalIdentity,"numero"> {
+    if (!snapshot?.validatedPreparation || snapshot.currency !== "ARS" || !["FA","FB"].includes(snapshot.tipo))
+      throw new FundingError("FISCAL_PREPARATION_REQUIRED", "Falta preparación fiscal validada.", 503);
+    return {environment:snapshot.environment,issuer:snapshot.issuer,tipo:snapshot.tipo,
+      puntoVenta:snapshot.puntoVenta,fecha:snapshot.fecha,snapshot};
+  }
  private async persistResult(c: PoolClient, row: any, result: { cae: string; caeFechaVto: Date }): Promise<FiscalLookup> {
    if (!/^\d{14}$/.test(result.cae) || !Number.isFinite(result.caeFechaVto.getTime()))
      throw new FundingError("AUTHORIZATION_MISMATCH", "Respuesta fiscal inválida.");
@@ -43,6 +51,7 @@ export class PersistentFiscalGateway implements FiscalGateway {
    const o = await this.store.operation(operationId);
    if (hash(o.claim) !== hash(claim) || o.kind !== "invoice" || o.scope_kind!=="spa" || !["authorizing","fiscal_unknown"].includes(o.status))
      throw new FundingError("AUTHORIZATION_MISMATCH", "No existe una operación fiscal reservada coincidente.");
+    let numbering: { identityHash: string; lookup: () => Promise<number> } | undefined;
    const ready = await this.store.transaction({kind:o.scope_kind,id:o.scope_id}, operationId, async c => {
      let row = (await c.query("SELECT * FROM payment_funding.fiscal_claims WHERE operation_id=$1 FOR UPDATE", [operationId])).rows[0];
      if (row) {
@@ -52,16 +61,17 @@ export class PersistentFiscalGateway implements FiscalGateway {
      }
      const doc = (await c.query("SELECT * FROM payment_funding.documents WHERE id=$1 FOR UPDATE", [claim.documentId])).rows[0];
      const snapshot = doc?.snapshot;
-     if (!snapshot?.validatedPreparation || snapshot.currency !== "ARS" || !["FA","FB"].includes(snapshot.tipo))
-       throw new FundingError("FISCAL_PREPARATION_REQUIRED", "Falta preparación fiscal validada.", 503);
-     const base = {environment:snapshot.environment,issuer:snapshot.issuer,tipo:snapshot.tipo,
-       puntoVenta:snapshot.puntoVenta,fecha:snapshot.fecha,snapshot} as Omit<FiscalIdentity,"numero">;
+      const base = this.numberingIdentity(snapshot);
+      if (!numbering || numbering.identityHash !== hash(base))
+        throw new FundingError("SOURCE_CHANGED", "La preparación fiscal cambió después de autenticar.");
      // Serialize this series, including local drafts, BEFORE choosing a number.
       const lock=await c.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
         [`funding-fiscal:${base.environment}:${base.issuer}:${base.tipo}:${base.puntoVenta}`]);
       if(lock.rows[0]?.locked!==true)
         throw new FundingError("FISCAL_OPERATION_PENDING","La serie fiscal está ocupada. Reintentá la misma operación.");
-      const last = await this.transport.lastNumber(base,c);
+      // Pure remote number query with already-persisted credentials. It cannot
+      // issue/cache a fresh WSAA ticket inside this financial transaction.
+      const last = await numbering.lookup();
      if (!Number.isSafeInteger(last) || last < 0) throw new Error("Invalid last fiscal number");
      const pending = await c.query(`SELECT id FROM ${this.s}.sales_invoices
        WHERE tipo_comprobante=$1 AND punto_venta=$2 AND numero>$3 AND estado<>'descartada' LIMIT 1`,
@@ -84,6 +94,12 @@ export class PersistentFiscalGateway implements FiscalGateway {
        (operation_id,document_id,claim_hash,identity,invoice_id,status) VALUES($1,$2,$3,$4,$5,'prepared') RETURNING *`,
        [operationId,claim.documentId,claim.claimHash,JSON.stringify(identity),String(invoice.id)])).rows[0];
      return { row };
+    }, async c => {
+      if ((await c.query("SELECT 1 FROM payment_funding.fiscal_claims WHERE operation_id=$1",[operationId])).rowCount)
+        return; // Known identities recover without preparing or reserving another.
+      const doc = (await c.query("SELECT snapshot FROM payment_funding.documents WHERE id=$1",[claim.documentId])).rows[0];
+      const base = this.numberingIdentity(doc?.snapshot);
+      numbering = {identityHash:hash(base),lookup:await this.transport.prepareNumbering(base,c)};
    });
    if (ready.row.result) return {outcome:"authorized",invoice:ready.row.result};
    // A crash before this compare-and-set is recoverable; no network has run.

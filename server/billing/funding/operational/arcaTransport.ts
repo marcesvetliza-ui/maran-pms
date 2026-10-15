@@ -16,8 +16,24 @@ export function createArcaTransport(auth: (identity: Omit<FiscalIdentity,"numero
    return auth(i,client);
  };
  return {
-   async lastNumber(i,client) {
-     const a=await credentials(i,client);
+   async prepareNumbering(i,client) {
+     // This is a dedicated authentication transaction on the already owned
+     // loan, BEFORE FundingStore opens its financial transaction. A rollback
+     // of number/draft allocation must not erase an externally issued ticket.
+     await client.query("BEGIN");
+     let a:Auth;
+     try {
+       const lock=await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
+         [`funding-wsaa:${i.environment}:${i.issuer}`]);
+       if(lock.rows[0]?.locked!==true)
+         throw new FundingError("CONCURRENT_CHANGE","Hay otra autenticación fiscal en curso. Reintentá la misma operación.",409,true);
+       a=await credentials(i,client);
+       await client.query("COMMIT");
+     } catch(error) {
+       await client.query("ROLLBACK").catch(()=>{});
+       throw error;
+     }
+     return async()=>{
      const response=await fetch("https://wswhomo.afip.gov.ar/wsfev1/service.asmx",{
        method:"POST",headers:{"Content-Type":"text/xml; charset=utf-8",SOAPAction:'"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"'},
        signal:AbortSignal.timeout(10000),
@@ -26,6 +42,7 @@ export function createArcaTransport(auth: (identity: Omit<FiscalIdentity,"numero
      const text=await response.text(),match=text.match(/<CbteNro>(\d+)<\/CbteNro>/);
      if(!response.ok || !match || /<(?:Errors|faultstring)>/.test(text)) throw new Error("ARCA no confirmó el último número fiscal.");
      return Number(match[1]);
+     };
    },
    async authorize(i) {
      const a=await credentials(i),r=i.snapshot.recipient;
@@ -56,6 +73,6 @@ export function configuredArcaTransport(): FiscalTransport {
    if(config.arcaAmbiente!==identity.environment || issuer!==identity.issuer ||
      config.puntoVentaHomolog!==identity.puntoVenta || !config.arcaCert || !config.arcaKey)
      throw new FundingError("FISCAL_ENVIRONMENT_BLOCKED","La configuración fiscal cambió o no está completa.",503);
-   return getTokenAuth(config.arcaCert,config.arcaKey,identity.environment,database);
+   return getTokenAuth(config.arcaCert,config.arcaKey,identity.environment,database,true);
  });
 }

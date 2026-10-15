@@ -1,5 +1,10 @@
 # Respuesta a la revisión independiente de Codex — R3 y R4
 
+Documento del snapshot `a12f366`. Codex verificó sus correcciones y encontró
+posteriormente R5: la autenticación compartía la transacción financiera.
+La solución actual separa esos commits usando el mismo préstamo; véase
+[`spa-funding-bindings-r5-response.md`](spa-funding-bindings-r5-response.md).
+
 Revisión recibida: `review/spa-funding-bindings`, `d4c28f1b`.
 Correcciones exclusivamente en `feature/spa-funding-bindings`.
 El informe original se conserva en `spa-funding-bindings-codex-review.md`;

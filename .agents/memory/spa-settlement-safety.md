@@ -84,3 +84,16 @@ duplicate collection but do not by themselves prove recoverability.
 **How to apply:** Require exact SOAP/WSFE structure and the persisted identity;
 reject missing/contradictory evidence and never invent fiscal expiry dates.
 Exercise post-CAE recovery through the concrete parser as well as the SQL engine.
+
+WSAA ticket persistence must commit independently BEFORE any financial
+transaction that can reject numbering or roll back a fiscal draft.
+
+**Why:** Issuing an external ticket cannot be rolled back. Losing its local
+cache on a later financial failure can leave a valid remote ticket unavailable,
+and another login can be rejected as already authenticated.
+
+**How to apply:** Reuse one pool loan across separate authentication and
+financial transactions, committing the durable cache first. Coordinate refresh
+without nested pool loans, and prove reuse after rollback with fresh instances,
+not only with an in-memory token. A failure before that first durable commit
+cannot be advertised as solved by a subsequent financial retry.

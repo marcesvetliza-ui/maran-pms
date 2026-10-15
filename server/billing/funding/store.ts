@@ -3,19 +3,26 @@ import { FundingError, type Scope } from "./contracts";
 
 export class FundingStore {
   constructor(readonly pool: Pool) {}
-  async transaction<T>(scope: Scope, operationId: string | null, run: (client: PoolClient) => Promise<T>): Promise<T> {
+  async transaction<T>(scope: Scope, operationId: string | null, run: (client: PoolClient) => Promise<T>,
+    beforeBegin?: (client: PoolClient) => Promise<void>): Promise<T> {
     const client = await this.pool.connect();
+    let begun = false;
     try {
+      // Optional preflight owns this SAME loan, before any financial locks or
+      // BEGIN. External authentication can commit independently of later SQL.
+      await beforeBegin?.(client);
       await client.query("BEGIN");
+      begun = true;
       await client.query("SET LOCAL lock_timeout='3s'");
       await client.query("SET LOCAL statement_timeout='10s'");
       if (operationId) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`funding-operation:${operationId}`]);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`funding-scope:${scope.kind}:${scope.id}`]);
       const result = await run(client);
       await client.query("COMMIT");
+      begun = false;
       return result;
     } catch (error: any) {
-      await client.query("ROLLBACK").catch(() => {});
+      if (begun) await client.query("ROLLBACK").catch(() => {});
       if (["55P03","40P01","40001"].includes(error.code)) throw new FundingError("CONCURRENT_CHANGE", "Hay otra operación financiera en curso. Reintente la misma operación.", 409, true);
       if (error.code === "23514") throw new FundingError(String(error.message).split("\n")[0], "La operación viola una garantía financiera; no se aplicó ningún cambio.", 409);
       if (error.code === "23505") throw new FundingError("DUPLICATE_CLAIM", "Ya existe una operación o vínculo financiero con esa identidad.", 409);

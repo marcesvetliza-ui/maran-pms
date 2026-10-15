@@ -141,7 +141,11 @@ it("R4: concrete funding numbering reads config and the real WSAA cache on the s
   const identity={environment:"homologacion" as const,issuer,tipo:"FB" as const,puntoVenta:99,fecha:"2026-10-15",snapshot:{}};
   try {
     const transport=configuredArcaTransport();
-    expect(await Promise.all(clients.map(c=>transport.lastNumber(identity,c)))).toEqual([0,0]);
+    // Number preparation now commits its own auth transaction before financial
+    // numbering; run sequentially here because both use the same WSAA issuer.
+    const numbers=[];
+    for(const c of clients) numbers.push(await (await transport.prepareNumbering(identity,c))());
+    expect(numbers).toEqual([0,0]);
     expect(connects).not.toHaveBeenCalled();
   } finally {clients.forEach(c=>c.release());}
   expect(pool.idleCount).toBe(2);
