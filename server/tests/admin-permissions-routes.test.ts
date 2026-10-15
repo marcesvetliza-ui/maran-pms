@@ -102,6 +102,32 @@ describe("admin role-permissions routes", () => {
     expect(body.grants).toEqual([{ role: "reception", resourceKey: "sidebar:/reservations" }]);
   });
 
+  it("reúne los cinco permisos de Revenue en una sección administrable", async () => {
+    app = await startApp();
+    const response = await fetch(`${app.baseUrl}/api/admin/role-permissions`);
+    const body = await response.json();
+    const revenue = body.catalog.filter((item: { section: string }) => item.section === "Revenue Management");
+    expect(revenue.map((item: { resourceKey: string }) => item.resourceKey).sort()).toEqual([
+      "api:revenue:competitor-write", "api:revenue:configure", "api:revenue:events-write",
+      "api:revenue:read", "sidebar:/revenue-management",
+    ]);
+  });
+
+  it.each(["sidebar:/revenue-management", "api:revenue:read", "api:revenue:events-write",
+    "api:revenue:competitor-write", "api:revenue:configure"])("permite otorgar Revenue por rol: %s", async (resourceKey) => {
+    app = await startApp();
+    const response = await fetch(`${app.baseUrl}/api/admin/role-permissions/grant`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "reception", resourceKey }),
+    });
+    expect(response.status).toBe(204);
+    expect(dbState.rows).toEqual([{ role: "reception", resourceKey }]);
+    const { hasPermission } = await import("../permissions");
+    expect(hasPermission("reception", resourceKey)).toBe(true);
+    expect(hasPermission("reception", resourceKey === "api:revenue:configure"
+      ? "api:revenue:read" : "api:revenue:configure")).toBe(false);
+  });
+
   it("POST /grant agrega el permiso y audita el cambio", async () => {
     app = await startApp();
 

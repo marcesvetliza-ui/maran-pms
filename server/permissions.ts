@@ -384,7 +384,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:/operaciones": { label: "Operaciones", section: "Gerencia & Revenue" },
   "sidebar:/executive": { label: "Ejecutivo", section: "Gerencia & Revenue" },
   "sidebar:/reports": { label: "Reportes", section: "Gerencia & Revenue" },
-  "sidebar:/revenue-management": { label: "Revenue Management", section: "Gerencia & Revenue" },
+  "sidebar:/revenue-management": { label: "Acceder al módulo Revenue Management", section: "Revenue Management" },
 
   "sidebar:/administration": { label: "Configuración", section: "Configuración" },
   "sidebar:/admin/room-types/integrity": { label: "Reparar tipos de habitación", section: "Configuración" },
@@ -434,10 +434,10 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
 
-  "api:revenue:read": { label: "Ver tablero, pace report y sugerencias", section: "API — Revenue Management" },
-  "api:revenue:events-write": { label: "Cargar calendario de demanda", section: "API — Revenue Management" },
-  "api:revenue:competitor-write": { label: "Cargar tarifas de competencia", section: "API — Revenue Management" },
-  "api:revenue:configure": { label: "Configurar motor de sugerencias", section: "API — Revenue Management" },
+  "api:revenue:read": { label: "Ver tablero, Pace, demanda, competencia y sugerencias", section: "Revenue Management" },
+  "api:revenue:events-write": { label: "Agregar, modificar y eliminar eventos de demanda", section: "Revenue Management" },
+  "api:revenue:competitor-write": { label: "Agregar, modificar y eliminar tarifas de competencia", section: "Revenue Management" },
+  "api:revenue:configure": { label: "Configurar sugerencias y planes tarifarios de referencia", section: "Revenue Management" },
   "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
   "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
   "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },
