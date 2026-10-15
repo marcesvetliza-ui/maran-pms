@@ -48,6 +48,11 @@ export function registerRevenueRoutes(app: Express) {
   app.get("/api/revenue/board", requirePermission(REVENUE_READ), async (req, res) => {
     try {
       const { from, to } = parseRange(req);
+      // El tablero es, junto con el pace report, uno de los dos puntos de
+      // entrada reales que disparan la captura perezosa del snapshot diario
+      // (ver server/revenue/metrics.ts, sección PACE SNAPSHOTS) — antes solo
+      // estaba conectado acá el endpoint de pace.
+      await ensureTodayPaceSnapshot();
       const days = await computeRevenueBoard(from, to);
       res.json({ from, to, days });
     } catch (e: any) {
@@ -249,6 +254,7 @@ export function registerRevenueRoutes(app: Express) {
         roomTypeId: rt.id,
         roomTypeName: rt.name,
         configuredRatePlanId: configByRoomType.get(rt.id)?.ratePlanId ?? null,
+        includesBreakfast: configByRoomType.get(rt.id)?.includesBreakfast ?? false,
         availablePlans: planRows.filter(p => p.roomTypeId === rt.id).map(p => ({ id: p.id, name: p.name })),
       }));
       res.json(result);
@@ -260,12 +266,12 @@ export function registerRevenueRoutes(app: Express) {
   app.put("/api/revenue/reference-rate-plans/:roomTypeId", requirePermission(REVENUE_CONFIGURE), async (req, res) => {
     try {
       const { roomTypeId } = req.params;
-      const { ratePlanId } = req.body as { ratePlanId: string | null };
+      const { ratePlanId, includesBreakfast } = req.body as { ratePlanId: string | null; includesBreakfast?: boolean };
 
       if (ratePlanId === null || ratePlanId === undefined || ratePlanId === "") {
         await db.delete(revenueReferenceRatePlans).where(eq(revenueReferenceRatePlans.roomTypeId, roomTypeId));
         await audit(req, "update", "revenue", `Plan de referencia desconfigurado para el tipo de habitación ${roomTypeId}`, { entityType: "revenue_reference_rate_plan", entityId: roomTypeId });
-        return res.json({ roomTypeId, configuredRatePlanId: null });
+        return res.json({ roomTypeId, configuredRatePlanId: null, includesBreakfast: false });
       }
 
       const [plan] = await db.select({ id: ratePlans.id, roomTypeId: ratePlans.roomTypeId })
@@ -274,14 +280,15 @@ export function registerRevenueRoutes(app: Express) {
         return res.status(400).json({ error: "El plan tarifario elegido no corresponde a este tipo de habitación" });
       }
 
+      const breakfast = includesBreakfast === true;
       await db.insert(revenueReferenceRatePlans).values({
-        roomTypeId, ratePlanId, updatedBy: req.user?.id || null,
+        roomTypeId, ratePlanId, includesBreakfast: breakfast, updatedBy: req.user?.id || null,
       }).onConflictDoUpdate({
         target: revenueReferenceRatePlans.roomTypeId,
-        set: { ratePlanId, updatedAt: new Date(), updatedBy: req.user?.id || null },
+        set: { ratePlanId, includesBreakfast: breakfast, updatedAt: new Date(), updatedBy: req.user?.id || null },
       });
-      await audit(req, "update", "revenue", `Plan de referencia configurado para el tipo de habitación ${roomTypeId}`, { entityType: "revenue_reference_rate_plan", entityId: roomTypeId, details: { ratePlanId } });
-      res.json({ roomTypeId, configuredRatePlanId: ratePlanId });
+      await audit(req, "update", "revenue", `Plan de referencia configurado para el tipo de habitación ${roomTypeId}`, { entityType: "revenue_reference_rate_plan", entityId: roomTypeId, details: { ratePlanId, includesBreakfast: breakfast } });
+      res.json({ roomTypeId, configuredRatePlanId: ratePlanId, includesBreakfast: breakfast });
     } catch (e: any) {
       res.status(400).json({ error: e?.message || "No se pudo guardar el plan de referencia" });
     }
