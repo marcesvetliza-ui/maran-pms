@@ -267,3 +267,17 @@ describe("authorizePilotExternalRole — reglas exhaustivas (Fase 6)", () => {
     expect(status).toBe(403);
   });
 });
+
+
+describe("Revenue para el visitante del demo", () => {
+  for (const path of ["/api/revenue/board", "/api/revenue/board/2026-10-15", "/api/revenue/pace/2026-11-15", "/api/revenue/demand-events", "/api/revenue/competitor-rates", "/api/revenue/suggestions", "/api/revenue/suggestion-config", "/api/revenue/reference-rate-plans"]) {
+    it(`permite consultar ${path}`, () => {
+      expect(callMiddleware(PILOT_EXTERNAL_ROLE, "GET", path)).toEqual({ status: null, nextCalled: true });
+    });
+  }
+  for (const [method, path] of [["POST", "/api/revenue/demand-events"], ["PATCH", "/api/revenue/demand-events/id"], ["DELETE", "/api/revenue/demand-events/id"], ["POST", "/api/revenue/competitor-rates"], ["PATCH", "/api/revenue/suggestion-config"], ["PUT", "/api/revenue/reference-rate-plans/id"], ["POST", "/api/revenue/pace/capture"], ["GET", "/api/revenue/unknown"]]) {
+    it(`bloquea ${method} ${path}`, () => {
+      expect(callMiddleware(PILOT_EXTERNAL_ROLE, method, path)).toEqual({ status: 403, nextCalled: false });
+    });
+  }
+});

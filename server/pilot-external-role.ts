@@ -139,6 +139,15 @@ const DENY_RULES: PathRule[] = [
 // Módulos permitidos (Fase 6): Reservas, Huéspedes, Check-in/out, Folios y
 // Caja. DENY_RULES arriba tiene prioridad sobre estas reglas.
 const ALLOW_RULES: PathRule[] = [
+  // Revenue demo: visualización, sin alta/edición de eventos, competencia o configuración.
+  exact("GET", "/api/revenue/board", "ver tablero Revenue"),
+  exact("GET", "/api/revenue/board/:date", "ver detalle Revenue"),
+  exact("GET", "/api/revenue/pace/:stayDate", "ver pace Revenue"),
+  exact("GET", "/api/revenue/demand-events", "ver demanda Revenue"),
+  exact("GET", "/api/revenue/competitor-rates", "ver competencia Revenue"),
+  exact("GET", "/api/revenue/suggestions", "ver sugerencias Revenue"),
+  exact("GET", "/api/revenue/suggestion-config", "ver configuración Revenue"),
+  exact("GET", "/api/revenue/reference-rate-plans", "ver planes de referencia Revenue"),
   exact("GET", "/api/permissions/mine", "permisos del propio usuario"),
   // Reservas: listado, detalle, planning, crear/editar, check-in/out y
   // operaciones normales de uso diario (transferencias, deshacer, etc.)
