@@ -1,4 +1,5 @@
-import {useLocation} from "wouter";
+import { buildSpaInvoiceRecipient } from "@/lib/spaInvoiceRecipient";
+
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useMemo, useRef, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -147,6 +148,9 @@ type SpaClientType = {
   condicionVentaPredeterminada?: string | null;
   cuilCuit?: string | null;
   razonSocial?: string | null;
+  vatCondition?: string | null;
+  documentNumber?: string | null;
+  direccion?: string | null;
 };
 
 type SpaAppointment = {
@@ -291,6 +295,7 @@ type WeeklySummaryItem = {
 type InventoryItemWithDetails = {
   id: string;
   name: string;
+  sku?: string | null;
   currentStock: number;
   unit: string;
   costPrice: string;
@@ -563,10 +568,6 @@ export default function SpaPage() {
   const [chargeType, setChargeType] = useState("");
   const [receiptType, setReceiptType] = useState("");
   const [folioRoomChargeId, setFolioRoomChargeId] = useState("");
-  const [invoiceCustomerName, setInvoiceCustomerName] = useState("");
-  const [invoiceCustomerCuit, setInvoiceCustomerCuit] = useState("");
-  const [invoiceCustomerDni, setInvoiceCustomerDni] = useState("");
-  const [saveCuitToProfile, setSaveCuitToProfile] = useState(false);
   const [isTreatmentDialogOpen, setIsTreatmentDialogOpen] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<SpaTreatment | null>(null);
   const [deletingTreatment, setDeletingTreatment] = useState<SpaTreatment | null>(null);
@@ -608,9 +609,15 @@ export default function SpaPage() {
     queryKey: ["/api/spa/cabins"],
   });
 
-  const { data: treatments = [] } = useQuery<SpaTreatment[]>({
-    queryKey: ["/api/spa/treatments"],
+  const [treatmentStatus, setTreatmentStatus] = useState("active");
+  const [inventorySearch, setInventorySearch] = useState("");
+  const { data: allTreatments = [] } = useQuery<SpaTreatment[]>({
+    queryKey: ["/api/spa/treatments", "all"],
+    queryFn: async () => (await apiRequest("GET", "/api/spa/treatments?status=all")).json(),
   });
+  const treatments = allTreatments.filter(t => t.isActive === "true");
+  const listedTreatments = allTreatments.filter(t => treatmentStatus === "all" ||
+    (treatmentStatus === "active" ? t.isActive === "true" : t.isActive !== "true"));
 
   const { data: treatmentSales = [], isLoading: treatmentSalesLoading } = useQuery<SpaTreatmentSale[]>({
     queryKey: ["/api/spa/treatment-sales", showAllTreatmentSales],
@@ -850,36 +857,6 @@ export default function SpaPage() {
     editingAppointmentResources,
   ]);
 
-  // Pre-fill company name and CUIT when the folio dialog opens with a receipt
-  // type already selected (e.g. re-opening a partially-filled close dialog).
-  // The onValueChange handler covers the case where staff changes the type;
-  // this effect covers the case where the dialog reopens with it already set.
-  useEffect(() => {
-    if (!isFolioOpen) return;
-    if (!["factura_a", "factura_b"].includes(receiptType)) return;
-    // Only pre-fill when both fields are still blank to avoid clobbering manual edits.
-    if (invoiceCustomerName || invoiceCustomerCuit) return;
-
-    const linkedReservation = selectedAppointment?.reservationId
-      ? allReservations.find((r) => r.id === selectedAppointment.reservationId)
-      : null;
-    const linkedCompany = linkedReservation?.companyId
-      ? (companies as Company[]).find((c) => c.id === linkedReservation.companyId)
-      : null;
-
-    if (linkedCompany) {
-      setInvoiceCustomerName(linkedCompany.razonSocial || linkedCompany.nombreFantasia || linkedCompany.name || "");
-      setInvoiceCustomerCuit(receiptType === "factura_a" ? (linkedCompany.cuilCuit || "") : "");
-    } else if (selectedAppointment?.guestId) {
-      const guest = spaClients.find((c) => c.id === selectedAppointment.guestId);
-      if (guest) {
-        setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
-        setInvoiceCustomerCuit(receiptType === "factura_a" ? (guest.cuilCuit || "") : "");
-      }
-    }
-  }, [isFolioOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const [, navigateToReceipt] = useLocation();
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: AppointmentFormValues) => {
       const treatment = treatments.find((t) => t.id === data.treatmentId);
@@ -946,43 +923,16 @@ export default function SpaPage() {
           : null;
         const reservationGuest = linkedReservation?.guest;
         const fullName = `${variables.guestLastName || ""} ${variables.guestName}`.trim();
-        const recipientName = linkedCompany?.razonSocial
-          || linkedCompany?.nombreFantasia
-          || spaGuest?.razonSocial
-          || fullName;
-
+        const recipient = buildSpaInvoiceRecipient(linkedCompany, spaGuest || reservationGuest, fullName);
         const receiptContext: PendingSpaInvoice = {
+          ...recipient,
           accountId: createdApt.accountId,
           initialValues: {
-            razonSocial: recipientName,
-            cuit: linkedCompany?.cuilCuit || spaGuest?.cuilCuit || reservationGuest?.cuilCuit || undefined,
-            dni: reservationGuest?.documentNumber || undefined,
-            condicionIva: linkedCompany?.condicionIva || reservationGuest?.vatCondition || "Consumidor Final",
-            domicilio: linkedCompany?.domicilio || linkedCompany?.direccion || reservationGuest?.direccion || "",
-            items: (createdApt.accountItems || []).map((item) => ({
-              descripcion: item.description,
-              precioUnitario: parseFloat(item.amount),
-            })),
+            ...recipient.initialValues,
+            items: (createdApt.accountItems || []).map(item => ({ descripcion: item.description, precioUnitario: parseFloat(item.amount) })),
           },
-          billingEntityType: linkedCompany ? "company" : undefined,
-          billingEntityId: linkedCompany?.id,
-          recipientProfile: linkedCompany
-            ? { type: "company", id: linkedCompany.id }
-            : reservationGuest?.id
-              ? {
-                  type: "guest",
-                  id: reservationGuest.id,
-                  firstName: reservationGuest.firstName,
-                  lastName: reservationGuest.lastName,
-                }
-              : undefined,
         };
-        try {
-          sessionStorage.setItem('spa-receipt-'+createdApt.accountId, JSON.stringify(receiptContext));
-          navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(createdApt.accountId));
-        } catch {
-          setPendingSpaInvoice(receiptContext);
-        }
+        setPendingSpaInvoice(receiptContext);
       }
 
       setIsNewDialogOpen(false);
@@ -1172,20 +1122,6 @@ export default function SpaPage() {
       if (selectedAppointment) {
         await updateAppointmentMutation.mutateAsync({ id: selectedAppointment.id, status: "completed" });
       }
-      // Persist CUIT to guest profile if requested
-      if (saveCuitToProfile && invoiceCustomerCuit.trim() && selectedAppointment?.guestId) {
-        try {
-          await fetch(`/api/spa/clients/${selectedAppointment.guestId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cuilCuit: invoiceCustomerCuit.trim() }),
-            credentials: "include",
-          });
-          queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
-        } catch (e) {
-          console.warn("[SPA] Failed to save CUIT to guest profile:", e);
-        }
-      }
       queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       const wasFactura = ["factura_a", "factura_b", "factura_c"].includes(variables.receiptType);
@@ -1200,10 +1136,6 @@ export default function SpaPage() {
       setSelectedAppointment(null);
       setReceiptType("");
       setFolioRoomChargeId("");
-      setInvoiceCustomerName("");
-      setInvoiceCustomerCuit("");
-      setInvoiceCustomerDni("");
-      setSaveCuitToProfile(false);
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
@@ -1333,7 +1265,7 @@ export default function SpaPage() {
     },
     onSuccess: (savedTreatment: SpaTreatment, variables: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments"] });
-      if (!editingTreatment && variables.isCircuit) {
+      if (!editingTreatment) {
         setEditingTreatment(savedTreatment);
         treatmentForm.reset({
           name: savedTreatment.name,
@@ -1342,9 +1274,9 @@ export default function SpaPage() {
           durationMinutes: savedTreatment.durationMinutes,
           price: savedTreatment.price,
           isActive: savedTreatment.isActive || "true",
-          isCircuit: true,
+          isCircuit: savedTreatment.isCircuit ?? false,
         });
-        toast({ title: "Circuito creado", description: "Ahora configurá los recursos incluidos." });
+        toast({ title: variables.isCircuit ? "Circuito creado" : "Tratamiento creado", description: "Podés completar los insumos y recursos antes de cerrar." });
         return;
       }
       toast({ title: editingTreatment ? "Servicio actualizado" : "Tratamiento creado" });
@@ -1359,23 +1291,23 @@ export default function SpaPage() {
 
   const deleteTreatmentMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/spa/treatments/${id}`);
+      return apiRequest("PATCH", `/api/spa/treatments/${id}`, { isActive: "false" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/treatments"] });
-      toast({ title: "Tratamiento eliminado" });
+      toast({ title: "Tratamiento desactivado" });
       setDeletingTreatment(null);
     },
     onError: () => {
-      toast({ title: "Error al eliminar tratamiento", variant: "destructive" });
+      toast({ title: "Error al desactivar tratamiento", variant: "destructive" });
     },
   });
 
-  const { data: treatmentSupplies = [], refetch: refetchSupplies } = useQuery<any[]>({
+  const { data: treatmentSupplies = [], refetch: refetchSupplies, isLoading: suppliesLoading, isError: suppliesError } = useQuery<any[]>({
     queryKey: ["/api/spa/treatments", editingTreatment?.id, "supplies"],
     queryFn: async () => {
       if (!editingTreatment?.id) return [];
-      const res = await fetch(`/api/spa/treatments/${editingTreatment.id}/supplies`);
+      const res = await apiRequest("GET", `/api/spa/treatments/${editingTreatment.id}/supplies`);
       return res.json();
     },
     enabled: !!editingTreatment?.id,
@@ -1664,6 +1596,8 @@ export default function SpaPage() {
   const handleOpenFolio = () => {
     setSelectedAppointment(selectedAppointment);
     setIsFolioOpen(true);
+    setReceiptType("");
+    setFolioRoomChargeId("");
     // Pre-fill room charge with the appointment's linked reservation, if any
     if (selectedAppointment?.reservationId) {
       setFolioRoomChargeId(selectedAppointment.reservationId);
@@ -1792,7 +1726,7 @@ export default function SpaPage() {
   };
 
   const printComandaTermica = (apt: SpaAppointment) => {
-    const treatment = treatments.find(t => t.id === apt.treatmentId);
+    const treatment = allTreatments.find(t => t.id === apt.treatmentId);
     const cabin = cabins.find(c => c.id === apt.cabinId);
     const professional = professionals.find(p => p.id === apt.professionalId);
     const printWindow = window.open("", "_blank");
@@ -1925,7 +1859,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+        <div className="flex flex-wrap max-w-full items-center gap-1 bg-muted rounded-lg p-1">
           <Button
             variant={activeTab === "agenda" ? "default" : "ghost"}
             size="sm"
@@ -2091,7 +2025,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                       <div
                                         className={`h-full rounded px-2 py-1 flex flex-col justify-center ${isPast ? "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 opacity-50 cursor-default" : `cursor-pointer ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}`}
                                         onClick={isPast ? undefined : () => setSelectedAppointment(appointment.parentAppointment || appointment)}
-                                        title={`${appointment.displayedAsResource ? "Recurso del circuito · " : ""}${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
+                                        title={`${appointment.displayedAsResource ? "Recurso del circuito · " : ""}${appointment.guestName} ${appointment.guestLastName || ""} - ${allTreatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
                                         data-testid={`appointment-${appointment.id}${appointment.displayedAsResource ? "-resource" : ""}`}
                                       >
                                         <div className="flex items-center gap-1 min-w-0">
@@ -2110,7 +2044,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                         </div>
                                         <div className="text-[10px] truncate opacity-75">
                                           {appointment.displayedAsResource ? "Recurso · " : ""}
-                                          {treatments.find(t => t.id === appointment.treatmentId)?.name}
+                                          {allTreatments.find(t => t.id === appointment.treatmentId)?.name}
                                         </div>
                                         <div className="text-[10px] opacity-60">
                                           {appointment.startTime} - {appointment.endTime}
@@ -2378,7 +2312,11 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             </Button>
           </CardHeader>
           <CardContent>
-            {treatments.length === 0 ? (
+            <Select value={treatmentStatus} onValueChange={setTreatmentStatus}>
+              <SelectTrigger className="w-full sm:w-48 mb-3" aria-label="Estado de tratamientos"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent>
+            </Select>
+            {listedTreatments.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-40" />
                 <p className="text-sm">No hay tratamientos cargados.</p>
@@ -2387,7 +2325,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             ) : (
               <div className="space-y-2">
                 {treatmentCategories.map((cat) => {
-                  const catTreatments = treatments.filter((t) => t.categoryId === cat.id);
+                  const catTreatments = listedTreatments.filter((t) => t.categoryId === cat.id);
                   if (catTreatments.length === 0) return null;
                   return (
                     <div key={cat.id}>
@@ -2410,8 +2348,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditTreatment(t)} data-testid={`button-edit-treatment-${t.id}`}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
-                                <Trash2 className="h-4 w-4" />
+                              <Button variant="ghost" size="icon" className="h-8 w-auto px-2 text-destructive" disabled={t.isActive !== "true"} onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
+                                <span className="text-xs">Desactivar</span>
                               </Button>
                             </div>
                           </div>
@@ -2420,10 +2358,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                     </div>
                   );
                 })}
-                {treatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).length > 0 && (
+                {listedTreatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).length > 0 && (
                   <div>
                     <h3 className="text-sm font-semibold text-muted-foreground mb-2 mt-3">Sin categoría</h3>
-                    {treatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).map((t) => (
+                    {listedTreatments.filter((t) => !t.categoryId || !treatmentCategories.find((c) => c.id === t.categoryId)).map((t) => (
                       <div key={t.id} className="flex items-center justify-between p-3 border rounded-lg mb-1" data-testid={`treatment-row-${t.id}`}>
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -2441,8 +2379,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditTreatment(t)} data-testid={`button-edit-treatment-${t.id}`}>
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
-                              <Trash2 className="h-4 w-4" />
+                            <Button variant="ghost" size="icon" className="h-8 w-auto px-2 text-destructive" disabled={t.isActive !== "true"} onClick={() => setDeletingTreatment(t)} data-testid={`button-delete-treatment-${t.id}`}>
+                              <span className="text-xs">Desactivar</span>
                             </Button>
                           </div>
                         </div>
@@ -2470,7 +2408,8 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               </div>
             ) : (
               <div className="space-y-2">
-                {spaInventoryItems.map((item) => (
+                <Input aria-label="Buscar insumos SPA" placeholder="Buscar por nombre o SKU…" value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
+                {spaInventoryItems.filter(item => `${item.name} ${item.sku || ""}`.toLocaleLowerCase().includes(inventorySearch.trim().toLocaleLowerCase())).map((item) => (
                   <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`spa-item-${item.id}`}>
                     <div>
                       <p className="text-sm font-medium">{item.name}</p>
@@ -2481,7 +2420,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         <p className={`text-sm font-medium ${item.currentStock <= 0 ? "text-red-600" : ""}`}>
                           {item.currentStock} {item.unit}
                         </p>
-                        <p className="text-xs text-muted-foreground">${parseFloat(item.costPrice).toLocaleString()}/u</p>
+                        <p className="text-xs text-muted-foreground">${fmtMoney(Number(item.costPrice))}/{item.unit}</p>
                       </div>
                     </div>
                   </div>
@@ -3117,7 +3056,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       {pendingSpaInvoice && (
         <EmitirFacturaDialog
           open={!!pendingSpaInvoice}
-          onClose={() => setPendingSpaInvoice(null)}
+          onClose={() => {
+            setPendingSpaInvoice(null);
+            if (selectedAppointment) setIsFolioOpen(true);
+          }}
           config={billingConfig}
           initialValues={pendingSpaInvoice.initialValues}
           allowedTipos={["FA", "FB"]}
@@ -3135,12 +3077,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
             toast({ title: "Factura emitida y cobro SPA registrado" });
             setPendingSpaInvoice(null);
+            setIsFolioOpen(false);
+            setSelectedAppointment(null);
           }}
         />
       )}
 
       {/* Appointment Detail Dialog */}
-      <Dialog open={!!selectedAppointment && !isFolioOpen} onOpenChange={() => setSelectedAppointment(null)}>
+      <Dialog open={!!selectedAppointment && !isFolioOpen && !pendingSpaInvoice} onOpenChange={() => setSelectedAppointment(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Detalle del Turno</DialogTitle>
@@ -3563,10 +3507,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
               {/* Right: Payments */}
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-sm">Pagos</h3>
+                  <h3 className="font-medium text-sm">Pagos registrados</h3>
                   {selectedAccount.status === "open" && (
                     <Button size="sm" variant="outline" onClick={() => setIsAddPaymentOpen(true)} data-testid="button-add-payment">
-                      <DollarSign className="h-3 w-3 mr-1" /> Registrar Pago
+                      <DollarSign className="h-3 w-3 mr-1" /> Registrar cobro recibido
                     </Button>
                   )}
                 </div>
@@ -3711,108 +3655,19 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                           <Select value={receiptType} onValueChange={(v) => {
                             setReceiptType(v);
                             if (v !== "cargo_habitacion") setFolioRoomChargeId("");
-                            if (["factura_a", "factura_b"].includes(v)) {
-                              // Company linked via reservation takes priority over guest profile.
-                              // Use allReservations (not checkedInReservations) so the lookup
-                              // succeeds even when the reservation is not yet checked-in.
-                              const linkedReservation = selectedAppointment?.reservationId
-                                ? allReservations.find(r => r.id === selectedAppointment.reservationId)
-                                : null;
-                              const linkedCompany = linkedReservation?.companyId
-                                ? (companies as Company[]).find(c => c.id === linkedReservation.companyId)
-                                : null;
-                              if (linkedCompany) {
-                                setInvoiceCustomerName(linkedCompany.razonSocial || linkedCompany.nombreFantasia || linkedCompany.name || "");
-                                setInvoiceCustomerCuit(v === "factura_a" ? (linkedCompany.cuilCuit || "") : "");
-                              } else if (selectedAppointment?.guestId) {
-                                const guest = spaClients.find(c => c.id === selectedAppointment.guestId);
-                                if (guest) {
-                                  setInvoiceCustomerName(guest.razonSocial || `${guest.firstName}${guest.lastName ? " " + guest.lastName : ""}`.trim());
-                                  setInvoiceCustomerCuit(v === "factura_a" ? (guest.cuilCuit || "") : "");
-                                } else {
-                                  setInvoiceCustomerName("");
-                                  setInvoiceCustomerCuit("");
-                                }
-                              } else {
-                                setInvoiceCustomerName("");
-                                setInvoiceCustomerCuit("");
-                              }
-                            } else {
-                              setInvoiceCustomerName("");
-                              setInvoiceCustomerCuit("");
-                            }
                           }}>
                             <SelectTrigger data-testid="select-receipt-type">
                               <SelectValue placeholder="Seleccionar comprobante" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="cierre_spa">Cierre de SPA</SelectItem>
-                              <SelectItem value="factura_a">Factura A (IVA Resp. Inscripto)</SelectItem>
-                              <SelectItem value="factura_b">Factura B (Consumidor Final)</SelectItem>
+                              <SelectItem value="factura_b">Factura electrónica (según receptor)</SelectItem>
                               <SelectItem value="cargo_habitacion">Cargo a Habitación</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
-                        {["factura_a", "factura_b", "factura_c"].includes(receiptType) && (
-                          <div className="space-y-2 p-3 border rounded-md bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
-                            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">Datos del cliente para la factura AFIP</p>
-                            <div>
-                              <label className="text-xs text-muted-foreground">Razón Social / Nombre</label>
-                              <Input
-                                placeholder={receiptType === "factura_a" || receiptType === "factura_c" ? "Razón social" : "Nombre y apellido"}
-                                value={invoiceCustomerName}
-                                onChange={(e) => setInvoiceCustomerName(e.target.value)}
-                                data-testid="input-invoice-customer-name"
-                              />
-                            </div>
-                            {(receiptType === "factura_a" || receiptType === "factura_c") && (
-                              <div className="space-y-1.5">
-                                <label className="text-xs text-muted-foreground">CUIT</label>
-                                <Input
-                                  placeholder="XX-XXXXXXXX-X"
-                                  value={invoiceCustomerCuit}
-                                  onChange={(e) => {
-                                    setInvoiceCustomerCuit(e.target.value);
-                                    setSaveCuitToProfile(false);
-                                  }}
-                                  data-testid="input-invoice-customer-cuit"
-                                />
-                                {(() => {
-                                  const linkedGuest = selectedAppointment?.guestId
-                                    ? spaClients.find(c => c.id === selectedAppointment.guestId)
-                                    : null;
-                                  const cuitTyped = invoiceCustomerCuit.trim();
-                                  const showSave = linkedGuest && cuitTyped && (!linkedGuest.cuilCuit || linkedGuest.cuilCuit !== cuitTyped);
-                                  if (!showSave) return null;
-                                  return (
-                                    <label className="flex items-center gap-2 cursor-pointer select-none mt-1">
-                                      <input
-                                        type="checkbox"
-                                        className="rounded border-gray-300"
-                                        checked={saveCuitToProfile}
-                                        onChange={(e) => setSaveCuitToProfile(e.target.checked)}
-                                        data-testid="checkbox-save-cuit"
-                                      />
-                                      <span className="text-xs text-blue-700 dark:text-blue-300">
-                                        Guardar CUIT en el perfil del cliente
-                                      </span>
-                                    </label>
-                                  );
-                                })()}
-                              </div>
-                            )}
-                            {receiptType === "factura_b" && (
-                              <div>
-                                <label className="text-xs text-muted-foreground">DNI (opcional)</label>
-                                <Input
-                                  placeholder="DNI sin puntos"
-                                  value={invoiceCustomerDni}
-                                  onChange={(e) => setInvoiceCustomerDni(e.target.value)}
-                                  data-testid="input-invoice-customer-dni"
-                                />
-                              </div>
-                            )}
-                          </div>
+                        {["factura_a", "factura_b"].includes(receiptType) && (
+                          <p className="text-sm text-muted-foreground">Al continuar podrás buscar al receptor, revisar sus datos fiscales y elegir el comprobante y la forma de pago en una sola pantalla.</p>
                         )}
                         {receiptType === "cargo_habitacion" && (
                           <div>
@@ -3839,9 +3694,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         )}
                       </div>
                     )}
-                    {(["factura_a", "factura_c"].includes(receiptType) && !invoiceCustomerCuit.trim()) && (
-                      <p className="text-xs text-red-500 text-center" data-testid="cuit-required-msg">
-                        El CUIT es obligatorio para Factura A/C
+                    {["factura_a", "factura_b"].includes(receiptType) && accountPaid > 0 && (
+                      <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+                        Este folio ya tiene cobros registrados. La emisión por este circuito está bloqueada para evitar cobrarlos nuevamente. No registres otro pago ni anules cobros reales para continuar; solicitá la conciliación de los pagos existentes.
                       </p>
                     )}
                     <Button
@@ -3851,7 +3706,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                         (["factura_a", "factura_b"].includes(receiptType) && accountPaid > 0) ||
                         (!receiptType && !selectedAccount.payments.some(p => p.method === "room_charge")) ||
                         (receiptType === "cargo_habitacion" && !folioRoomChargeId) ||
-                        (["factura_a", "factura_c"].includes(receiptType) && !invoiceCustomerCuit.trim()) ||
                         closeAccountMutation.isPending ||
                         addPaymentMutation.isPending
                       }
@@ -3865,26 +3719,23 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                             reservationId: folioRoomChargeId,
                           });
                         } else if (["factura_a", "factura_b"].includes(receiptType)) {
+                          setIsFolioOpen(false);
+                          const reservation = allReservations.find(r => r.id === selectedAppointment?.reservationId);
+                          const company = companies.find(c => c.id === reservation?.companyId);
+                          const client = spaClients.find(c => c.id === selectedAppointment?.guestId) || reservation?.guest;
+                          const recipient = buildSpaInvoiceRecipient(company, client, selectedAccount.guestName);
                           setPendingSpaInvoice({
+                            ...recipient,
                             accountId: selectedAccount.id,
                             initialValues: {
-                              razonSocial: invoiceCustomerName || selectedAccount.guestName,
-                              cuit: invoiceCustomerCuit || undefined,
-                              dni: invoiceCustomerDni || undefined,
-                              condicionIva: receiptType === "factura_a" ? "Responsable Inscripto" : "Consumidor Final",
-                              items: selectedAccount.items.map((item) => ({
-                                descripcion: item.description,
-                                precioUnitario: parseFloat(item.subtotal),
-                              })),
+                              ...recipient.initialValues,
+                              items: selectedAccount.items.map(item => ({ descripcion: item.description, precioUnitario: parseFloat(item.subtotal) })),
                             },
                           });
                         } else {
                           closeAccountMutation.mutate({
                             accountId: selectedAccount.id,
                             receiptType: selectedAccount.payments.some(p => p.method === "room_charge") ? "cierre_spa" : receiptType,
-                            customerName: invoiceCustomerName || undefined,
-                            customerCuit: invoiceCustomerCuit || undefined,
-                            customerDni: invoiceCustomerDni || undefined,
                           });
                         }
                       }}
@@ -4316,13 +4167,17 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 <p className="text-sm font-semibold flex items-center gap-2">
                   <span>🧴</span> Insumos a descontar del inventario
                 </p>
-                {treatmentSupplies.length > 0 ? (
+                {suppliesLoading ? <p className="text-sm">Cargando insumos…</p> : suppliesError ? (
+                  <div role="alert" className="text-sm text-destructive">No se pudieron cargar los insumos. <Button type="button" variant="outline" size="sm" onClick={() => refetchSupplies()}>Reintentar</Button></div>
+                ) : treatmentSupplies.length > 0 ? (
                   <div className="space-y-1">
                     {treatmentSupplies.map((s: any) => (
                       <div key={s.id} className="flex items-center justify-between text-sm bg-muted/40 rounded px-2 py-1" data-testid={`row-supply-${s.id}`}>
-                        <span className="font-medium">{s.inventoryItemName}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">{parseFloat(s.quantity).toLocaleString("es-AR", { minimumFractionDigits: 3 })} {s.inventoryItemUnit || s.unit}</span>
+                        <span className="font-medium min-w-0 break-words">{s.inventoryItemName}
+                          <span className="block text-xs text-muted-foreground">{s.estimatedCost == null ? s.costWarning || "Costo no disponible" : `$${fmtMoney(s.estimatedCost)}`}</span>
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-muted-foreground">{parseFloat(s.quantity).toLocaleString("es-AR", { maximumFractionDigits: 3 })} {s.unit || s.inventoryItemUnit}</span>
                           <Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => deleteSupplyMutation.mutate(s.id)} data-testid={`btn-delete-supply-${s.id}`}>
                             <Trash2 className="h-3 w-3" />
                           </Button>
@@ -4333,8 +4188,13 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 ) : (
                   <p className="text-xs text-muted-foreground">Sin insumos configurados — el stock no se descontará al cerrar la cuenta.</p>
                 )}
-                <div className="flex items-end gap-2 pt-1">
-                  <div className="flex-1">
+                {!suppliesLoading && !suppliesError && <p className="text-sm font-medium" data-testid="treatment-estimated-cost">
+                  Costo estimado de insumos: ${fmtMoney(treatmentSupplies.reduce((sum: number, supply: any) => sum + (supply.estimatedCost ?? 0), 0))}
+                  {treatmentSupplies.some((s: any) => s.estimatedCost == null) && " · Parcial: hay costos o equivalencias pendientes"}
+                </p>}
+                <p className="text-xs text-muted-foreground">Estimado con costos actuales. No modifica el precio de venta ni incluye gastos no configurados.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2 pt-1">
+                  <div className="min-w-0">
                     <label className="text-xs text-muted-foreground">Artículo (solo SPA)</label>
                     <Select value={supplyItemId} onValueChange={(v) => {
                       setSupplyItemId(v);
@@ -4367,7 +4227,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="w-24">
+                  <div className="w-full">
                     <label className="text-xs text-muted-foreground">{supplyItemId === "__profesional__" ? "Horas" : "Cantidad"}</label>
                     <Input type="number" step="0.001" min="0.001" value={supplyQty} onChange={e => setSupplyQty(e.target.value)} className="h-8 text-sm" data-testid="input-supply-qty" />
                   </div>
@@ -4404,14 +4264,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
       <Dialog open={!!deletingTreatment} onOpenChange={(open) => { if (!open) setDeletingTreatment(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Eliminar Tratamiento</DialogTitle>
+            <DialogTitle>Desactivar tratamiento</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">¿Estás seguro de eliminar "{deletingTreatment?.name}"? El turno y su historial se conservan. Cancelar el turno no anula ni devuelve sus cobros.</p>
+          <p className="text-sm text-muted-foreground">¿Desactivar "{deletingTreatment?.name}"? Se conservarán sus turnos e historial. Podés reactivarlo desde la vista Inactivos, editando su estado.</p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeletingTreatment(null)}>Cancelar</Button>
             <Button variant="destructive" disabled={deleteTreatmentMutation.isPending} onClick={() => deletingTreatment && deleteTreatmentMutation.mutate(deletingTreatment.id)} data-testid="button-confirm-delete-treatment">
               {deleteTreatmentMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Eliminar
+              Desactivar
             </Button>
           </DialogFooter>
         </DialogContent>
