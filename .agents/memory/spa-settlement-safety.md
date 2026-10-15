@@ -3,8 +3,14 @@ name: SPA settlement safety
 description: Financial consistency rules for closing a SPA appointment at creation
 ---
 
-Cargo a habitación closes the SPA folio by transferring one charge to the occupied room folio; it must never create a Caja movement. Voucher SPA closes against one direct payment and one non-fiscal Caja movement. A fiscal SPA invoice must claim its SPA folio before contacting ARCA, and only the final account-link operation may create the SPA payment, Caja movement, and folio settlement.
+Cargo a habitación closes the SPA folio by transferring one charge to the occupied room folio; it must never create a Caja movement. Voucher SPA closes against one direct payment and one non-fiscal Caja movement. A fiscal SPA invoice must claim its SPA folio before contacting ARCA. Only a designated settlement finalizer may create genuinely new SPA payments and Caja movements; invoicing existing collections must reuse their identities without repeating either.
 
 **Why:** Invoice authorization and local linking are separate failure points. Without a durable pre-authorization claim, a process interruption can emit a duplicate fiscal document; with more than one Caja writer, recovery and normal linking can duplicate income.
 
 **How to apply:** Keep the SPA account, SPA payment, Caja movement, and folio movements in one transaction when closing. Persist immutable invoice number, recipient, items, total, payment method, and SPA account before ARCA; resume that same claim after failure. Expose pending authorization and pending link states to operators. Duplicate-draft review decisions and their audit row must commit atomically; any later ARCA resume requires a server-validated, draft-specific written confirmation.
+
+Existing-payment invoicing and new collection require distinct funding modes with one shared availability ledger. A fiscal retry or final link must never treat an existing paid folio as permission to create another full-value receipt.
+
+**Why:** The user requires SPA to invoice recorded collections without duplicating Caja, using the same funding guarantees as reservation Folio corrections.
+
+**How to apply:** Reserve identified payment applications before fiscal authorization, retain them through ambiguous outcomes, and finalize existing-only invoicing without new payments, Caja movements, or folio payment entries.

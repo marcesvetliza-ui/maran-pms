@@ -1,6 +1,6 @@
 # Folio: diagnóstico y diseño de corrección financiera
 
-**Estado: propuesta para revisión; no implementada.** No ejecutar reparaciones ni emitir comprobantes a partir de este documento.
+**Estado: enfoque aprobado para avanzar en rama y demo; no implementado.** Las precisiones de cierre, restauración y motor compartido SPA están en `docs/folio-payment-funding-rectifications.md`. No ejecutar reparaciones ni emitir comprobantes a partir de estos documentos.
 
 ## 1. Base y alcance
 
