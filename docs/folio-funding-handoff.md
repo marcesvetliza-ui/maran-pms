@@ -1,5 +1,15 @@
 # Entrega a Codex: motor Folio y preparación de interfaz SPA
 
+## Actualización posterior: desarrollo de bindings autorizado, habilitación no
+
+La entrega de cliente `24346aa8` es la base exacta de la rama aislada
+`feature/spa-funding-bindings`. El estado posterior de implementación, evidencia,
+propuestas de extensiones y bloqueos está en
+[`spa-funding-operational-bindings.md`](spa-funding-operational-bindings.md).
+Las tablas de este handoff describen el punto de entrega original, no niegan
+el desarrollo posterior autorizado. Todas las condiciones de habilitación
+requieren revisión conjunta: no se cierran por pruebas sintéticas o por un push.
+
 ## Alcance y estado
 
 - Motor y pruebas: commit `553493b`, conservado sin amend ni rebase.

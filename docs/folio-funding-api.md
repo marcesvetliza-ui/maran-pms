@@ -10,7 +10,7 @@ comprobantes no fiscales, que no identifica individualmente los folios.
 
 ## Estado y límites de habilitación
 
-Implementación en `design/folio-payment-correction`. No está montada en `server/routes.ts`, no modifica el workflow ni el servidor principal y no ejecuta DDL al iniciar la aplicación operativa. La demo separada sirve estos endpoints en el puerto **8099**, con PostgreSQL local descartable y emisor simulado. **No se contactó ARCA ni una base operativa.**
+Implementación original en `design/folio-payment-correction`. La preparación posterior de bindings en `feature/spa-funding-bindings` se documenta en `spa-funding-operational-bindings.md`: el servidor tiene una llamada de montaje **desactivada**, sin registrar rutas, consultar datos ni ejecutar DDL. No modifica workflows. La demo separada sirve estos endpoints en el puerto **8099**, con PostgreSQL local descartable y emisor simulado. **No se contactó ARCA ni una base operativa.**
 
 El motor y los adaptadores SQL están en `server/billing/funding/`; el único finalizador es `PaymentFundingService.finalize`, con la rama SPA en `SqlFundingAdapter.finalize`. La integración protegida y opt-in es `mountPaymentFunding`.
 

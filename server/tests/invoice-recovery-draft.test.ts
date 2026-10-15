@@ -15,6 +15,10 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../db", () => ({
+  pool: { connect: async () => ({
+    query: async () => ({ rows: [{ table_name: null }], rowCount: 0 }),
+    release: () => {},
+  }) },
   db: {
     transaction: vi.fn(async (action: (tx: any) => Promise<any>) => action({
       execute: vi.fn(async () => ({ rows: [] })),

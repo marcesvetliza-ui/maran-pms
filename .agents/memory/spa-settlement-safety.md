@@ -38,3 +38,25 @@ Synthetic PostgreSQL proofs and a prepared SPA interface do not authorize enabli
 **Why:** The user explicitly requires all unconnected real dependencies to remain pending and blocked; a review handoff or branch push must not silently turn a demo into an operational circuit.
 
 **How to apply:** Keep operational mounting disabled and reject missing bindings. Never substitute the synthetic gateway, permissive demo actor, invented fiscal documents or no-op stock callback in a real flow.
+
+Authorization to develop operational bindings is not authorization to access
+operational data, enable routes/UI, migrate history, emit real invoices or deploy.
+
+**Why:** The user explicitly separated isolated binding development and synthetic
+verification from a later joint Codex review and activation decision.
+
+**How to apply:** Keep work on the separately authorized branch and preserve Codex's
+client ownership. Propose and agree additions to its contract before connecting
+them. Treat homologation connectivity and complex historical evidence as separate
+verification requirements, never as consequences of a green synthetic suite.
+
+Fiscal numbering must coordinate with every writer in the same series, including
+legacy emission for another account; scope-only locking is insufficient.
+
+**Why:** Different scopes can both choose the same next ARCA number. A durable
+unknown claim must also prevent another writer from taking that number or
+interpreting its authorization as a different customer's invoice.
+
+**How to apply:** Serialize series allocation, persist identity before sending,
+block legacy issuance behind unresolved claims and validate the consulted
+recipient/date/amount/currency, not merely the presence of a CAE.
