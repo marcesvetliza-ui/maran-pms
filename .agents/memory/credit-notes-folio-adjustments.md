@@ -9,6 +9,12 @@ Reservation credit notes must retain the original charge and add a separately au
 
 **How to apply:** Require a complete, explicit charge mapping before automating a reservation NC. Preserve fiscal receiver, document type, point of sale, sale condition, and payment method from the source invoice. Reject ambiguous historical mappings and serialize NCs with other reservation invoice operations.
 
+Never infer a payment-to-charge association from matching amounts, methods, dates, descriptions or row order. Preserve the established NC proration; changing it to another matching heuristic is not a financial repair.
+
+**Why:** The user explicitly requires evidence-based payment, invoice, charge and cash links before designing Folio corrections. A payment that matches a service's price does not prove it funded that service.
+
+**How to apply:** Require persisted IDs/references and explicit, auditable application decisions. Missing or contradictory links require review. Correcting a real instrument, withdrawing a nonexistent collection and re-invoicing preserved funds are separate operations.
+
 The tagged negative Folio adjustment created by a reservation NC is audit history only: it must not reduce the operational source amount or its future invoice capacity. Restored capacity comes from the original invoice's credited source allocation.
 
 **Why:** If both the negative adjustment and the credited invoice allocation reduce the same source, a total NC leaves the UI showing a restored charge while the server rejects its re-invoice as having zero capacity.
