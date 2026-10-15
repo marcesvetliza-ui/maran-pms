@@ -5630,8 +5630,9 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getSpaTreatments(): Promise<SpaTreatment[]> {
-    return db.select().from(spaTreatments).where(eq(spaTreatments.isActive, "true"));
+  async getSpaTreatments(status: string = "active"): Promise<SpaTreatment[]> {
+    if (status === "all") return db.select().from(spaTreatments);
+    return db.select().from(spaTreatments).where(eq(spaTreatments.isActive, status === "inactive" ? "false" : "true"));
   }
 
   async getSpaTreatment(id: string): Promise<SpaTreatment | undefined> {
@@ -5656,8 +5657,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteSpaTreatment(id: string): Promise<boolean> {
-    const result = await db.delete(spaTreatments).where(eq(spaTreatments.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const rows = await db.update(spaTreatments).set({ isActive: "false" }).where(eq(spaTreatments.id, id)).returning({ id: spaTreatments.id });
+    return rows.length > 0;
   }
 
   private async enrichSpaAppointmentsBulk(appointments: SpaAppointment[]): Promise<SpaAppointmentWithDetails[]> {

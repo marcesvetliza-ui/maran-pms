@@ -1,3 +1,5 @@
+import { convertInventoryQuantity } from "../inventoryUnits";
+import { unitFactor } from "../inventoryStockEngine";
 import type { Express } from "express";
 import { voidSpaPayment } from "../spaCancellation";
 import { storage } from "../db-storage";
@@ -568,7 +570,9 @@ export function registerSpaRoutes(app: Express) {
   // SPA Treatments
   app.get("/api/spa/treatments", requireAuth, async (req, res) => {
     try {
-      const treatments = await storage.getSpaTreatments();
+      const status = String(req.query.status || "active");
+      if (!["active", "inactive", "all"].includes(status)) return res.status(400).json({ error: "Estado de tratamientos inválido" });
+      const treatments = await storage.getSpaTreatments(status);
       res.json(treatments);
     } catch (error) {
       res.status(500).json({ error: "Error fetching treatments" });
@@ -594,8 +598,9 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/treatments", requireAuth, async (req, res) => {
+  app.post("/api/spa/treatments", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
+      if (req.body.isActive !== undefined && !["true", "false"].includes(req.body.isActive)) return res.status(400).json({ error: "Estado de tratamiento inválido" });
       const treatment = await storage.createSpaTreatment(req.body);
       res.status(201).json(treatment);
     } catch (error) {
@@ -603,8 +608,9 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/spa/treatments/:id", requireAuth, async (req, res) => {
+  app.patch("/api/spa/treatments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
+      if (req.body.isActive !== undefined && !["true", "false"].includes(req.body.isActive)) return res.status(400).json({ error: "Estado de tratamiento inválido" });
       const treatment = await storage.updateSpaTreatment(req.params.id, req.body);
       if (!treatment) return res.status(404).json({ error: "Treatment not found" });
       res.json(treatment);
@@ -615,7 +621,8 @@ export function registerSpaRoutes(app: Express) {
 
   app.delete("/api/spa/treatments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      await storage.deleteSpaTreatment(req.params.id);
+      const changed = await storage.deleteSpaTreatment(req.params.id);
+      if (!changed) return res.status(404).json({ error: "Tratamiento no encontrado" });
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting treatment" });
@@ -2235,9 +2242,21 @@ export function registerSpaRoutes(app: Express) {
       const supplies = await storage.getTreatmentSupplies(req.params.id);
       // Enrich with inventory item info
       const enriched = await Promise.all(supplies.map(async (s) => {
-        const [item] = await db.select({ name: inventoryItems.name, unit: inventoryItems.unit })
+        const [item] = await db.select({ name: inventoryItems.name, unit: inventoryItems.unit, costPrice: inventoryItems.costPrice })
           .from(inventoryItems).where(eq(inventoryItems.id, s.inventoryItemId));
-        return { ...s, inventoryItemName: item?.name ?? "—", inventoryItemUnit: item?.unit ?? s.unit };
+        let estimatedCost: number | null = null;
+        let costWarning: string | null = null;
+        try {
+          if (!item || item.costPrice == null || !Number.isFinite(Number(item.costPrice)) || Number(item.costPrice) < 0) throw Object.assign(new Error("Falta costo del artículo"), { statusCode: 409 });
+          const factor = await unitFactor(db, s.inventoryItemId, s.unit || item.unit, item.unit);
+          const quantity = Number(s.quantity);
+          if (!Number.isFinite(quantity) || quantity < 0) throw Object.assign(new Error("Cantidad inválida"), { statusCode: 409 });
+          estimatedCost = Math.round(convertInventoryQuantity(quantity, factor) * Number(item.costPrice) * 100) / 100;
+        } catch (error: any) {
+          if (error.statusCode !== 409) throw error;
+          costWarning = error.message || "No se pudo calcular el costo";
+        }
+        return { ...s, inventoryItemName: item?.name ?? "—", inventoryItemUnit: item?.unit ?? s.unit, estimatedCost, costWarning };
       }));
       res.json(enriched);
     } catch (error) {
