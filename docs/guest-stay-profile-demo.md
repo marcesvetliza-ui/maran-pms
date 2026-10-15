@@ -1,8 +1,8 @@
-# Huéspedes y datos de estadía: revisión en Xenia
+# Huéspedes y datos de estadía
 
-Implementación en `fix/assistant-diagnostic-format`, para el demo. No desplegar
-esta rama completa en MARAN: contiene marca y asistente exclusivos del piloto.
-Después de aprobar, trasladar únicamente el commit de esta funcionalidad.
+Funcionalidad aprobada en el demo y trasladada selectivamente a MARAN el 15/10/2026.
+Se incluyen los cambios de huéspedes/reservas y sus correcciones de persistencia
+y cantidad de personas, sin integrar la marca ni el asistente exclusivos del piloto.
 
 ## Funcionamiento
 
@@ -68,4 +68,4 @@ las listas pero conserva los acompañantes y el vehículo principal.
 Validación automatizada: componentes React, regresiones de reservas y huéspedes,
 PostgreSQL local con transacciones reales, tipos y compilación. Verificación
 visual adicional en Chromium a 1440×1000 y 390×844, con datos ficticios.
-La aceptación en el demo desplegado sigue pendiente de revisión del usuario.
+La funcionalidad fue aprobada por el usuario para su publicación en main.
