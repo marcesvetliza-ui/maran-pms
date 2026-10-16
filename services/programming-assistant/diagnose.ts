@@ -1,3 +1,4 @@
+import {checkErrorAttribution} from "./attribution";
 import {buildCoverageReview,coverageReviewInstruction} from "./review";
 import { partialDiagnosis } from "./partial";
 import { orientInvestigation } from "./navigation";
@@ -144,6 +145,7 @@ export async function diagnose(
     coverageReviewed = false,
     researchClosed = false,
     evidenceCorrections = 0,
+    attributionCorrections = 0,
     rounds = 0;
   try {
   for (let round = 0; round < 14; round++) {
@@ -223,6 +225,14 @@ export async function diagnose(
             })),
           }),
         });
+        continue;
+      }
+      const attributionErrors=await checkErrorAttribution(report,source);
+      if(attributionErrors.length) {
+        if(attributionCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: el diagnóstico insiste en atribuir el error a otra función."),{code:"evidence_attribution"});
+        messages.push({...answer,role:"assistant"});
+        messages.push({role:"system",content:"La comprobación del código detectó una atribución de error incorrecta. No entregar este borrador ni ocultar el error cambiando sólo la certeza. Corregir resumen, causa y explicaciones de las citas según la función que contiene el throw. Eliminar preguntas técnicas que el repositorio ya responde."});
+        messages.push({role:"user",content:JSON.stringify({validationError:"Atribución incompatible con el origen del mensaje leído en el código.",attributionErrors})});
         continue;
       }
       verifiedDraft = report;

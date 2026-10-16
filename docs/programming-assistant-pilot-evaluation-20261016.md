@@ -126,3 +126,35 @@ confirmar que PMS y asistente ejecutan esta nueva revisión, y comparar:
 
 Este ajuste modifica el investigador del piloto, **no corrige el toast de
 Inventario ni cambia la operatoria del hotel**.
+
+## Comprobación explícita de la atribución repetida
+
+El segundo diagnóstico real (`7d43f813`) volvió a atribuir el error a
+`convertInventoryQuantity`. Las instrucciones y la revisión del propio modelo
+no bastaron. Se incorpora por eso un control de regresión acotado al error de
+equivalencia faltante de este módulo:
+
+- Lee `server/inventoryUnits.ts` desde el catálogo autorizado y localiza la
+  función exportada que contiene la instrucción directa `throw` con ese mensaje.
+  Los nombres de la función propietaria y de las otras funciones se obtienen
+  del código actual; no se fija como respuesta un nombre de función.
+- Comprueba atribuciones explícitas en resumen, causa y explicación de cada cita.
+  Distingue negaciones y explicaciones correctas de multiplicación numérica.
+- Si encuentra una atribución incompatible, devuelve al modelo la instrucción
+  real y la función propietaria para corregir el diagnóstico. Cambiar sólo la
+  certeza a hipótesis no habilita una afirmación que ya se detectó equivocada.
+- Tras dos correcciones fallidas rechaza el informe por evidencia no verificable.
+  Un borrador con esa contradicción no se guarda como avance verificado ni se
+  convierte en diagnóstico parcial al alcanzar un límite.
+
+El control no ejecuta el código y **no es un verificador semántico general**:
+abarca este patrón, este módulo y atribuciones explícitas reconocibles. Si el
+módulo cambia de estructura o el mensaje usa otra construcción, no se infiere un
+origen. Conserva las validaciones generales de citas y revisión humana. No
+promete detectar todas las paráfrasis ni otros tipos de afirmación equivocada.
+
+Regresiones automatizadas: textos de los diagnósticos recibidos, atribución
+errónea en evidencia, certeza rebajada sin corregir, distinciones válidas,
+funciones renombradas en código sintético, modelo simulado que insiste (rechazo)
+y modelo simulado que corrige (entrega tras revisión). La calidad del modelo real
+requiere otra evaluación después del despliegue. No se modificó Inventario.
