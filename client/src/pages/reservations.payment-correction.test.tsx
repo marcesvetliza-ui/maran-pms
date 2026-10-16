@@ -17,12 +17,9 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();queryClient.clear();vi.unstubAllEnvs();vi.unstubAllGlobals();});
 const mount=()=>render(<QueryClientProvider client={queryClient}><ReservationDetailDialog reservation={reservation as any} open onOpenChange={vi.fn()} onCancel={vi.fn()} currentUserRole="reception"/></QueryClientProvider>);
-it('a Reception role with the funding permission can correct a payment already linked to an invoice',async()=>{
- mount();await userEvent.click(await screen.findByTestId('tab-folio'));await userEvent.click(await screen.findByTestId('button-correct-payment-paid'));
- expect(screen.getByRole('heading',{name:'Corregir cobro'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Revisar corrección'})).toBeDisabled();
- expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
-});
-it('the correction action stays hidden without its administrable permission',async()=>{
- access.allowed=false;mount();await userEvent.click(await screen.findByTestId('tab-folio'));await waitFor(()=>expect(screen.getByTestId('text-total-payments')).toHaveTextContent('90.000,00'));
+it.each([true, false])('keeps the folio payment visible without the duplicate correction action (funding permission: %s)',async(allowed)=>{
+ access.allowed=allowed;mount();await userEvent.click(await screen.findByTestId('tab-folio'));await waitFor(()=>expect(screen.getByTestId('text-total-payments')).toHaveTextContent('90.000,00'));
  expect(screen.queryByTestId('button-correct-payment-paid')).not.toBeInTheDocument();
+ expect(screen.queryByRole('heading',{name:'Corregir cobro'})).not.toBeInTheDocument();
+ expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });
