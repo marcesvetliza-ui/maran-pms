@@ -1,3 +1,4 @@
+import {citedScreens} from "@shared/programming-support-scope";
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -285,6 +286,7 @@ export default function ProgrammingSupport() {
                   <Badge variant="outline">
                     {ticket.report.certainty.replaceAll("_", " ")}
                   </Badge>
+                  {citedScreens(ticket.report).length>0 && <p className="text-sm text-muted-foreground">Interfaz con evidencia citada: {citedScreens(ticket.report).join(', ')}.</p>}
                   {(
                     [
                       ["Resumen", ticket.report.summary],
@@ -347,11 +349,16 @@ export default function ProgrammingSupport() {
                       Revisión {ticket.version}
                     </p>
                     {ticket.report.evidence.map((r, i) => (
-                      <p key={i} className="mt-2 break-all text-sm">
-                        {r.path}:{r.start}–{r.end}
-                        <br />
-                        {r.explanation}
-                      </p>
+                      <div key={i} className="mt-2 text-sm">
+                        <p className="break-all">{r.path}:{r.start}–{r.end}<br />{r.explanation}</p>
+                        {!!r.assertionFragments?.length && <details className="mt-2">
+                          <summary className="cursor-pointer">Aserciones leídas — sin ejecutar</summary>
+                          {r.assertionFragments.map((fragment,index)=><div key={index} className="mt-2">
+                            <p className="text-xs text-muted-foreground">Líneas {fragment.start}–{fragment.end}{fragment.partial ? ' · fragmento parcial' : ''}</p>
+                            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">{fragment.code}</pre>
+                          </div>)}
+                        </details>}
+                      </div>
                     ))}
                   </details>
                 </div>

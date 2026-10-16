@@ -1,3 +1,5 @@
+import {attachAssertionFragments} from "./assertion-fragments";
+import {citedScreens} from "../../shared/programming-support-scope";
 import {validateReportClaims} from "./claim-validation";
 import {checkErrorAttribution} from "./attribution";
 import {buildCoverageReview,coverageReviewInstruction} from "./review";
@@ -189,6 +191,9 @@ export async function diagnose(
       let report: SupportDiagnosis;
       try {
         report = diagnosisSchema.parse(JSON.parse(answer.content || "{}"));
+        // Excerpts are generated only from the authorized source, never trusted
+        // if supplied by a model response or an older persisted report.
+        for(const ref of report.evidence)delete ref.assertionFragments;
       } catch (error) {
         if (formatCorrections++ >= 2 || round === 13) throw error;
         // Return field paths and validation codes only, never provider error bodies.
@@ -254,13 +259,17 @@ export async function diagnose(
         messages.push({role:"user",content:JSON.stringify(await buildCoverageReview(report,source))});
         continue;
       }
+      const screens=citedScreens(report);
+      const screenScope=screens.length ? [`La evidencia de interfaz citada corresponde a: ${screens.join(', ')}. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.`] : [];
       report.limitations = [
         ...new Set([
-          ...report.limitations.slice(0, 8),
+          ...report.limitations.slice(0, 8-screenScope.length),
+          ...screenScope,
           "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
           "Propuesta pendiente de revisión humana. No se aplicó ningún cambio.",
         ]),
       ];
+      await attachAssertionFragments(report,source);
       return {
         report,
         tokens,

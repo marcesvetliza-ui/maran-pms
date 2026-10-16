@@ -196,3 +196,32 @@ La orientación del cambio de habitación también pide distinguir texto fijo de
 catch frente al detalle del servidor, cierre por éxito frente a error y explicar
 las comparaciones de fechas. Estos puntos requieren revisión de la respuesta;
 no se presentan como garantías de un verificador semántico general.
+
+## Presentación del alcance y las aserciones realmente citadas
+
+Tras el informe de `ad1ee123`, el diagnóstico central de disponibilidad fue útil,
+pero aún faltaban las aserciones y delimitar la pantalla. Se incorporan mejoras
+comunes a los diagnósticos nuevos, sin modificar el circuito de reservas:
+
+- El servidor agrega a las evidencias de tests hasta tres fragmentos que contienen
+  aserciones reales de sus líneas citadas, con números de línea. Usa sólo rangos
+  ya validados; descarta fragmentos que pudieran venir del modelo y los reconstruye
+  desde el catálogo autorizado. No ejecuta los tests ni infiere resultados.
+- Los fragmentos están limitados a 2500 caracteres cada uno y 10000 en total, y se
+  marcan parciales cuando corresponde. La extracción reconoce patrones comunes de
+  `expect/assert`; no es un parser completo y puede no extraer otras formas. La
+  ausencia de un fragmento no demuestra ausencia de pruebas ni su ejecución.
+- Se muestran dentro de “Evidencia consultada” → “Aserciones leídas — sin ejecutar”.
+  La salida del modelo no necesita repetir esos bloques, evitando más gasto de
+  tokens. Los diagnósticos históricos sin fragmentos se siguen mostrando.
+- La interfaz muestra las pantallas reconocidas por los archivos de producción
+  citados. Por ejemplo, `planning-reservation-detail.tsx` corresponde a Planning,
+  no demuestra el editor de Reservas. Los helpers o tests no se etiquetan como
+  pantallas completas. La revisión recibe ese alcance y el informe conserva una
+  limitación explícita sobre otras pantallas y sobre validación integral de UI.
+
+La pantalla citada identifica evidencia parcial, no cobertura completa. Estas
+mejoras no garantizan por sí mismas que toda explicación del modelo sea correcta
+ni que exista una prueba integrada para conservar la reserva original. Continúa
+pendiente evaluar los casos de concurrencia en facturación y NC/refacturación,
+y después los mismos problemas narrados en lenguaje cotidiano con poco detalle.

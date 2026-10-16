@@ -35,3 +35,16 @@ it.each(['Resolvió mi consulta','Sigue el problema'])('records %s without reque
  expect(state.request.mock.calls[1][2]).toEqual(state.request.mock.calls[0][2]);
  expect(state.request.mock.calls.some(call=>/analyze|close/.test(call[1]))).toBe(false);
 });
+
+it('shows the cited screen and exact assertion fragments without claiming test execution',async()=>{
+ const user=userEvent.setup();
+ const report={summary:'Inspección de código',certainty:'hipotesis',cause:'',proposal:'',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[{path:'client/src/components/planning-reservation-detail.tsx',start:99,end:115,explanation:'Catch de Planning'},{path:'server/tests/room-availability.test.ts',start:12,end:31,explanation:'Función pura',assertionFragments:[{start:24,end:27,code:'24: expect(isRoomAvailableForInterval(input)).toBe(false);',partial:false}]}]};
+ state.cases=[{id:'case-one',title:'Consulta conocida',status:'proposal_ready',version:'a'.repeat(40),report,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-10-16T12:00:00Z',messages:[]}];
+ render(<ProgrammingSupport/>);
+ await user.click(screen.getByRole('button',{name:/Consulta conocida/}));
+ expect(screen.getByText('Interfaz con evidencia citada: Planning.')).toBeInTheDocument();
+ await user.click(screen.getByText('Evidencia consultada'));
+ await user.click(screen.getByText('Aserciones leídas — sin ejecutar'));
+ expect(screen.getByText(/24: expect\(isRoomAvailableForInterval/)).toBeInTheDocument();
+ expect(state.request).not.toHaveBeenCalled();
+});

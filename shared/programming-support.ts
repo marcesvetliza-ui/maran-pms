@@ -56,6 +56,10 @@ export const diagnosisSchema = z
             start: z.number().int().positive(),
             end: z.number().int().positive(),
             explanation: z.string().max(1200),
+            assertionFragments:z.array(z.object({
+              start:z.number().int().positive(),end:z.number().int().positive(),
+              code:z.string().max(2500),partial:z.boolean(),
+            }).strict()).max(3).optional(),
           })
           .strict(),
       )
