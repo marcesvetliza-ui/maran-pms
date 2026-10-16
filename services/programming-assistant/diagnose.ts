@@ -1,3 +1,4 @@
+import {buildCoverageReview,coverageReviewInstruction} from "./review";
 import { partialDiagnosis } from "./partial";
 import { orientInvestigation } from "./navigation";
 import { compactContext, investigationCase, reserveClosure } from "./context";
@@ -229,10 +230,8 @@ export async function diagnose(
         if (round === 13) throw Object.assign(new Error("Se alcanzó el límite antes de revisar la cobertura del diagnóstico."), { code: "investigation_rounds" });
         coverageReviewed=true;
         messages.push({...answer,role:"assistant"});
-        messages.push({role:"user",content:JSON.stringify({
-          review:"Antes de entregar el diagnóstico, revisá este borrador contra los requisitos completos del caso. Si afirmás un cálculo o validación delegada a una función, leé su definición con inspect_symbol y continuá el cuerpo si el fragmento es parcial. Buscá tests por símbolo, endpoint y comportamiento antes de afirmar que no existen o proponer una aserción ya cubierta. No sostengas en el resumen un comportamiento que declarás no inspeccionado en las limitaciones. Si falta una parte central y no podés inspeccionarla con el presupuesto restante, indicá falta_informacion y limitá la conclusión. No preguntes al usuario dónde está código que podés buscar. Entregá el JSON definitivo después de esta revisión.",
-          allowedReadRanges:[...source.readRanges].map(([path,ranges])=>({path,ranges})),
-        })});
+        messages.push({role:"system",content:coverageReviewInstruction});
+        messages.push({role:"user",content:JSON.stringify(await buildCoverageReview(report,source))});
         continue;
       }
       report.limitations = [

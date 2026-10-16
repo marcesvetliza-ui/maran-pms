@@ -91,7 +91,7 @@ export class CodeSource {
       throw new Error("Línea demasiado extensa para inspeccionar.");
     end = start + selected.length - 1;
     const list = this.readRanges.get(rel) || [];
-    list.push([start, end]);
+    if(!list.some(([a,b])=>a===start && b===end))list.push([start, end]);
     this.readRanges.set(rel, list);
     return { path: rel, start, end, content: selected.join("\n") };
   }

@@ -91,3 +91,38 @@ Verificación local: pruebas de interfaz para ambas respuestas y pérdida de
 respuesta HTTP; pruebas PostgreSQL de persistencia, propietarios, concurrencia,
 reintentos, conflictos y diagnósticos desactualizados; pruebas del gateway de
 sesión y validación estricta. No se usó OpenAI real.
+
+## Ajuste tras el primer diagnóstico real de equivalencias
+
+El resultado de la revisión `38e0788d` terminó, pero atribuyó la ausencia de
+configuración a `convertInventoryQuantity` y preguntó por una pantalla existente.
+El transporte del error y el uso propuesto de `parseApiError` sí coincidían con
+el código de esa revisión. No se considera un caso aprobado.
+
+La revisión final ahora recibe los fragmentos reales citados, con límite conjunto
+de 16000 caracteres, además del borrador. La consigna de revisión se envía como
+instrucción de sistema separada: comprobar afirmación frente a cita, localizar la
+instrucción que origina el mensaje y eliminar preguntas que el repositorio puede
+resolver. Una lectura recortada u omitida se marca como tal, sin simular una
+revisión completa. No se agrega una llamada adicional al modelo ni se eleva el
+presupuesto existente.
+
+Para el flujo de error de recetas, la orientación incluye las definiciones de
+`unitFactor`, `inventoryUnitFactor`, `convertInventoryQuantity`, el componente
+`InventoryUnitConversions` y su uso real en la pantalla. Son lecturas del código,
+no conclusiones prefijadas ni permisos de ejecutar operaciones.
+
+Las pruebas automáticas comprueban que el revisor recibe esas lecturas, preserva
+rangos válidos y respeta el límite. **No demuestran que el modelo real corregirá
+siempre una atribución equivocada.** Hay que repetir la consulta después de
+confirmar que PMS y asistente ejecutan esta nueva revisión, y comparar:
+
+- La ausencia de equivalencia se atribuye a `inventoryUnitFactor`, llamada por
+  `unitFactor`; la multiplicación/validación numérica se distingue de esa búsqueda.
+- La propuesta muestra el detalle con el parser existente.
+- No se pregunta si existe una pantalla de equivalencias ni por políticas que
+  pueden encontrarse en el código.
+- Las citas respaldan exactamente lo afirmado y no se declara ejecución de tests.
+
+Este ajuste modifica el investigador del piloto, **no corrige el toast de
+Inventario ni cambia la operatoria del hotel**.

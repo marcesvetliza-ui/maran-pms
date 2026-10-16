@@ -84,6 +84,17 @@ export async function orientInvestigation(
       if (example) workflowReads.push(await source.read(example.path, Math.max(1, example.line - 3), example.line + 3));
     }
   }
+  if(errorFlow) {
+    // Inspect the real throw site and the configuration component, rather than
+    // assuming that a function named "convert" looks up missing conversions.
+    for(const symbol of ["unitFactor","inventoryUnitFactor","convertInventoryQuantity","InventoryUnitConversions"]) {
+      const code=await source.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:30});
+      workflowReads.push(...code.definitions);
+    }
+    const uses=await source.search("<InventoryUnitConversions", "client/src/pages/");
+    const use=uses.matches.find(match=>!match.path.includes(".test."));
+    if(use)workflowReads.push(await source.read(use.path,Math.max(1,use.line-4),use.line+4));
+  }
   return {
     investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración; si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : undefined,
     endpointContext,
