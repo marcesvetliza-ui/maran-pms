@@ -620,3 +620,88 @@ it("ordinary Reception charges do not retain extra connections while protecting 
   expect(responses.map(r=>r.status)).toEqual([200,200]);
  } finally {release();await new Promise<void>(resolve=>listener.close(()=>resolve()));await limited.end();}
 });
+
+async function prefactura(id:string,settings:any) {
+ const view=(await http(`/spa/${id}/account`)).body.data;
+ return {requestId:randomUUID(),expectedVersion:view.chargeVersion,settings:{recipientKind:'client',discount:null,notes:'',...settings}};
+}
+it("prefactura invoices a company with a real discount and mixed payments without changing the SPA client",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,companyId=randomUUID();
+ await pool.query("INSERT INTO funding_demo.companies VALUES($1,'Empresa SPA','20301234567','responsable_inscripto','Domicilio empresa')",[companyId]);
+ const request=await prefactura(id,{recipientKind:'company',recipientId:companyId,discount:{type:'percent',value:10,reason:'Beneficio efectivo'},notes:'Referencia SPA 201'});
+ const prepared=await http(`/spa/${id}/prepare-document`,request);expect(prepared.status).toBe(200);expect(prepared.body.data.totalCents).toBe(8550000);
+ const again=await http(`/spa/${id}/prepare-document`,request);expect(again.body.data.documentId).toBe(prepared.body.data.documentId);
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.totalCents).toBe(8550000);
+ expect(view.items.filter((i:any)=>i.itemType==='discount')).toHaveLength(1);
+ expect((await pool.query("SELECT guest_id FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].guest_id).toBe(id);
+ const doc=(await service.scope(f.scope,actor)).documents[0];expect(doc.snapshot).toMatchObject({tipo:'FA',recipient:{id:companyId,razonSocial:'Empresa SPA',cuit:'20301234567'},prefactura:{notes:'Referencia SPA 201'}});
+ const r={scope:f.scope,documentId:doc.id,applications:[],newCollections:[{rowId:'cash',method:'efectivo',amountCents:5000000,shiftId:`${id}:shift`},{rowId:'card',method:'tarjeta_debito',amountCents:3550000,shiftId:`${id}:shift`}]};
+ const preview=await http('/previews',r);expect(preview.status).toBe(200);
+ const operationId=randomUUID();await http('/operations',{operationId,previewHash:preview.body.data.previewHash,request:r});
+ await http(`/operations/${operationId}/authorize`,{});
+ // A stale gross cache must not survive a discounted settlement.
+ await pool.query("UPDATE funding_demo.folios SET total_charges=95000 WHERE entity_id=$1",[id]);
+ expect((await http(`/operations/${operationId}/finalize`,{})).body.data.status).toBe('applied');
+ expect((await http(`/operations/${operationId}/finalize`,{})).body.data.status).toBe('applied');
+ expect((await financialCounts(f.scope)).payments).toBe(2);expect((await financialCounts(f.scope)).cash).toBe(2);
+ const invoice=(await pool.query("SELECT cliente_razon_social,observaciones,monto_total FROM funding_demo.sales_invoices WHERE spa_account_id=$1",[id])).rows[0];
+ expect(invoice).toMatchObject({cliente_razon_social:'Empresa SPA',observaciones:'Referencia SPA 201'});expect(Number(invoice.monto_total)).toBe(85500);
+ const cached=(await pool.query("SELECT total_charges,total_payments,balance FROM funding_demo.folios WHERE entity_id=$1",[id])).rows[0];
+ expect(Object.fromEntries(Object.entries(cached).map(([k,v])=>[k,Number(v)]))).toEqual({total_charges:85500,total_payments:85500,balance:0});
+ expect((await http(`/spa/${id}/prepare-document`,await prefactura(id,{discount:null}))).status).toBe(409);
+});
+it("prefactura validates source version, company fiscal data and discount against previous payments atomically",async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const bad=await prefactura(id,{discount:{type:'fixed',value:1000,reason:'Beneficio'}});
+ expect((await http(`/spa/${id}/prepare-document`,{...bad,expectedVersion:'0'.repeat(64)})).body.error.code).toBe('PREVIEW_STALE');
+ const companyId=randomUUID();await pool.query("INSERT INTO funding_demo.companies VALUES($1,'Sin CUIT','','responsable_inscripto','')",[companyId]);
+ expect((await http(`/spa/${id}/prepare-document`,await prefactura(id,{recipientKind:'company',recipientId:companyId,discount:{type:'fixed',value:1000,reason:'Beneficio'}}))).status).toBe(409);
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.totalCents).toBe(9500000);expect(view.items.some((r:any)=>r.itemType==='discount')).toBe(false);
+ const paid=await fixture(true);
+ expect((await http(`/spa/${paid.scope.id}/prepare-document`,await prefactura(paid.scope.id,{discount:{type:'percent',value:99,reason:'Supera saldo'}}))).body.error.code).toBe('DISCOUNT_EXCEEDS_BALANCE');
+});
+it("prefactura revisions change an unused draft and fixed discount without stacking it or losing cents",async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const first=await http(`/spa/${id}/prepare-document`,await prefactura(id,{discount:{type:'fixed',value:100.01,reason:'Atención'}}));expect(first.status).toBe(200);
+ expect(first.body.data.totalCents).toBe(9489999);
+ const second=await http(`/spa/${id}/prepare-document`,await prefactura(id,{discount:{type:'fixed',value:100.01,reason:'Atención'},notes:'Segunda revisión'}));expect(second.status).toBe(200);
+ expect(second.body.data.totalCents).toBe(9489999);
+ expect((await http(`/spa/${id}/account`)).body.data.items.filter((i:any)=>i.itemType==='discount')).toHaveLength(1);
+ expect((await service.scope(f.scope,actor)).documents).toHaveLength(1);
+ const removed=await http(`/spa/${id}/prepare-document`,await prefactura(id,{discount:null}));expect(removed.status).toBe(200);expect(removed.body.data.totalCents).toBe(9500000);
+});
+it("prefactura can select a different guest or transfer its discounted account to Reception without issuing or collecting",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,guest=randomUUID(),target=await destination(),n=sends;
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Destinatario','Distinto','consumidor_final','30111222')",[guest]);
+ const p=await http(`/spa/${id}/prepare-document`,await prefactura(id,{recipientKind:'guest',recipientId:guest,discount:{type:'percent',value:10,reason:'Beneficio'}}));expect(p.status).toBe(200);
+ expect((await service.scope(f.scope,actor)).documents[0].snapshot.recipient.id).toBe(guest);
+ const moved=await accountCommand(id,{action:'room-transfer',reservationId:target,expectedCents:8550000,reason:'Cargar a habitación desde prefactura'});expect(moved.status).toBe(200);
+ expect(Number((await pool.query("SELECT amount FROM funding_demo.charges WHERE reservation_id=$1",[target])).rows[0].amount)).toBe(85500);
+ expect((await financialCounts(f.scope)).payments).toBe(0);expect(sends).toBe(n);
+ expect((await pool.query("SELECT guest_id FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].guest_id).toBe(id);
+});
+it("prefactura options carry a discount to a room without needing a fiscal recipient or a new cash shift",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,target=await destination(),n=sends;
+ await pool.query("UPDATE funding_demo.spa_appointments SET guest_id=NULL WHERE id=$1",[id]);
+ const request=await prefactura(id,{discount:{type:'percent',value:10,reason:'Beneficio habitación'}});
+ expect((await http(`/spa/${id}/prefactura-options`,request)).status).toBe(200);
+ expect((await service.scope(f.scope,actor)).documents).toHaveLength(0);
+ expect((await accountCommand(id,{action:'room-transfer',reservationId:target,expectedCents:8550000,reason:'Solicitado por huésped'})).status).toBe(200);
+ expect(sends).toBe(n);expect((await financialCounts(f.scope)).payments).toBe(0);
+});
+it("an obsolete prefactura request cannot silently return another company's current draft",async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const first=await prefactura(id,{notes:'Primera revisión'});expect((await http(`/spa/${id}/prepare-document`,first)).status).toBe(200);
+ expect((await http(`/spa/${id}/prepare-document`,await prefactura(id,{notes:'Segunda revisión'}))).status).toBe(200);
+ expect((await http(`/spa/${id}/prepare-document`,first)).body.error.code).toBe('PREVIEW_STALE');
+ const reader=await http(`/spa/${id}/prefactura-options`,await prefactura(id,{}),{'x-role':'reader'});expect(reader.status).toBe(403);
+});
+
+it("a receipt refresh restores discounted net charges rather than retaining a stale gross folio cache",async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ expect((await http(`/spa/${id}/prefactura-options`,await prefactura(id,{discount:{type:'percent',value:10,reason:'Beneficio'}}))).status).toBe(200);
+ await pool.query("UPDATE funding_demo.folios SET total_charges=95000,balance=95000 WHERE entity_id=$1",[id]);
+ expect((await accountCommand(id,{action:'payment',amountCents:1000000,method:'efectivo',shiftId:`${id}:shift`})).status).toBe(200);
+ const cached=(await pool.query("SELECT total_charges,total_payments,balance FROM funding_demo.folios WHERE entity_id=$1",[id])).rows[0];
+ expect(Object.fromEntries(Object.entries(cached).map(([k,v])=>[k,Number(v)]))).toEqual({total_charges:85500,total_payments:10000,balance:75500});
+});

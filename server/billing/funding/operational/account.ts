@@ -22,15 +22,15 @@ async function sourceAccount(service:PaymentFundingService,c:PoolClient,id:strin
  if(!a) throw new FundingError("NOT_FOUND","Cuenta SPA inexistente.",404);
  return a;
 }
-async function editable(service:PaymentFundingService,c:PoolClient,id:string,s:string) {
+export async function editable(service:PaymentFundingService,c:PoolClient,id:string,s:string,allowClosed=false) {
  const a=await sourceAccount(service,c,id,s);
  await service.adapter({kind:"spa",id}).assertScope(c,{kind:"spa",id});
- if(a.status!=="open") throw new FundingError("ACCOUNT_CLOSED","La cuenta está cerrada; sus cargos se conservan para consulta.");
+ if(a.status!=="open"&&!(allowClosed&&a.status==="closed")) throw new FundingError("ACCOUNT_CLOSED","La cuenta está cerrada; sus cargos se conservan para consulta.");
  if((await c.query("SELECT id FROM payment_funding.operations WHERE scope_kind='spa' AND scope_id=$1 LIMIT 1",[id])).rowCount)
   throw new FundingError("FISCAL_OPERATION_PENDING","La cuenta ya tiene una operación de facturación. Completala antes de modificarla.");
  return a;
 }
-async function invalidateDrafts(service:PaymentFundingService,c:PoolClient,id:string,commandId:string,actor:Actor) {
+export async function invalidateDrafts(service:PaymentFundingService,c:PoolClient,id:string,commandId:string,actor:Actor) {
  const docs=(await c.query("SELECT * FROM payment_funding.documents WHERE scope_kind='spa' AND scope_id=$1 FOR UPDATE",[id])).rows;
  if(docs.some(d=>d.status!=="draft"||d.invoice_id)) throw new FundingError("DOCUMENT_ALREADY_ISSUED","La cuenta tiene un comprobante fiscal; no se modifican sus cargos.");
  if(docs.length) {
@@ -101,6 +101,7 @@ export async function executeSpaAccountCommand(service:PaymentFundingService,id:
    const item=(await c.query(`SELECT * FROM ${s}.spa_account_items WHERE id=$1 AND account_id=$2 FOR UPDATE`,[request.itemId,id])).rows[0];
    if(!item) throw new FundingError("NOT_FOUND","El cargo no pertenece a esta cuenta.",404);
    if(item.item_type==="treatment") throw new FundingError("TREATMENT_CHARGE","El tratamiento se modifica o cancela desde su turno.");
+   if(item.item_type==="discount") throw new FundingError("DISCOUNT_REVIEW_REQUIRED","El descuento se cambia desde la prefactura.");
    const stock=(await c.query(`SELECT 1 FROM ${s}.stock_movements WHERE source_type='spa_account_item' AND source_id=$1 LIMIT 1`,[item.id])).rowCount;
    const job=(await c.query(`SELECT status FROM ${s}.inventory_consumption_jobs WHERE source_type='spa_account_item' AND source_id=$1 FOR UPDATE`,[item.id])).rows[0];
    const reversed=(await c.query(`SELECT 1 FROM ${s}.inventory_source_reversals WHERE source_type='spa_account_item' AND source_id=$1 AND completed_at IS NOT NULL`,[item.id])).rowCount;
@@ -158,11 +159,14 @@ export async function executeSpaAccountCommand(service:PaymentFundingService,id:
  });
 }
 
+export async function spaChargeRows(c:PoolClient,id:string,s:string) {
+ return (await c.query(`SELECT id,description,quantity,unit_price AS "unitPrice",subtotal,item_type AS "itemType",inventory_item_id AS "inventoryItemId" FROM ${s}.spa_account_items WHERE account_id=$1 ORDER BY id`,[id])).rows;
+}
 export async function spaAccountView(service:PaymentFundingService,id:string,actor:Actor,schema="public") {
  requirePermission(actor,"funding:read");const s=identifier(schema);
  return service.store.transaction({kind:"spa",id},null,async c=>{
   const a=await sourceAccount(service,c,id,s);
-  const items=(await c.query(`SELECT id,description,quantity,unit_price AS "unitPrice",subtotal,item_type AS "itemType",inventory_item_id AS "inventoryItemId" FROM ${s}.spa_account_items WHERE account_id=$1 ORDER BY id`,[id])).rows;
+  const items=await spaChargeRows(c,id,s);
   const payments=(await c.query(`SELECT id,amount,method,status,notes,created_at AS "createdAt" FROM ${s}.spa_payments WHERE account_id=$1 ORDER BY created_at,id`,[id])).rows;
   const folio=(await c.query(`SELECT * FROM ${s}.folios WHERE entity_type='spa_account' AND entity_id=$1`,[id])).rows[0];
   const movements=folio?(await c.query(`SELECT id,type,amount,description,created_at AS "createdAt" FROM ${s}.folio_movements WHERE folio_id=$1 ORDER BY created_at,id`,[folio.id])).rows:[];
@@ -175,7 +179,8 @@ export async function spaAccountView(service:PaymentFundingService,id:string,act
   const totalCents=items.reduce((sum,i)=>sum+Math.round(Number(i.subtotal)*100),0);
   const paidCents=payments.filter(p=>p.status==="active").reduce((sum,p)=>sum+Math.round(Number(p.amount)*100),0);
   const transferred=events.find(e=>e.kind==="spa_account_command"&&e.payload.result?.action==="room-transfer")?.payload.result;
-  return {id,guestName:a.guest_name,status:a.status,totalCents,paidCents,balanceCents:transferred?0:Math.max(0,totalCents-paidCents),items,payments,movements,
+  const preferences=events.filter(e=>e.kind==="spa_prefactura_saved").at(-1)?.payload.settings??null;
+  return {id,chargeVersion:hash(items),preferences,guestName:a.guest_name,status:a.status,totalCents,paidCents,balanceCents:transferred?0:Math.max(0,totalCents-paidCents),items,payments,movements,
    readOnly:history||a.status!=="open"||operations.length>0,canInvoice:!history&&!transferred&&!a.invoice_id,transferred:transferred??null,operations,
    invoices,events:events.filter(e=>e.kind==="spa_account_command").map(e=>({action:e.payload.request.action,reason:e.payload.request.reason??e.payload.request.notes??"",createdAt:e.createdAt}))};
  });

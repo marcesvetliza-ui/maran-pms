@@ -12,6 +12,7 @@ import { SqlFundingAdapter } from "../adapters";
 import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from "./rollout";
 import { getSpaRecipient, saveSpaRecipient } from "./recipient";
 import { executeSpaAccountCommand, spaAccountView } from "./account";
+import { applySpaPreferences } from "./preferences";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
@@ -58,6 +59,21 @@ export function mountOperationalSpaFunding(app:Express,options:{
  // Reviewed additive endpoints used by the connected SPA client remain independently gated.
  // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
  if(options.reviewedExtensions!==true) return service;
+ app.get("/api/payment-funding/spa/:accountId/prefactura-context",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const config=(await options.pool.query(`SELECT arca_ambiente AS environment,punto_venta_homolog AS point FROM ${s}.billing_config ORDER BY id LIMIT 1`)).rows[0];
+     const companies=(await options.pool.query(`SELECT id,razon_social AS name,cuil_cuit AS cuit,condicion_iva AS "vatCondition",direccion AS address FROM ${s}.companies ORDER BY razon_social,id`)).rows;
+     res.json({ok:true,data:{...config,companies}});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/prefactura-options",options.authenticate,async(req,res)=>{
+   try {
+     const who=actor(req);
+     await service.store.transaction({kind:"spa",id:req.params.accountId},null,c=>applySpaPreferences(service,c,req.params.accountId,req.body,who,schema));
+     res.json({ok:true,data:{saved:true}});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
  app.get("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
    try {res.json({ok:true,data:await spaAccountView(service,req.params.accountId,actor(req),schema)});}
    catch(error){fundingErrorResponse(res,error);}
@@ -144,6 +160,14 @@ export function mountOperationalSpaFunding(app:Express,options:{
  });
  app.post("/api/payment-funding/spa/:accountId/prepare-document",options.authenticate,async(req,res)=>{
    try {
+     if(req.body&&Object.keys(req.body).length) {
+       const who=actor(req);
+       const result=await service.store.transaction({kind:"spa",id:req.params.accountId},null,async c=>{
+         await applySpaPreferences(service,c,req.params.accountId,req.body,who,schema);
+         return prepareSpaDocument(service,req.params.accountId,who,schema,c);
+       });
+       return res.json({ok:true,data:result});
+     }
      if(!req.body || Object.keys(req.body).length) throw new FundingError("INVALID_REQUEST","Esta preparación sólo acepta el ID de cuenta y un body vacío.",422);
      res.json({ok:true,data:await prepareSpaDocument(service,req.params.accountId,actor(req),schema)});
    } catch(error) {fundingErrorResponse(res,error);}

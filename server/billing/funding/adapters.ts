@@ -137,7 +137,7 @@ export class SqlFundingAdapter implements FundingAdapter {
   async refreshFolio(c:PoolClient,scope:Scope) {
     const totals=await this.totals(c,scope);
     const f=await this.folio(c,scope);
-    await c.query(`UPDATE ${this.s}.folios SET total_payments=$2,balance=total_charges-$2::numeric WHERE id=$1`,[f.id,amount(totals.paidCents)]);
+    await c.query(`UPDATE ${this.s}.folios SET total_charges=$3,total_payments=$2,balance=$3::numeric-$2::numeric WHERE id=$1`,[f.id,amount(totals.paidCents),amount(totals.totalCents)]);
     return totals;
   }
   /** Sole finalizer: never calls createSpaPayment for existing_only funding. */
@@ -157,8 +157,8 @@ export class SqlFundingAdapter implements FundingAdapter {
     await c.query(`UPDATE ${this.s}.spa_accounts SET status='closed',invoice_id=$2,total_paid=$3,closed_at=COALESCE(closed_at,now()) WHERE id=$1`,
       [scope.id,invoice.invoiceId,amount(totals.paidCents)]);
     const f=await this.folio(c,scope);
-    await c.query(`UPDATE ${this.s}.folios SET status='closed',total_payments=$2,balance=0,closed_at=COALESCE(closed_at,now()),closed_by=COALESCE(closed_by,$3) WHERE id=$1`,
-      [f.id,amount(totals.paidCents),actor.id]);
+    await c.query(`UPDATE ${this.s}.folios SET status='closed',total_charges=$4,total_payments=$2,balance=0,closed_at=COALESCE(closed_at,now()),closed_by=COALESCE(closed_by,$3) WHERE id=$1`,
+      [f.id,amount(totals.paidCents),actor.id,amount(totals.totalCents)]);
   }
   async correctionContext(c:PoolClient,r:any,request:CorrectionRequest) {
     const source=await this.source(c,r);

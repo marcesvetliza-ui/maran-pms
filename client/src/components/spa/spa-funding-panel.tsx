@@ -18,7 +18,7 @@ const terminal = (operation: FundingOperation) => ["applied", "aborted"].include
 type Shift = { id: string; label: string };
 
 /** Only consumes the funding API. Never invokes billing, payments, Caja or legacy settlement. */
-export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument, recipientEditor, operational = false }: {
+export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument, recipientEditor, operational = false, prefactura }: {
   accountId: string; userId: string; canWrite: boolean;
   // Must come from verified server data; no manual shift IDs or synthetic defaults.
   collectionShifts?: Shift[];
@@ -26,6 +26,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   onPrepareDocument?: () => Promise<string>;
   recipientEditor?: ReactNode;
   operational?: boolean;
+  prefactura?: {applications:FundingRequest["applications"];collections:FundingRequest["newCollections"];selectionKey:string;valid:boolean;children:ReactNode};
 }) {
   const key = fundingJournalKey(userId, accountId);
   const [projection, setProjection] = useState<FundingProjection>();
@@ -105,6 +106,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   const active = pendingId || projection?.operations.find(item => !terminal(item))?.id;
   const locked = busy || !!active || !canWrite || fatalJournal.current;
   const resetPreview = () => setPreview(undefined);
+  useEffect(()=>setPreview(undefined),[prefactura?.selectionKey]);
   async function prepareDocument() {
     if (locked || !onPrepareDocument) return;
     const id = await onPrepareDocument();
@@ -117,14 +119,14 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   }
   async function prepare() {
     if (!projection || locked) return;
-    let selectedDocument = documentId || (operational ? projection.documents.find(doc => doc.status === "draft")?.id : "");
+    let selectedDocument = prefactura?await prepareDocument():documentId || (operational ? projection.documents.find(doc => doc.status === "draft")?.id : "");
     if (operational && !selectedDocument) selectedDocument = await prepareDocument();
     if (!selectedDocument) throw new Error("No se pudo preparar la factura. Revisá los datos del cliente.");
     setDocumentId(selectedDocument);
-    const applications = Object.entries(amounts).filter(([, value]) => value !== "").map(([receiptId, value]) => ({ receiptId, amountCents: pesosToCents(value) }));
+    const applications = prefactura?.applications??Object.entries(amounts).filter(([, value]) => value !== "").map(([receiptId, value]) => ({ receiptId, amountCents: pesosToCents(value) }));
     const request: FundingRequest = {
       scope: { kind: "spa", id: accountId }, documentId: selectedDocument, applications,
-      newCollections: newAmount ? [{ rowId: "new-collection", method, amountCents: pesosToCents(newAmount), shiftId: shiftId || (collectionShifts.length === 1 ? collectionShifts[0].id : "") }] : [],
+      newCollections: prefactura?.collections??(newAmount ? [{ rowId: "new-collection", method, amountCents: pesosToCents(newAmount), shiftId: shiftId || (collectionShifts.length === 1 ? collectionShifts[0].id : "") }] : []),
     };
     if (newAmount && !collectionShifts.some(shift => shift.id === request.newCollections[0].shiftId)) throw new Error("Seleccioná una caja SPA abierta para registrar el pago.");
     const next = await fundingApi.preview(request);
@@ -210,6 +212,8 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
       {projection.legacyHistory.payments.map(p=><p key={p.id}>Pago {p.id} · {p.method} · {fundingMoney(p.amountCents)} · {p.status}</p>)}
       {projection.legacyHistory.invoices.map(i=><p key={i.id}>Comprobante {i.type} {i.point}-{i.number} · {fundingMoney(i.amountCents)} · {i.status}</p>)}
     </div> : projection && <>
+      {prefactura&&<fieldset disabled={locked} className="min-w-0 space-y-4">{prefactura.children}</fieldset>}
+      {!prefactura && <>
       {!projection.documents.length && !projection.operations.some(o=>!terminal(o)) && recipientEditor}
       <p>Saldo pendiente de cobro: <strong>{fundingMoney(projection.debtCents)}</strong></p>
       {projection.receipts.length > 0 && <div className="overflow-x-auto"><table className="w-full text-sm">
@@ -250,13 +254,15 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
         <label>Medio<select aria-label="Medio del faltante" className="block w-full rounded border bg-background p-2" value={method} onChange={e => { setMethod(e.target.value as typeof method); resetPreview(); }}>{fundingMethods.map(value => <option key={value} value={value}>{fundingMethodLabels[value]}</option>)}</select></label>
         {(!operational || collectionShifts.length > 1) && <label>Caja<select aria-label="Turno del faltante" className="block w-full rounded border bg-background p-2" value={shiftId} onChange={e => { setShiftId(e.target.value); resetPreview(); }}><option value="">Seleccionar caja</option>{collectionShifts.map(shift => <option key={shift.id} value={shift.id}>{shift.label}</option>)}</select></label>}
       </fieldset> : operational ? <p className="text-sm">Para registrar el pago, abrí tu caja SPA desde Caja.</p> : <p className="text-sm">Sin turno abierto verificado: el cobro de dinero nuevo está deshabilitado.</p>)}
+      </>}
       {!canWrite && <p className="text-sm">Sólo consulta. No tenés permiso para confirmar operaciones.</p>}
-      <Button disabled={locked || (!operational && !documentId)} onClick={() => void run(prepare)}>{operational ? "Revisar factura" : "Previsualizar financiación"}</Button>
+      <Button disabled={locked || (!!prefactura&&!prefactura.valid) || (!operational && !documentId)} onClick={() => void run(prepare)}>{operational ? "Revisar factura" : "Previsualizar financiación"}</Button>
       {preview && <div className="space-y-2 rounded border p-3">
+        {prefactura&&projection.documents.filter(d=>d.id===documentId).map(d=><p key={d.id}>Facturar a: {String((d.snapshot.recipient as any)?.razonSocial??"")} · {String(d.snapshot.tipo??"")}</p>)}
         <p>Importe a facturar: <strong>{fundingMoney(preview.totalCents)}</strong></p>
         <p>{preview.fundingMode === "existing_only" ? "Cubierto por pagos registrados." : "Incluye el pago indicado."}</p>
-        {preview.paymentMethods.map(row => <p key={row.method}>{fundingMethodLabels[row.method]}: {fundingMoney(row.amountCents)}</p>)}
-        <Button disabled={locked} onClick={() => void run(confirm)}>{operational ? "Confirmar y emitir factura" : "Confirmar y reservar fondos"}</Button>
+        {preview.paymentMethods.map((row,index) => <p key={`${row.method}:${index}`}>{fundingMethodLabels[row.method]}: {fundingMoney(row.amountCents)}</p>)}
+        <Button disabled={locked} onClick={() => void run(confirm)}>{prefactura?"Registrar y emitir":operational ? "Confirmar y emitir factura" : "Confirmar y reservar fondos"}</Button>
       </div>}
       {rejectedPlanId && <Button disabled={busy || !canWrite} onClick={() => void run(reviseRejectedPlan)}>Revisar selección rechazada</Button>}
       {(active || operation) && <div className="space-y-2 rounded border p-3">

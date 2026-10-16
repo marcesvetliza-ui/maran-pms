@@ -3,23 +3,32 @@ import { FundingError, hash, identifier, number, requirePermission, stableId, ty
 import { calcularMontos, type InvoiceItem } from "../../invoiceService";
 import { resolveCondicionIvaReceptorId, resolveFiscalRecipientDocument } from "../../fiscalDocument";
 import { spaRecipientProfiles } from "./recipient";
+import { spaPreferences } from "./preferences";
+import type { PoolClient } from "pg";
 
 /** Trusted server command, NOT a fiscal snapshot endpoint. All economic and
  * recipient data is reconstructed from persisted operational identities.
  * The first integration deliberately supports direct SPA / FA / FB / ARS only.
  */
-export async function prepareSpaDocument(service: PaymentFundingService, accountId: string, actor: Actor, schema = "public") {
+export async function prepareSpaDocument(service: PaymentFundingService, accountId: string, actor: Actor, schema = "public", client?:PoolClient) {
  requirePermission(actor);
  const s=identifier(schema),scope={kind:"spa" as const,id:accountId};
- return service.store.transaction(scope,null,async c=>{
+ const run=async(c:PoolClient)=>{
    await service.store.assertAdopted(c,scope);
    await service.adapter(scope).assertScope(c,scope);
    const account=(await c.query(`SELECT * FROM ${s}.spa_accounts WHERE id=$1 FOR UPDATE`,[accountId])).rows[0];
    const appointment=(await c.query(`SELECT * FROM ${s}.spa_appointments WHERE id=$1 FOR SHARE`,[account.appointment_id])).rows[0];
-   if(!appointment?.guest_id) throw new FundingError("FISCAL_PREPARATION_REQUIRED","El turno no tiene un receptor fiscal identificado.");
+   if(!appointment) throw new FundingError("FISCAL_PREPARATION_REQUIRED","No se encontró el turno de esta cuenta.");
+   const preferences=await spaPreferences(c,accountId);
+   if(!appointment?.guest_id && (!preferences||preferences.recipientKind==="client")) throw new FundingError("FISCAL_PREPARATION_REQUIRED","El turno no tiene un receptor fiscal identificado.");
    // Historical UI used either guests or spa_clients. An ID collision is NOT
    // permission to choose whichever happens to have an equal name/amount.
-   const recipients=await spaRecipientProfiles(c,accountId,appointment.guest_id,schema);
+   const recipients=preferences?.recipientKind==="company"?
+    (await c.query(`SELECT jsonb_build_object('id',id,'first_name',razon_social,'last_name','','vat_condition',condicion_iva,
+      'cuil_cuit',cuil_cuit,'document_number',cuil_cuit,'document_type','CUIT','direccion',direccion) AS data
+      FROM ${s}.companies WHERE id=$1 FOR SHARE`,[preferences.recipientId])).rows:
+    preferences?.recipientKind==="guest"?(await c.query(`SELECT to_jsonb(g) AS data FROM ${s}.guests g WHERE id=$1 FOR SHARE`,[preferences.recipientId])).rows:
+    await spaRecipientProfiles(c,accountId,appointment.guest_id,schema);
    if(recipients.length!==1) throw new FundingError("FISCAL_PREPARATION_REQUIRED","Receptor inexistente o ambiguo; revisar la ficha.");
    const g=recipients[0].data;
    const condition=String(g.vat_condition??"").trim().toLowerCase().replace(/[\s-]+/g,"_");
@@ -46,7 +55,9 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    if(!rows.length) throw new FundingError("FISCAL_PREPARATION_REQUIRED","La cuenta no tiene cargos.");
    const items:InvoiceItem[]=rows.map(row=>{
      const subtotal=number(Math.round(Number(row.subtotal)*100)),unit=number(Math.round(Number(row.unit_price)*100));
-     if(!row.description || !Number.isSafeInteger(row.quantity) || row.quantity<=0 || unit<0 || subtotal<=0 || unit*row.quantity!==subtotal)
+     const isDiscount=row.item_type==="discount";
+     if(!row.description || !Number.isSafeInteger(row.quantity) || row.quantity<=0 ||
+       (isDiscount?(unit>=0||subtotal>=0||row.quantity!==1):(unit<0||subtotal<=0)) || unit*row.quantity!==subtotal)
        throw new FundingError("FISCAL_PREPARATION_REQUIRED","El cargo requiere conciliación de cantidad, precio y subtotal.");
      // Direct SPA supplies/services are taxable at the existing standard 21%.
      // Unsupported tax categories require a reviewed catalog mapping, not browser VAT.
@@ -60,7 +71,7 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    const date=(await c.query("SELECT to_char(now() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS date")).rows[0].date;
    const snapshot={validatedPreparation:true,recipient,tipo,currency:"ARS",environment:config.arca_ambiente,
      issuer:String(config.issuer).replace(/\D/g,""),puntoVenta:config.punto_venta_homolog,fecha:date,
-     folioId:folio[0].id,items,amounts,sourceItems:rows.map(r=>({id:r.id,quantity:r.quantity,unitPrice:r.unit_price,subtotal:r.subtotal}))};
+     folioId:folio[0].id,items,amounts,...(preferences?{prefactura:preferences}:{}),sourceItems:rows.map(r=>({id:r.id,quantity:r.quantity,unitPrice:r.unit_price,subtotal:r.subtotal}))};
    const id=stableId(`spa-preparation:${accountId}:${hash(snapshot)}`);
    const active=(await c.query(`SELECT id FROM payment_funding.operations WHERE scope_kind='spa' AND scope_id=$1
      AND kind='invoice' AND status<>'aborted'`,[accountId])).rows;
@@ -72,5 +83,6 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    if(!prior.length && !(await c.query("SELECT 1 FROM payment_funding.events WHERE event_key=$1",[`prepared:${id}`])).rowCount)
      await service.store.event(c,null,`prepared:${id}`,"fiscal_document_prepared",{scopeKey:`spa:${accountId}`,documentId:id,sourceHash:hash(snapshot)},actor.id);
    return {documentId:id,totalCents};
- });
+ };
+ return client?run(client):service.store.transaction(scope,null,run);
 }

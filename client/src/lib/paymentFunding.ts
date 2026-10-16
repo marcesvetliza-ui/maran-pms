@@ -79,6 +79,7 @@ export const spaRecipientSchema=z.object({guestId:z.string().nullable(),kind:z.e
 export type SpaRecipient=z.infer<typeof spaRecipientSchema>;
 const decimal=z.union([z.string(),z.number()]).transform(Number);
 export const spaAccountViewSchema=z.object({id:z.string(),guestName:z.string().nullable(),status:z.string(),totalCents:cents,paidCents:cents,balanceCents:cents,
+ chargeVersion:z.string().optional(),preferences:z.unknown().optional(),
  readOnly:z.boolean(),canInvoice:z.boolean(),transferred:z.object({roomNumber:z.string(),reservationId:z.string(),amountCents:cents}).passthrough().nullable(),
  items:z.array(z.object({id:z.string(),description:z.string(),quantity:z.number(),unitPrice:decimal,subtotal:decimal,itemType:z.string(),inventoryItemId:z.string().nullable()})),
  payments:z.array(z.object({id:z.string(),amount:decimal,method:z.string(),status:z.string(),notes:z.string().nullable(),createdAt:z.string().nullable()})),
@@ -99,7 +100,9 @@ export const fundingApi = {
   enrollment: (id: string) => call(`/spa/${encodeURIComponent(id)}/enrollment`, z.object({ adopted: z.boolean() })),
   adoptUnbilled: (id: string) => call(`/spa/${encodeURIComponent(id)}/adopt-unbilled`, z.object({ accountId: z.string().min(1) }), {}),
   collectionShifts: (id: string) => call(`/spa/${encodeURIComponent(id)}/collection-shifts`, collectionShiftsSchema),
-  prepareDocument: (id: string) => call(`/spa/${encodeURIComponent(id)}/prepare-document`, preparedDocumentSchema, {}),
+  prepareDocument: (id: string, input:unknown={}) => call(`/spa/${encodeURIComponent(id)}/prepare-document`, preparedDocumentSchema, input),
+  prefacturaContext:(id:string)=>call(`/spa/${encodeURIComponent(id)}/prefactura-context`,z.object({environment:z.string(),point:z.number(),companies:z.array(z.object({id:z.string(),name:z.string(),cuit:z.string(),vatCondition:z.string().nullable(),address:z.string().nullable()}))})),
+  savePrefacturaOptions:(id:string,input:unknown)=>call(`/spa/${encodeURIComponent(id)}/prefactura-options`,z.object({saved:z.boolean()}),input),
   scope: (id: string) => call(`/scopes/spa/${encodeURIComponent(id)}`, projectionSchema),
   preview: (request: FundingRequest) => call("/previews", previewSchema, requestSchema.parse(request)),
   reserve: async (confirmation: FundingConfirmation) => verifyOperation(await call("/operations", operationSchema, confirmationSchema.parse(confirmation)), confirmation.operationId),

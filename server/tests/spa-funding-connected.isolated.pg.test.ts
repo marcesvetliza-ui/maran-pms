@@ -95,22 +95,21 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
    await page.getByLabel("Nombre / razón social",{exact:true}).fill("Cliente");
    await page.getByLabel("Apellido",{exact:true}).fill("Verificado");
    await page.getByLabel("Número de documento",{exact:true}).fill(String(10000000+parseInt(id.slice(-8),16)%90000000));
-   await page.getByLabel("Condición IVA",{exact:true}).selectOption("consumidor_final");
+   await page.getByRole("combobox",{name:"Condición IVA",exact:true}).selectOption("consumidor_final");
    await page.getByRole("button",{name:"Guardar y vincular cliente",exact:true}).click();
    await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toHaveCount(0);
   }
-  await page.getByLabel(`Usar ${id}:S1`,{exact:true}).check();
-  if(index!==1)await page.getByLabel(`Usar ${id}:S2`,{exact:true}).check();
-  else {
-   await page.getByLabel("Dinero nuevo",{exact:true}).fill("90000");
-   if(await page.getByLabel("Turno del faltante",{exact:true}).count())
-    await page.getByLabel("Turno del faltante",{exact:true}).selectOption(`${id}:shift`);
+  if(index===1) {
+   await page.getByLabel("Monto del cobro 1",{exact:true}).fill("90000");
+   if(await page.getByLabel("Caja SPA del cobro",{exact:true}).count())
+    await page.getByLabel("Caja SPA del cobro",{exact:true}).selectOption(`${id}:shift`);
   }
   await page.getByRole("button",{name:"Revisar factura",exact:true}).click();
   if(index===0)await page.screenshot({path:"/workspace/entregables/spa-connected-desktop.png",fullPage:true});
-  await browserExpect(page.getByText("Receptor: Cliente Verificado",{exact:true})).toBeVisible();
+  try {await browserExpect(page.getByText("Facturar a: Cliente Verificado · FB",{exact:true})).toBeVisible();}
+  catch(error){process.stderr.write(await page.locator("body").innerText());throw error;}
   if(index===2)failAfterCae=true;
-  await page.getByRole("button",{name:"Confirmar y emitir factura",exact:true}).click();
+  await page.getByRole("button",{name:"Registrar y emitir",exact:true}).click();
   if(index===2){
    await browserExpect(page.getByText("Resultado fiscal pendiente de conciliación",{exact:true})).toBeVisible();
    await page.reload();await page.getByLabel("Escenario",{exact:true}).selectOption(id);
@@ -133,7 +132,9 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   }
  }
  expect(emissions).toBe(3);expect(errors).toEqual([]);
- expect(newRequests.filter(req=>req.url.endsWith("/prepare-document")).map(req=>req.body)).toEqual([{}, {}, {}, {}]);
+ const preparations=newRequests.filter(req=>req.url.endsWith("/prepare-document"));
+ expect(preparations).toHaveLength(4);
+ expect(preparations.every(req=>req.body.expectedVersion?.length===64&&req.body.settings.recipientKind==="client")).toBe(true);
  await page.close();
 },60000);
 
@@ -185,5 +186,49 @@ it("account browser: charge, void, room transfer and history use the same accoun
  expect((await pool.query("SELECT 1 FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rowCount).toBe(0);
  expect((await pool.query("SELECT 1 FROM funding_demo.sales_invoices WHERE spa_account_id=$1",[id])).rowCount).toBe(0);
  expect(emissions).toBe(n);expect((await service.scope(scope,{id:"review",permissions:["funding:read"]})).operations).toHaveLength(0);
+ await page.close();
+},60000);
+
+it("prefactura browser: company, discount, advance, split methods, printable summary and a single invoice",async()=>{
+ const id=`spa-prefactura-browser-${randomUUID()}`,scope=await seedSyntheticScope(service,id,"spa",{partial:true}),companyId=randomUUID();
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1 WHERE id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','SPA UI','consumidor_final','30111222')",[id]);
+ await pool.query("INSERT INTO funding_demo.spa_treatments VALUES($1)",[id]);
+ await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
+ await pool.query("INSERT INTO funding_demo.companies VALUES($1,'Empresa UI','20301234567','responsable_inscripto','Domicilio UI')",[companyId]);
+ scenarios.push({id,title:'Prefactura empresa'});
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),n=emissions;
+ await page.goto(`${base}/connected-client.html`);await page.getByLabel('Escenario',{exact:true}).selectOption(id);
+ await page.getByRole('tab',{name:'Facturación',exact:true}).click();
+ await page.getByLabel('Facturar a',{exact:true}).selectOption('company');
+ await page.getByLabel('Empresa a facturar',{exact:true}).selectOption(companyId);
+ await browserExpect(page.getByLabel('Tipo de comprobante',{exact:true})).toHaveValue('Factura A');
+ await page.getByRole('button',{name:'Agregar descuento',exact:true}).click();
+ await page.getByLabel('Motivo del descuento',{exact:true}).fill('Beneficio efectivo');
+ await browserExpect(page.getByLabel('Monto del cobro 1',{exact:true})).toHaveValue('80500.00');
+ await page.getByLabel('Monto del cobro 1',{exact:true}).fill('50000');
+ await page.getByRole('button',{name:'Agregar forma de pago',exact:true}).click();
+ await page.getByLabel('Monto del cobro 2',{exact:true}).fill('30500');
+ await page.getByLabel('Método del cobro 2',{exact:true}).selectOption('tarjeta_credito');
+ await page.getByLabel('Caja SPA del cobro',{exact:true}).selectOption(`${id}:shift`);
+ await page.getByLabel('Referencia / Observaciones del comprobante',{exact:true}).fill('Referencia recepción 201');
+ const [printed]=await Promise.all([page.waitForEvent('popup'),page.getByRole('button',{name:'Imprimir resumen',exact:true}).click()]);
+ await browserExpect(printed.locator('body')).toContainText('Empresa UI');await browserExpect(printed.locator('body')).toContainText('Prefactura — no es un comprobante fiscal.');await printed.close();
+ expect(emissions).toBe(n);
+ await page.getByRole('button',{name:'Revisar factura',exact:true}).click();
+ await browserExpect(page.getByText('Facturar a: Empresa UI · FA',{exact:true})).toBeVisible();
+ await page.screenshot({path:'/workspace/entregables/spa-prefactura-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/workspace/entregables/spa-prefactura-mobile.png',fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)).toBe(false);
+ await page.getByRole('button',{name:'Registrar y emitir',exact:true}).click();
+ await browserExpect(page.getByText('Cuenta cerrada',{exact:true})).toBeVisible();
+ const invoice=(await pool.query("SELECT cliente_razon_social,observaciones,monto_total FROM funding_demo.sales_invoices WHERE spa_account_id=$1",[id])).rows;
+ expect(invoice).toHaveLength(1);expect(invoice[0].cliente_razon_social).toBe('Empresa UI');expect(invoice[0].observaciones).toBe('Referencia recepción 201');expect(Number(invoice[0].monto_total)).toBe(85500);
+ expect((await pool.query("SELECT 1 FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rowCount).toBe(3);
+ expect((await service.scope(scope,{id:'review',permissions:['funding:read']})).debtCents).toBe(0);expect(emissions-n).toBe(1);
+ expect((await pool.query("SELECT guest_id FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].guest_id).toBe(id);
  await page.close();
 },60000);

@@ -3491,7 +3491,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
       {/* Folio Dialog */}
       <Dialog open={isFolioOpen} onOpenChange={(open) => { if (!open) { setIsFolioOpen(false); } }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />

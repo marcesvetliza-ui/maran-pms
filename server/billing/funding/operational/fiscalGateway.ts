@@ -93,6 +93,7 @@ export class PersistentFiscalGateway implements FiscalGateway {
      row = (await c.query(`INSERT INTO payment_funding.fiscal_claims
        (operation_id,document_id,claim_hash,identity,invoice_id,status) VALUES($1,$2,$3,$4,$5,'prepared') RETURNING *`,
        [operationId,claim.documentId,claim.claimHash,JSON.stringify(identity),String(invoice.id)])).rows[0];
+     if(snapshot.prefactura?.notes) await c.query(`UPDATE ${this.s}.sales_invoices SET observaciones=$2 WHERE id=$1`,[invoice.id,snapshot.prefactura.notes]);
      return { row };
     }, async c => {
       if ((await c.query("SELECT 1 FROM payment_funding.fiscal_claims WHERE operation_id=$1",[operationId])).rowCount)
