@@ -1,3 +1,4 @@
+import { partialDiagnosis } from "./partial";
 import { orientInvestigation } from "./navigation";
 import { compactContext, investigationCase, reserveClosure } from "./context";
 import OpenAI from "openai";
@@ -133,6 +134,8 @@ export async function diagnose(
   const timeout = AbortSignal.timeout(options.timeoutMs || 180000);
   const completedCalls=new Map<string,string>();
   const tracedEndpoints=new Set<string>(orientation.endpointContext.map(context => context.endpoint));
+  let verifiedDraft: SupportDiagnosis | undefined;
+  const partialResult = () => ({report:partialDiagnosis(verifiedDraft!),tokens,calls,readFiles:[...source.readRanges.keys()],searches:source.searches});
   let measuredPromptTokens = 0;
   let tokens = 0,
     calls = 0,
@@ -148,6 +151,9 @@ export async function diagnose(
     const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
     if(closing && !messages.some(m=>m.role==="system" && m.content==="Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."))
       messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
+    // A final review must not consume the last budget merely to lose a
+    // read-verified draft. Leave it explicitly partial when closure cannot fit.
+    if (verifiedDraft && tokens + Math.max(Math.ceil(JSON.stringify(compactContext(messages)).length / 3) + 4000, measuredPromptTokens) + 8400 >= 100000) return partialResult();
     const response = await ai.chat.completions.create(
       {
         model: options.model,
@@ -218,6 +224,7 @@ export async function diagnose(
         });
         continue;
       }
+      verifiedDraft = report;
       if (!coverageReviewed) {
         if (round === 13) throw Object.assign(new Error("Se alcanzó el límite antes de revisar la cobertura del diagnóstico."), { code: "investigation_rounds" });
         coverageReviewed=true;
@@ -296,6 +303,10 @@ export async function diagnose(
   }
   throw Object.assign(new Error("No se obtuvo un diagnóstico dentro del límite de investigación."), { code: "investigation_rounds" });
   } catch (error) {
+    // Only controlled research limits may preserve a draft. Authentication,
+    // network, malformed output and invalid citations remain explicit failures.
+    if (verifiedDraft && error && typeof error === "object" && "code" in error &&
+        ["investigation_tokens","investigation_rounds","diagnosis_length"].includes(String(error.code))) return partialResult();
     if (error && typeof error === "object") Object.assign(error, {
       investigation: { rounds, calls, tokens, phase: coverageReviewed ? "coverage_review" : researchClosed ? "closing" : "research" },
     });

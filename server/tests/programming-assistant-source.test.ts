@@ -497,3 +497,29 @@ describe("read-only code investigator", () => {
     ).rejects.toThrow(/no coinciden/);
   });
 });
+
+it('preserves only a read-verified draft as partial if coverage review exceeds tokens',async()=>{
+ const source=new CodeSource(process.cwd(),'a'.repeat(40));
+ const read=await source.read('shared/room-availability.ts',1,10);
+ const report={summary:'El código inspeccionado define la comparación de fechas.',certainty:'sustentado_en_codigo',cause:'Comparación inspeccionada',proposal:'Cambiar',proposedTests:[],questions:[],dataRepair:'Modificar datos',limitations:[],evidence:[{path:read.path,start:read.start,end:read.end,explanation:'Comparación'}]};
+ let round=0;
+ const client={chat:{completions:{create:async()=>round++===0 ? {usage:{total_tokens:1000,prompt_tokens:500},choices:[{message:{role:'assistant',content:JSON.stringify(report)}}]} : {usage:{total_tokens:100000},choices:[]}}}};
+ const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:'unused',model:'mock'},client as any);
+ expect(result.report.certainty).toBe('falta_informacion');
+ expect(result.report.summary).toContain('Revisión parcial');
+ expect(result.report.evidence).toEqual(report.evidence);
+ expect(result.report.dataRepair).toBe('');
+ expect(result.report.proposal).not.toContain('Cambiar');
+ expect(round).toBe(2);
+});
+
+it('does not mask a provider authentication failure as a partial diagnosis',async()=>{
+ const source=new CodeSource(process.cwd(),'a'.repeat(40));
+ const report={summary:'Revisión pendiente',certainty:'falta_informacion',cause:'',proposal:'',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]};
+ let round=0;
+ const client={chat:{completions:{create:async()=>{
+  if(round++===0)return {choices:[{message:{role:'assistant',content:JSON.stringify(report)}}]};
+  throw Object.assign(new Error('provider authentication'),{status:401});
+ }}}};
+ await expect(diagnose({version:source.version} as SupportTicket,source,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({status:401});
+});

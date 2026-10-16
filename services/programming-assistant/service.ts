@@ -283,6 +283,12 @@ export async function createService(
             new CodeSource(config.sourceRoot, config.version),
             { apiKey: config.apiKey!, model: config.model },
           );
+          console.info("Investigación del asistente completada", {
+            caseId:ticket.id, model:config.model,
+            tokens:result.tokens, calls:result.calls,
+            readFileCount:result.readFiles.length,
+            certainty:result.report.certainty,
+          });
           ticket.report = result.report;
           ticket.status = diagnosisState(result.report);
           ticket.lastError = null;

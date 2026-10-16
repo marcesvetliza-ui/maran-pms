@@ -31,3 +31,16 @@ it("reserves closure before five large requests can consume 102731 tokens", () =
   // Close after three research rounds: two 20400-token responses fit below 100k.
   expect(61638 + 2 * 18400).toBeLessThan(100000);
 });
+
+it('compacts overlapping reads while keeping every new line and citation range',()=>{
+  const messages=compactContext([
+    {role:'tool',tool_call_id:'first',content:JSON.stringify({path:'server/example.ts',start:1,end:3,content:'1: first\n2: shared\n3: another'})},
+    {role:'tool',tool_call_id:'second',content:JSON.stringify({path:'server/example.ts',start:2,end:4,content:'2: shared\n3: another\n4: unique'})},
+  ]);
+  const second=JSON.parse(messages[1].content as string);
+  expect(second).toMatchObject({path:'server/example.ts',start:2,end:4});
+  expect(second.content).toContain('messages[0].content');
+  expect(second.content).toContain('4: unique');
+  expect(second.content).not.toContain('2: shared');
+  expect(messages[1]).toHaveProperty('tool_call_id','second');
+});
