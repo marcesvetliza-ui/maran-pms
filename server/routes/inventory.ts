@@ -1,3 +1,4 @@
+import {validateInventoryConversions} from "../inventoryConversionValidation";
 import { insertInventoryItemSchema } from "@shared/schema";
 import { protectWarehouseDeactivation } from "../inventoryLifecycle";
 import {registerInventoryHistoryRoutes} from "../inventoryHistory";
@@ -157,10 +158,11 @@ export function registerInventoryRoutes(app: Express) {
 
   app.post("/api/inventory/items", requireAuth, inventoryWritePermission, async(req,res)=>{
     try{
-      const {warehouseId,...body}=req.body,quantity=stockUnits(body.currentStock ?? 0);
+      const {warehouseId,conversions=[],...body}=req.body,quantity=stockUnits(body.currentStock ?? 0);
       if (typeof body.name !== "string" || !body.name.trim() || typeof body.unit !== "string" || !body.unit.trim()) return res.status(400).json({error:"Indicá nombre y unidad del artículo"});
       if (!['A','B','C'].includes(body.abcClass) || !['0','2.5','5','10.5','21','27'].includes(String(body.ivaRate))) return res.status(400).json({error:"Indicá clasificación ABC y alícuota de IVA válidas"});
       if(body.maxStock != null && String(body.maxStock).trim() !== "" && (!Number.isFinite(Number(body.maxStock)) || Number(body.maxStock)<Number(body.minStock))) return res.status(400).json({error:"El stock máximo no puede ser menor que el mínimo"});
+      validateInventoryConversions(conversions,body.unit);
       if(quantity&&!warehouseId)return res.status(400).json({error:'El stock inicial necesita depósito de destino'});
       if(!body.categoryId || body.minStock == null || body.criticalStock == null) return res.status(400).json({error:"Indicá subagrupamiento, stock mínimo y crítico"});
       for (const field of ["minStock","criticalStock"]) if (String(body[field]).trim() === "" || !Number.isFinite(Number(body[field])) || Number(body[field]) < 0) return res.status(400).json({error:"Los límites de stock deben ser números no negativos"});
@@ -172,6 +174,7 @@ export function registerInventoryRoutes(app: Express) {
         const classification=await db.execute(sql`SELECT parent_id FROM item_categories WHERE id=${body.categoryId} FOR SHARE`);
         if(!classification.rows[0]?.parent_id) throw Object.assign(new Error("El subagrupamiento debe pertenecer a un agrupamiento; completá esa clasificación antes del alta"),{statusCode:400});
         const created=await storage.createInventoryItem({...body,currentStock:(quantity/1000).toFixed(3)});
+        for(const line of conversions) await db.execute(sql`INSERT INTO inventory_unit_conversions(item_id,from_unit,factor) VALUES(${created.id},${line.fromUnit},${String(line.factor)})`);
         if(quantity){await db.execute(sql`INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock,updated_at) VALUES(${warehouseId},${created.id},${quantity/1000},now())`);
           await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,notes,source_type,created_at,created_by,warehouse_id) VALUES(${created.id},'entrada',${quantity/1000},0,${quantity/1000},'Stock inicial','manual',now(),${req.user?.id || null},${warehouseId})`);
         }return created;

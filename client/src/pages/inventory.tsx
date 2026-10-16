@@ -5,7 +5,7 @@ import {InventoryPreparation} from "@/components/inventory-preparation";
 import {INVENTORY_AREAS,INVENTORY_SELECTABLE_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
-import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
+import {InventoryUnitConversions, type InventoryConversionDraft} from "@/components/inventory-unit-conversions";
 import {InventoryPendingConsumptions} from "@/components/inventory-pending-consumptions";
 import { InventoryMovementDetail } from "@/components/inventory-movement-detail";
 import { Fragment, useState, useEffect } from "react";
@@ -2802,11 +2802,12 @@ export function NewItemForm({
   brands: Brand[];
   suppliers: AccountingSupplier[];
   existingItems: InventoryItem[];
-  onSubmit: (data: Partial<InventoryItem>) => void;
+  onSubmit: (data: Partial<InventoryItem> & {conversions?:InventoryConversionDraft[]}) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
+  const [conversions,setConversions]=useState<InventoryConversionDraft[]>([]);
   const [sku, setSku] = useState(initialItem?.sku || "");
   const [active, setActive] = useState(initialItem?.isActive !== "false");
   const [name, setName] = useState(initialItem?.name || "");
@@ -3048,7 +3049,7 @@ export function NewItemForm({
         </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
-          <Select value={unit} onValueChange={setUnit} disabled={!!initialItem}>
+          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem}>
             <SelectTrigger data-testid="select-unit">
               <SelectValue />
             </SelectTrigger>
@@ -3127,6 +3128,7 @@ export function NewItemForm({
         </Select>
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
+      {!initialItem && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
       {!initialItem && missingRequiredFields.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
           Falta completar: {missingRequiredFields.join(", ")}.
@@ -3140,6 +3142,7 @@ export function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
+              ...(!initialItem ? {conversions} : {}),
               ...(initialItem ? {sku:sku.trim() || null,isActive:active ? "true" : "false"} : {}),
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,

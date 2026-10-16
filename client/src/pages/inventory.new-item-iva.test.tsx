@@ -89,3 +89,15 @@ describe("NewItemForm — alícuota de IVA", () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ ivaRate: "10.5" }));
   });
 });
+
+it("guarda las equivalencias con el artículo nuevo, sin guardado separado", async () => {
+  const user = userEvent.setup();
+  const onSubmit = renderForm();
+  await user.type(screen.getByTestId("input-item-name"), "Botellas");
+  await fillOtherRequiredFields(user);
+  await user.click(screen.getByRole("button", {name:"Agregar equivalencia"}));
+  await user.type(screen.getByLabelText("Factor de equivalencia 1"), "12,5");
+  expect(screen.queryByRole("button", {name:"Guardar equivalencias"})).not.toBeInTheDocument();
+  await user.click(screen.getByTestId("button-save-item"));
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({conversions:[{fromUnit:"caja",factor:"12.5"}]}));
+});
