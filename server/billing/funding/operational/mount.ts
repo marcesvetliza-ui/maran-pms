@@ -11,6 +11,7 @@ import { checkSpaHomologation } from "./homologation";
 import { SqlFundingAdapter } from "../adapters";
 import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from "./rollout";
 import { getSpaRecipient, saveSpaRecipient } from "./recipient";
+import { executeSpaAccountCommand, spaAccountView } from "./account";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
@@ -57,6 +58,31 @@ export function mountOperationalSpaFunding(app:Express,options:{
  // Reviewed additive endpoints used by the connected SPA client remain independently gated.
  // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
  if(options.reviewedExtensions!==true) return service;
+ app.get("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await spaAccountView(service,req.params.accountId,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await executeSpaAccountCommand(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/room-targets",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const rows=(await options.pool.query(`SELECT r.id,rm.room_number AS "roomNumber",g.first_name AS "firstName",g.last_name AS "lastName"
+       FROM ${s}.reservations r JOIN ${s}.rooms rm ON rm.id=r.room_id JOIN ${s}.guests g ON g.id=r.guest_id
+       WHERE r.status='checked_in' ORDER BY rm.room_number,r.id`)).rows;
+     res.json({ok:true,data:rows});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/product-catalog",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     res.json({ok:true,data:(await options.pool.query(`SELECT i.id,i.name FROM ${s}.inventory_items i JOIN ${s}.item_categories cat ON cat.id=i.category_id
+       WHERE i.is_active='true' AND i.item_kind='venta_directa' AND cat.area='spa' AND cat.is_active='true'
+        AND COALESCE(i.iva_rate,'21')='21' ORDER BY i.name,i.id`)).rows});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
  app.get("/api/payment-funding/recipients/:guestId",options.authenticate,async(req,res)=>{
    try {
      requirePermission(actor(req),"funding:read");

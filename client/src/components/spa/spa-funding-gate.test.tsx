@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SpaFundingGate } from "./spa-funding-gate";
-vi.mock("./spa-funding-connected-panel",()=>({SpaFundingConnectedPanel:({canWrite}:{canWrite:boolean})=><p>{canWrite?"Nuevo circuito conectado":"Nuevo circuito de consulta"}</p>}));
+vi.mock("./spa-account-folio",()=>({SpaAccountFolio:({canWrite}:{canWrite:boolean})=><p>{canWrite?"Nuevo circuito conectado":"Nuevo circuito de consulta"}</p>}));
 afterEach(()=>vi.unstubAllGlobals());
 function mount(enabled=true,userId="u",canWrite=true){return render(<SpaFundingGate enabled={enabled} accountId="a" userId={userId} canWrite={canWrite} canAdopt={false}><button>Circuito anterior</button></SpaFundingGate>);}
 it("flag apagado conserva la compatibilidad anterior sin consultar ni mutar",()=>{

@@ -54,7 +54,7 @@ beforeAll(async()=>{
   await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
   await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
   if(partial){
-   await pool.query("INSERT INTO funding_demo.inventory_items VALUES($1,'Insumo UI','true','ml',10,1)",[id]);
+   await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Insumo UI','true','ml',10,1)",[id]);
    await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[id]);
    await pool.query("INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,10,now())",[id]);
    await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[id]);
@@ -84,6 +84,8 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   const before=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rows[0].n;
   const cashBefore=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.cash_movements c JOIN funding_demo.spa_payments p ON p.id=c.payment_id WHERE p.account_id=$1",[id])).rows[0].n;
   await page.goto(`${base}/connected-client.html`);await page.getByLabel("Escenario",{exact:true}).selectOption(id);
+  await browserExpect(page.getByRole("tab",{name:"Cuenta",exact:true})).toHaveAttribute("aria-selected","true");
+  await page.getByRole("tab",{name:"Facturación",exact:true}).click();
   await browserExpect(page.getByRole("button",{name:"Revisar factura",exact:true})).toBeVisible();
   for(const name of ["Preparar comprobante","Actualizar financiación","Actualizar cajas autorizadas","Previsualizar financiación"])
    await browserExpect(page.getByRole("button",{name,exact:true})).toHaveCount(0);
@@ -112,9 +114,10 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   if(index===2){
    await browserExpect(page.getByText("Resultado fiscal pendiente de conciliación",{exact:true})).toBeVisible();
    await page.reload();await page.getByLabel("Escenario",{exact:true}).selectOption(id);
+   await page.getByRole("tab",{name:"Facturación",exact:true}).click();
    await page.getByRole("button",{name:"Recuperar esta operación",exact:true}).click();
   }
-  await browserExpect(page.getByText("Operación finalizada",{exact:true})).toBeVisible();
+  await browserExpect(page.getByText("Cuenta cerrada",{exact:true})).toBeVisible();
   const result=await service.scope({kind:"spa",id},{id:"connected-reviewer",permissions:["funding:read"]});
   expect(result.operations).toHaveLength(1);expect(result.debtCents).toBe(0);
   const after=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rows[0].n;
@@ -131,5 +134,56 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
  }
  expect(emissions).toBe(3);expect(errors).toEqual([]);
  expect(newRequests.filter(req=>req.url.endsWith("/prepare-document")).map(req=>req.body)).toEqual([{}, {}, {}, {}]);
+ await page.close();
+},60000);
+
+it("account browser: charge, void, room transfer and history use the same account without a fiscal or cash duplicate",async()=>{
+ const id=`spa-account-browser-${randomUUID()}`,scope=await seedSyntheticScope(service,id,"spa",{partial:true});
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+ await pool.query("DELETE FROM payment_funding.receipts WHERE scope_id=$1",[id]);
+ await pool.query("DELETE FROM funding_demo.folio_movements WHERE folio_id=$1 AND type='payment'",[`${id}:folio`]);
+ await pool.query("DELETE FROM funding_demo.cash_movements WHERE payment_id IN (SELECT id FROM funding_demo.spa_payments WHERE account_id=$1)",[id]);
+ await pool.query("DELETE FROM funding_demo.spa_payments WHERE account_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1,total_paid=0 WHERE id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.folios SET status='open',total_payments=0,balance=total_charges WHERE entity_id=$1",[id]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Operativo','consumidor_final','30111222')",[id]);
+ await pool.query("INSERT INTO funding_demo.spa_treatments VALUES($1)",[id]);
+ await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
+ const target=randomUUID();
+ await pool.query("INSERT INTO funding_demo.rooms VALUES($1,'806')",[target]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name) VALUES($1,'Destino','UI')",[target]);
+ await pool.query("INSERT INTO funding_demo.reservations VALUES($1,'checked_in',$1,$1)",[target]);
+ await pool.query("INSERT INTO funding_demo.folios(id,codigo,entity_type,entity_id,status,total_charges,total_payments,balance) VALUES($1,$1,'reservation',$2,'open',0,0,0)",[`${target}:folio`,target]);
+ scenarios.push({id,title:"Cuenta operativa"});
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),n=emissions;
+ await page.goto(`${base}/connected-client.html`);await page.getByLabel("Escenario",{exact:true}).selectOption(id);
+ await browserExpect(page.getByText("Tratamiento sintético",{exact:true})).toBeVisible();
+ await browserExpect(page.getByRole("button",{name:"Revisar factura",exact:true})).toHaveCount(0);
+ await page.getByRole("button",{name:"Agregar cargo",exact:true}).click();
+ await page.getByLabel("Descripción",{exact:true}).fill("Extra de prueba UI");
+ await page.getByLabel("Precio unitario",{exact:true}).fill("5000");
+ await page.getByRole("button",{name:"Guardar cargo",exact:true}).click();
+ await browserExpect(page.getByText("Extra de prueba UI",{exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"Anular",exact:true}).click();
+ await page.getByLabel("Motivo de anulación",{exact:true}).fill("Extra cargado por error");
+ await page.getByRole("button",{name:"Confirmar anulación del cargo",exact:true}).click();
+ await browserExpect(page.getByText("Extra de prueba UI",{exact:true})).toHaveCount(0);
+ await page.screenshot({path:"/workspace/entregables/spa-account-desktop.png",fullPage:true});
+ await page.getByRole("button",{name:"Transferir a habitación",exact:true}).click();
+ await page.getByLabel("Habitación de destino",{exact:true}).selectOption(target);
+ await page.getByLabel("Motivo de transferencia",{exact:true}).fill("Solicitado por el cliente UI");
+ await page.getByRole("button",{name:"Confirmar transferencia a habitación",exact:true}).click();
+ await browserExpect(page.getByText("Cuenta trasladada a Hab. 806",{exact:true})).toBeVisible();
+ await browserExpect(page.getByRole("button",{name:"Ir a facturación",exact:true})).toBeDisabled();
+ await page.getByRole("tab",{name:"Historial",exact:true}).click();
+ await browserExpect(page.getByText(/Transferencia SPA → Hab.806/)).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:"/workspace/entregables/spa-account-mobile.png",fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)).toBe(false);
+ expect((await pool.query("SELECT 1 FROM funding_demo.charges WHERE reservation_id=$1",[target])).rowCount).toBe(1);
+ expect((await pool.query("SELECT 1 FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rowCount).toBe(0);
+ expect((await pool.query("SELECT 1 FROM funding_demo.sales_invoices WHERE spa_account_id=$1",[id])).rowCount).toBe(0);
+ expect(emissions).toBe(n);expect((await service.scope(scope,{id:"review",permissions:["funding:read"]})).operations).toHaveLength(0);
  await page.close();
 },60000);

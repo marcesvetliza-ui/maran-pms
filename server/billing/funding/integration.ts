@@ -43,7 +43,10 @@ export function mountPaymentFunding(app:Express,options:{
         if(managed) break;
       }
       if(!managed) {
-        if(scopes.length) releaseAfterLegacyResponse(res,release);
+        // Charges are inspected to protect transferred SPA provenance. Ordinary
+        // Reception charges keep their existing connection lifecycle; retaining
+        // an extra loan across their legacy handler can exhaust a small pool.
+        if(scopes.length && !req.path.startsWith("/charges")) releaseAfterLegacyResponse(res,release);
         else await release();
         return next();
       }
@@ -71,7 +74,7 @@ export function mountPaymentFunding(app:Express,options:{
   app.use("/api",(req,res,next)=>{
     if(["GET","HEAD","OPTIONS"].includes(req.method) || req.path.startsWith("/payment-funding/")) return next();
     // Authenticate before querying ownership; login and nonfinancial routes remain untouched.
-    if(!/^\/(billing|spa|payments|reservations|folios|admin\/spa|admin\/cash|cash)(\/|$)/.test(req.path)) return next();
+    if(!/^\/(billing|spa|payments|reservations|charges|folios|admin\/spa|admin\/cash|cash)(\/|$)/.test(req.path)) return next();
     return options.authenticate(req,res,()=>{Promise.resolve(fence(req,res,next)).catch(error=>fundingErrorResponse(res,error));});
   });
   registerPaymentFundingRoutes(app,service,options);

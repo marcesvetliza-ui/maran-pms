@@ -63,3 +63,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS binding_job_source ON funding_demo.inventory_c
 CREATE TABLE IF NOT EXISTS funding_demo.inventory_source_reversals(id text,source_type text,source_id text,completed_at timestamp);
 CREATE TABLE IF NOT EXISTS funding_demo.audit_logs(id text DEFAULT gen_random_uuid()::text,
  user_id text,action text,module text,entity_type text,entity_id text,description text,details text,timestamp timestamp);
+ALTER TABLE funding_demo.spa_accounts ADD COLUMN IF NOT EXISTS reservation_id text;
+ALTER TABLE funding_demo.spa_account_items ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT now();
+ALTER TABLE funding_demo.folio_movements ADD COLUMN IF NOT EXISTS created_at timestamp DEFAULT now(),
+ ADD COLUMN IF NOT EXISTS related_folio_id text,ADD COLUMN IF NOT EXISTS void_reason text;
+CREATE TABLE IF NOT EXISTS funding_demo.rooms(id text PRIMARY KEY,room_number text);
+CREATE TABLE IF NOT EXISTS funding_demo.reservations(id text PRIMARY KEY,status text,room_id text,guest_id text);
+CREATE TABLE IF NOT EXISTS funding_demo.charges(id text PRIMARY KEY,reservation_id text,description text,amount numeric,date date,category text,created_by text,status text);
+ALTER TABLE funding_demo.inventory_items ADD COLUMN IF NOT EXISTS item_kind text DEFAULT 'materia_prima';
+CREATE TABLE IF NOT EXISTS funding_demo.item_categories(id text PRIMARY KEY,area text,is_active text);
+INSERT INTO funding_demo.item_categories VALUES('synthetic-spa','spa','true') ON CONFLICT DO NOTHING;
+ALTER TABLE funding_demo.inventory_items ADD COLUMN IF NOT EXISTS category_id text DEFAULT 'synthetic-spa',ADD COLUMN IF NOT EXISTS iva_rate text DEFAULT '21';

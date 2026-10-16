@@ -18,6 +18,7 @@ import { FundingStore } from "../billing/funding/store";
 import { PaymentFundingService } from "../billing/funding/service";
 import { enrollAllSpaAccounts, enrollSpaAccount } from "../billing/funding/operational/rollout";
 import { SqlFundingAdapter } from "../billing/funding/adapters";
+import { mountPaymentFunding } from "../billing/funding/integration";
 
 // ONLY the connection is replaced. Real auth, roles, invoice builder,
 // inventory engine, SQL adapter, gateway persistence and HTTP handlers execute.
@@ -242,7 +243,7 @@ it("existing collections use validated builder and persistent gateway; no new ca
 });
 it("mixed mode validates cashier shifts, collects only the missing amount and consumes actual stock atomically",async()=>{
  const f=await fixture(true),id=f.scope.id;
- await pool.query("INSERT INTO funding_demo.inventory_items VALUES($1,'Insumo sintético','true','ml',10,1)",[id]);
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Insumo sintético','true','ml',10,1)",[id]);
  await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[id]);
  await pool.query("INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,10,now())",[id]);
  await pool.query(`INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())`,[id]);
@@ -259,7 +260,7 @@ it("mixed mode validates cashier shifts, collects only the missing amount and co
 });
 it("insufficient inventory rolls back new cash and all close writes; same CAE/operation finishes after repair",async()=>{
  const f=await fixture(true),id=f.scope.id;
- await pool.query("INSERT INTO funding_demo.inventory_items VALUES($1,'Sin stock','true','ml',1,1)",[id]);
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Sin stock','true','ml',1,1)",[id]);
  await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[id]);
  await pool.query("INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,1,now())",[id]);
  await pool.query(`INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())`,[id]);
@@ -450,4 +451,172 @@ it("full rollout routes new accounts automatically and blocks legacy financial w
   const result=await fetch(`${host}/api/payment-funding/scopes/spa/${id}`);
   expect(result.status).toBe(200);expect((await result.json()).data.receipts).toHaveLength(1);
  } finally {await new Promise<void>(r=>srv.close(()=>r()));}
+});
+
+async function emptyAccount() {
+ const f=await unadoptedFixture(),id=f.scope.id;
+ await pool.query("DELETE FROM funding_demo.folio_movements WHERE folio_id=$1 AND type='payment'",[`${id}:folio`]);
+ await pool.query("DELETE FROM funding_demo.cash_movements WHERE payment_id IN (SELECT id FROM funding_demo.spa_payments WHERE account_id=$1)",[id]);
+ await pool.query("DELETE FROM funding_demo.spa_payments WHERE account_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.folios SET total_payments=0,balance=total_charges,status='open' WHERE entity_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET total_paid=0 WHERE id=$1",[id]);
+ await enrollSpaAccount(service,id,"funding_demo");
+ return f;
+}
+async function accountCommand(id:string,request:any,commandId=randomUUID(),headers:Record<string,string>={}) {
+ return http(`/spa/${id}/account`,{commandId,request},headers);
+}
+it("account charges invalidate an unused draft, preserve audit and retry without duplicating a charge",async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const old=await prepareSpaDocument(service,id,actor,"funding_demo"),commandId=randomUUID();
+ const request={action:"add-charge",description:"Extra SPA",quantity:2,unitCents:100000};
+ const results=await Promise.all([accountCommand(id,request,commandId),accountCommand(id,request,commandId)]);
+ expect(results.map(r=>r.status)).toEqual([200,200]);
+ const view=await http(`/spa/${id}/account`);
+ expect(view.status).toBe(200);expect(view.body.data).toMatchObject({totalCents:9700000,paidCents:0,balanceCents:9700000,readOnly:false});
+ expect(view.body.data.items.filter((i:any)=>i.description==="Extra SPA")).toHaveLength(1);
+ expect((await pool.query("SELECT 1 FROM payment_funding.documents WHERE id=$1",[old.documentId])).rowCount).toBe(0);
+ expect((await pool.query("SELECT payload FROM payment_funding.events WHERE event_key=$1",[`spa-drafts:${commandId}`])).rows[0].payload.documents[0].id).toBe(old.documentId);
+ expect((await accountCommand(id,{...request,unitCents:200000},commandId)).body.error.code).toBe("IDEMPOTENCY_CONFLICT");
+ const itemId=results[0].body.data.itemId;
+ expect((await accountCommand(id,{action:"void-charge",itemId,reason:"Extra cargado por error"})).status).toBe(200);
+ expect((await http(`/spa/${id}/account`)).body.data.totalCents).toBe(9500000);
+ expect((await http(`/spa/${id}/account`)).body.data.movements.some((m:any)=>m.type==="void")).toBe(true);
+});
+it("account payment records one receipt/Caja entry and can later invoice without collecting it again",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,cmd=randomUUID(),before=await financialCounts(f.scope),n=sends;
+ const request={action:"payment",amountCents:9500000,method:"efectivo",shiftId:`${id}:shift`,notes:"Abono antes de facturar"};
+ const results=await Promise.all([accountCommand(id,request,cmd),accountCommand(id,request,cmd)]);
+ expect(results.map(r=>r.status)).toEqual([200,200]);
+ expect(await financialCounts(f.scope)).toEqual({payments:before.payments+1,cash:before.cash+1,folio:before.folio+1});
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.balanceCents).toBe(0);expect(view.paidCents).toBe(9500000);
+ expect((await accountCommand(id,request)).body.error.code).toBe("COLLECTION_EXCEEDS_DEBT");
+ const prepared=await prepareSpaDocument(service,id,actor,"funding_demo"),projection=await service.scope(f.scope,actor);
+ const invoiceRequest={scope:f.scope,documentId:prepared.documentId,applications:projection.receipts.map(r=>({receiptId:r.id,amountCents:r.freeCents})),newCollections:[]};
+ const preview=await http("/previews",invoiceRequest),operationId=randomUUID();
+ expect(preview.status).toBe(200);
+ expect((await http("/operations",{operationId,previewHash:preview.body.data.previewHash,request:invoiceRequest})).status).toBe(200);
+ expect((await http(`/operations/${operationId}/authorize`,{})).status).toBe(202);
+ expect((await http(`/operations/${operationId}/finalize`,{})).body.data.status).toBe("applied");
+ expect(await financialCounts(f.scope)).toEqual({payments:before.payments+1,cash:before.cash+1,folio:before.folio+1});expect(sends-n).toBe(1);
+ expect((await accountCommand(id,{action:"add-charge",description:"Luego de facturar",quantity:1,unitCents:100})).status).toBe(409);
+});
+it("account writes require role, own open SPA shift and reject bad amounts without mutations",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,before=await financialCounts(f.scope);
+ const request={action:"payment",amountCents:100,method:"efectivo",shiftId:`${id}:shift`,notes:""};
+ expect((await accountCommand(id,request,randomUUID(),{"x-role":"reader"})).status).toBe(403);
+ expect((await accountCommand(id,{...request,shiftId:"another-cashier"})).body.error.code).toBe("SHIFT_CLOSED");
+ expect((await accountCommand(id,{...request,amountCents:0})).status).toBe(422);
+ expect(await financialCounts(f.scope)).toEqual(before);
+});
+async function destination() {
+ const id=randomUUID();
+ await pool.query("INSERT INTO funding_demo.rooms VALUES($1,'806')",[id]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name) VALUES($1,'Huésped','Destino')",[id]);
+ await pool.query("INSERT INTO funding_demo.reservations VALUES($1,'checked_in',$1,$1)",[id]);
+ await pool.query("INSERT INTO funding_demo.folios(id,codigo,entity_type,entity_id,status,total_charges,total_payments,balance) VALUES($1,$1,'reservation',$2,'open',100000,0,100000)",[`${id}:folio`,id]);
+ return id;
+}
+it("room transfer is atomic and idempotent, creates one reservation charge and no new money or invoice",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,target=await destination(),before=await financialCounts(f.scope),n=sends;
+ const request={action:"room-transfer",reservationId:target,expectedCents:9500000,reason:"Solicitado por el huésped"},cmd=randomUUID();
+ const results=await Promise.all([accountCommand(id,request,cmd),accountCommand(id,request,cmd)]);
+ expect(results.map(r=>r.status)).toEqual([200,200]);
+ expect((await pool.query("SELECT * FROM funding_demo.charges WHERE reservation_id=$1",[target])).rows).toHaveLength(1);
+ expect((await pool.query("SELECT amount FROM funding_demo.charges WHERE reservation_id=$1",[target])).rows[0].amount).toBe("95000");
+ expect((await pool.query("SELECT type FROM funding_demo.folio_movements WHERE source_type='spa_room_transfer' AND source_id=$1",[results[0].body.data.chargeId])).rows.map(r=>r.type).sort()).toEqual(["transfer_in","transfer_out"]);
+ const view=(await http(`/spa/${id}/account`)).body.data;
+ expect(view).toMatchObject({balanceCents:0,paidCents:0,readOnly:true,canInvoice:false,transferred:{reservationId:target,roomNumber:"806",amountCents:9500000}});
+ expect((await pool.query("SELECT balance FROM funding_demo.folios WHERE entity_id=$1",[target])).rows[0].balance).toBe("195000.00");
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
+ const legacy=await fetch(`${base}/api/charges/${results[0].body.data.chargeId}/anular`,{method:"PATCH",headers:{"x-session":"yes","content-type":"application/json"},body:JSON.stringify({motivoAnulacion:"No modificar transferencia aislada"})});
+ expect(legacy.status).toBe(409);expect((await legacy.json()).error.code).toBe("MANAGED_SCOPE_USE_FUNDING");
+ expect((await accountCommand(id,{...request,reservationId:await destination()})).status).toBe(409);
+});
+it("room transfer rejects stale amount, departed destination and paid account without partial writes",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,target=await destination();
+ const request={action:"room-transfer",reservationId:target,expectedCents:9500000,reason:"Transferencia solicitada"};
+ expect((await accountCommand(id,{...request,expectedCents:1})).body.error.code).toBe("PREVIEW_STALE");
+ await pool.query("UPDATE funding_demo.reservations SET status='checked_out' WHERE id=$1",[target]);
+ expect((await accountCommand(id,request)).body.error.code).toBe("ROOM_NOT_AVAILABLE");
+ expect((await pool.query("SELECT 1 FROM funding_demo.charges WHERE reservation_id=$1",[target])).rowCount).toBe(0);
+ expect((await pool.query("SELECT status FROM funding_demo.spa_accounts WHERE id=$1",[id])).rows[0].status).toBe("open");
+ const paid=await fixture(true);
+ expect((await accountCommand(paid.scope.id,request)).body.error.code).toBe("PAYMENTS_REQUIRE_REVIEW");
+});
+it("product added to SPA consumes once and the invoice finalizer does not consume it again",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,productId=randomUUID();
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Producto venta','true','unidad',10,1,'venta_directa')",[productId]);
+ await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[productId]);
+ await pool.query("INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,10,now())",[productId]);
+ await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[productId]);
+ const cmd=randomUUID(),request={action:"add-charge",description:"Producto venta",quantity:2,unitCents:10000,inventoryItemId:productId};
+ const first=await accountCommand(id,request,cmd);expect(first.status).toBe(200);
+ expect((await accountCommand(id,request,cmd)).status).toBe(200);
+ expect(Number((await pool.query("SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1",[productId])).rows[0].current_stock)).toBe(8);
+ const job=(await pool.query("SELECT * FROM funding_demo.inventory_consumption_jobs WHERE source_type='spa_account_item' AND source_id=$1",[first.body.data.itemId])).rows[0];
+ expect(job.status).toBe("completed");
+ expect((await accountCommand(id,{action:"void-charge",itemId:first.body.data.itemId,reason:"Revisar consumo"})).body.error.code).toBe("STOCK_REVIEW_REQUIRED");
+ const total=9520000;
+ expect((await accountCommand(id,{action:"payment",amountCents:total,method:"efectivo",shiftId:`${id}:shift`,notes:""})).status).toBe(200);
+ const prepared=await prepareSpaDocument(service,id,actor,"funding_demo"),projection=await service.scope(f.scope,actor);
+ const req={scope:f.scope,documentId:prepared.documentId,applications:projection.receipts.map(r=>({receiptId:r.id,amountCents:r.freeCents})),newCollections:[]};
+ const preview=await http("/previews",req),operationId=randomUUID();expect(preview.status).toBe(200);
+ await http("/operations",{operationId,previewHash:preview.body.data.previewHash,request:req});await http(`/operations/${operationId}/authorize`,{});
+ expect((await http(`/operations/${operationId}/finalize`,{})).body.data.status).toBe("applied");
+ expect(Number((await pool.query("SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1",[productId])).rows[0].current_stock)).toBe(8);
+ expect((await pool.query("SELECT 1 FROM funding_demo.stock_movements WHERE source_type='spa_account_item' AND source_id=$1",[first.body.data.itemId])).rowCount).toBe(1);
+});
+it("out-of-stock product remains a saved charge with a pending consumption and no partial stock mutation",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,p=randomUUID();
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Agotado','true','unidad',0,1,'venta_directa')",[p]);
+ const result=await accountCommand(id,{action:"add-charge",description:"Producto agotado",quantity:1,unitCents:10000,inventoryItemId:p});
+ expect(result.status).toBe(200);
+ const job=(await pool.query("SELECT status,error FROM funding_demo.inventory_consumption_jobs WHERE source_id=$1",[result.body.data.itemId])).rows[0];
+ expect(job.status).toBe("pending");expect(job.error).toBeTruthy();
+ expect((await pool.query("SELECT 1 FROM funding_demo.stock_movements WHERE source_id=$1",[result.body.data.itemId])).rowCount).toBe(0);
+ expect((await http(`/spa/${id}/account`)).body.data.totalCents).toBe(9510000);
+});
+it("SPA catalog rejects products from other areas or unsupported tax categories",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,p=randomUUID();
+ await pool.query("INSERT INTO funding_demo.item_categories VALUES($1,'restaurant','true')",[p]);
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind,category_id) VALUES($1,'Solo restaurant','true','unidad',5,1,'venta_directa',$1)",[p]);
+ const request={action:"add-charge",description:"Producto inválido",quantity:1,unitCents:10000,inventoryItemId:p};
+ expect((await accountCommand(id,request)).body.error.code).toBe("INVALID_PRODUCT");
+ await pool.query("UPDATE funding_demo.inventory_items SET category_id='synthetic-spa',iva_rate='10.5' WHERE id=$1",[p]);
+ expect((await accountCommand(id,request)).body.error.code).toBe("INVALID_PRODUCT");
+ expect((await http(`/spa/${id}/product-catalog`)).body.data.some((r:any)=>r.id===p)).toBe(false);
+ expect((await http(`/spa/${id}/account`)).body.data.totalCents).toBe(9500000);
+});
+it("stock failure rolls the entire room transfer back and preserves both folios and the original appointment",async()=>{
+ const f=await emptyAccount(),id=f.scope.id,target=await destination(),p=randomUUID();
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Insumo faltante','true','ml',0,1)",[p]);
+ await pool.query("INSERT INTO funding_demo.treatment_supplies VALUES($1,$2,$1,2,'ml')",[p,id]);
+ const before=await financialCounts(f.scope);
+ const r=await accountCommand(id,{action:"room-transfer",reservationId:target,expectedCents:9500000,reason:"Transferencia con stock pendiente"});
+ expect(r.status).toBe(409);expect(r.body.error.code).toBe("STOCK_REVIEW_REQUIRED");
+ expect((await pool.query("SELECT 1 FROM funding_demo.charges WHERE reservation_id=$1",[target])).rowCount).toBe(0);
+ expect((await pool.query("SELECT status FROM funding_demo.spa_accounts WHERE id=$1",[id])).rows[0].status).toBe("open");
+ expect((await pool.query("SELECT status FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].status).toBe("confirmed");
+ expect(Number((await pool.query("SELECT balance FROM funding_demo.folios WHERE entity_id=$1",[target])).rows[0].balance)).toBe(100000);
+ expect(await financialCounts(f.scope)).toEqual(before);
+});
+it("ordinary Reception charges do not retain extra connections while protecting transferred SPA charges",async()=>{
+ const limited=new Pool({host:"/tmp/folio-funding-isolated/socket",port:55439,user:"runner",database:"folio_funding_synthetic",max:2,connectionTimeoutMillis:2000,options:"-c search_path=funding_demo,public"});
+ const app=express();app.use(express.json());
+ mountPaymentFunding(app,{enabled:true,pool:limited,fiscal:service.fiscal,firstSpaClose:createFirstSpaClose("funding_demo"),authenticate:(_req,_res,next)=>next(),actor:()=>actor,operationalSchema:"funding_demo"});
+ let arrived=0,release!:()=>void;
+ const barrier=new Promise<void>(resolve=>{release=resolve;});
+ app.post("/api/charges",async(_req,res)=>{
+  if(++arrived===2)release();
+  await barrier;
+  try {await limited.query("SELECT 1");res.json({ok:true});}
+  catch(error){res.status(500).json({ok:false});}
+ });
+ const listener=app.listen(0,"127.0.0.1");await new Promise<void>(resolve=>listener.once("listening",resolve));
+ const url=`http://127.0.0.1:${(listener.address() as any).port}/api/charges`;
+ try {
+  const responses=await Promise.all([1,2].map(()=>fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({reservationId:randomUUID()}),signal:AbortSignal.timeout(5000)})));
+  expect(responses.map(r=>r.status)).toEqual([200,200]);
+ } finally {release();await new Promise<void>(resolve=>listener.close(()=>resolve()));await limited.end();}
 });

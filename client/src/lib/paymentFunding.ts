@@ -77,7 +77,22 @@ export const spaRecipientSchema=z.object({guestId:z.string().nullable(),kind:z.e
   firstName:z.string(),lastName:z.string(),documentType:z.string().nullish(),documentNumber:z.string().nullish(),
   vatCondition:z.string().nullish(),cuit:z.string().nullish(),address:z.string().nullish(),editable:z.boolean()});
 export type SpaRecipient=z.infer<typeof spaRecipientSchema>;
+const decimal=z.union([z.string(),z.number()]).transform(Number);
+export const spaAccountViewSchema=z.object({id:z.string(),guestName:z.string().nullable(),status:z.string(),totalCents:cents,paidCents:cents,balanceCents:cents,
+ readOnly:z.boolean(),canInvoice:z.boolean(),transferred:z.object({roomNumber:z.string(),reservationId:z.string(),amountCents:cents}).passthrough().nullable(),
+ items:z.array(z.object({id:z.string(),description:z.string(),quantity:z.number(),unitPrice:decimal,subtotal:decimal,itemType:z.string(),inventoryItemId:z.string().nullable()})),
+ payments:z.array(z.object({id:z.string(),amount:decimal,method:z.string(),status:z.string(),notes:z.string().nullable(),createdAt:z.string().nullable()})),
+ movements:z.array(z.object({id:z.string(),type:z.string(),amount:decimal,description:z.string().nullable(),createdAt:z.string().nullable()})),
+ operations:z.array(z.object({id:z.string(),status:z.string(),invoice:z.unknown()})),
+ invoices:z.array(z.object({id:z.string(),type:z.string().nullable(),point:z.number().nullable(),number:z.number().nullable(),status:z.string(),amountCents:cents})),
+ events:z.array(z.object({action:z.string(),reason:z.string(),createdAt:z.string()})),
+});
+export type SpaAccountView=z.infer<typeof spaAccountViewSchema>;
 export const fundingApi = {
+  account:(id:string)=>call(`/spa/${encodeURIComponent(id)}/account`,spaAccountViewSchema),
+  accountCommand:(id:string,body:unknown)=>call(`/spa/${encodeURIComponent(id)}/account`,z.object({action:z.string()}).passthrough(),body),
+  roomTargets:(id:string)=>call(`/spa/${encodeURIComponent(id)}/room-targets`,z.array(z.object({id:z.string(),roomNumber:z.string(),firstName:z.string(),lastName:z.string()}))),
+  productCatalog:(id:string)=>call(`/spa/${encodeURIComponent(id)}/product-catalog`,z.array(z.object({id:z.string(),name:z.string()}))),
   recipient:(id:string)=>call(`/spa/${encodeURIComponent(id)}/recipient`,spaRecipientSchema),
   recipientCandidate:(id:string)=>call(`/recipients/${encodeURIComponent(id)}`,spaRecipientSchema),
   saveRecipient:(id:string,body:unknown)=>call(`/spa/${encodeURIComponent(id)}/recipient`,spaRecipientSchema,body),

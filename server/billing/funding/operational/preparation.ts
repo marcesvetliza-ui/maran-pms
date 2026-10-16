@@ -69,7 +69,8 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    if(prior.some(r=>r.id!==id)) throw new FundingError("FISCAL_PREPARATION_REQUIRED","Existe otro documento preparado; revisar sin sustituir su identidad.");
    await c.query(`INSERT INTO payment_funding.documents(id,scope_kind,scope_id,original_cents,total_cents,snapshot,status)
      VALUES($1,'spa',$2,$3,$3,$4,'draft') ON CONFLICT(id) DO NOTHING`,[id,accountId,totalCents,JSON.stringify(snapshot)]);
-   if(!prior.length) await service.store.event(c,null,`prepared:${id}`,"fiscal_document_prepared",{scopeKey:`spa:${accountId}`,documentId:id,sourceHash:hash(snapshot)},actor.id);
+   if(!prior.length && !(await c.query("SELECT 1 FROM payment_funding.events WHERE event_key=$1",[`prepared:${id}`])).rowCount)
+     await service.store.event(c,null,`prepared:${id}`,"fiscal_document_prepared",{scopeKey:`spa:${accountId}`,documentId:id,sourceHash:hash(snapshot)},actor.id);
    return {documentId:id,totalCents};
  });
 }

@@ -29,6 +29,8 @@ export async function legacyFundingScopes(c:PoolClient,req:Request,schema:string
     UNION SELECT 'reservation',reservation_id FROM ${s}.payments WHERE id=ANY($1::text[])
     UNION SELECT 'spa',spa_account_id FROM ${s}.sales_invoices WHERE id::text=ANY($1::text[]) AND spa_account_id IS NOT NULL
     UNION SELECT 'spa',id FROM ${s}.spa_accounts WHERE invoice_id::text=ANY($1::text[]) OR to_jsonb(spa_accounts)->>'nc_id'=ANY($1::text[])
+    UNION SELECT 'spa',f.entity_id FROM ${s}.folios f JOIN ${s}.folio_movements m ON m.folio_id=f.id
+      WHERE f.entity_type='spa_account' AND m.source_type='spa_room_transfer' AND m.source_id=ANY($1::text[])
     UNION SELECT 'reservation',reserva_id FROM ${s}.sales_invoices WHERE id::text=ANY($1::text[]) AND reserva_id IS NOT NULL
     UNION SELECT CASE entity_type WHEN 'spa_account' THEN 'spa' ELSE 'reservation' END,entity_id
       FROM ${s}.folios WHERE id=ANY($1::text[]) AND entity_type IN ('spa_account','reservation')`,[tokens])).rows);
