@@ -9,7 +9,7 @@ import { prepareSpaDocument } from "./preparation";
 import { sessionFundingActor } from "./access";
 import { checkSpaHomologation } from "./homologation";
 import { SqlFundingAdapter } from "../adapters";
-import { enrollAllSpaAccounts, enrollSpaAccount } from "./rollout";
+import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from "./rollout";
 import { getSpaRecipient, saveSpaRecipient } from "./recipient";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
@@ -140,7 +140,11 @@ export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=f
  try {await checkSpaHomologation(client);} finally {client.release();}
  const service=mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
    transport:configuredArcaTransport(),reviewedExtensions,fullRollout:true})!;
- const enrolled=await enrollAllSpaAccounts(service);
- console.info("[SPA funding] Motor general listo.",{cuentasIncorporadas:enrolled.accounts});
+ scheduleSpaEnrollment(async()=>{
+   const enrolled=await enrollAllSpaAccounts(service);
+   console.info("[SPA funding] Incorporación de cuentas finalizada.",{cuentasIncorporadas:enrolled.accounts,pendientes:enrolled.failed});
+ }, error=>console.error("[SPA funding] Incorporación pendiente; se reintentará al abrir el folio.",
+   {code:(error as {code?:string})?.code??"ENROLLMENT_FAILED"}));
+ console.info("[SPA funding] Motor general listo; incorporación en segundo plano.");
  return service;
 }

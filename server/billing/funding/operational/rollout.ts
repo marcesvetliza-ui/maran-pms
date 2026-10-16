@@ -29,8 +29,8 @@ export async function enrollSpaAccount(service: PaymentFundingService, accountId
       // A genuinely unpaid account may not yet have a unified folio. Its
       // source charges determine the initial balance; this is not a collection.
       if (!payments.length && !(await c.query(`SELECT 1 FROM ${s}.folios WHERE entity_type='spa_account' AND entity_id=$1`, [accountId])).rowCount)
-        await c.query(`INSERT INTO ${s}.folios(id,entity_type,entity_id,status,total_charges,total_payments,balance)
-          VALUES($1,'spa_account',$2,'open',$3,0,$3)`, [stableId(`spa-funding-folio:${accountId}`), accountId, totalCents / 100]);
+        await c.query(`INSERT INTO ${s}.folios(id,codigo,entity_type,entity_id,status,total_charges,total_payments,balance)
+          VALUES($1,$4,'spa_account',$2,'open',$3,0,$3)`, [stableId(`spa-funding-folio:${accountId}`), accountId, totalCents / 100, `SP-${accountId}`]);
       const adapter = service.adapter(scope);
       if (!(adapter instanceof SqlFundingAdapter)) throw new Error("Missing SQL SPA adapter");
       await c.query("SAVEPOINT spa_account_adoption");
@@ -61,6 +61,21 @@ export async function enrollAllSpaAccounts(service: PaymentFundingService, schem
   const s = identifier(schema);
   const accounts = (await service.store.pool.query(`SELECT a.id FROM ${s}.spa_accounts a
     WHERE NOT EXISTS(SELECT 1 FROM payment_funding.scopes f WHERE f.kind='spa' AND f.id=a.id) ORDER BY a.id`)).rows;
-  for (const account of accounts) await enrollSpaAccount(service, account.id, schema);
-  return { accounts: accounts.length };
+  let enrolled = 0, failed = 0;
+  for (const account of accounts) {
+    try { await enrollSpaAccount(service, account.id, schema); enrolled++; }
+    catch (error) {
+      failed++;
+      // Do not expose account identities or SQL parameters in startup logs.
+      console.error("[SPA funding] Cuenta pendiente de incorporación.", {code: (error as {code?:string})?.code ?? "ENROLLMENT_FAILED"});
+    }
+  }
+  return { accounts: enrolled, failed };
+}
+
+/** Never make availability of the hotel depend on scanning historical SPA
+ * accounts. The request middleware still verifies each account atomically and
+ * the legacy fence remains enabled even when background adoption fails. */
+export function scheduleSpaEnrollment(run: () => Promise<unknown>, onError: (error: unknown) => void) {
+  setImmediate(() => { void Promise.resolve().then(run).catch(onError); });
 }

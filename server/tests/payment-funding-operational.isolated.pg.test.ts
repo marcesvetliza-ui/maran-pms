@@ -17,6 +17,7 @@ import { Pool } from "pg";
 import { FundingStore } from "../billing/funding/store";
 import { PaymentFundingService } from "../billing/funding/service";
 import { enrollAllSpaAccounts, enrollSpaAccount } from "../billing/funding/operational/rollout";
+import { SqlFundingAdapter } from "../billing/funding/adapters";
 
 // ONLY the connection is replaced. Real auth, roles, invoice builder,
 // inventory engine, SQL adapter, gateway persistence and HTTP handlers execute.
@@ -380,6 +381,42 @@ it("automatic module cutover enrolls pending accounts once, preserves old invoic
  await enrollAllSpaAccounts(service,"funding_demo");
  expect((await pool.query("SELECT a.id FROM funding_demo.spa_accounts a LEFT JOIN payment_funding.scopes s ON s.kind='spa' AND s.id=a.id WHERE s.id IS NULL")).rowCount).toBe(0);
  expect((await pool.query("SELECT count(*)::int AS n FROM payment_funding.events WHERE event_key=$1",[`adopted:spa:${pending.scope.id}`])).rows[0].n).toBe(1);
+});
+it("creates an unpaid folio with the operational required unique codigo, idempotently",async()=>{
+ const schema="funding_codigo_regression", id=randomUUID();
+ await pool.query(`CREATE SCHEMA ${schema}`);
+ try {
+   await pool.query(`CREATE TABLE ${schema}.spa_accounts(id text PRIMARY KEY,status text,charged_to text,invoice_id integer,nc_id integer);
+     CREATE TABLE ${schema}.spa_account_items(id text,account_id text,description text,quantity integer,subtotal numeric);
+     CREATE TABLE ${schema}.spa_payments(id text,account_id text,amount numeric,method text,status text,invoice_ref text);
+     CREATE TABLE ${schema}.sales_invoices(id integer,spa_account_id text,tipo_comprobante text,punto_venta integer,numero integer,estado text,monto_total numeric,nota_credito_id integer);
+     CREATE TABLE ${schema}.folios(id text PRIMARY KEY,codigo text NOT NULL UNIQUE,entity_type text NOT NULL,entity_id text NOT NULL,status text,total_charges numeric,total_payments numeric,balance numeric)`);
+   await pool.query(`INSERT INTO ${schema}.spa_accounts VALUES($1,'open',NULL,NULL,NULL)`,[id]);
+   await pool.query(`INSERT INTO ${schema}.spa_account_items VALUES('item',$1,'Masaje',1,85000)`,[id]);
+   const adapted=new PaymentFundingService(service.store,{...service.adapters,spa:new SqlFundingAdapter("spa",schema,async()=>{})},service.fiscal);
+   await Promise.all([enrollSpaAccount(adapted,id,schema),enrollSpaAccount(adapted,id,schema)]);
+   const rows=(await pool.query(`SELECT * FROM ${schema}.folios WHERE entity_id=$1`,[id])).rows;
+   expect(rows).toHaveLength(1);
+   expect(rows[0]).toMatchObject({codigo:`SP-${id}`,total_charges:"85000",total_payments:"0",balance:"85000"});
+   expect((await pool.query("SELECT 1 FROM payment_funding.receipts WHERE scope_id=$1",[id])).rowCount).toBe(0);
+ } finally { await pool.query(`DROP SCHEMA ${schema} CASCADE`); }
+});
+it("one failed historical account does not stop enrollment of other SPA accounts",async()=>{
+ const broken=await unadoptedFixture(), healthy=await unadoptedFixture();
+ const original=service.store.transaction.bind(service.store);
+ const transaction=vi.spyOn(service.store,"transaction").mockImplementation((scope,...args:any[])=>{
+   if(scope.id===broken.scope.id) return Promise.reject(Object.assign(new Error("synthetic SQL failure"),{code:"42703"}));
+   return (original as any)(scope,...args);
+ });
+ const logged=vi.spyOn(console,"error").mockImplementation(()=>{});
+ try {
+   const result=await enrollAllSpaAccounts(service,"funding_demo");
+   expect(result.failed).toBe(1);
+   expect((await pool.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[healthy.scope.id])).rowCount).toBe(1);
+   expect((await pool.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[broken.scope.id])).rowCount).toBe(0);
+   expect(logged).toHaveBeenCalledWith(expect.any(String),{code:"42703"});
+ } finally { transaction.mockRestore(); logged.mockRestore(); }
+ await enrollSpaAccount(service,broken.scope.id,"funding_demo");
 });
 it("closed nonfiscal accounts remain invoiceable with the same receipts, no new collection or stock consumption",async()=>{
  const f=await fixture(false),id=f.scope.id;

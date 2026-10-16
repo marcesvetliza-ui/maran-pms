@@ -7,8 +7,10 @@ prueba y se solicita utilizar el motor nuevo en todo SPA. Con los dos flags ya
 activados, este despliegue realiza el cambio automáticamente. No requiere volver
 a instalar tablas, nuevas variables ni vincular cada cuenta en la pantalla.
 
-El backend incorpora al arrancar las cuentas existentes que todavía no fueron
-incorporadas. Las nuevas se incorporan al consultar el folio. Los scopes ya
+El backend incorpora en segundo plano las cuentas existentes que todavía no fueron
+incorporadas, sin esperar ese recorrido para iniciar la aplicación. Un fallo
+individual queda registrado y no detiene las demás cuentas. Las nuevas o pendientes
+se incorporan al consultar el folio. Los scopes ya
 gestionados, UUID, reservas de fondos, comprobantes preparados y operaciones
 pendientes se conservan, sin reiniciarlos. El navegador deja de elegir motor.
 
@@ -77,3 +79,13 @@ PostgreSQL, 27 de bindings/rutas aisladas, 2 recorridos Chromium, 4 de concurren
 4 de persistencia WSAA y 8 del instalador empaquetado: 1441 aprobadas.
 TypeScript completo, build con UI activada y `git diff --check` correctos.
 Los 37 casos focalizados de UI están incluidos en las 659 pruebas de cliente.
+
+### Corrección de arranque
+
+El despliegue reportó SQL 23502: `folios.codigo` obligatorio no estaba incluido
+en el alta de un folio sin cobros. Se agrega el código estable `SP-<accountId>`,
+igual al patrón del circuito SPA existente. La regresión usa PostgreSQL con
+`codigo NOT NULL UNIQUE`, verifica dos incorporaciones concurrentes, un solo folio,
+saldo de $85.000 y ningún recibo nuevo. Además, la incorporación masiva se agenda
+fuera del arranque y continúa tras una cuenta fallida. Los pendientes siguen
+rechazando escritores legacy y se validan al abrir su folio.

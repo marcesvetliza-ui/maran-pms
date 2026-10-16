@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS funding_demo.folios(
  total_charges numeric(12,2),total_payments numeric(12,2),balance numeric(12,2),
  closed_at timestamptz,closed_by text
 );
+ALTER TABLE funding_demo.folios ADD COLUMN IF NOT EXISTS codigo text;
 CREATE TABLE IF NOT EXISTS funding_demo.folio_movements(
  id text PRIMARY KEY,folio_id text,type text,amount numeric(12,2),description text,source_type text,
  source_id text,payment_method text,cash_movement_id text,registered_by text,voided_movement_id text
