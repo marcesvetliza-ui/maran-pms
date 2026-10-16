@@ -84,8 +84,11 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   const before=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rows[0].n;
   const cashBefore=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.cash_movements c JOIN funding_demo.spa_payments p ON p.id=c.payment_id WHERE p.account_id=$1",[id])).rows[0].n;
   await page.goto(`${base}/connected-client.html`);await page.getByLabel("Escenario",{exact:true}).selectOption(id);
+  await browserExpect(page.getByRole("button",{name:"Revisar factura",exact:true})).toBeVisible();
+  for(const name of ["Preparar comprobante","Actualizar financiación","Actualizar cajas autorizadas","Previsualizar financiación"])
+   await browserExpect(page.getByRole("button",{name,exact:true})).toHaveCount(0);
   if(index===0) {
-   await page.getByRole("button",{name:"Preparar comprobante",exact:true}).click();
+   await page.getByRole("button",{name:"Revisar factura",exact:true}).click();
    await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toBeVisible();
    await page.getByLabel("Nombre / razón social",{exact:true}).fill("Cliente");
    await page.getByLabel("Apellido",{exact:true}).fill("Verificado");
@@ -94,24 +97,23 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
    await page.getByRole("button",{name:"Guardar y vincular cliente",exact:true}).click();
    await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toHaveCount(0);
   }
-  await page.getByRole("button",{name:"Preparar comprobante",exact:true}).click();
-  await browserExpect(page.getByText("Receptor: Cliente Verificado",{exact:true})).toBeVisible();
   await page.getByLabel(`Usar ${id}:S1`,{exact:true}).check();
   if(index!==1)await page.getByLabel(`Usar ${id}:S2`,{exact:true}).check();
   else {
    await page.getByLabel("Dinero nuevo",{exact:true}).fill("90000");
-   await page.getByLabel("Turno del faltante",{exact:true}).selectOption(`${id}:shift`);
+   if(await page.getByLabel("Turno del faltante",{exact:true}).count())
+    await page.getByLabel("Turno del faltante",{exact:true}).selectOption(`${id}:shift`);
   }
-  await page.getByRole("button",{name:"Previsualizar financiación",exact:true}).click();
+  await page.getByRole("button",{name:"Revisar factura",exact:true}).click();
   if(index===0)await page.screenshot({path:"/workspace/entregables/spa-connected-desktop.png",fullPage:true});
-  await page.getByRole("button",{name:"Confirmar y reservar fondos",exact:true}).click();
+  await browserExpect(page.getByText("Receptor: Cliente Verificado",{exact:true})).toBeVisible();
   if(index===2)failAfterCae=true;
-  await page.getByRole("button",{name:"Autorizar esta operación",exact:true}).click();
+  await page.getByRole("button",{name:"Confirmar y emitir factura",exact:true}).click();
   if(index===2){
    await browserExpect(page.getByText("Resultado fiscal pendiente de conciliación",{exact:true})).toBeVisible();
    await page.reload();await page.getByLabel("Escenario",{exact:true}).selectOption(id);
    await page.getByRole("button",{name:"Recuperar esta operación",exact:true}).click();
-  }else await page.getByRole("button",{name:"Finalizar esta operación",exact:true}).click();
+  }
   await browserExpect(page.getByText("Operación finalizada",{exact:true})).toBeVisible();
   const result=await service.scope({kind:"spa",id},{id:"connected-reviewer",permissions:["funding:read"]});
   expect(result.operations).toHaveLength(1);expect(result.debtCents).toBe(0);

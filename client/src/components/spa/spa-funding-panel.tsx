@@ -18,13 +18,14 @@ const terminal = (operation: FundingOperation) => ["applied", "aborted"].include
 type Shift = { id: string; label: string };
 
 /** Only consumes the funding API. Never invokes billing, payments, Caja or legacy settlement. */
-export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument, recipientEditor }: {
+export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument, recipientEditor, operational = false }: {
   accountId: string; userId: string; canWrite: boolean;
   // Must come from verified server data; no manual shift IDs or synthetic defaults.
   collectionShifts?: Shift[];
   onCompleted?: () => void;
   onPrepareDocument?: () => Promise<string>;
   recipientEditor?: ReactNode;
+  operational?: boolean;
 }) {
   const key = fundingJournalKey(userId, accountId);
   const [projection, setProjection] = useState<FundingProjection>();
@@ -112,15 +113,20 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
       throw new Error("El documento preparado no aparece disponible. Actualizá el folio antes de continuar.");
     setDocumentId(id);
     resetPreview();
+    return id;
   }
   async function prepare() {
     if (!projection || locked) return;
+    let selectedDocument = documentId || (operational ? projection.documents.find(doc => doc.status === "draft")?.id : "");
+    if (operational && !selectedDocument) selectedDocument = await prepareDocument();
+    if (!selectedDocument) throw new Error("No se pudo preparar la factura. Revisá los datos del cliente.");
+    setDocumentId(selectedDocument);
     const applications = Object.entries(amounts).filter(([, value]) => value !== "").map(([receiptId, value]) => ({ receiptId, amountCents: pesosToCents(value) }));
     const request: FundingRequest = {
-      scope: { kind: "spa", id: accountId }, documentId, applications,
-      newCollections: newAmount ? [{ rowId: "new-collection", method, amountCents: pesosToCents(newAmount), shiftId }] : [],
+      scope: { kind: "spa", id: accountId }, documentId: selectedDocument, applications,
+      newCollections: newAmount ? [{ rowId: "new-collection", method, amountCents: pesosToCents(newAmount), shiftId: shiftId || (collectionShifts.length === 1 ? collectionShifts[0].id : "") }] : [],
     };
-    if (newAmount && !collectionShifts.some(shift => shift.id === shiftId)) throw new Error("Seleccioná un turno abierto verificado para registrar el faltante.");
+    if (newAmount && !collectionShifts.some(shift => shift.id === request.newCollections[0].shiftId)) throw new Error("Seleccioná una caja SPA abierta para registrar el pago.");
     const next = await fundingApi.preview(request);
     if (JSON.stringify(next.request) !== JSON.stringify(request)) throw new Error("La previsualización no coincide con la selección. Actualizá el folio.");
     setPreview(next);
@@ -159,7 +165,13 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
     if (!preview || locked) return;
     const confirmation = persistFundingConfirmation(key, preview);
     setPendingId(confirmation.operationId);
-    acceptOperation(await reservePlan(confirmation));
+    let next = await reservePlan(confirmation);
+    acceptOperation(next);
+    if (operational && next.canAuthorize) {
+      next = await fundingApi.action(next.id, "authorize");
+      acceptOperation(next);
+    }
+    if (operational && next.canFinalize) acceptOperation(await fundingApi.action(next.id, "finalize"));
     await refresh();
   }
   async function recover() {
@@ -184,12 +196,12 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
     await refresh();
   }
 
-  return <section className="space-y-4" aria-label="Financiación del folio SPA">
-    <h3 className="font-semibold">Facturación y cobros SPA</h3>
-    <p className="text-sm text-muted-foreground">Reutiliza los cobros seleccionados. Sólo el faltante confirmado registra dinero nuevo. Una operación pendiente se recupera; no se vuelve a emitir.</p>
+  return <section className="space-y-4" aria-label="Facturación del folio SPA">
+    {!operational && <><h3 className="font-semibold">Facturación y cobros SPA</h3>
+    <p className="text-sm text-muted-foreground">Reutiliza los cobros seleccionados. Sólo el faltante confirmado registra dinero nuevo. Una operación pendiente se recupera; no se vuelve a emitir.</p></>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    <Button variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar financiación</Button>
-    {!projection && <p>{busy ? "Consultando financiación…" : "Financiación no disponible. No se habilita el cierre desde esta pantalla."}</p>}
+    {!operational && <Button variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar financiación</Button>}
+    {!projection && <p>{busy ? "Cargando folio…" : "No se pudo cargar el folio. Cerrá esta ventana y volvé a abrirlo."}</p>}
     {projection?.legacyHistory ? <div className="space-y-2 rounded border p-3">
       <h4 className="font-semibold">Historial anterior al cambio de motor</h4>
       <p>{projection.legacyHistory.reason}. Se conserva para consulta; estos importes no se vuelven a facturar ni cobrar.</p>
@@ -200,19 +212,19 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
     </div> : projection && <>
       {!projection.documents.length && !projection.operations.some(o=>!terminal(o)) && recipientEditor}
       <p>Saldo pendiente de cobro: <strong>{fundingMoney(projection.debtCents)}</strong></p>
-      <div className="overflow-x-auto"><table className="w-full text-sm">
-        <caption className="text-left font-medium">Cobros registrados (no se suman otra vez a Caja)</caption>
-        <thead><tr>{["Usar", "Medio / referencia", "Importe", "Aplicado", "Reservado", "Libre", "Aplicar (pesos)"].map(label => <th className="p-2 text-left" key={label}>{label}</th>)}</tr></thead>
+      {projection.receipts.length > 0 && <div className="overflow-x-auto"><table className="w-full text-sm">
+        <caption className="text-left font-medium">Pagos registrados</caption>
+        <thead><tr>{(operational ? ["Usar", "Medio", "Disponible", "Importe a utilizar"] : ["Usar", "Medio / referencia", "Importe", "Aplicado", "Reservado", "Libre", "Aplicar (pesos)"]).map(label => <th className="p-2 text-left" key={label}>{label}</th>)}</tr></thead>
         <tbody>{projection.receipts.map(receipt => <tr key={receipt.id}>
           <td className="p-2"><Checkbox aria-label={`Usar ${receipt.sourcePaymentId}`} checked={amounts[receipt.id] !== undefined && amounts[receipt.id] !== ""} disabled={locked || receipt.freeCents === 0}
             onCheckedChange={checked => { setAmounts(prev => ({ ...prev, [receipt.id]: checked ? centsToInput(receipt.freeCents) : "" })); resetPreview(); }} /></td>
-          <td className="p-2">{fundingMethodLabels[receipt.method]} · {receipt.sourcePaymentId}</td>
-          {[receipt.amountCents, receipt.appliedCents, receipt.heldCents, receipt.freeCents].map((value, index) => <td className="p-2 whitespace-nowrap" key={index}>{fundingMoney(value)}</td>)}
+          <td className="p-2">{fundingMethodLabels[receipt.method]}{!operational && ` · ${receipt.sourcePaymentId}`}</td>
+          {(operational ? [receipt.freeCents] : [receipt.amountCents, receipt.appliedCents, receipt.heldCents, receipt.freeCents]).map((value, index) => <td className="p-2 whitespace-nowrap" key={index}>{fundingMoney(value)}</td>)}
           <td><Input className="min-w-28" aria-label={`Importe ${receipt.sourcePaymentId}`} inputMode="decimal" value={amounts[receipt.id] ?? ""} disabled={locked || receipt.freeCents === 0}
             onChange={e => { const value = e.currentTarget.value; setAmounts(prev => ({ ...prev, [receipt.id]: value })); resetPreview(); }} /></td>
         </tr>)}</tbody>
-      </table></div>
-      <label className="block text-sm">Documento fiscal preparado por el servidor
+      </table></div>}
+      {!operational && <><label className="block text-sm">Documento fiscal preparado por el servidor
         <select className="block w-full rounded border bg-background p-2" aria-label="Documento fiscal" value={documentId} disabled={locked} onChange={e => { setDocumentId(e.target.value); resetPreview(); }}>
           <option value="">Seleccionar documento</option>
           {projection.documents.filter(doc => doc.status === "draft").map(doc => <option key={doc.id} value={doc.id}>{doc.id} · {fundingMoney(doc.totalCents)}</option>)}
@@ -221,7 +233,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
       {!projection.documents.some(doc => doc.status === "draft") && <div className="space-y-2">
         <p className="text-sm">Falta preparar el comprobante con los cargos y datos fiscales guardados.</p>
         {onPrepareDocument && <Button disabled={locked} onClick={() => void run(prepareDocument)}>Preparar comprobante</Button>}
-      </div>}
+      </div>}</>}
       {projection.documents.filter(doc => doc.id === documentId).map(doc => {
         const recipient = doc.snapshot.recipient as Record<string, unknown> | undefined;
         return <div className="rounded border p-3 text-sm" key={doc.id}>
@@ -232,23 +244,23 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
           <p>Total: {fundingMoney(doc.totalCents)}</p>
         </div>;
       })}
-      {collectionShifts.length > 0 ? <fieldset disabled={locked} className="grid gap-3 rounded border p-3 md:grid-cols-3">
-        <legend>Dinero nuevo (sólo el faltante)</legend>
+      {(!operational || projection.debtCents > 0) && (collectionShifts.length > 0 ? <fieldset disabled={locked} className={`grid gap-3 rounded border p-3 ${operational && collectionShifts.length === 1 ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
+        <legend>{operational ? "Registrar pago" : "Dinero nuevo (sólo el faltante)"}</legend>
         <label>Importe en pesos<Input aria-label="Dinero nuevo" inputMode="decimal" value={newAmount} onChange={e => { setNewAmount(e.target.value); resetPreview(); }} /></label>
         <label>Medio<select aria-label="Medio del faltante" className="block w-full rounded border bg-background p-2" value={method} onChange={e => { setMethod(e.target.value as typeof method); resetPreview(); }}>{fundingMethods.map(value => <option key={value} value={value}>{fundingMethodLabels[value]}</option>)}</select></label>
-        <label>Turno abierto<select aria-label="Turno del faltante" className="block w-full rounded border bg-background p-2" value={shiftId} onChange={e => { setShiftId(e.target.value); resetPreview(); }}><option value="">Seleccionar turno</option>{collectionShifts.map(shift => <option key={shift.id} value={shift.id}>{shift.label}</option>)}</select></label>
-      </fieldset> : <p className="text-sm">Sin turno abierto verificado: el cobro de dinero nuevo está deshabilitado.</p>}
+        {(!operational || collectionShifts.length > 1) && <label>Caja<select aria-label="Turno del faltante" className="block w-full rounded border bg-background p-2" value={shiftId} onChange={e => { setShiftId(e.target.value); resetPreview(); }}><option value="">Seleccionar caja</option>{collectionShifts.map(shift => <option key={shift.id} value={shift.id}>{shift.label}</option>)}</select></label>}
+      </fieldset> : operational ? <p className="text-sm">Para registrar el pago, abrí tu caja SPA desde Caja.</p> : <p className="text-sm">Sin turno abierto verificado: el cobro de dinero nuevo está deshabilitado.</p>)}
       {!canWrite && <p className="text-sm">Sólo consulta. No tenés permiso para confirmar operaciones.</p>}
-      <Button disabled={locked || !documentId} onClick={() => void run(prepare)}>Previsualizar financiación</Button>
+      <Button disabled={locked || (!operational && !documentId)} onClick={() => void run(prepare)}>{operational ? "Revisar factura" : "Previsualizar financiación"}</Button>
       {preview && <div className="space-y-2 rounded border p-3">
         <p>Importe a facturar: <strong>{fundingMoney(preview.totalCents)}</strong></p>
-        <p>{preview.fundingMode === "existing_only" ? "Se usan cobros existentes; no se registra dinero nuevo." : "Se usan cobros existentes y se registra únicamente el faltante."}</p>
+        <p>{preview.fundingMode === "existing_only" ? "Cubierto por pagos registrados." : "Incluye el pago indicado."}</p>
         {preview.paymentMethods.map(row => <p key={row.method}>{fundingMethodLabels[row.method]}: {fundingMoney(row.amountCents)}</p>)}
-        <Button disabled={locked} onClick={() => void run(confirm)}>Confirmar y reservar fondos</Button>
+        <Button disabled={locked} onClick={() => void run(confirm)}>{operational ? "Confirmar y emitir factura" : "Confirmar y reservar fondos"}</Button>
       </div>}
       {rejectedPlanId && <Button disabled={busy || !canWrite} onClick={() => void run(reviseRejectedPlan)}>Revisar selección rechazada</Button>}
       {(active || operation) && <div className="space-y-2 rounded border p-3">
-        <p>Operación: {active ?? operation?.id}</p>
+        {!operational && <p>Operación: {active ?? operation?.id}</p>}
         {operation && <p>{statusLabels[operation.status]}</p>}
         {operation?.fundsRetained && <p>Los fondos permanecen reservados para esta operación.</p>}
         {active && <Button variant="outline" disabled={busy || !canWrite || fatalJournal.current} onClick={() => void run(recover)}>Consultar misma operación</Button>}

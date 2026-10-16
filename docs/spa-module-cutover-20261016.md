@@ -89,3 +89,20 @@ igual al patrón del circuito SPA existente. La regresión usa PostgreSQL con
 saldo de $85.000 y ningún recibo nuevo. Además, la incorporación masiva se agenda
 fuera del arranque y continúa tras una cuenta fallida. Los pendientes siguen
 rechazando escritores legacy y se validan al abrir su folio.
+
+### Pantalla operativa de SPA
+
+El folio conectado utiliza **Revisar factura → Confirmar y emitir factura**.
+La revisión prepara el documento persistido si hace falta y consulta el plan;
+no autoriza ni cobra. La confirmación conserva el UUID registrado y encadena
+reserva, autorización y finalización cuando cada respuesta lo permite. Un
+resultado pendiente mantiene la misma operación recuperable, sin emitir otra.
+
+Se retiran del uso habitual los botones de actualizar financiación/cajas, el
+selector técnico de documentos y el paso manual de preparación. La tabla vacía
+de cobros no se muestra; los pagos existentes muestran medio, disponible e importe
+a utilizar. Una sola caja autorizada se elige internamente; si hay varias, el
+operador debe seleccionar la correcta. Si falta caja, se indica dónde abrirla.
+
+Verificación del flujo simplificado: 19 pruebas UI y dos recorridos PostgreSQL/
+Chromium, incluyendo pago existente, faltante y recuperación posterior al CAE.

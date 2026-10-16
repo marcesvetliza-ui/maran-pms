@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fundingApi } from "@/lib/paymentFunding";
-import { Button } from "@/components/ui/button";
 import { SpaFundingPanel } from "./spa-funding-panel";
 import { SpaFundingRecipientEditor } from "./spa-funding-recipient";
 
@@ -15,8 +14,8 @@ export function SpaFundingConnectedPanel({ accountId, userId, canWrite, onComple
   });
   return <div className="space-y-3">
     {shifts.isError && <p role="alert" className="text-sm text-destructive">No se pudieron consultar las cajas autorizadas. El cobro de dinero nuevo queda deshabilitado. {shifts.error.message}</p>}
-    <Button variant="outline" disabled={shifts.isFetching || !userId} onClick={() => void shifts.refetch()}>Actualizar cajas autorizadas</Button>
     <SpaFundingPanel key={`${userId}:${accountId}:${revision}`} accountId={accountId} userId={userId}
+      operational
       canWrite={!!userId && canWrite} collectionShifts={shifts.isError || shifts.isFetching ? [] : shifts.data ?? []}
       recipientEditor={<SpaFundingRecipientEditor accountId={accountId} userId={userId} canWrite={canWrite} onSaved={()=>setRevision(v=>v+1)}/>}
       onPrepareDocument={async () => (await fundingApi.prepareDocument(accountId)).documentId}
