@@ -1,3 +1,4 @@
+import { cancelTransferredSpaCharge } from "./operational/roomChargeCancellation";
 import type { Express, Request, RequestHandler } from "express";
 import type { Pool, PoolClient } from "pg";
 import { FundingError, type Actor, type FiscalGateway } from "./contracts";
@@ -51,6 +52,13 @@ export function mountPaymentFunding(app:Express,options:{
         return next();
       }
       await release();
+      const cancel=req.path.match(/^\/charges\/([^/]+)\/anular$/);
+      if(managed.kind==="spa" && req.method==="PATCH" && cancel) {
+        if(!["admin","manager","reception"].includes(req.user?.role??""))
+          throw new FundingError("FORBIDDEN","No tenés permiso para anular cargos de habitación.",403);
+        const data=await cancelTransferredSpaCharge(service,decodeURIComponent(cancel[1]),req.body?.motivoAnulacion,options.actor(req),schema);
+        return res.json(data);
+      }
       // Existing SPA UI may link a known CAE, but it must use the same finalizer.
       const link=req.path.match(/^\/spa\/accounts\/([^/]+)\/link-invoice$/);
       if(managed.kind==="spa" && req.method==="POST" && link && decodeURIComponent(link[1])===managed.id) {

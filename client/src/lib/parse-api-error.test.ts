@@ -27,3 +27,7 @@ describe("parseApiError", () => {
     expect(parseApiError({})).toBe("Error inesperado");
   });
 });
+
+it("shows the nested financial error message instead of JSON or object coercion",()=>{
+ expect(parseApiError(new Error('409: {"ok":false,"error":{"code":"CHARGE_HAS_FISCAL_HISTORY","message":"El cargo ya tiene historial fiscal asociado."}}'))).toBe("El cargo ya tiene historial fiscal asociado.");
+});

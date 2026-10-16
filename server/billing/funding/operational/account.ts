@@ -179,9 +179,11 @@ export async function spaAccountView(service:PaymentFundingService,id:string,act
   const totalCents=items.reduce((sum,i)=>sum+Math.round(Number(i.subtotal)*100),0);
   const paidCents=payments.filter(p=>p.status==="active").reduce((sum,p)=>sum+Math.round(Number(p.amount)*100),0);
   const transferred=events.find(e=>e.kind==="spa_account_command"&&e.payload.result?.action==="room-transfer")?.payload.result;
+  const cancelled=events.find(e=>e.kind==="spa_room_charge_voided");
+  if(transferred&&cancelled)transferred.cancelled={reason:cancelled.payload.reason,createdAt:cancelled.createdAt};
   const preferences=events.filter(e=>e.kind==="spa_prefactura_saved").at(-1)?.payload.settings??null;
   return {id,chargeVersion:hash(items),preferences,guestName:a.guest_name,status:a.status,totalCents,paidCents,balanceCents:transferred?0:Math.max(0,totalCents-paidCents),items,payments,movements,
    readOnly:history||a.status!=="open"||operations.length>0,canInvoice:!history&&!transferred&&!a.invoice_id,transferred:transferred??null,operations,
-   invoices,events:events.filter(e=>e.kind==="spa_account_command").map(e=>({action:e.payload.request.action,reason:e.payload.request.reason??e.payload.request.notes??"",createdAt:e.createdAt}))};
+   invoices,events:events.filter(e=>["spa_account_command","spa_room_charge_voided"].includes(e.kind)).map(e=>({action:e.kind==="spa_room_charge_voided"?"room-charge-void":e.payload.request.action,reason:e.payload.reason??e.payload.request?.reason??e.payload.request?.notes??"",createdAt:e.createdAt}))};
  });
 }

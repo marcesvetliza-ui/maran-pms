@@ -76,3 +76,6 @@ INSERT INTO funding_demo.item_categories VALUES('synthetic-spa','spa','true') ON
 ALTER TABLE funding_demo.inventory_items ADD COLUMN IF NOT EXISTS category_id text DEFAULT 'synthetic-spa',ADD COLUMN IF NOT EXISTS iva_rate text DEFAULT '21';
 CREATE TABLE IF NOT EXISTS funding_demo.companies(id text PRIMARY KEY,razon_social text,cuil_cuit text,condicion_iva text,direccion text);
 ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS observaciones text;
+
+ALTER TABLE funding_demo.charges ADD COLUMN IF NOT EXISTS anulado_por text,ADD COLUMN IF NOT EXISTS motivo_anulacion text,ADD COLUMN IF NOT EXISTS anulado_at timestamp;
+ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS source_charge_ids jsonb,ADD COLUMN IF NOT EXISTS source_charge_amounts jsonb;

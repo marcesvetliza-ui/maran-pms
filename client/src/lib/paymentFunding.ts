@@ -80,7 +80,7 @@ export type SpaRecipient=z.infer<typeof spaRecipientSchema>;
 const decimal=z.union([z.string(),z.number()]).transform(Number);
 export const spaAccountViewSchema=z.object({id:z.string(),guestName:z.string().nullable(),status:z.string(),totalCents:cents,paidCents:cents,balanceCents:cents,
  chargeVersion:z.string().optional(),preferences:z.unknown().optional(),
- readOnly:z.boolean(),canInvoice:z.boolean(),transferred:z.object({roomNumber:z.string(),reservationId:z.string(),amountCents:cents}).passthrough().nullable(),
+ readOnly:z.boolean(),canInvoice:z.boolean(),transferred:z.object({roomNumber:z.string(),reservationId:z.string(),amountCents:cents,cancelled:z.object({reason:z.string(),createdAt:z.string()}).optional()}).passthrough().nullable(),
  items:z.array(z.object({id:z.string(),description:z.string(),quantity:z.number(),unitPrice:decimal,subtotal:decimal,itemType:z.string(),inventoryItemId:z.string().nullable()})),
  payments:z.array(z.object({id:z.string(),amount:decimal,method:z.string(),status:z.string(),notes:z.string().nullable(),createdAt:z.string().nullable()})),
  movements:z.array(z.object({id:z.string(),type:z.string(),amount:decimal,description:z.string().nullable(),createdAt:z.string().nullable()})),

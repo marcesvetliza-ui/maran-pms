@@ -61,7 +61,7 @@ beforeAll(async()=>{
  const app=express();app.use(express.json());
  app.use((req,_res,next)=>{
    req.isAuthenticated=(()=>req.headers["x-session"]==="yes") as any;
-   if(req.isAuthenticated()) req.user={id:actor.id,role:req.headers["x-role"]==="reader"?"manager":"spa"} as any;
+   if(req.isAuthenticated()) req.user={id:actor.id,role:req.headers["x-role"]==="reception"?"reception":req.headers["x-role"]==="reader"?"manager":"spa"} as any;
    next();
  });
  service=mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission:permissions.hasPermission,
@@ -530,7 +530,7 @@ it("room transfer is atomic and idempotent, creates one reservation charge and n
  expect((await pool.query("SELECT balance FROM funding_demo.folios WHERE entity_id=$1",[target])).rows[0].balance).toBe("195000.00");
  expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
  const legacy=await fetch(`${base}/api/charges/${results[0].body.data.chargeId}/anular`,{method:"PATCH",headers:{"x-session":"yes","content-type":"application/json"},body:JSON.stringify({motivoAnulacion:"No modificar transferencia aislada"})});
- expect(legacy.status).toBe(409);expect((await legacy.json()).error.code).toBe("MANAGED_SCOPE_USE_FUNDING");
+ expect(legacy.status).toBe(403);expect((await legacy.json()).error.code).toBe("FORBIDDEN");
  expect((await accountCommand(id,{...request,reservationId:await destination()})).status).toBe(409);
 });
 it("room transfer rejects stale amount, departed destination and paid account without partial writes",async()=>{
@@ -704,4 +704,75 @@ it("a receipt refresh restores discounted net charges rather than retaining a st
  expect((await accountCommand(id,{action:'payment',amountCents:1000000,method:'efectivo',shiftId:`${id}:shift`})).status).toBe(200);
  const cached=(await pool.query("SELECT total_charges,total_payments,balance FROM funding_demo.folios WHERE entity_id=$1",[id])).rows[0];
  expect(Object.fromEntries(Object.entries(cached).map(([k,v])=>[k,Number(v)]))).toEqual({total_charges:85500,total_payments:10000,balance:75500});
+});
+
+async function cancelRoomCharge(chargeId:string,reason:any,role="reception",session="yes") {
+ const r=await fetch(`${base}/api/charges/${chargeId}/anular`,{method:'PATCH',headers:{'x-session':session,'x-role':role,'content-type':'application/json'},body:JSON.stringify({motivoAnulacion:reason,anuladoPor:'forged-user'})});
+ return {status:r.status,body:await r.json()};
+}
+async function transferredAccount() {
+ const f=await emptyAccount(),reservationId=await destination();
+ const transfer=await accountCommand(f.scope.id,{action:'room-transfer',reservationId,expectedCents:9500000,reason:'Cargo solicitado'});
+ expect(transfer.status).toBe(200);
+ return {...f,reservationId,chargeId:transfer.body.data.chargeId};
+}
+it("Reception cancels a transferred SPA charge once with reason while preserving appointment, stock, payments and closed SPA",async()=>{
+ const f=await transferredAccount(),id=f.scope.id,before=await financialCounts(f.scope);
+ const appointment=(await pool.query('SELECT * FROM funding_demo.spa_appointments WHERE id=$1',[id])).rows[0];
+ const source=(await pool.query('SELECT * FROM funding_demo.spa_accounts WHERE id=$1',[id])).rows[0];
+ const stock=(await pool.query('SELECT count(*)::int AS n FROM funding_demo.stock_movements')).rows[0].n;
+ expect((await cancelRoomCharge(f.chargeId,'   ')).status).toBe(400);
+ expect((await cancelRoomCharge(f.chargeId,'x'.repeat(501))).status).toBe(400);
+ expect((await cancelRoomCharge(f.chargeId,'Sin permiso','spa')).status).toBe(403);
+ expect((await cancelRoomCharge(f.chargeId,'Sin sesión','reception','no')).status).toBe(401);
+ const results=await Promise.all([cancelRoomCharge(f.chargeId,'Error de carga'),cancelRoomCharge(f.chargeId,'Error de carga')]);
+ expect(results.map(r=>r.status)).toEqual([200,200]);
+ expect(results[0].body).toMatchObject({status:'anulado',motivoAnulacion:'Error de carga',anuladoPor:actor.id});
+ const charge=(await pool.query('SELECT * FROM funding_demo.charges WHERE id=$1',[f.chargeId])).rows[0];
+ expect(charge).toMatchObject({status:'anulado',anulado_por:actor.id,motivo_anulacion:'Error de carga'});expect(charge.anulado_at).toBeTruthy();
+ const folio=(await pool.query('SELECT total_charges,total_payments,balance FROM funding_demo.folios WHERE entity_id=$1',[f.reservationId])).rows[0];
+ expect(Number(folio.total_charges)).toBe(100000);expect(Number(folio.balance)).toBe(100000);expect(Number(folio.total_payments)).toBe(0);
+ expect((await pool.query("SELECT * FROM funding_demo.folio_movements WHERE source_type='spa_room_charge_void' AND source_id=$1",[f.chargeId])).rows).toHaveLength(1);
+ expect((await pool.query('SELECT * FROM funding_demo.spa_appointments WHERE id=$1',[id])).rows[0]).toEqual(appointment);
+ expect((await pool.query('SELECT * FROM funding_demo.spa_accounts WHERE id=$1',[id])).rows[0]).toEqual(source);
+ expect((await pool.query('SELECT count(*)::int AS n FROM funding_demo.stock_movements')).rows[0].n).toBe(stock);
+ expect(await financialCounts(f.scope)).toEqual(before);
+ const view=(await http(`/spa/${id}/account`)).body.data;
+ expect(view).toMatchObject({balanceCents:0,canInvoice:false,transferred:{cancelled:{reason:'Error de carga'}}});
+ expect(view.events.at(-1)).toMatchObject({action:'room-charge-void',reason:'Error de carga'});
+ expect((await pool.query("SELECT payload FROM payment_funding.events WHERE event_key=$1",[`spa-room-charge-void:${f.chargeId}`])).rows).toHaveLength(1);
+});
+it("SPA room cancellation preserves billed charges and closed reservations and serializes with Reception invoice preparation",async()=>{
+ const f=await transferredAccount();
+ await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,estado,source_charge_ids,items) VALUES($1,'emitida',$2,'[]')",[f.reservationId,JSON.stringify([f.chargeId])]);
+ const billed=await cancelRoomCharge(f.chargeId,'Error de carga');expect(billed.status).toBe(409);expect(billed.body.error.code).toBe('CHARGE_HAS_FISCAL_HISTORY');
+ expect((await pool.query('SELECT status FROM funding_demo.charges WHERE id=$1',[f.chargeId])).rows[0].status).toBe('active');
+ const closed=await transferredAccount();await pool.query("UPDATE funding_demo.reservations SET status='checked_out' WHERE id=$1",[closed.reservationId]);
+ expect((await cancelRoomCharge(closed.chargeId,'Error de carga')).status).toBe(409);
+ const racing=await transferredAccount(),c=await pool.connect();
+ try {
+  await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`folio-invoice:${racing.reservationId}`]);
+  const pending=cancelRoomCharge(racing.chargeId,'Error de carga');
+  await expect.poll(async()=>Number((await c.query("SELECT count(*) AS n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())")).rows[0].n)).toBeGreaterThan(0);
+  await c.query("INSERT INTO funding_demo.sales_invoices(reserva_id,estado,source_charge_ids,items) VALUES($1,'autorizacion_pendiente',$2,'[]')",[racing.reservationId,JSON.stringify([racing.chargeId])]);
+  await c.query('COMMIT');expect((await pending).status).toBe(409);
+ }finally{await c.query('ROLLBACK');c.release();}
+ expect((await pool.query('SELECT status FROM funding_demo.charges WHERE id=$1',[racing.chargeId])).rows[0].status).toBe('active');
+});
+
+it("SPA charge cancellation allows an unrelated mapped invoice but rolls back completely if its audit cannot be committed",async()=>{
+ const f=await transferredAccount();
+ await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,estado,source_charge_ids,items) VALUES($1,'emitida','[\"alojamiento\"]','[]')",[f.reservationId]);
+ const c=await pool.connect();
+ try {
+  await c.query(`CREATE FUNCTION funding_demo.reject_spa_void_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.kind='spa_room_charge_voided' AND NEW.payload->>'chargeId'='${f.chargeId}' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$`);
+  await c.query("CREATE TRIGGER reject_spa_void_audit BEFORE INSERT ON payment_funding.events FOR EACH ROW EXECUTE FUNCTION funding_demo.reject_spa_void_audit()");
+  expect((await cancelRoomCharge(f.chargeId,'Error de carga')).status).toBe(500);
+  expect((await pool.query('SELECT status FROM funding_demo.charges WHERE id=$1',[f.chargeId])).rows[0].status).toBe('active');
+  expect(Number((await pool.query('SELECT balance FROM funding_demo.folios WHERE entity_id=$1',[f.reservationId])).rows[0].balance)).toBe(195000);
+  expect((await pool.query("SELECT 1 FROM funding_demo.folio_movements WHERE source_type='spa_room_charge_void' AND source_id=$1",[f.chargeId])).rowCount).toBe(0);
+ }finally{
+  await c.query('DROP TRIGGER IF EXISTS reject_spa_void_audit ON payment_funding.events');await c.query('DROP FUNCTION IF EXISTS funding_demo.reject_spa_void_audit()');c.release();
+ }
+ expect((await cancelRoomCharge(f.chargeId,'Error de carga')).status).toBe(200);
 });

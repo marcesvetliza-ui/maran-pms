@@ -83,3 +83,14 @@ it("damaged recovery identity prevents new account writes and billing",async()=>
  for(const name of ["Agregar cargo","Registrar pago","Transferir a habitación","Ir a facturación"])expect(screen.getByRole("button",{name})).toBeDisabled();
  expect(calls.filter(c=>c.body)).toHaveLength(0);
 });
+
+it("a room charge cancelled in Reception stays closed in SPA and displays the cancellation reason in history",async()=>{
+ view={...view,status:"closed",readOnly:true,canInvoice:false,balanceCents:0,transferred:{roomNumber:"806",reservationId:"r",amountCents:8500000,cancelled:{reason:"Error de carga",createdAt:"2026-10-16T13:00:00Z"}},events:[{action:"room-charge-void",reason:"Error de carga",createdAt:"2026-10-16T13:00:00Z"}]};
+ mount();expect(await screen.findByText("Cargo anulado desde Recepción · el turno se mantiene")).toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"Ir a facturación"})).toBeDisabled();
+ await userEvent.click(screen.getByRole("tab",{name:"Facturación"}));
+ expect(screen.getByText("El cargo fue anulado desde Recepción; no vuelve a generar saldo en SPA.")).toBeInTheDocument();
+ await userEvent.click(screen.getByRole("tab",{name:"Historial"}));
+ expect(screen.getByText(/Error de carga/)).toBeInTheDocument();
+ expect(calls.filter(c=>c.body)).toHaveLength(0);
+});

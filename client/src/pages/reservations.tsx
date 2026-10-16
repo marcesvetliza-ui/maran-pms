@@ -120,7 +120,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
 import { GroupRoomObservations } from "@/components/group-room-observations";
@@ -2787,12 +2787,14 @@ export function ReservationDetailDialog({
     },
     onSuccess: () => {
       refetchCharges();
+      queryClient.invalidateQueries({ queryKey: ["spa-account-folio"] });
+      queryClient.invalidateQueries({ queryKey: ["spa-prefactura-account"] });
       setAnularTarget(null);
       setMotivoAnulacion("");
       toast({ title: "Cargo anulado", description: "El cargo ha sido anulado del folio." });
     },
     onError: (error: any) => {
-      toast({ title: "Error", description: error?.message || "No se pudo anular el cargo", variant: "destructive" });
+      toast({ title: "Error", description: parseApiError(error) || "No se pudo anular el cargo", variant: "destructive" });
       console.error("Anular charge error:", error);
     },
   });
@@ -5409,9 +5411,11 @@ export function ReservationDetailDialog({
                   )}
                 </div>
               )}
-              <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
+              <Label htmlFor="motivo-anulacion">Motivo de anulación{anularTarget?.type === "cargo" ? " (obligatorio)" : " (opcional)"}</Label>
               <Textarea
                 id="motivo-anulacion"
+                maxLength={500}
+                required={anularTarget?.type === "cargo"}
                 placeholder="Ej: Error de carga, duplicado..."
                 value={motivoAnulacion}
                 onChange={(e) => setMotivoAnulacion(e.target.value)}
@@ -5447,7 +5451,7 @@ export function ReservationDetailDialog({
                     });
                   }
                 }}
-                disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending || (anularTarget?.type === "pago" && anularLinkedInvoiceId !== null && isLoadingAnularInvoice)}
+                disabled={(anularTarget?.type === "cargo" && !motivoAnulacion.trim()) || anularChargeMutation.isPending || anularPaymentMutation.isPending || (anularTarget?.type === "pago" && anularLinkedInvoiceId !== null && isLoadingAnularInvoice)}
                 data-testid="button-confirm-anular"
               >
                 {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}

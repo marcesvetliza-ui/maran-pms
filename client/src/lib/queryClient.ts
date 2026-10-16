@@ -154,6 +154,7 @@ export function parseApiError(err: unknown): string {
           ].filter(Boolean).join(" ");
           return details ? `${String(parsed.error)} ${details}` : String(parsed.error);
         }
+        if (typeof parsed.error === "object" && typeof parsed.error.message === "string") return parsed.error.message;
         return String(parsed.error);
       }
       if (parsed?.message) {
