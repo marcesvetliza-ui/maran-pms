@@ -95,6 +95,16 @@ export class CodeSource {
     this.readRanges.set(rel, list);
     return { path: rel, start, end, content: selected.join("\n") };
   }
+  /** Literal app/router registrations only; never executes the module. */
+  async routeAt(ref:{path:string;start:number;end:number}) {
+    const text=await this.content(ref.path);
+    const routes=[...text.matchAll(/^[\t ]*(?:app|router)\s*\.\s*(get|post|patch|put|delete)\s*\(\s*(['"`])(\/api\/[^'"`\r\n]+)\2/gm)].map(match=>({method:match[1].toUpperCase(),endpoint:match[3],line:text.slice(0,match.index).split("\n").length}));
+    const index=routes.findLastIndex(route=>route.line<=ref.start);
+    if(index<0)return null;
+    const route=routes[index];
+    const declaration=await this.read(ref.path,route.line,route.line);
+    return {...route,containsRange:!routes[index+1] || ref.end<routes[index+1].line,declaration};
+  }
   async findFiles(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
       throw new Error("Nombre entre 3 y 120 caracteres.");

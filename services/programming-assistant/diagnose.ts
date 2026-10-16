@@ -1,3 +1,4 @@
+import {validateReportClaims} from "./claim-validation";
 import {checkErrorAttribution} from "./attribution";
 import {buildCoverageReview,coverageReviewInstruction} from "./review";
 import { partialDiagnosis } from "./partial";
@@ -146,12 +147,13 @@ export async function diagnose(
     researchClosed = false,
     evidenceCorrections = 0,
     attributionCorrections = 0,
+    claimCorrections = 0,
     rounds = 0;
   try {
   for (let round = 0; round < 14; round++) {
     rounds = round + 1;
     const context = compactContext(messages);
-    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
+    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 || claimCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
     if(closing && !messages.some(m=>m.role==="system" && m.content==="Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."))
       messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
     // A final review must not consume the last budget merely to lose a
@@ -162,7 +164,7 @@ export async function diagnose(
         model: options.model,
         messages: compactContext(messages),
         tools,
-        tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || coverageReviewed)) ? "none" : "auto",
+        tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || claimCorrections > 0 || coverageReviewed)) ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -227,6 +229,14 @@ export async function diagnose(
         });
         continue;
       }
+      const claimErrors=await validateReportClaims(report,source);
+      if(claimErrors.length) {
+        if(claimCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: las citas del endpoint o las aserciones de pruebas no respaldan el diagnóstico."),{code:"evidence_claim_mismatch"});
+        messages.push({...answer,role:"assistant"});
+        messages.push({role:"system",content:"El control de citas encontró una contradicción verificable. Corregir el diagnóstico completo, no sólo su certeza. Una prueba de una función pura no prueba otro método ni el endpoint completo. No atribuir el detalle de un error al cliente si el catch usa un texto fijo."});
+        messages.push({role:"user",content:JSON.stringify({validationError:"Las afirmaciones no coinciden con el código o las aserciones citadas.",claimErrors})});
+        continue;
+      }
       const attributionErrors=await checkErrorAttribution(report,source);
       if(attributionErrors.length) {
         if(attributionCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: el diagnóstico insiste en atribuir el error a otra función."),{code:"evidence_attribution"});
@@ -269,7 +279,7 @@ export async function diagnose(
         const key=call.function.name+JSON.stringify(args,Object.keys(args).sort());
         const prior=completedCalls.get(key);
         if(prior) result={alreadyConsulted:true,previousToolCallId:prior,guidance:"El resultado ya está en el historial. Usá sus líneas, o pedí otro rango/símbolo si falta una parte. No se repite la lectura."};
-        else if(closing || calls >= (coverageReviewed || evidenceCorrections>0 ? 24 : 20))
+        else if(closing || calls >= (coverageReviewed || evidenceCorrections>0 || claimCorrections>0 ? 24 : 20))
           result={researchClosed:true,guidance:"Se reservó el presupuesto restante para concluir. No se ejecutó esta consulta: usá evidencia leída y declará lo pendiente."};
         else {
         calls++;

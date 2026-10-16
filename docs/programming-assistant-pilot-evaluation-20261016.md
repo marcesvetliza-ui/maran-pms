@@ -158,3 +158,41 @@ errónea en evidencia, certeza rebajada sin corregir, distinciones válidas,
 funciones renombradas en código sintético, modelo simulado que insiste (rechazo)
 y modelo simulado que corrige (entrega tras revisión). La calidad del modelo real
 requiere otra evaluación después del despliegue. No se modificó Inventario.
+
+## Controles tras evaluar el cambio de habitación
+
+El informe de `9d460891` citó `server/routes.ts:559–584` como el PATCH de reservas,
+pero esas líneas pertenecían a otro recorrido. Además afirmó pruebas unitarias de
+`checkOverbooking` sin citar aserciones de ese método. El test leído de fechas
+contiguas prueba `isRoomAvailableForInterval`, no la persistencia ni el PATCH.
+
+Se incorporan dos comprobaciones acotadas antes de aceptar el borrador:
+
+- Cuando una explicación de evidencia afirma explícitamente ser un endpoint con
+  método HTTP, se compara su rango con el registro literal `app/router` que lo
+  contiene en ese archivo. Se verifica método, ruta y que no cruce otra ruta.
+  Puede citarse el interior del handler sin incluir la línea de registro. Si el
+  endpoint no está escrito en esa explicación, sólo se infiere cuando el informe
+  menciona uno único, evitando adivinar entre varios recorridos.
+- Las afirmaciones explícitas de pruebas para una función identificada requieren
+  una cita de test operativo con una aserción directa sobre esa función. Se
+  excluyen las pruebas del propio investigador. Una aserción sobre otra función
+  no demuestra el método de almacenamiento ni una integración HTTP.
+
+El modelo recibe el conflicto y debe corregir el informe completo. Dos intentos
+fallidos causan rechazo por evidencia; bajar la certeza no permite conservar la
+contradicción. Los límites de consultas, tokens y rondas se mantienen. No se
+modificó el funcionamiento de reservas ni se ejecutaron operaciones del hotel.
+
+Límites: registros de ruta reconocibles como literales `app/router`; no se intenta
+resolver montajes dinámicos. La comprobación de tests reconoce nombres explícitos
+y aserciones directas `expect/assert`, no toda forma de prueba (por ejemplo,
+aserciones sobre variables intermedias). Si una prueba usa otra forma, el informe
+puede explicar lo que contiene sin atribuir una cobertura no demostrada. No se
+verifica automáticamente toda afirmación en lenguaje natural ni se demuestra
+inexistencia de pruebas. Sigue siendo necesaria la evaluación del modelo real.
+
+La orientación del cambio de habitación también pide distinguir texto fijo del
+catch frente al detalle del servidor, cierre por éxito frente a error y explicar
+las comparaciones de fechas. Estos puntos requieren revisión de la respuesta;
+no se presentan como garantías de un verificador semántico general.
