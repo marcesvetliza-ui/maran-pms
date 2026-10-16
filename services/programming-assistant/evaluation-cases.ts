@@ -19,7 +19,7 @@ export const pilotEvaluationCases = [
   actual:'Dos operadores intentan facturar el mismo cargo de una reserva y uno recibe 409.',
   expected:'Investigar si el rechazo protege de una doble factura y cómo se muestra, sin emitir comprobantes.',
   endpoint:'/api/billing/invoices',method:'POST',
-  checks:['Leer validación de saldo, bloqueo y manejo del conflicto.','No tratar todo 409 como defecto ni garantizar concurrencia por un comentario.'],
+  checks:['Leer validación de saldo, bloqueo, orden entre factura y cobros, y catch de Prefactura.','Citar las pruebas concurrentes existentes y sus mocks, sin recomendar como nueva la misma aserción.','No tratar todo 409 como defecto ni afirmar ausencia de doble cobro real sólo por el rechazo fiscal.'],
  },
  {
   id:'credit-refacture',module:'facturacion',title:'Refacturar después de una nota de crédito',

@@ -256,7 +256,7 @@ export async function diagnose(
         coverageReviewed=true;
         messages.push({...answer,role:"assistant"});
         messages.push({role:"system",content:coverageReviewInstruction});
-        messages.push({role:"user",content:JSON.stringify(await buildCoverageReview(report,source))});
+        messages.push({role:"user",content:JSON.stringify(await buildCoverageReview(report,source,orientation.coverageChecklist))});
         continue;
       }
       const screens=citedScreens(report);

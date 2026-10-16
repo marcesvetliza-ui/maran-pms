@@ -225,3 +225,37 @@ mejoras no garantizan por sí mismas que toda explicación del modelo sea correc
 ni que exista una prueba integrada para conservar la reserva original. Continúa
 pendiente evaluar los casos de concurrencia en facturación y NC/refacturación,
 y después los mismos problemas narrados en lenguaje cotidiano con poco detalle.
+
+## Ajuste del caso de facturación concurrente
+
+El primer informe de `1fcd892d` identificó el rechazo de saldo, pero no cubrió
+cobros ni pantalla y propuso una prueba concurrente ya existente. Para consultas
+cotidianas de Recepción/Facturación con dos personas, sesiones o saldo insuficiente:
+
+- Se orienta hacia el mensaje real de validación, el bloqueo y su implementación,
+  el orden de emisión/pagos del helper de Prefactura y el catch de la pantalla.
+  No se precargan por defecto recorridos de SPA o grupos para justificar un caso
+  de reserva. Las consultas específicamente clasificadas en esos módulos no
+  reciben esta orientación de Recepción.
+- Se localiza el archivo de concurrencia del catálogo, leyendo tanto sus mocks
+  como el bloque `Promise.all` y sus aserciones de estados y cantidad de emisiones.
+  Esto es descubrimiento de evidencia, no una conclusión de que el caso del
+  usuario tuvo ese resultado.
+- La revisión final recibe una lista de cobertura (factura, cobro, interfaz,
+  pruebas existentes, qué puede comprobar el operador). También recibe lecturas
+  de tests ya consultados aunque no estén citados en el borrador, con límite
+  conjunto de 8000 caracteres y marca de lectura parcial cuando corresponde.
+
+El revisor debe distinguir prueba HTTP con persistencia/emisor simulados de
+PostgreSQL o ARCA reales. Un 409 no demuestra cuántos cobros existen en el caso
+concreto; el asistente no tiene acceso a Caja ni a documentos operativos. Debe
+explicar ese límite y proponer consultar comprobantes y movimientos antes de
+repetir una operación. `paymentId` no se supone informado por el usuario ni se
+presenta como la única protección contra duplicados.
+
+Las pruebas locales verifican descubrimiento del test existente, sus mocks,
+aserciones, helper de pagos y catch; conservación de esa evidencia para la
+revisión y exclusión de la orientación de Recepción para un caso SPA. No se hizo
+una consulta a OpenAI ni se probó una operación financiera real. Estos cambios
+mejoran navegación/cobertura; no son un verificador determinista de toda conclusión
+ni garantizan que el modelo vaya a responder correctamente sin nueva evaluación.
