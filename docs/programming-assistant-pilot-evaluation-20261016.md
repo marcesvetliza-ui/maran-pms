@@ -67,5 +67,28 @@ comprobar `/health` del asistente y el estado del gateway antes de evaluar.
 No cambiar la base, claves ni habilitar herramientas de escritura para esta
 iteración. No se hicieron solicitudes pagadas a OpenAI desde estas pruebas.
 
-Después de evaluar esta iteración, añadir seguimiento “Resolvió mi consulta” /
-“Sigue el problema” sin equiparar el cierre del caso a una reparación automática.
+## Seguimiento de utilidad
+
+Debajo de cada diagnóstico se muestran “Resolvió mi consulta” y “Sigue el
+problema”. La elección se guarda con el identificador de ese diagnóstico y
+fecha, y queda en el seguimiento. No cierra el caso ni solicita un análisis al
+modelo. Se puede agregar un mensaje con los detalles pendientes y después
+solicitar explícitamente otra investigación.
+
+Cada resultado nuevo tiene un ID propio. Una evaluación enviada desde una
+pantalla desactualizada recibe conflicto, en vez de asociarse a otra respuesta.
+Los diagnósticos anteriores a este cambio usan su revisión como ID de legado;
+al generar el próximo diagnóstico reciben un ID único. Los reintentos con el
+mismo requestId no duplican la evaluación y no pueden cambiar su contenido.
+El propietario se obtiene de la sesión del PMS, no del cuerpo de la solicitud.
+
+Se guarda en el JSON del caso en la base separada del asistente; no requiere
+migraciones del PMS ni acceso a datos del hotel. El diagnóstico de estado
+“Falta información” admite evaluación de utilidad sin presentarlo como cerrado.
+La evaluación es informativa; el límite de investigaciones sólo cuenta analyze.
+
+Verificación local: pruebas de interfaz para ambas respuestas y pérdida de
+respuesta HTTP; pruebas PostgreSQL de persistencia, propietarios, concurrencia,
+reintentos, conflictos y diagnósticos desactualizados; pruebas del gateway de
+sesión y validación estricta. No se usó OpenAI real.
+

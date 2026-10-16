@@ -6,6 +6,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   diagnosisState,
   supportCreateSchema,
+  supportFeedbackSchema,
   supportMessageSchema,
   supportRunSchema,
   type SupportTicket,
@@ -129,12 +130,12 @@ export async function createService(
   app.post("/cases/:id/:action", async (req, res) => {
     const { action, id } = req.params;
     if (
-      !["messages", "analyze", "close"].includes(action) ||
+      !["messages", "analyze", "close", "feedback"].includes(action) ||
       !/^[a-f0-9-]{36}$/.test(id)
     )
       return res.status(404).json({ error: "Caso no encontrado" });
     const parsed = (
-      action === "messages" ? supportMessageSchema : supportRunSchema
+      action === "messages" ? supportMessageSchema : action === "feedback" ? supportFeedbackSchema : supportRunSchema
     ).safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Datos inválidos" });
@@ -159,6 +160,14 @@ export async function createService(
         [res.locals.owner, parsed.data.requestId],
       );
       if (previous.rows.length) {
+        if(action === "feedback") {
+          const feedback=supportFeedbackSchema.parse(req.body);
+          const saved=ticket.feedback?.find(item=>item.requestId===feedback.requestId);
+          if(!saved || saved.reportId!==feedback.reportId || saved.outcome!==feedback.outcome) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({error:"Identificador ya utilizado para otra evaluación"});
+          }
+        }
         await client.query("ROLLBACK");
         return previous.rows[0].case_id === id &&
           previous.rows[0].kind === action
@@ -204,6 +213,15 @@ export async function createService(
         ticket.report = null;
         ticket.status = "queued";
         ticket.lastError = null;
+      } else if (action === "feedback") {
+        const feedback=supportFeedbackSchema.parse(req.body);
+        if(!ticket.report || feedback.reportId!==(ticket.reportId || ticket.version) || (ticket.feedback?.length || 0)>=30) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({error:"El diagnóstico cambió o no admite más evaluaciones. Actualizá el caso."});
+        }
+        const createdAt=new Date().toISOString();
+        ticket.feedback=[...(ticket.feedback || []),{...feedback,createdAt}];
+        ticket.messages=[...(ticket.messages || []),{id:randomUUID(),author:"user",text:feedback.outcome==="resolved" ? "Evaluación del diagnóstico: resolvió mi consulta." : "Evaluación del diagnóstico: sigue el problema.",createdAt}];
       } else if (action === "close") ticket.status = "closed";
       else {
         if ((ticket.messages?.length || 0) >= 30) {
@@ -290,6 +308,7 @@ export async function createService(
             certainty:result.report.certainty,
           });
           ticket.report = result.report;
+          ticket.reportId = randomUUID();
           ticket.status = diagnosisState(result.report);
           ticket.lastError = null;
         } catch (error) {

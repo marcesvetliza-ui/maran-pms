@@ -81,6 +81,12 @@ describe("PMS support gateway", () => {
         ).status,
       ).toBe(400);
       expect(calls).toHaveLength(1);
+      const feedback={requestId:"11111111-1111-4111-8111-111111111111",reportId:"a".repeat(40),outcome:"unresolved"};
+      const endpoint=url+"/22222222-2222-4222-8222-222222222222/feedback";
+      expect((await originalFetch(endpoint,{method:"POST",headers:{"x-test-role":"admin","Content-Type":"application/json"},body:JSON.stringify(feedback)})).status).toBe(200);
+      expect(JSON.parse(calls[1].body)).toEqual(feedback);
+      expect((await originalFetch(endpoint,{method:"POST",headers:{"x-test-role":"admin","Content-Type":"application/json"},body:JSON.stringify({...feedback,createdBy:"forged"})})).status).toBe(400);
+      expect(calls).toHaveLength(2);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }

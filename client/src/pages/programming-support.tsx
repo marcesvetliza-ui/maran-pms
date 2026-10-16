@@ -326,6 +326,19 @@ export default function ProgrammingSupport() {
                         </section>
                       ),
                   )}
+                  <div className="space-y-2 border-t pt-3">
+                    <p className="text-sm font-medium">¿Te sirvió este diagnóstico?</p>
+                    <div className="flex flex-wrap gap-2">
+                      {([['resolved','Resolvió mi consulta'],['unresolved','Sigue el problema']] as const).map(([outcome,label])=>(
+                        <Button key={outcome} variant="outline" disabled={busy || ['queued','investigating','closed'].includes(ticket.status)}
+                          onClick={()=>void send(`/${ticket.id}/feedback`,{reportId:ticket.reportId || ticket.version,outcome})}>{label}</Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Guarda tu evaluación. No cierra la consulta, solicita otra investigación ni aplica cambios.</p>
+                    {ticket.feedback?.filter(item=>item.reportId===(ticket.reportId || ticket.version)).slice(-1).map(item=>(
+                      <p key={item.requestId} role="status" className="text-sm">Evaluación guardada: {item.outcome==='resolved' ? 'resolvió mi consulta' : 'sigue el problema'}.</p>
+                    ))}
+                  </div>
                   <details>
                     <summary className="cursor-pointer font-medium">
                       Evidencia consultada

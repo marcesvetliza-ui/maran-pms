@@ -3,6 +3,7 @@ import { requireAuth, requirePermission } from "../auth";
 import { isPilotEnv } from "../app-env";
 import {
   supportCreateSchema,
+  supportFeedbackSchema,
   supportMessageSchema,
   supportRunSchema,
 } from "@shared/programming-support";
@@ -35,14 +36,16 @@ export function registerProgrammingSupport(app: Express) {
       (req.method === "GET" && (id || action)) ||
       (req.method !== "GET" && req.method !== "POST") ||
       (id && !/^[a-f0-9-]{36}$/.test(id)) ||
-      (action && !["messages", "analyze", "close"].includes(action)) ||
+      (action && !["messages", "analyze", "close", "feedback"].includes(action)) ||
       !!id !== !!action
     )
       return res.status(404).json({ error: "Operación no disponible" });
     let body: unknown;
     if (req.method === "POST") {
       const parsed = (
-        action === "messages"
+        action === "feedback"
+          ? supportFeedbackSchema
+          : action === "messages"
           ? supportMessageSchema
           : action
             ? supportRunSchema

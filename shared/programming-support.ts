@@ -26,6 +26,11 @@ export const supportMessageSchema = z
     text: z.string().trim().min(2).max(4000),
   })
   .strict();
+export const supportFeedbackSchema = z.object({
+  requestId:z.string().uuid(),
+  reportId:z.string().min(1).max(80),
+  outcome:z.enum(["resolved","unresolved"]),
+}).strict();
 export const supportRunSchema = z
   .object({ requestId: z.string().uuid() })
   .strict();
@@ -92,6 +97,8 @@ export type SupportTicket = {
   updatedAt: string;
   createdBy: string;
   report: SupportDiagnosis | null;
+  reportId?: string;
+  feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
   lastError: string | null;
   messages?: SupportMessage[];
 };

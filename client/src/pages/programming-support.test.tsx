@@ -18,3 +18,20 @@ it("saving a case does not request a diagnosis, and retrying a lost response kee
   fireEvent.submit(screen.getByRole("button",{name:"Guardar consulta"}).closest("form")!);await waitFor(()=>expect(state.request).toHaveBeenCalledTimes(2));
   expect(state.request.mock.calls[0][1]).toBe("/api/programming-support/cases");expect(state.request.mock.calls[1][2].requestId).toBe(state.request.mock.calls[0][2].requestId);expect(state.request.mock.calls.some(call=>call[1].includes("analyze"))).toBe(false);
 });
+
+it.each(['Resolvió mi consulta','Sigue el problema'])('records %s without requesting analysis or closing, and retries with the same identifier',async(label)=>{
+ const user=userEvent.setup();
+ const report={summary:'Inspección de código',certainty:'hipotesis',cause:'',proposal:'',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]};
+ state.cases=[{id:'case-one',title:'Consulta conocida',status:'proposal_ready',version:'a'.repeat(40),reportId:'report-one',report,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-10-16T12:00:00Z',messages:[]}];
+ state.request.mockRejectedValueOnce(new Error('Respuesta perdida')).mockResolvedValueOnce(new Response(JSON.stringify(state.cases[0])));
+ render(<ProgrammingSupport/>);
+ await user.click(screen.getByRole('button',{name:/Consulta conocida/}));
+ await user.click(screen.getByRole('button',{name:label}));
+ await screen.findByRole('alert');
+ await user.click(screen.getByRole('button',{name:label}));
+ await waitFor(()=>expect(state.request).toHaveBeenCalledTimes(2));
+ expect(state.request.mock.calls[0][1]).toBe('/api/programming-support/cases/case-one/feedback');
+ expect(state.request.mock.calls[0][2]).toMatchObject({reportId:'report-one',outcome:label==='Sigue el problema'?'unresolved':'resolved'});
+ expect(state.request.mock.calls[1][2]).toEqual(state.request.mock.calls[0][2]);
+ expect(state.request.mock.calls.some(call=>/analyze|close/.test(call[1]))).toBe(false);
+});

@@ -114,10 +114,24 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
         const updated = await (await request("/cases")).json();
         expect(updated[0].status).toBe("proposal_ready");
         expect(updated[0].version).toBe(version);
+        const feedback={requestId:randomUUID(),reportId:updated[0].reportId,outcome:"unresolved"};
+        expect((await request(`/cases/${ticket.id}/feedback`,feedback,"owner2")).status).toBe(404);
+        const evaluations=await Promise.all([request(`/cases/${ticket.id}/feedback`,feedback),request(`/cases/${ticket.id}/feedback`,feedback)]);
+        expect(evaluations.map(response=>response.status)).toEqual([200,200]);
+        const evaluated=await (await request("/cases")).json();
+        expect(evaluated[0].status).toBe("proposal_ready");
+        expect(evaluated[0].feedback).toHaveLength(1);
+        expect(evaluated[0].feedback[0]).toMatchObject(feedback);
+        expect(evaluated[0].messages.filter((message:any)=>message.text.includes("sigue el problema"))).toHaveLength(1);
+        expect((await request(`/cases/${ticket.id}/feedback`,{...feedback,outcome:"resolved"})).status).toBe(409);
         report.certainty = "falta_informacion";
         expect((await request(`/cases/${ticket.id}/analyze`, {requestId:randomUUID()})).status).toBe(200);
         await service.tick();
         expect((await (await request("/cases")).json())[0].status).toBe("needs_info");
+        expect((await request(`/cases/${ticket.id}/feedback`,{...feedback,requestId:randomUUID()})).status).toBe(409);
+        const current=await (await request("/cases")).json();
+        expect(current[0].reportId).not.toBe(feedback.reportId);
+        expect(current[0].feedback).toHaveLength(1);
         const count = await service.pool.query(
           "SELECT count(*)::int AS count FROM support_runs WHERE kind='analyze'",
         );
