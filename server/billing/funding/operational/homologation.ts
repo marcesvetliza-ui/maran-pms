@@ -15,8 +15,8 @@ export async function checkSpaHomologation(client: Pick<PoolClient, "query">, sc
   if (![config.issuer_ready, config.point_ready, config.certificate_ready, config.key_ready].every(v => v === true))
     throw new FundingError("FISCAL_PREPARATION_REQUIRED", "Completá CUIT emisor, PV, certificado y clave de homologación en la configuración fiscal.", 503);
   const points = (await client.query(`SELECT count(*)::int AS n FROM ${s}.pos_configs
-    WHERE area='spa' AND activo=true AND tipo='online'`)).rows[0].n;
+    WHERE area='spa' AND activo=true AND tipo='electronico'`)).rows[0].n;
   if (points !== 1)
-    throw new FundingError("FISCAL_PREPARATION_REQUIRED", "Debe existir un único punto de venta online activo para SPA.", 503);
+    throw new FundingError("FISCAL_PREPARATION_REQUIRED", "Debe existir un único punto de venta electrónico activo para SPA.", 503);
   return { environment: "homologacion" as const, credentialsPresent: true, spaPointReady: true };
 }

@@ -5,6 +5,12 @@ configuración fue cambiada a homologación. Este documento reemplaza, para esta
 prueba, la restricción de las entregas anteriores que sólo contemplaba Xenia.
 No convierte los informes de pruebas sintéticas en una homologación fiscal real.
 
+Corrección posterior al chequeo en MARAN: `pos_configs.tipo` guarda
+`electronico`, no `online` (este último corresponde a otra configuración fiscal).
+El instalador y la preparación usan ahora el valor real del catálogo. No requiere
+modificar el PV 0023. Verificados 22 casos SQL/HTTP, 8 del instalador empaquetado y
+14 de validación; se rechazan PV manuales y varios electrónicos activos en SPA.
+
 ## Estado y límites
 
 El código permite habilitar explícitamente el circuito, instalar su esquema y
@@ -42,7 +48,7 @@ la pantalla bloquea las acciones hasta volver a consultar.
    Usa la conexión existente del servicio. Sólo informa disponibilidad de
    configuración/esquema; no imprime claves, certificados, CUIT ni conexión.
    Verifica homologación, CUIT emisor, PV homologación positivo, presencia de
-   certificado/clave y un único PV SPA online activo. **No valida autenticación
+   certificado/clave y un único PV SPA electrónico activo. **No valida autenticación
    contra ARCA ni cambia esa configuración.**
 3. Si el chequeo es correcto, instalar explícitamente:
 

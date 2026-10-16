@@ -38,7 +38,7 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    // Developing a binding is not authorization to emit in production.
    if(config?.arca_ambiente!=="homologacion" || !/^\d{11}$/.test(String(config.issuer).replace(/\D/g,"")))
      throw new FundingError("FISCAL_ENVIRONMENT_BLOCKED","Este binding requiere homologación configurada y revisión posterior.",503);
-   const points=(await c.query(`SELECT numero FROM ${s}.pos_configs WHERE area='spa' AND activo=true AND tipo='online' ORDER BY id`)).rows;
+   const points=(await c.query(`SELECT numero FROM ${s}.pos_configs WHERE area='spa' AND activo=true AND tipo='electronico' ORDER BY id`)).rows;
    // Homologation uses the configured homologation PV, never a production PV.
    if(points.length!==1 || !Number.isSafeInteger(config.punto_venta_homolog) || config.punto_venta_homolog<=0)
      throw new FundingError("FISCAL_PREPARATION_REQUIRED","Revisar el punto de venta SPA y el PV de homologación.");

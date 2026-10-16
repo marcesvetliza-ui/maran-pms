@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS funding_demo.pos_configs(id int PRIMARY KEY,numero in
 ALTER TABLE funding_demo.billing_config ADD COLUMN IF NOT EXISTS arca_cert text,
  ADD COLUMN IF NOT EXISTS arca_key text;
 UPDATE funding_demo.billing_config SET arca_cert='SYNTHETIC_NOT_A_CERTIFICATE',arca_key='SYNTHETIC_NOT_A_KEY' WHERE id=1;
-INSERT INTO funding_demo.pos_configs VALUES(1,3,'spa',true,'online') ON CONFLICT(id) DO NOTHING;
+INSERT INTO funding_demo.pos_configs VALUES(1,3,'spa',true,'electronico') ON CONFLICT(id) DO UPDATE SET tipo=excluded.tipo;
 CREATE TABLE IF NOT EXISTS funding_demo.provider_authorizations(identity_key text PRIMARY KEY,cae text,expiry timestamptz);
 CREATE TABLE IF NOT EXISTS funding_demo.inventory_items(id text PRIMARY KEY,name text,is_active text,unit text,current_stock numeric,cost_price numeric);
 CREATE TABLE IF NOT EXISTS funding_demo.inventory_warehouses(id text PRIMARY KEY,is_active text);

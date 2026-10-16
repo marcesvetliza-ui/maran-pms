@@ -16,11 +16,12 @@ beforeAll(async () => {
     punto_venta_homolog int,arca_cert text,arca_key text);
     INSERT INTO billing_config VALUES(1,'homologacion','20111111112',NULL,99,'SYNTHETIC_CERT','SYNTHETIC_KEY');
     CREATE TABLE pos_configs(id int,area text,activo boolean,tipo text);
-    INSERT INTO pos_configs VALUES(1,'spa',true,'online')`);
+    INSERT INTO pos_configs VALUES(1,'spa',true,'electronico')`);
 });
 beforeEach(async () => {
   await pool.query("DROP SCHEMA IF EXISTS payment_funding CASCADE");
   await pool.query("UPDATE billing_config SET arca_ambiente='homologacion',arca_cert='SYNTHETIC_CERT'");
+  await pool.query("TRUNCATE pos_configs; INSERT INTO pos_configs VALUES(1,'spa',true,'electronico')");
 });
 afterAll(async () => {
   await pool.end();
@@ -54,6 +55,16 @@ it("rejects production before DDL, even with explicit install", async () => {
 it("rejects incomplete credentials without any DDL", async () => {
   await pool.query("UPDATE billing_config SET arca_cert=NULL");
   await expect(run(true)).rejects.toMatchObject({ code: 1 }); expect(await hasSchema()).toBe(false);
+});
+it.each(["manual", "online"])("does not confuse %s with the persisted electronic POS type", async tipo => {
+  await pool.query("UPDATE pos_configs SET tipo=$1", [tipo]);
+  await expect(run(true)).rejects.toMatchObject({ code: 1 });
+  expect(await hasSchema()).toBe(false);
+});
+it("rejects two active electronic SPA points rather than choosing arbitrarily", async () => {
+  await pool.query("INSERT INTO pos_configs VALUES(2,'spa',true,'electronico')");
+  await expect(run(true)).rejects.toMatchObject({ code: 1 });
+  expect(await hasSchema()).toBe(false);
 });
 it("refuses to overwrite a partial installation", async () => {
   await pool.query("CREATE SCHEMA payment_funding; CREATE TABLE payment_funding.preserved(id int); INSERT INTO payment_funding.preserved VALUES(42)");
