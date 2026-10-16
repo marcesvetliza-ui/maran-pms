@@ -91,4 +91,3 @@ Verificación local: pruebas de interfaz para ambas respuestas y pérdida de
 respuesta HTTP; pruebas PostgreSQL de persistencia, propietarios, concurrencia,
 reintentos, conflictos y diagnósticos desactualizados; pruebas del gateway de
 sesión y validación estricta. No se usó OpenAI real.
-
