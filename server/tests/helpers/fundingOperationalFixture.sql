@@ -79,3 +79,10 @@ ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS observaciones t
 
 ALTER TABLE funding_demo.charges ADD COLUMN IF NOT EXISTS anulado_por text,ADD COLUMN IF NOT EXISTS motivo_anulacion text,ADD COLUMN IF NOT EXISTS anulado_at timestamp;
 ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS source_charge_ids jsonb,ADD COLUMN IF NOT EXISTS source_charge_amounts jsonb;
+ALTER TABLE funding_demo.payments ADD COLUMN IF NOT EXISTS anulado_por text;
+ALTER TABLE funding_demo.payments ADD COLUMN IF NOT EXISTS invoice_link_failed boolean DEFAULT false;
+ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS credit_reapplication_intent jsonb,
+ ADD COLUMN IF NOT EXISTS reconciliation_status text,ADD COLUMN IF NOT EXISTS reconciliation_error text,
+ ADD COLUMN IF NOT EXISTS reconciliation_updated_at timestamp;
+
+CREATE TABLE IF NOT EXISTS funding_demo.reservation_changelog(id bigserial PRIMARY KEY,reservation_id text,fecha timestamp DEFAULT now(),operador text,tipo text,descripcion text);

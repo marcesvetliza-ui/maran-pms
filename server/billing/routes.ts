@@ -1,3 +1,4 @@
+import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement} from './creditNoteAccountMovement';
 import type { Express } from "express";
@@ -242,6 +243,7 @@ async function reconcileReservationCreditNote(
   const originalNroFacReal = `${originalTipoComprobante}-${String(invoiceValue(original, "numero", "numero")).padStart(8, "0")}`;
 
   await db.transaction(async (tx) => {
+    await releaseReservationCredit(tx, original, nc);
     await tx.execute(sql`
       UPDATE sales_invoices
       SET nota_credito_id = ${ncId},
@@ -3657,6 +3659,7 @@ export function registerBillingRoutes(app: Express) {
             const originalCredited = parseFloat(String(sourceInvoice.monto_acreditado || 0));
             const newOriginalCredited = Math.max(0, originalCredited - debitAmount);
             await db.transaction(async tx => {
+              await reclaimReservationCredit(tx,sourceInvoice,nd);
               await tx.execute(sql`
                 UPDATE sales_invoices
                 SET monto_acreditado = ${newNcReversed.toFixed(2)},

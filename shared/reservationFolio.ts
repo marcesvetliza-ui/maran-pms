@@ -153,6 +153,12 @@ function invoiceReleaseRatio(invoice: ReservationInvoiceLike): number {
   return Math.max(0, Math.min(1, (Number.isFinite(credited) ? credited : 0) / total));
 }
 
+/** Exact persisted release after NC/restoration; older histories use their original ratio. */
+export function reservationPaymentReleasedCents(ref:any,invoiceId:unknown,appliedCents:number,ratio:number):number {
+ const override=ref?.fundingReleases?.[String(invoiceId)];
+ return Number.isSafeInteger(override)&&override>=0&&override<=appliedCents?override:Math.round(appliedCents*ratio);
+}
+
 /**
  * A payment remains historically linked to its original invoice. When that
  * invoice is offset by a credit note, the matching proportion of the payment
@@ -202,11 +208,11 @@ export function getAvailableReservationAdvancePayments<T extends ReservationPaym
       const reappliedAmount = Number((reapplication as any).amount) || 0;
       const reappliedKey = invoiceKey(reapplication as ReservationInvoiceLike);
       const targetReleaseRatio = reappliedKey ? (releaseRatioByKey.get(reappliedKey) || 0) : 0;
-      return total + reappliedAmount * (1 - targetReleaseRatio);
+      return total + (Math.round(reappliedAmount*100) - reservationPaymentReleasedCents(ref,(reapplication as any).invoiceId,Math.round(reappliedAmount*100),targetReleaseRatio))/100;
     }, 0);
     const availableAdvanceAmount = Number(Math.max(
       0,
-      paymentAmount * (releaseRatio || 0) - amountStillApplied,
+      reservationPaymentReleasedCents(ref,ref.id,Math.round(paymentAmount*100),releaseRatio||0)/100 - amountStillApplied,
     ).toFixed(2));
     return availableAdvanceAmount > 0.009
       ? [{

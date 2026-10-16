@@ -1,3 +1,4 @@
+import { ReservationPaymentCorrection } from "@/components/reservation-payment-correction";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
@@ -2318,6 +2319,8 @@ export function ReservationDetailDialog({
   const isGroupReservation = Boolean((reservation as any).groupId || (reservation as any).isGroup);
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
+  const {user:correctionUser,hasPermission:correctionPermission}=useAuth();
+  const [correctionPayment,setCorrectionPayment]=useState<any>(null);
   const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
 
   // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
@@ -4470,6 +4473,7 @@ export function ReservationDetailDialog({
                           <FileText className="h-3 w-3 mr-1" />Emitir
                         </Button>
                       )}
+                      {import.meta.env.VITE_SPA_FUNDING_UI === 'true' && !isAnulado && correctionPermission('funding:write') && ['efectivo','tarjeta_debito','tarjeta_credito','transferencia','mercadopago','cash','debit_card','credit_card','transfer'].includes(payment.method) && <Button size="sm" variant="outline" onClick={()=>setCorrectionPayment(payment)} data-testid={`button-correct-payment-${payment.id}`}>Corregir cobro</Button>}
                       {/* Bug J+T: payments with invoiceRef are locked (NC only), and voiding requires supervisor permission */}
                       {!isLocked && !isAnulado && !invoiceRef && canAnularPago && (
                       <Button 
@@ -5362,6 +5366,9 @@ export function ReservationDetailDialog({
         </DialogContent>
       </Dialog>
 
+      {correctionPayment&&<ReservationPaymentCorrection userId={String(correctionUser?.id??"session")} reservationId={String(reservation.id)} payment={correctionPayment} onClose={()=>setCorrectionPayment(null)} onSaved={()=>{
+        void refetchPayments();queryClient.invalidateQueries({queryKey:["/api/reservations",String(reservation.id)]});queryClient.invalidateQueries({queryKey:["/api/reservations",String(reservation.id),"folio"]});queryClient.invalidateQueries({queryKey:["/api/billing/invoices"]});
+      }}/>}
       {/* Anular Cargo / Pago Dialog */}
       {(() => {
         const anularPayment = anularTarget?.type === "pago"

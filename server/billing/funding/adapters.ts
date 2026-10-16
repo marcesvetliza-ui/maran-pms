@@ -17,7 +17,7 @@ export class SqlFundingAdapter implements FundingAdapter {
   get paymentTable() { return `${this.s}.${this.kind==="spa"?"spa_payments":"payments"}`; }
   get ownerColumn() { return this.kind==="spa"?"account_id":"reservation_id"; }
   normalize(method:string) {
-    const m=this.kind==="spa"?(spaToCanonical[method]??method):method;
+    const m=spaToCanonical[method]??method;
     if (!(moneyMethods as readonly string[]).includes(m)) throw new FundingError("UNSUPPORTED_SETTLEMENT","CC, retenciones, vouchers y cargos a habitación requieren su propio adaptador.",422);
     return m;
   }
@@ -175,7 +175,7 @@ export class SqlFundingAdapter implements FundingAdapter {
     }
     return {...source,shift,evidence,previous};
   }
-  async correct(c:PoolClient,r:any,request:CorrectionRequest,operationId:string,actor:Actor) {
+  async correct(c:PoolClient,r:any,request:CorrectionRequest,operationId:string,actor:Actor,sourceOnly=false) {
     const ctx=await this.correctionContext(c,r,request);
     const delta:Record<string,number>={[r.method]:-number(r.effective_cents)};
     await c.query(`UPDATE ${this.s}.cash_movements SET anulado=true,motivo_anulacion=$2,anulado_por=$3,anulado_at=now() WHERE id=$1`,
@@ -194,13 +194,13 @@ export class SqlFundingAdapter implements FundingAdapter {
         [stableId(`${operationId}:note`),ctx.folio.id,`Medio corregido: ${r.method} → ${method}. ${request.reason}`,operationId,actor.id]);
       // Canonical link changes; history retains the original link in events.
       await c.query(`UPDATE ${this.s}.folio_movements SET cash_movement_id=$2 WHERE id=$1`,[ctx.fm.id,cm]);
-      await c.query("UPDATE payment_funding.receipts SET method=$2,cash_movement_id=$3,version=version+1 WHERE id=$1",[r.id,method,cm]);
+      if(!sourceOnly) await c.query("UPDATE payment_funding.receipts SET method=$2,cash_movement_id=$3,version=version+1 WHERE id=$1",[r.id,method,cm]);
     } else {
       await c.query(`UPDATE ${this.paymentTable} SET status='anulado',motivo_anulacion=$2,anulado_at=now() WHERE id=$1`,[ctx.p.id,request.reason]);
       await c.query(`INSERT INTO ${this.s}.folio_movements(id,folio_id,type,amount,description,source_type,source_id,voided_movement_id,registered_by)
         VALUES($1,$2,'void',$3,$4,'financial_correction',$5,$6,$7)`,
         [stableId(`${operationId}:void`),ctx.folio.id,amount(-number(r.effective_cents)),request.reason,operationId,ctx.fm.id,actor.id]);
-      await c.query("UPDATE payment_funding.receipts SET effective_cents=0,version=version+1 WHERE id=$1",[r.id]);
+      if(!sourceOnly) await c.query("UPDATE payment_funding.receipts SET effective_cents=0,version=version+1 WHERE id=$1",[r.id]);
       await this.refreshFolio(c,{kind:this.kind,id:r.scope_id});
     }
     if (ctx.evidence) {

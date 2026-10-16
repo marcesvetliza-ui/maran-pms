@@ -1,3 +1,4 @@
+import { ReservationPaymentCorrections } from "./reservationCorrections";
 import type { Express, Request, RequestHandler } from "express";
 import type { Pool } from "pg";
 import { FundingError, fundingRequestSchema, identifier, requirePermission } from "../contracts";
@@ -59,6 +60,14 @@ export function mountOperationalSpaFunding(app:Express,options:{
  // Reviewed additive endpoints used by the connected SPA client remain independently gated.
  // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
  if(options.reviewedExtensions!==true) return service;
+ const reservationCorrections=new ReservationPaymentCorrections(service.store,schema);
+ app.post("/api/payment-funding/reservations/:id/payment-corrections/preview",options.authenticate,async(req,res)=>{
+  try {res.json({ok:true,data:await reservationCorrections.preview(req.params.id,req.body,actor(req))});}catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/reservations/:id/payment-corrections",options.authenticate,async(req,res)=>{
+  try {res.json({ok:true,data:await reservationCorrections.confirm(req.params.id,req.body.operationId,req.body.previewHash,req.body.request,actor(req),req.user?.fullName||req.user?.username||req.user?.id)});}catch(error){fundingErrorResponse(res,error);}
+ });
+
  app.get("/api/payment-funding/spa/:accountId/prefactura-context",options.authenticate,async(req,res)=>{
    try {
      requirePermission(actor(req),"funding:read");

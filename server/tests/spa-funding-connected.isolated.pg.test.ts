@@ -232,3 +232,37 @@ it("prefactura browser: company, discount, advance, split methods, printable sum
  expect((await pool.query("SELECT guest_id FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].guest_id).toBe(id);
  await page.close();
 },60000);
+
+it("Reception browser explicitly restores NC coverage and recovers the same correction after a lost response",async()=>{
+ const id=`reception-browser-${randomUUID()}`,folio=`${id}:folio`,shift=`${id}:shift`;
+ await pool.query("INSERT INTO funding_demo.reservations(id,status) VALUES($1,'checked_in')",[id]);
+ await pool.query("INSERT INTO funding_demo.folios(id,codigo,entity_type,entity_id,status,total_charges,total_payments,balance) VALUES($1,$1,'reservation',$2,'open',270000,270000,0)",[folio,id]);
+ await pool.query("INSERT INTO funding_demo.cash_shifts(id,area,status,opened_by) VALUES($1,'reception','open','connected-reviewer')",[shift]);
+ const invoice=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','parcial',270000,90000,'[]') RETURNING id",[id])).rows[0];
+ for(const [suffix,amount,method,released] of [['debit',180000,'tarjeta_debito',6000000],['card',90000,'tarjeta_credito',3000000]] as const){
+  const p=`${id}:${suffix}`;
+  await pool.query("INSERT INTO funding_demo.payments(id,reservation_id,amount,method,date,invoice_ref) VALUES($1,$2,$3,$4,CURRENT_DATE,$5)",[p,id,amount,method,JSON.stringify({id:invoice.id,fundingReleases:{[String(invoice.id)]:released}})]);
+  await pool.query("INSERT INTO funding_demo.cash_movements(id,shift_id,area,source_type,source_id,payment_method,amount,movement_type,payment_id) VALUES($1,$2,'reception','reservation',$3,$4,$5,'income',$6)",[`${p}:cash`,shift,id,method,amount,p]);
+  await pool.query("INSERT INTO funding_demo.folio_movements(id,folio_id,type,amount,source_type,source_id,payment_method,cash_movement_id) VALUES($1,$2,'payment',$3,'payment',$4,$5,$6)",[`${p}:fm`,folio,amount,p,method,`${p}:cash`]);
+ }
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),requests:any[]=[];let lose=true;
+ await page.route('**/api/payment-funding/reservations/*/payment-corrections',async route=>{
+  requests.push(route.request().postDataJSON());
+  const response=await route.fetch();if(lose){lose=false;await route.abort('failed');}else await route.fulfill({response});
+ });
+ await page.goto(`${base}/connected-client.html?reservation=${encodeURIComponent(id)}`);
+ await page.getByLabel('Tipo de corrección').selectOption('void_nonexistent');
+ await page.getByLabel('Motivo',{exact:true}).fill('El cupón de tarjeta nunca existió');await page.getByLabel('Referencia de comprobación').fill('Control de Caja');
+ await page.getByRole('button',{name:'Revisar corrección',exact:true}).click();
+ await browserExpect(page.getByRole('checkbox')).toBeEnabled();await page.getByRole('checkbox').check();
+ await browserExpect(page.getByRole('button',{name:'Confirmar corrección',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Revisar corrección',exact:true}).click();
+ await browserExpect(page.getByRole('button',{name:'Confirmar corrección',exact:true})).toBeEnabled();await page.getByRole('button',{name:'Confirmar corrección',exact:true}).click();
+ await browserExpect(page.getByRole('button',{name:'Recuperar la misma corrección',exact:true})).toBeVisible();
+ await page.reload();await page.getByRole('button',{name:'Recuperar la misma corrección',exact:true}).click();await browserExpect(page.getByText('Corrección guardada',{exact:true})).toBeVisible();
+ expect(requests).toHaveLength(2);expect(requests[1]).toEqual(requests[0]);expect(requests[0].request.restorations).toEqual([{paymentId:`${id}:debit`,invoiceId:invoice.id,amountCents:6000000}]);
+ expect(Number((await pool.query('SELECT balance FROM funding_demo.folios WHERE id=$1',[folio])).rows[0].balance)).toBe(90000);
+ expect((await pool.query("SELECT * FROM payment_funding.events WHERE event_key=$1",[`reservation-correction:${requests[0].operationId}`])).rows).toHaveLength(1);
+ expect((await pool.query("SELECT * FROM funding_demo.cash_movements WHERE payment_id=$1 AND movement_type='expense'",[`${id}:card`])).rows).toHaveLength(0);
+ await page.close();
+},60000);

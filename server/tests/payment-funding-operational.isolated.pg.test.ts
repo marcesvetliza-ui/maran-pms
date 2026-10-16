@@ -776,3 +776,177 @@ it("SPA charge cancellation allows an unrelated mapped invoice but rolls back co
  }
  expect((await cancelRoomCharge(f.chargeId,'Error de carga')).status).toBe(200);
 });
+
+async function receptionFixture() {
+ const id=await destination(),shift=`${id}:reception-shift`;
+ await pool.query("INSERT INTO funding_demo.cash_shifts(id,area,status,opened_by) VALUES($1,'recepcion','open',$2)",[shift,actor.id]);
+ await pool.query("UPDATE funding_demo.folios SET total_charges=270000,total_payments=270000,balance=0 WHERE entity_id=$1",[id]);
+ const invoice=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','emitida',270000,0,'[]') RETURNING id",[id])).rows[0];
+ for(const [suffix,amount,method] of [['debit',180000,'tarjeta_debito'],['card',90000,'tarjeta_credito']] as const){
+  const p=`${id}:${suffix}`;
+  await pool.query("INSERT INTO funding_demo.payments(id,reservation_id,amount,method,date,invoice_ref) VALUES($1,$2,$3,$4,CURRENT_DATE,$5)",[p,id,amount,method,JSON.stringify({id:invoice.id,tipoComprobante:'FB',puntoVenta:21,numero:1})]);
+  await pool.query("INSERT INTO funding_demo.cash_movements(id,shift_id,area,source_type,source_id,payment_method,amount,movement_type,payment_id) VALUES($1,$2,'recepcion','reservation',$3,$4,$5,'income',$6)",[`${p}:cash`,shift,id,method==='tarjeta_debito'?'debit_card':'credit_card',amount,p]);
+  await pool.query("INSERT INTO funding_demo.folio_movements(id,folio_id,type,amount,source_type,source_id,payment_method,cash_movement_id) VALUES($1,$2,'payment',$3,'payment',$4,$5,$6)",[`${p}:fm`,`${id}:folio`,amount,p,method,`${p}:cash`]);
+ }
+ return {id,shift,invoiceId:invoice.id};
+}
+async function receptionNc(f:any,amount:number) {
+ const {drizzle}=await import('drizzle-orm/node-postgres');const {releaseReservationCredit}=await import('../billing/reservationCreditRelease');
+ const c=await pool.connect();
+ try {
+  await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`folio-invoice:${f.id}`]);
+  const original=(await c.query('SELECT * FROM funding_demo.sales_invoices WHERE id=$1 FOR UPDATE',[f.invoiceId])).rows[0];
+  await releaseReservationCredit(drizzle(c),original,{monto_total:amount});
+  await c.query("UPDATE funding_demo.sales_invoices SET monto_acreditado=monto_acreditado+$2,estado='parcial' WHERE id=$1",[f.invoiceId,amount]);
+  await c.query('COMMIT');
+ }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+}
+const correctionRequest=(f:any,action='void_nonexistent')=>({paymentId:`${f.id}:card`,action,reason:'Registro de tarjeta inexistente',evidenceRef:'Control de Caja',restorations:[]});
+it("Reception NC partial releases real cents; nonexistent card withdrawal and explicit debit restoration leave only 90000 owed",async()=>{
+ const f=await receptionFixture();await receptionNc(f,90000);
+ const {getAvailableReservationAdvancePayments}=await import('../../shared/reservationFolio');
+ const read=async()=>getAvailableReservationAdvancePayments((await pool.query('SELECT * FROM funding_demo.payments WHERE reservation_id=$1 ORDER BY id',[f.id])).rows,(await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE reserva_id=$1',[f.id])).rows);
+ expect((await read()).map(p=>p.availableAdvanceAmount).sort((a,b)=>a-b)).toEqual([30000,60000]);
+ const initial=await http(`/reservations/${f.id}/payment-corrections/preview`,correctionRequest(f));expect(initial.status).toBe(200);
+ expect(initial.body.data.proposals).toEqual([{paymentId:`${f.id}:debit`,invoiceId:f.invoiceId,amountCents:6000000}]);
+ const request={...correctionRequest(f),restorations:initial.body.data.proposals},preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);
+ expect(preview.status).toBe(200);expect(preview.body.data.debtAfterCents).toBe(9000000);
+ const body={operationId:randomUUID(),previewHash:preview.body.data.previewHash,request};
+ const results=await Promise.all([http(`/reservations/${f.id}/payment-corrections`,body),http(`/reservations/${f.id}/payment-corrections`,body)]);
+ expect(results.some(r=>r.status===200)).toBe(true);
+ for(const result of results){expect([200,409]).toContain(result.status);if(result.status===409)expect(result.body.error.code).toBe('CONCURRENT_CHANGE');}
+ expect((await http(`/reservations/${f.id}/payment-corrections`,body)).status).toBe(200);
+ expect(await read()).toEqual([]);
+ expect((await pool.query("SELECT * FROM funding_demo.reservation_changelog WHERE reservation_id=$1 AND tipo='pago'",[f.id])).rows).toHaveLength(1);
+ expect(Number((await pool.query('SELECT balance FROM funding_demo.folios WHERE entity_id=$1',[f.id])).rows[0].balance)).toBe(90000);
+ expect((await pool.query("SELECT * FROM funding_demo.cash_movements WHERE payment_id=$1 AND movement_type='expense'",[`${f.id}:card`])).rows).toHaveLength(0);
+ expect((await pool.query("SELECT * FROM funding_demo.payments WHERE id=$1",[`${f.id}:card`])).rows[0]).toMatchObject({status:'anulado',anulado_por:actor.id});
+ await receptionNc(f,90000);expect((await read()).map(p=>p.availableAdvanceAmount)).toEqual([90000]);
+});
+it("Reception changes an actual payment's method without another receipt, debt, invoice or net income",async()=>{
+ const f=await receptionFixture();await receptionNc(f,90000);
+ const request={...correctionRequest(f,'change_method'),newMethod:'efectivo'},preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);
+ expect(preview.status).toBe(200);
+ const body={operationId:randomUUID(),previewHash:preview.body.data.previewHash,request};
+ expect((await http(`/reservations/${f.id}/payment-corrections`,body)).status).toBe(200);
+ expect((await http(`/reservations/${f.id}/payment-corrections`,body)).status).toBe(200);
+ expect(Number((await pool.query("SELECT sum(amount)::numeric AS n FROM funding_demo.cash_movements WHERE payment_id IN ($1,$2) AND NOT anulado AND movement_type='income'",[`${f.id}:card`,`${f.id}:debit`])).rows[0].n)).toBe(270000);
+ expect((await pool.query('SELECT * FROM funding_demo.payments WHERE reservation_id=$1',[f.id])).rows).toHaveLength(2);
+ expect((await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE reserva_id=$1',[f.id])).rows).toHaveLength(1);
+ expect((await pool.query('SELECT method FROM funding_demo.payments WHERE id=$1',[`${f.id}:card`])).rows[0].method).toBe('efectivo');
+ expect(Number((await pool.query('SELECT balance FROM funding_demo.folios WHERE entity_id=$1',[f.id])).rows[0].balance)).toBe(0);
+});
+it("Reception correction rejects stale previews, foreign payments, closed shifts and unauthorized operators",async()=>{
+ const f=await receptionFixture(),request=correctionRequest(f);
+ expect((await http(`/reservations/${f.id}/payment-corrections/preview`,request,{'x-role':'reader'})).status).toBe(403);
+ expect((await http(`/reservations/${f.id}/payment-corrections/preview`,{...request,paymentId:'not-here'})).status).toBe(409);
+ const preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);expect(preview.status).toBe(200);
+ await pool.query("UPDATE funding_demo.payments SET invoice_ref=(invoice_ref::jsonb||$2::jsonb)::text WHERE id=$1",[request.paymentId,JSON.stringify({audit:'changed'})]);
+ expect((await http(`/reservations/${f.id}/payment-corrections`,{operationId:randomUUID(),previewHash:preview.body.data.previewHash,request})).body.error.code).toBe('PREVIEW_STALE');
+ await pool.query("UPDATE funding_demo.cash_shifts SET status='closed' WHERE id=$1",[f.shift]);
+ expect((await http(`/reservations/${f.id}/payment-corrections/preview`,request)).body.error.code).toBe('HISTORICAL_CONFIRMATION_REQUIRED');
+});
+
+it("Reception retains two uncovered obligations when the released credit already financed another invoice",async()=>{
+ const f=await receptionFixture();await receptionNc(f,90000);
+ const second=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','emitida',90000,0,'[]') RETURNING id",[f.id])).rows[0];
+ for(const [suffix,amount] of [['debit',60000],['card',30000]] as const)await pool.query("UPDATE funding_demo.payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,'{reapplications}',$2::jsonb)::text WHERE id=$1",[`${f.id}:${suffix}`,JSON.stringify([{invoiceId:second.id,amount}])]);
+ const request=correctionRequest(f),preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);
+ expect(preview.status).toBe(200);expect(preview.body.data.proposals).toEqual([]);expect(preview.body.data.obligations).toEqual([{invoiceId:f.invoiceId,uncoveredCents:6000000},{invoiceId:second.id,uncoveredCents:3000000}]);
+ const stolen={...request,restorations:[{paymentId:`${f.id}:debit`,invoiceId:f.invoiceId,amountCents:6000000}]};
+ expect((await http(`/reservations/${f.id}/payment-corrections/preview`,stolen)).body.error.code).toBe('FUNDS_UNAVAILABLE');
+ expect((await http(`/reservations/${f.id}/payment-corrections`,{operationId:randomUUID(),previewHash:preview.body.data.previewHash,request})).status).toBe(200);
+ expect((await pool.query('SELECT count(*)::int AS n FROM funding_demo.sales_invoices WHERE reserva_id=$1',[f.id])).rows[0].n).toBe(2);
+});
+it("Reception NC allocation preserves cents across three receipts and an unpaid portion without creating new cash",async()=>{
+ const id=await destination();const invoiceId=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','emitida',300,0,'[]') RETURNING id",[id])).rows[0].id;
+ for(let i=0;i<3;i++)await pool.query("INSERT INTO funding_demo.payments(id,reservation_id,amount,method,invoice_ref) VALUES($1,$2,100,'efectivo',$3)",[`${id}:${i}`,id,JSON.stringify({id:invoiceId})]);
+ await receptionNc({id,invoiceId},100);
+ const {getAvailableReservationAdvancePayments}=await import('../../shared/reservationFolio');
+ const payments=(await pool.query('SELECT * FROM funding_demo.payments WHERE reservation_id=$1 ORDER BY id',[id])).rows,invoices=(await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE reserva_id=$1',[id])).rows;
+ expect(getAvailableReservationAdvancePayments(payments,invoices).map(p=>p.availableAdvanceAmount)).toEqual([33.34,33.33,33.33]);
+ const uncovered=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','emitida',100,0,'[]') RETURNING id",[id])).rows[0];
+ await pool.query("INSERT INTO funding_demo.payments(id,reservation_id,amount,method,invoice_ref) VALUES($1,$2,50,'efectivo',$3)",[`${id}:partial`,id,JSON.stringify({id:uncovered.id})]);
+ await receptionNc({id,invoiceId:uncovered.id},50);
+ const ref=JSON.parse((await pool.query('SELECT invoice_ref FROM funding_demo.payments WHERE id=$1',[`${id}:partial`])).rows[0].invoice_ref);
+ expect(ref.fundingReleases[String(uncovered.id)]).toBe(2500);
+});
+it("native Reception refactoring consumes the corrected payment methods once and a pending hold blocks correction",async()=>{
+ const f=await receptionFixture();await receptionNc(f,90000);
+ const request={...correctionRequest(f,'change_method'),newMethod:'efectivo'},preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);
+ expect(preview.body.data.obligations.every((o:any)=>o.uncoveredCents===0)).toBe(true);
+ expect((await http(`/reservations/${f.id}/payment-corrections`,{operationId:randomUUID(),previewHash:preview.body.data.previewHash,request})).status).toBe(200);
+ const {prepareReservationCreditIntent,reconcileReservationCreditInvoice}=await import('../billing/reservationCreditReconciliation');
+ const {drizzle}=await import('drizzle-orm/node-postgres'),c=await pool.connect();let invoiceId:number;
+ try {
+  await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`folio-invoice:${f.id}`]);
+  const draft:any={montoTotal:90000},intent={operationId:randomUUID(),invoiceTotal:90000,status:'pending' as const,payments:[{paymentId:`${f.id}:debit`,amount:60000},{paymentId:`${f.id}:card`,amount:30000}]};
+  await prepareReservationCreditIntent(f.id,intent)(drizzle(c),draft);
+  invoiceId=(await c.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items,credit_reapplication_intent,reconciliation_status) VALUES($1,'FB','emitida',90000,0,'[]',$2,'pendiente') RETURNING id",[f.id,JSON.stringify(draft.creditReapplicationIntent)])).rows[0].id;
+  await c.query('COMMIT');
+ }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+ const held=await http(`/reservations/${f.id}/payment-corrections/preview`,{...request,newMethod:'transferencia'});expect(held.body.error.code).toBe('FISCAL_OPERATION_PENDING');
+ await reconcileReservationCreditInvoice(invoiceId!);await reconcileReservationCreditInvoice(invoiceId!);
+ const {getAvailableReservationAdvancePayments}=await import('../../shared/reservationFolio');
+ const payments=(await pool.query('SELECT * FROM funding_demo.payments WHERE reservation_id=$1',[f.id])).rows,invoices=(await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE reserva_id=$1',[f.id])).rows;
+ expect(getAvailableReservationAdvancePayments(payments,invoices)).toEqual([]);
+ expect(payments).toHaveLength(2);expect(invoices).toHaveLength(2);
+ expect(payments.find(p=>p.method==='efectivo')).toBeTruthy();
+ expect(JSON.parse(payments.find(p=>p.id.endsWith(':debit')).invoice_ref).reapplications).toEqual([{invoiceId:invoiceId!,tipoComprobante:'FB',amount:60000}]);
+});
+it("ND reclaims only still-free credit and does not recover money already applied to another invoice",async()=>{
+ const {reclaimReservationCredit}=await import('../billing/reservationCreditRelease'),{drizzle}=await import('drizzle-orm/node-postgres');
+ for(const reused of [false,true]){
+  const f=await receptionFixture();await receptionNc(f,90000);
+  if(reused){
+   const target=(await pool.query("INSERT INTO funding_demo.sales_invoices(reserva_id,tipo_comprobante,estado,monto_total,monto_acreditado,items) VALUES($1,'FB','emitida',90000,0,'[]') RETURNING id",[f.id])).rows[0];
+   for(const [suffix,amount] of [['debit',60000],['card',30000]] as const)await pool.query("UPDATE funding_demo.payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,'{reapplications}',$2::jsonb)::text WHERE id=$1",[`${f.id}:${suffix}`,JSON.stringify([{invoiceId:target.id,amount}])]);
+  }
+  const c=await pool.connect();
+  try {
+   await c.query('BEGIN');const original=(await c.query('SELECT * FROM funding_demo.sales_invoices WHERE id=$1',[f.invoiceId])).rows[0];
+   await reclaimReservationCredit(drizzle(c),original,{montoTotal:90000});await c.query("UPDATE funding_demo.sales_invoices SET monto_acreditado=0,estado='emitida' WHERE id=$1",[f.invoiceId]);await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+  const refs=(await pool.query('SELECT invoice_ref FROM funding_demo.payments WHERE reservation_id=$1',[f.id])).rows.map(p=>JSON.parse(p.invoice_ref));
+  expect(refs.reduce((n,ref)=>n+ref.fundingReleases[String(f.invoiceId)],0)).toBe(reused?9000000:0);
+ }
+});
+it("Reception corrections fail promptly against the invoice lock with a two-connection pool and roll back if audit fails",async()=>{
+ const f=await receptionFixture(),request={...correctionRequest(f,'change_method'),newMethod:'efectivo'};
+ const {ReservationPaymentCorrections}=await import('../billing/funding/operational/reservationCorrections');
+ const limited=new Pool({host:'/tmp/folio-funding-isolated/socket',port:55439,user:'runner',database:'folio_funding_synthetic',ssl:false,max:2});
+ const corrections=new ReservationPaymentCorrections(new FundingStore(limited),'funding_demo'),blocker=await limited.connect();
+ try{
+  await blocker.query('BEGIN');await blocker.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`funding-scope:reservation:${f.id}`]);
+  await expect(corrections.preview(f.id,request,actor)).rejects.toMatchObject({code:'CONCURRENT_CHANGE'});
+  await blocker.query('ROLLBACK');
+  await blocker.query('BEGIN');await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`folio-invoice:${f.id}`]);
+  await expect(corrections.preview(f.id,request,actor)).rejects.toMatchObject({code:'CONCURRENT_CHANGE'});
+  expect((await blocker.query('SELECT 1 AS n')).rows[0].n).toBe(1);
+ }finally{await blocker.query('ROLLBACK');blocker.release();await limited.end();}
+ const preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request),body={operationId:randomUUID(),previewHash:preview.body.data.previewHash,request};
+ const c=await pool.connect();
+ try {
+  await c.query(`CREATE FUNCTION funding_demo.reject_reservation_correction() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.kind='reservation_payment_correction' AND NEW.payload->>'scopeKey'='reservation:${f.id}' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$`);
+  await c.query('CREATE TRIGGER reject_reservation_correction BEFORE INSERT ON payment_funding.events FOR EACH ROW EXECUTE FUNCTION funding_demo.reject_reservation_correction()');
+  expect((await http(`/reservations/${f.id}/payment-corrections`,body)).status).toBe(500);
+  expect((await pool.query('SELECT method FROM funding_demo.payments WHERE id=$1',[request.paymentId])).rows[0].method).toBe('tarjeta_credito');
+  expect((await pool.query('SELECT count(*)::int AS n FROM funding_demo.cash_movements WHERE payment_id=$1 AND NOT anulado',[request.paymentId])).rows[0].n).toBe(1);
+ }finally{await c.query('DROP TRIGGER IF EXISTS reject_reservation_correction ON payment_funding.events');await c.query('DROP FUNCTION IF EXISTS funding_demo.reject_reservation_correction()');c.release();}
+ expect((await http(`/reservations/${f.id}/payment-corrections`,body)).status).toBe(200);
+});
+
+it("Reception corrections preserve existing discount offsets and their gross folio cache without double-discounting",async()=>{
+ const f=await receptionFixture();
+ await pool.query('UPDATE funding_demo.payments SET amount=153000 WHERE id=$1',[`${f.id}:debit`]);
+ await pool.query('UPDATE funding_demo.cash_movements SET amount=153000 WHERE payment_id=$1',[`${f.id}:debit`]);
+ await pool.query('UPDATE funding_demo.folio_movements SET amount=153000 WHERE source_id=$1',[`${f.id}:debit`]);
+ await pool.query('UPDATE funding_demo.sales_invoices SET monto_total=243000 WHERE id=$1',[f.invoiceId]);
+ await pool.query("INSERT INTO funding_demo.folio_movements(id,folio_id,type,amount,source_type,source_id) VALUES($1,$2,'discount',27000,'checkout_discount',$3)",[`${f.id}:discount`,`${f.id}:folio`,String(f.invoiceId)]);
+ const request=correctionRequest(f),preview=await http(`/reservations/${f.id}/payment-corrections/preview`,request);
+ expect(preview.status).toBe(200);expect(preview.body.data.debtAfterCents).toBe(9000000);
+ expect((await http(`/reservations/${f.id}/payment-corrections`,{operationId:randomUUID(),previewHash:preview.body.data.previewHash,request})).status).toBe(200);
+ const cached=(await pool.query('SELECT total_charges,total_payments,balance FROM funding_demo.folios WHERE entity_id=$1',[f.id])).rows[0];
+ expect(Number(cached.total_charges)).toBe(270000);expect(Number(cached.total_payments)).toBe(180000);expect(Number(cached.balance)).toBe(90000);
+ const next=await http(`/reservations/${f.id}/payment-corrections/preview`,{...request,paymentId:`${f.id}:debit`});expect(next.body.data.debtAfterCents).toBe(24300000);
+});

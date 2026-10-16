@@ -1056,12 +1056,13 @@ export function PrefacturaDialog({
       amount: application.amount,
     }));
 
-  const totalPayments = paymentRows.reduce((acc, r) => {
+  const preparedPayments = paymentRows.reduce((acc, r) => {
     const net = parseFloat(r.amount) || 0;
     const ret = r.retencionEnabled ? (parseFloat(r.retencionMonto) || 0) : 0;
     return acc + net + ret;
   }, 0);
 
+  const totalPayments = selectedBalance > 0.01 ? preparedPayments : 0;
   const saldoRestante = selectedBalance - totalPayments;
   const invoiceAmount = saleCondition === "cuenta_corriente"
     ? totalSelected

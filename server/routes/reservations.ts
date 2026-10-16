@@ -133,6 +133,15 @@ export function calculateGroupPersonalExtrasCap(input: {
 }
 
 export function registerReservationsRoutes(app: Express) {
+  // Release counters are server-owned; relinking preserves persisted values.
+  app.use("/api/payments",(req,_res,next)=>{
+    if(req.body&&typeof req.body==='object')for(const field of ['invoiceData','invoiceRef']){
+      const value=req.body[field];
+      try {const ref=typeof value==='string'?JSON.parse(value):value;if(ref&&typeof ref==='object'&&!Array.isArray(ref)){const {fundingReleases,reapplications,...safe}=ref;req.body[field]=typeof value==='string'?JSON.stringify(safe):safe;}}catch{/* Existing validation reports malformed references. */}
+    }
+    next();
+  });
+
   registerGuestStayRoutes(app);
   registerManualChargeActionRoutes(app);
 
@@ -3024,8 +3033,9 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/payments/:id", async (req, res) => {
+  app.patch("/api/payments/:id", requireAuth, async (req, res) => {
     try {
+      if(Object.keys(req.body||{}).some(k=>!["notes","reference"].includes(k)))return res.status(409).json({error:"Los importes, medios y vínculos fiscales se modifican desde su acción de corrección o vinculación; no mediante edición directa."});
       const current = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
       const reservationId = String((current.rows[0] as any)?.reservation_id || "");
       const payment = await withInvoiceAdvisoryLock(
@@ -3300,9 +3310,9 @@ export function registerReservationsRoutes(app: Express) {
       } catch {
         throw Object.assign(new Error("El vínculo fiscal existente del pago no es válido"), { statusCode: 409 });
       }
-      const preservedRef = priorReapplications.length
-        ? { ...canonicalRef, reapplications: priorReapplications }
-        : canonicalRef;
+      const preservedRef = {...canonicalRef,
+        ...(priorReapplications.length?{reapplications:priorReapplications}:{}),
+        ...(previousRef?.fundingReleases?{fundingReleases:previousRef.fundingReleases}:{})};
       const alreadyLinkedToTarget = Number(previousRef?.id) === Number(invoice.id);
       if (!alreadyLinkedToTarget) {
         const applied = await db.execute(sql`
@@ -3406,7 +3416,7 @@ export function registerReservationsRoutes(app: Express) {
       const linked = await db.transaction(async (tx) => {
         const paymentResult = await tx.execute(sql`
           UPDATE payments
-          SET invoice_ref = ${recoveryState.invoiceRef}, invoice_link_failed = ${recoveryState.invoiceLinkFailed}
+          SET invoice_ref = (COALESCE(invoice_ref::jsonb,'{}'::jsonb) || ${recoveryState.invoiceRef}::jsonb)::text, invoice_link_failed = ${recoveryState.invoiceLinkFailed}
           WHERE id = ${req.params.id}
             AND reservation_id = ${reservationId}
           RETURNING *
@@ -3570,6 +3580,7 @@ export function registerReservationsRoutes(app: Express) {
           preservedInvoiceData = {
             ...previousRef,
             ...invoiceData,
+            ...(previousRef.fundingReleases?{fundingReleases:previousRef.fundingReleases}:{}),
             id: previousRef.id,
             tipoComprobante: previousRef.tipoComprobante ?? previousRef.tipo_comprobante,
             puntoVenta: previousRef.puntoVenta ?? previousRef.punto_venta,

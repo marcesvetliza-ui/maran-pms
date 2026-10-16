@@ -4,7 +4,7 @@ import { FundingError, type Scope } from "./contracts";
 export class FundingStore {
   constructor(readonly pool: Pool) {}
   async transaction<T>(scope: Scope, operationId: string | null, run: (client: PoolClient) => Promise<T>,
-    beforeBegin?: (client: PoolClient) => Promise<void>): Promise<T> {
+    beforeBegin?: (client: PoolClient) => Promise<void>, scopeLock: "wait" | "try" = "wait"): Promise<T> {
     const client = await this.pool.connect();
     let begun = false;
     try {
@@ -16,7 +16,12 @@ export class FundingStore {
       await client.query("SET LOCAL lock_timeout='3s'");
       await client.query("SET LOCAL statement_timeout='10s'");
       if (operationId) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`funding-operation:${operationId}`]);
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`funding-scope:${scope.kind}:${scope.id}`]);
+      if(scopeLock==="try") {
+        const result=await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",[`funding-scope:${scope.kind}:${scope.id}`]);
+        if(!result.rows[0]?.locked)throw new FundingError("CONCURRENT_CHANGE","Hay otra operación en el folio. Reintentá la misma operación.",409,true);
+      } else {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`funding-scope:${scope.kind}:${scope.id}`]);
+      }
       const result = await run(client);
       await client.query("COMMIT");
       begun = false;

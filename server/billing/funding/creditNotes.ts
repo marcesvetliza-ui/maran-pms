@@ -1,3 +1,4 @@
+import { allocateFundingCents } from "@shared/fundingAllocation";
 import { FundingError, hash, number, type Actor, type Scope } from "./contracts";
 import { PaymentFundingService } from "./service";
 
@@ -31,17 +32,8 @@ export async function reconcileVerifiedCreditNote(f:PaymentFundingService,scope:
     const capacity=originals.reduce((sum,a)=>sum+BigInt(a.amount_cents),0n);
     const target=BigInt(proof.amountCents);
     if(target>capacity) throw new FundingError("NC_RECONCILIATION_REQUIRED","La NC supera la cobertura vigente; requiere conciliación explícita.");
-    const plan=originals.map((a,index)=>{
-      const numerator=BigInt(a.amount_cents)*target;
-      return {a,index,release:numerator/capacity,remainder:numerator%capacity};
-    });
-    let remaining=target-plan.reduce((sum,p)=>sum+p.release,0n);
-    const ranked=[...plan].sort((a,b)=>a.remainder===b.remainder?a.index-b.index:a.remainder>b.remainder?-1:1);
-    for(const p of ranked) {
-      if(remaining===0n) break;
-      if(p.release<BigInt(p.a.amount_cents)) {p.release++;remaining--;}
-    }
-    if(remaining!==0n) throw new FundingError("NC_RECONCILIATION_REQUIRED","No se pudo distribuir la NC dentro de las capacidades verificadas.");
+    const releases=allocateFundingCents(proof.amountCents,originals.map(a=>number(a.amount_cents)));
+    const plan=originals.map((a,index)=>({a,release:releases[index]}));
     for (const {a,release:cents} of plan) {
       const release=Number(cents);
       if (!release) continue;
