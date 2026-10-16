@@ -1,3 +1,4 @@
+import {financialConsistencyIssues} from "./consistency";
 import {attachAssertionFragments} from "./assertion-fragments";
 import {citedScreens} from "../../shared/programming-support-scope";
 import {validateReportClaims} from "./claim-validation";
@@ -150,12 +151,13 @@ export async function diagnose(
     evidenceCorrections = 0,
     attributionCorrections = 0,
     claimCorrections = 0,
+    consistencyCorrections = 0,
     rounds = 0;
   try {
   for (let round = 0; round < 14; round++) {
     rounds = round + 1;
     const context = compactContext(messages);
-    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 || claimCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
+    const closing = researchClosed ||= round >= 11 || calls >= (coverageReviewed || evidenceCorrections > 0 || claimCorrections > 0 || consistencyCorrections > 0 ? 24 : 20) || tokens >= 50000 || reserveClosure(tokens, JSON.stringify(context).length, measuredPromptTokens);
     if(closing && !messages.some(m=>m.role==="system" && m.content==="Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."))
       messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
     // A final review must not consume the last budget merely to lose a
@@ -166,7 +168,7 @@ export async function diagnose(
         model: options.model,
         messages: compactContext(messages),
         tools,
-        tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || claimCorrections > 0 || coverageReviewed)) ? "none" : "auto",
+        tool_choice: closing || (round >= 9 && !(evidenceCorrections > 0 || claimCorrections > 0 || consistencyCorrections > 0 || coverageReviewed)) ? "none" : "auto",
         max_completion_tokens: 4200,
         response_format: {
           type: "json_schema",
@@ -250,6 +252,14 @@ export async function diagnose(
         messages.push({role:"user",content:JSON.stringify({validationError:"Atribución incompatible con el origen del mensaje leído en el código.",attributionErrors})});
         continue;
       }
+      const consistencyErrors=financialConsistencyIssues(report);
+      if(consistencyErrors.length) {
+        if(consistencyCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: la conclusión financiera o el consejo de reintento contradicen el alcance de la investigación."),{code:"evidence_inconsistent"});
+        messages.push({...answer,role:"assistant"});
+        messages.push({role:"system",content:"Corregir la coherencia del informe completo antes de entregarlo. El asistente sólo leyó código: no conoce la cantidad real de facturas ni cobros del incidente. No afirmar un resultado operativo y negarlo luego en limitaciones. Una prueba simulada no es una emisión real. Ante estado incierto, consultar y recuperar la misma operación pendiente; no recomendar otra emisión por la duda. No basta rebajar la certeza."});
+        messages.push({role:"user",content:JSON.stringify({validationError:"Conclusión o recomendación incompatible con el alcance de sólo lectura.",consistencyErrors})});
+        continue;
+      }
       verifiedDraft = report;
       if (!coverageReviewed) {
         if (round === 13) throw Object.assign(new Error("Se alcanzó el límite antes de revisar la cobertura del diagnóstico."), { code: "investigation_rounds" });
@@ -288,7 +298,7 @@ export async function diagnose(
         const key=call.function.name+JSON.stringify(args,Object.keys(args).sort());
         const prior=completedCalls.get(key);
         if(prior) result={alreadyConsulted:true,previousToolCallId:prior,guidance:"El resultado ya está en el historial. Usá sus líneas, o pedí otro rango/símbolo si falta una parte. No se repite la lectura."};
-        else if(closing || calls >= (coverageReviewed || evidenceCorrections>0 || claimCorrections>0 ? 24 : 20))
+        else if(closing || calls >= (coverageReviewed || evidenceCorrections>0 || claimCorrections>0 || consistencyCorrections>0 ? 24 : 20))
           result={researchClosed:true,guidance:"Se reservó el presupuesto restante para concluir. No se ejecutó esta consulta: usá evidencia leída y declará lo pendiente."};
         else {
         calls++;

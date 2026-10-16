@@ -259,3 +259,34 @@ revisión y exclusión de la orientación de Recepción para un caso SPA. No se 
 una consulta a OpenAI ni se probó una operación financiera real. Estos cambios
 mejoran navegación/cobertura; no son un verificador determinista de toda conclusión
 ni garantizan que el modelo vaya a responder correctamente sin nueva evaluación.
+
+## Coherencia financiera de conclusión y consejo al operador
+
+El informe de `7ffb3537` reconocía no disponer de registros reales, pero luego
+indicaba interpretar que “no existe doble cobro”, describía una “emisión real”
+en una prueba simulada y sugería reintentar ante duda. Se añaden comprobaciones
+explícitas de esas formas de afirmación/recomendación antes de aceptar el borrador:
+
+- Una afirmación categórica no atribuida al código/test sobre ausencia de doble
+  cobro o doble factura no queda respaldada por la lectura de un 409. Debe
+  distinguirse protección implementada de resultado del incidente concreto.
+- Una prueba leída/simulada no debe presentarse como emisión fiscal real.
+- Una recomendación de reintentar o reemitir por duda, anomalía o estado incierto
+  se devuelve para corrección si no distingue consulta de estado y recuperación
+  de la misma operación frente a otra emisión. Mencionar sólo `operationId` no
+  demuestra que se conserve la identidad de la operación.
+
+El control comprueba resumen, causa, propuesta y explicaciones de evidencia,
+conservando negaciones y explicaciones con alcance de código/test. El revisor
+recibe el conflicto y debe corregir todo el informe; cambiar sólo la certeza no
+lo elude. Tras dos correcciones fallidas no se publica esa respuesta como válida
+ni como borrador verificado. Se mantiene el límite global de rondas/tokens.
+
+Son reglas de lenguaje acotadas para los errores observados, **no un verificador
+semántico universal**: no detectan todas las paráfrasis ni demuestran coherencia
+de cualquier texto posible. El asistente sigue sin acceso a registros reales.
+La recomendación correcta ante incertidumbre es consultar documentos/movimientos
+y, si existe una operación pendiente, recuperar esa misma operación sin crear otra.
+Las pruebas cubren los textos recibidos, negaciones, recuperación explícita,
+consejos no financieros y modelos simulados que insisten o corrigen. No implican
+emisión real, consulta a Caja ni evaluación de OpenAI real.
