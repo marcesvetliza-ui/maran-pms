@@ -1,5 +1,10 @@
 # Probar el nuevo circuito SPA en MARAN
 
+**Actualización 16/10/2026:** autorizado el cambio general de SPA. Con las variables
+ya activas no se vuelve a instalar ni se vincula cuenta por cuenta. El comportamiento
+actual se describe en [Cambio general de motor](spa-module-cutover-20261016.md).
+Los pasos de vinculación manual de esta guía corresponden a la habilitación inicial.
+
 La autorización posterior de Marcelo incluye probar en main/MARAN, cuya
 configuración fue cambiada a homologación. Este documento reemplaza, para esta
 prueba, la restricción de las entregas anteriores que sólo contemplaba Xenia.

@@ -13,7 +13,7 @@ import { legacyFundingScopes, lockLegacyFundingScopes, releaseAfterLegacyRespons
  */
 export function mountPaymentFunding(app:Express,options:{
   enabled:boolean; pool:Pool; fiscal: FiscalGateway; firstSpaClose:FirstSpaClose;
-  authenticate:RequestHandler; actor:(request:Request)=>Actor; operationalSchema?:string;
+  authenticate:RequestHandler; actor:(request:Request)=>Actor; operationalSchema?:string; allSpaAccounts?:boolean;
 }) {
   if (!options.enabled) return null;
   const schema=options.operationalSchema??"public";
@@ -38,6 +38,7 @@ export function mountPaymentFunding(app:Express,options:{
       await lockLegacyFundingScopes(c,scopes);
       let managed:any=null;
       for(const scope of scopes) {
+        if(options.allSpaAccounts && scope.kind==="spa") { managed=scope; break; }
         managed=(await c.query("SELECT * FROM payment_funding.scopes WHERE kind=$1 AND id=$2",[scope.kind,scope.id])).rows[0];
         if(managed) break;
       }

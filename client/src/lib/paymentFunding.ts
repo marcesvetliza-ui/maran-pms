@@ -26,6 +26,10 @@ export const projectionSchema = z.object({
     amountCents: cents, appliedCents: cents, heldCents: cents, freeCents: cents, version: cents })),
   documents: z.array(z.object({ id: z.string(), totalCents: cents, status: z.string(), snapshot: z.record(z.unknown()) })),
   operations: z.array(operationSchema), debtCents: cents,
+  legacyHistory: z.object({reason:z.string(),status:z.string(),totalCents:z.number().int(),paidCents:z.number().int(),
+    payments:z.array(z.object({id:z.string(),method:z.string(),status:z.string(),amountCents:z.number().int()})),
+    invoices:z.array(z.object({id:z.string(),type:z.string(),point:z.number().nullable(),number:z.number().nullable(),status:z.string(),amountCents:z.number().int()})),
+  }).optional(),
   rectifications: z.array(z.object({ shiftId: z.string(), revision: cents, physicalCountCents: cents.nullable(), reason: z.string() })),
 }).superRefine((data, ctx) => {
   for (const receipt of data.receipts) {
@@ -69,7 +73,14 @@ function verifyOperation(operation: FundingOperation, expectedId: string) {
 }
 export const collectionShiftsSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1) }));
 export const preparedDocumentSchema = z.object({ documentId: z.string().min(1), totalCents: cents.positive() });
+export const spaRecipientSchema=z.object({guestId:z.string().nullable(),kind:z.enum(["guest","spa_client"]).nullable(),
+  firstName:z.string(),lastName:z.string(),documentType:z.string().nullish(),documentNumber:z.string().nullish(),
+  vatCondition:z.string().nullish(),cuit:z.string().nullish(),address:z.string().nullish(),editable:z.boolean()});
+export type SpaRecipient=z.infer<typeof spaRecipientSchema>;
 export const fundingApi = {
+  recipient:(id:string)=>call(`/spa/${encodeURIComponent(id)}/recipient`,spaRecipientSchema),
+  recipientCandidate:(id:string)=>call(`/recipients/${encodeURIComponent(id)}`,spaRecipientSchema),
+  saveRecipient:(id:string,body:unknown)=>call(`/spa/${encodeURIComponent(id)}/recipient`,spaRecipientSchema,body),
   enrollment: (id: string) => call(`/spa/${encodeURIComponent(id)}/enrollment`, z.object({ adopted: z.boolean() })),
   adoptUnbilled: (id: string) => call(`/spa/${encodeURIComponent(id)}/adopt-unbilled`, z.object({ accountId: z.string().min(1) }), {}),
   collectionShifts: (id: string) => call(`/spa/${encodeURIComponent(id)}/collection-shifts`, collectionShiftsSchema),

@@ -9,6 +9,8 @@ import { prepareSpaDocument } from "./preparation";
 import { sessionFundingActor } from "./access";
 import { checkSpaHomologation } from "./homologation";
 import { SqlFundingAdapter } from "../adapters";
+import { enrollAllSpaAccounts, enrollSpaAccount } from "./rollout";
+import { getSpaRecipient, saveSpaRecipient } from "./recipient";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
@@ -17,13 +19,18 @@ import { SqlFundingAdapter } from "../adapters";
 export function mountOperationalSpaFunding(app:Express,options:{
  enabled?:boolean;pool:Pool;authenticate:RequestHandler;
  hasPermission:(role:string,key:string)=>boolean;transport:FiscalTransport;schema?:string;
- reviewedExtensions?:boolean;
+ reviewedExtensions?:boolean; fullRollout?:boolean;
 }) {
  if(options.enabled!==true) return null;
  const schema=options.schema??"public",s=identifier(schema);
  const actor=(req:Request)=>sessionFundingActor(req,options.hasPermission);
  app.use("/api/payment-funding",options.authenticate,async(req,res,next)=>{
    try {
+     const automaticScope=req.path.match(/^\/(?:scopes\/spa|spa)\/([^/]+)(?:\/|$)/);
+     if(options.fullRollout && automaticScope) {
+       requirePermission(actor(req),req.method==="GET"?"funding:read":"funding:write");
+       await enrollSpaAccount(service,decodeURIComponent(automaticScope[1]),schema);
+     }
      if(req.method!=="POST" || !["/previews","/operations"].includes(req.path)) return next();
      const who=actor(req);requirePermission(who);
      const request=fundingRequestSchema.parse(req.path==="/previews"?req.body:req.body?.request);
@@ -45,11 +52,29 @@ export function mountOperationalSpaFunding(app:Express,options:{
  });
  const service=mountPaymentFunding(app,{
    enabled:true,pool:options.pool,authenticate:options.authenticate,actor,operationalSchema:schema,
-   fiscal:new PersistentFiscalGateway(options.pool,options.transport,schema),firstSpaClose:createFirstSpaClose(schema),
+   fiscal:new PersistentFiscalGateway(options.pool,options.transport,schema),firstSpaClose:createFirstSpaClose(schema),allSpaAccounts:options.fullRollout,
  })!;
  // Reviewed additive endpoints used by the connected SPA client remain independently gated.
  // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
  if(options.reviewedExtensions!==true) return service;
+ app.get("/api/payment-funding/recipients/:guestId",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const g=(await options.pool.query(`SELECT id AS "guestId",'guest' AS kind,first_name AS "firstName",last_name AS "lastName",
+       document_type AS "documentType",document_number AS "documentNumber",vat_condition AS "vatCondition",
+       cuil_cuit AS cuit,direccion AS address,true AS editable FROM ${s}.guests WHERE id=$1`,[req.params.guestId])).rows[0];
+     if(!g) throw new FundingError("NOT_FOUND","Cliente inexistente.",404);
+     res.json({ok:true,data:g});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/recipient",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await getSpaRecipient(service,req.params.accountId,actor(req),schema)});}
+   catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/recipient",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await saveSpaRecipient(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error) {fundingErrorResponse(res,error);}
+ });
  app.get("/api/payment-funding/spa/:accountId/enrollment",options.authenticate,async(req,res)=>{
    try {
      requirePermission(actor(req),"funding:read");
@@ -113,6 +138,9 @@ export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=f
  if(!ready) throw new Error("Funding schema requires explicit reviewed installation before opt-in.");
  const client=await pool.connect();
  try {await checkSpaHomologation(client);} finally {client.release();}
- return mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
-   transport:configuredArcaTransport(),reviewedExtensions});
+ const service=mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
+   transport:configuredArcaTransport(),reviewedExtensions,fullRollout:true})!;
+ const enrolled=await enrollAllSpaAccounts(service);
+ console.info("[SPA funding] Motor general listo.",{cuentasIncorporadas:enrolled.accounts});
+ return service;
 }

@@ -28,6 +28,8 @@ export class SqlFundingAdapter implements FundingAdapter {
     return rows[0];
   }
   async assertScope(c:PoolClient,scope:Scope,operationId?:string,verifiedAdoption=false) {
+    if (scope.kind==="spa" && (await c.query("SELECT 1 FROM payment_funding.events WHERE kind='spa_rollout_history' AND event_key=$1",[`adopted:spa:${scope.id}`])).rowCount)
+      throw new FundingError("HISTORICAL_ACCOUNT_READ_ONLY","Esta cuenta conserva su liquidación anterior como historial; no se factura ni cobra nuevamente.");
     await this.folio(c,scope);
     if (this.kind!=="spa") return;
     const a=(await c.query(`SELECT * FROM ${this.s}.spa_accounts WHERE id=$1`,[scope.id])).rows[0];

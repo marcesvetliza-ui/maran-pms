@@ -27,13 +27,14 @@ export class PaymentFundingService {
       const events=(await c.query(`SELECT e.* FROM payment_funding.events e
         LEFT JOIN payment_funding.operations o ON o.id=e.operation_id
         WHERE (o.scope_kind=$1 AND o.scope_id=$2) OR (e.payload->>'scopeKey')=$3 ORDER BY e.seq`,[...params,`${scope.kind}:${scope.id}`])).rows;
-      const totals=await this.adapter(scope).totals(c,scope);
+      const legacyHistory=events.find(e=>e.kind==="spa_rollout_history")?.payload?.history;
+      const totals=legacyHistory??await this.adapter(scope).totals(c,scope);
       return {scope,receipts:receipts.map(r=>({
         id:r.id,sourcePaymentId:r.source_payment_id,method:r.method,amountCents:number(r.effective_cents),
         originalAmountCents:number(r.original_cents),appliedCents:number(r.applied_cents),
         heldCents:number(r.held_cents),freeCents:number(r.free_cents),version:number(r.version),
       })),documents:documents.map(d=>({id:d.id,totalCents:number(d.total_cents),status:d.status,snapshot:d.snapshot})),
-      operations:operations.map(o=>this.present(o)),debtCents:Math.max(0,totals.totalCents-totals.paidCents),
+      operations:operations.map(o=>this.present(o)),debtCents:Math.max(0,totals.totalCents-totals.paidCents),legacyHistory,
       rectifications:rectifications.map(r=>({shiftId:r.shift_id,revision:r.revision,delta:r.delta,
         expectedAfter:r.expected_after,physicalCountCents:r.physical_count_cents===null?null:number(r.physical_count_cents),reason:r.reason})),events};
     });

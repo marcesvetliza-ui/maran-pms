@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,12 +18,13 @@ const terminal = (operation: FundingOperation) => ["applied", "aborted"].include
 type Shift = { id: string; label: string };
 
 /** Only consumes the funding API. Never invokes billing, payments, Caja or legacy settlement. */
-export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument }: {
+export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts = [], onCompleted, onPrepareDocument, recipientEditor }: {
   accountId: string; userId: string; canWrite: boolean;
   // Must come from verified server data; no manual shift IDs or synthetic defaults.
   collectionShifts?: Shift[];
   onCompleted?: () => void;
   onPrepareDocument?: () => Promise<string>;
+  recipientEditor?: ReactNode;
 }) {
   const key = fundingJournalKey(userId, accountId);
   const [projection, setProjection] = useState<FundingProjection>();
@@ -184,12 +185,20 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   }
 
   return <section className="space-y-4" aria-label="Financiación del folio SPA">
-    <h3 className="font-semibold">Facturación con cobros existentes</h3>
+    <h3 className="font-semibold">Facturación y cobros SPA</h3>
     <p className="text-sm text-muted-foreground">Reutiliza los cobros seleccionados. Sólo el faltante confirmado registra dinero nuevo. Una operación pendiente se recupera; no se vuelve a emitir.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <Button variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar financiación</Button>
     {!projection && <p>{busy ? "Consultando financiación…" : "Financiación no disponible. No se habilita el cierre desde esta pantalla."}</p>}
-    {projection && <>
+    {projection?.legacyHistory ? <div className="space-y-2 rounded border p-3">
+      <h4 className="font-semibold">Historial anterior al cambio de motor</h4>
+      <p>{projection.legacyHistory.reason}. Se conserva para consulta; estos importes no se vuelven a facturar ni cobrar.</p>
+      <p>Estado registrado: {projection.legacyHistory.status}</p>
+      <p>Cargos: {fundingMoney(projection.legacyHistory.totalCents)} · Pagos registrados: {fundingMoney(projection.legacyHistory.paidCents)}</p>
+      {projection.legacyHistory.payments.map(p=><p key={p.id}>Pago {p.id} · {p.method} · {fundingMoney(p.amountCents)} · {p.status}</p>)}
+      {projection.legacyHistory.invoices.map(i=><p key={i.id}>Comprobante {i.type} {i.point}-{i.number} · {fundingMoney(i.amountCents)} · {i.status}</p>)}
+    </div> : projection && <>
+      {!projection.documents.length && !projection.operations.some(o=>!terminal(o)) && recipientEditor}
       <p>Saldo pendiente de cobro: <strong>{fundingMoney(projection.debtCents)}</strong></p>
       <div className="overflow-x-auto"><table className="w-full text-sm">
         <caption className="text-left font-medium">Cobros registrados (no se suman otra vez a Caja)</caption>

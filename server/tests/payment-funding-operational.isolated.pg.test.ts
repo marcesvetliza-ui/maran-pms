@@ -16,6 +16,7 @@ import { consultationFixture } from "./helpers/wsfeConsultationFixture";
 import { Pool } from "pg";
 import { FundingStore } from "../billing/funding/store";
 import { PaymentFundingService } from "../billing/funding/service";
+import { enrollAllSpaAccounts, enrollSpaAccount } from "../billing/funding/operational/rollout";
 
 // ONLY the connection is replaced. Real auth, roles, invoice builder,
 // inventory engine, SQL adapter, gateway persistence and HTTP handlers execute.
@@ -105,6 +106,35 @@ it("default-disabled mounting registers nothing and touches neither DB nor trans
  const app=express(),before=app._router?.stack?.length??0;
  expect(mountOperationalSpaFunding(app,{pool:null as any,transport:null as any,authenticate:null as any,hasPermission:null as any})).toBeNull();
  expect(app._router?.stack?.length??0).toBe(before);
+});
+const recipientData={firstName:"Cliente",lastName:"Identificado",documentType:"DNI",documentNumber:String(10000000+parseInt(randomUUID().slice(0,8),16)%90000000),vatCondition:"consumidor_final",cuit:"",address:"Domicilio de prueba"};
+it("completes a named appointment without a linked customer and prepares from the saved real profile",async()=>{
+ const f=await fixture(true),id=f.scope.id;
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_appointments SET guest_id=NULL WHERE id=$1",[id]);
+ expect((await http(`/spa/${id}/prepare-document`,{})).body.error.message).toContain("receptor fiscal");
+ const before=await financialCounts(f.scope),n=sends;
+ const saved=await http(`/spa/${id}/recipient`,recipientData);
+ expect(saved.status).toBe(200);expect(saved.body.data.guestId).toBeTruthy();
+ expect((await http(`/spa/${id}/recipient`,recipientData)).body.data.guestId).toBe(saved.body.data.guestId);
+ expect((await pool.query("SELECT guest_id FROM funding_demo.spa_appointments WHERE id=$1",[id])).rows[0].guest_id).toBe(saved.body.data.guestId);
+ expect((await http(`/spa/${id}/prepare-document`,{})).status).toBe(200);
+ const projection=await service.scope(f.scope,actor);
+ expect(projection.documents[0].snapshot.recipient).toMatchObject({razonSocial:"Cliente Identificado",dni:recipientData.documentNumber});
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
+ const immutable=await http(`/spa/${id}/recipient`,{...recipientData,guestId:saved.body.data.guestId,firstName:"Otro"});
+ expect(immutable.status).toBe(409);expect(immutable.body.error.code).toBe("FISCAL_OPERATION_PENDING");
+});
+it("recipient editing requires write permission, rejects missing fiscal data and respects explicit guest namespace",async()=>{
+ const f=await fixture(true),id=f.scope.id;
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+ expect((await http(`/spa/${id}/recipient`,recipientData,{"x-role":"reader"})).status).toBe(403);
+ expect((await http(`/spa/${id}/recipient`,{...recipientData,documentNumber:""})).status).toBe(422);
+ expect((await http(`/spa/${id}/recipient`,{...recipientData,vatCondition:"responsable_inscripto"})).status).toBe(422);
+ await pool.query("INSERT INTO funding_demo.spa_clients(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Otro','Registro','consumidor_final','35111111')",[id]);
+ expect((await http(`/spa/${id}/recipient`,{...recipientData,guestId:id,kind:"guest"})).status).toBe(200);
+ expect((await http(`/spa/${id}/prepare-document`,{})).status).toBe(200);
+ expect((await service.scope(f.scope,actor)).documents[0].snapshot.recipient.razonSocial).toBe("Cliente Identificado");
 });
 async function unadoptedFixture() {
  const f=await fixture(true);
@@ -327,4 +357,60 @@ it("verified history imports exact invoice/payment/Caja/folio IDs; ambiguity or 
  const projection=await service.scope(f.scope,actor);
  expect(projection.receipts[0].appliedCents).toBe(9_500_000);expect(projection.receipts[0].freeCents).toBe(0);
  await expect(adoptVerifiedHistory(pool,plan,{id:"no-history-role",permissions:["funding:write"]},createFirstSpaClose(),"funding_demo")).rejects.toMatchObject({status:403});
+});
+
+it("automatic module cutover enrolls pending accounts once, preserves old invoices and exposes read-only history",async()=>{
+ const pending=await unadoptedFixture(),history=await unadoptedFixture();
+ const invoice=(await pool.query("INSERT INTO funding_demo.sales_invoices(estado,spa_account_id,tipo_comprobante,monto_total,punto_venta,numero) VALUES('emitida',$1,'FB',95000,nextval('funding_demo.binding_pvs'),1) RETURNING id",[history.scope.id])).rows[0];
+ // Old ownership may exist only on the account, not on the invoice row.
+ await pool.query("UPDATE funding_demo.sales_invoices SET spa_account_id=NULL WHERE id=$1",[invoice.id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET invoice_id=$2 WHERE id=$1",[history.scope.id,invoice.id]);
+ const beforePending=await financialCounts(pending.scope),beforeHistory=await financialCounts(history.scope),n=sends;
+ await Promise.all([enrollSpaAccount(service,pending.scope.id,"funding_demo"),enrollSpaAccount(service,pending.scope.id,"funding_demo")]);
+ await enrollSpaAccount(service,history.scope.id,"funding_demo");
+ const current=await service.scope(pending.scope,actor),old=await service.scope(history.scope,actor);
+ expect(current.legacyHistory).toBeUndefined();expect(current.receipts).toHaveLength(1);
+ expect(current.receipts[0].freeCents).toBe(500_000);
+ expect(old.legacyHistory).toMatchObject({totalCents:9_500_000,paidCents:500_000});
+ expect(old.legacyHistory.invoices).toEqual([expect.objectContaining({id:String(invoice.id),status:"emitida",amountCents:9_500_000})]);
+ expect(old.receipts).toHaveLength(0);expect(old.documents).toHaveLength(0);
+ await expect(prepareSpaDocument(service,history.scope.id,actor,"funding_demo")).rejects.toMatchObject({code:"HISTORICAL_ACCOUNT_READ_ONLY"});
+ expect((await pool.query("SELECT estado FROM funding_demo.sales_invoices WHERE id=$1",[invoice.id])).rows[0].estado).toBe("emitida");
+ expect(await financialCounts(pending.scope)).toEqual(beforePending);expect(await financialCounts(history.scope)).toEqual(beforeHistory);expect(sends).toBe(n);
+ await enrollAllSpaAccounts(service,"funding_demo");
+ expect((await pool.query("SELECT a.id FROM funding_demo.spa_accounts a LEFT JOIN payment_funding.scopes s ON s.kind='spa' AND s.id=a.id WHERE s.id IS NULL")).rowCount).toBe(0);
+ expect((await pool.query("SELECT count(*)::int AS n FROM payment_funding.events WHERE event_key=$1",[`adopted:spa:${pending.scope.id}`])).rows[0].n).toBe(1);
+});
+it("closed nonfiscal accounts remain invoiceable with the same receipts, no new collection or stock consumption",async()=>{
+ const f=await fixture(false),id=f.scope.id;
+ await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+ await pool.query("DELETE FROM payment_funding.receipts WHERE scope_id=$1",[id]);
+ await pool.query("DELETE FROM payment_funding.scopes WHERE id=$1",[id]);
+ // Distinct synthetic fiscal snapshot from fixture's discarded test preparation.
+ await pool.query("UPDATE funding_demo.guests SET first_name='Cierre anterior' WHERE id=$1",[id]);
+ const before=await financialCounts(f.scope);
+ await enrollSpaAccount(service,id,"funding_demo");
+ expect((await service.scope(f.scope,actor)).legacyHistory).toBeUndefined();
+ const prepared=await prepareSpaDocument(service,id,actor,"funding_demo");
+ const r=await reserve({...f,prepared,request:{...f.request,documentId:prepared.documentId}});
+ expect((await http(`/operations/${r.id}/authorize`,{})).body.data.status).toBe("authorized_pending_link");
+ expect((await http(`/operations/${r.id}/finalize`,{})).body.data.status).toBe("applied");
+ expect(await financialCounts(f.scope)).toEqual(before);
+ expect((await pool.query("SELECT 1 FROM funding_demo.inventory_consumption_jobs WHERE source_id=$1",[id])).rowCount).toBe(0);
+});
+it("full rollout routes new accounts automatically and blocks legacy financial writers before enrollment",async()=>{
+ const f=await unadoptedFixture(),id=f.scope.id;
+ const app=express();app.use(express.json());
+ app.use((req,_res,next)=>{req.isAuthenticated=(()=>true) as any;req.user={id:actor.id,role:"spa"} as any;next();});
+ const {requireAuth}=await import("../auth");
+ mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission:(_role,key)=>["funding:read","funding:write"].includes(key),transport,schema:"funding_demo",reviewedExtensions:true,fullRollout:true});
+ let writes=0;app.post("/api/spa/accounts/:id/close",(_req,res)=>{writes++;res.json({ok:true});});
+ const srv=app.listen(0,"127.0.0.1");await new Promise<void>(r=>srv.once("listening",r));
+ const host=`http://127.0.0.1:${(srv.address() as any).port}`;
+ try {
+  const blocked=await fetch(`${host}/api/spa/accounts/${id}/close`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+  expect(blocked.status).toBe(409);expect(writes).toBe(0);
+  const result=await fetch(`${host}/api/payment-funding/scopes/spa/${id}`);
+  expect(result.status).toBe(200);expect((await result.json()).data.receipts).toHaveLength(1);
+ } finally {await new Promise<void>(r=>srv.close(()=>r()));}
 });

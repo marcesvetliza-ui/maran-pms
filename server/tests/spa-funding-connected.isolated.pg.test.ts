@@ -35,14 +35,21 @@ beforeAll(async()=>{
  app.use((req,_res,next)=>{req.isAuthenticated=(()=>true) as any;req.user={id:"connected-reviewer",role:"spa"} as any;next();});
  const {requireAuth}=await import("../auth");
  service=mountOperationalSpaFunding(app,{enabled:true,reviewedExtensions:true,pool,authenticate:requireAuth,
-  hasPermission:(_role,key)=>["funding:read","funding:write"].includes(key),schema:"funding_demo",transport})!;
+  hasPermission:(_role,key)=>["funding:read","funding:write"].includes(key),schema:"funding_demo",transport,fullRollout:true})!;
  await pool.query("UPDATE funding_demo.billing_config SET punto_venta_homolog=nextval('funding_demo.binding_pvs') WHERE id=1");
  for(const [label,partial] of [["Cobros existentes",false],["Cobrar faltante",true],["Recuperar CAE",false]] as const){
   const id=`spa-connected-${randomUUID()}`;const scope=await seedSyntheticScope(service,id,"spa",{partial});
   await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
+  if(label==="Cobros existentes") {
+   await pool.query("DELETE FROM payment_funding.receipts WHERE scope_id=$1",[id]);
+   await pool.query("DELETE FROM payment_funding.scopes WHERE id=$1",[id]);
+   await pool.query("UPDATE funding_demo.spa_accounts SET status='open' WHERE id=$1",[id]);
+   await pool.query("UPDATE funding_demo.folios SET status='open' WHERE entity_id=$1",[id]);
+  }
   await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Verificado','consumidor_final','30111222')",[id]);
   await pool.query("INSERT INTO funding_demo.spa_treatments VALUES($1)",[id]);
   await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
+  if(label==="Cobros existentes") await pool.query("UPDATE funding_demo.spa_appointments SET guest_id=NULL WHERE id=$1",[id]);
   await pool.query("UPDATE funding_demo.spa_accounts SET appointment_id=$1 WHERE id=$1",[id]);
   await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
   await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
@@ -77,6 +84,16 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   const before=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rows[0].n;
   const cashBefore=(await pool.query("SELECT count(*)::int AS n FROM funding_demo.cash_movements c JOIN funding_demo.spa_payments p ON p.id=c.payment_id WHERE p.account_id=$1",[id])).rows[0].n;
   await page.goto(`${base}/connected-client.html`);await page.getByLabel("Escenario",{exact:true}).selectOption(id);
+  if(index===0) {
+   await page.getByRole("button",{name:"Preparar comprobante",exact:true}).click();
+   await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toBeVisible();
+   await page.getByLabel("Nombre / razón social",{exact:true}).fill("Cliente");
+   await page.getByLabel("Apellido",{exact:true}).fill("Verificado");
+   await page.getByLabel("Número de documento",{exact:true}).fill(String(10000000+parseInt(id.slice(-8),16)%90000000));
+   await page.getByLabel("Condición IVA",{exact:true}).selectOption("consumidor_final");
+   await page.getByRole("button",{name:"Guardar y vincular cliente",exact:true}).click();
+   await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toHaveCount(0);
+  }
   await page.getByRole("button",{name:"Preparar comprobante",exact:true}).click();
   await browserExpect(page.getByText("Receptor: Cliente Verificado",{exact:true})).toBeVisible();
   await page.getByLabel(`Usar ${id}:S1`,{exact:true}).check();
@@ -111,6 +128,6 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
   }
  }
  expect(emissions).toBe(3);expect(errors).toEqual([]);
- expect(newRequests.filter(req=>req.url.endsWith("/prepare-document")).map(req=>req.body)).toEqual([{}, {}, {}]);
+ expect(newRequests.filter(req=>req.url.endsWith("/prepare-document")).map(req=>req.body)).toEqual([{}, {}, {}, {}]);
  await page.close();
 },60000);

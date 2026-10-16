@@ -2,6 +2,7 @@ import type { PaymentFundingService } from "../service";
 import { FundingError, hash, identifier, number, requirePermission, stableId, type Actor } from "../contracts";
 import { calcularMontos, type InvoiceItem } from "../../invoiceService";
 import { resolveCondicionIvaReceptorId, resolveFiscalRecipientDocument } from "../../fiscalDocument";
+import { spaRecipientProfiles } from "./recipient";
 
 /** Trusted server command, NOT a fiscal snapshot endpoint. All economic and
  * recipient data is reconstructed from persisted operational identities.
@@ -18,8 +19,7 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    if(!appointment?.guest_id) throw new FundingError("FISCAL_PREPARATION_REQUIRED","El turno no tiene un receptor fiscal identificado.");
    // Historical UI used either guests or spa_clients. An ID collision is NOT
    // permission to choose whichever happens to have an equal name/amount.
-   const recipients=(await c.query(`SELECT to_jsonb(g) AS data FROM ${s}.guests g WHERE id=$1
-     UNION ALL SELECT to_jsonb(g) FROM ${s}.spa_clients g WHERE id=$1`,[appointment.guest_id])).rows;
+   const recipients=await spaRecipientProfiles(c,accountId,appointment.guest_id,schema);
    if(recipients.length!==1) throw new FundingError("FISCAL_PREPARATION_REQUIRED","Receptor inexistente o ambiguo; revisar la ficha.");
    const g=recipients[0].data;
    const condition=String(g.vat_condition??"").trim().toLowerCase().replace(/[\s-]+/g,"_");
