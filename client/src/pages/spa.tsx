@@ -1914,7 +1914,6 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
   return (
     <div className="flex flex-col h-full p-4 gap-4">
-      <InventoryPendingConsumptions area="spa" readOnly/>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
@@ -1926,7 +1925,9 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           </div>
         </div>
 
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <InventoryPendingConsumptions area="spa" readOnly compact label="Consumos pendientes de stock"/>
+        <div className="flex flex-wrap items-center gap-1 bg-muted rounded-lg p-1">
           <Button
             variant={activeTab === "agenda" ? "default" : "ghost"}
             size="sm"
@@ -1967,6 +1968,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           >
             <Settings className="h-4 w-4 mr-1" /> Configuración
           </Button>
+        </div>
         </div>
       </div>
 
