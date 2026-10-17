@@ -303,7 +303,7 @@ export async function createService(
           );
           console.info("Investigación del asistente completada", {
             caseId:ticket.id, model:config.model,
-            tokens:result.tokens, calls:result.calls,
+            tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
             readFileCount:result.readFiles.length,
             certainty:result.report.certainty,
           });

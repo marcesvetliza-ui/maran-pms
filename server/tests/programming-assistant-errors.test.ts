@@ -37,3 +37,9 @@ describe("investigation metrics", () => {
     expect(investigationMetrics({investigation:{rounds:1,calls:0,tokens:"secret-provider-payload",phase:"research"}})).toBeUndefined();
   });
 });
+
+it('explains a failed independent coherence review without exposing model content',()=>{
+ expect(diagnosisFailure({code:'evidence_semantic_rejected',message:'private provider output'})).toMatchObject({code:'diagnosis_coherence'});
+ expect(diagnosisFailure({code:'evidence_audit_invalid',message:'private provider output'})).toMatchObject({code:'diagnosis_audit'});
+ expect(JSON.stringify(diagnosisFailure({code:'evidence_semantic_rejected',message:'private provider output'}))).not.toContain('private provider output');
+});

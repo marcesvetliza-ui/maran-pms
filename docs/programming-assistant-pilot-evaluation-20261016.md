@@ -290,3 +290,50 @@ y, si existe una operación pendiente, recuperar esa misma operación sin crear 
 Las pruebas cubren los textos recibidos, negaciones, recuperación explícita,
 consejos no financieros y modelos simulados que insisten o corrigen. No implican
 emisión real, consulta a Caja ni evaluación de OpenAI real.
+
+## 17/10 — Revisión semántica separada del informe completo
+
+El resultado real de `0fa16375` conservó la contradicción con otra redacción:
+“no se ha duplicado la facturación ni el cobro”. No se amplía esa lista de frases
+como solución principal. Se incorpora una solicitud separada al modelo configurado,
+con contexto propio de revisor, después de las validaciones y revisión de cobertura:
+
+- Recibe el caso, el diagnóstico completo, código citado y lecturas de pruebas.
+  No recibe el historial de razonamiento del redactor ni herramientas, acceso a
+  la base o capacidad de ejecutar operaciones. Usa el mismo modelo configurado;
+  contexto separado no significa un segundo proveedor ni garantía de independencia
+  estadística.
+- Devuelve un veredicto estructurado. Cada rechazo debe señalar campo, cita textual
+  exacta de ese campo, problema y corrección. El servidor comprueba el formato,
+  presencia de la cita y coherencia del veredicto: aprobar con observaciones o
+  rechazar sin observaciones es inválido. No acepta citas inventadas del informe.
+- Un rechazo vuelve al redactor para corregir todo el diagnóstico. La corrección
+  también necesita otra aprobación. Tras dos auditorías rechazadas se informa un
+  fallo de coherencia y no se publica una conclusión válida.
+- Se revisa la consistencia entre resumen, propuesta, evidencia y limitaciones:
+  hechos operativos desconocidos frente a protección del código, simulación frente
+  a emisión real y recuperación de operación frente a otra emisión por duda.
+
+La auditoría añade una solicitud normal por diagnóstico, como máximo dos cuando
+hay corrección. Sus tokens se suman al mismo presupuesto de 100000; no se aumenta
+ese límite ni el cupo diario de investigaciones. Se reserva cierre antes y se
+estima conservadoramente el costo antes de solicitar la auditoría. No hay nuevas
+variables, modelos, credenciales, migraciones ni herramientas de escritura.
+
+Si no queda presupuesto para completar la revisión, el parcial conserva sólo
+referencias consultadas y mensajes neutros: **no conserva la conclusión, causa,
+propuesta operativa ni preguntas del borrador no auditado**. Errores del proveedor
+o veredictos inválidos no se convierten en aprobación. Los logs sólo agregan el
+contador de auditorías; no registran informe ni comentarios completos del revisor.
+
+Las regresiones cubren precisamente la paráfrasis que el filtro previo dejó pasar,
+revisor separado sin herramientas, informe completo y evidencia en su contexto,
+rechazo persistente, corrección con nueva aprobación, citas de auditor inventadas,
+veredicto contradictorio, autenticación fallida y presupuesto insuficiente o
+excedido. Los tests previos de navegación/formato aíslan la auditoría con un mock
+explícito; las pruebas nuevas ejercitan su protocolo con respuestas de aprobación
+y rechazo controladas. **No se consultó al modelo real en estas pruebas.**
+
+La revisión semántica sigue siendo probabilística y puede equivocarse. Esto
+verifica que el sistema exige y respeta su veredicto; no demuestra que el modelo
+real detectará toda contradicción. Falta repetir el caso en el piloto actualizado.

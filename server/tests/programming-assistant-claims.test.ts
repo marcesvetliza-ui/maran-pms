@@ -1,4 +1,7 @@
-import {it,expect} from 'vitest';
+// These protocol tests isolate the earlier stages. Semantic review has its own
+// tests with explicit reject/approve responses and independent request checks.
+vi.mock('../../services/programming-assistant/semantic-audit',()=>({auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
+import {it,expect,vi} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
 import {validateReportClaims} from '../../services/programming-assistant/claim-validation';
 import {diagnose} from '../../services/programming-assistant/diagnose';

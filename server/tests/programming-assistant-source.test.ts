@@ -1,3 +1,6 @@
+// These protocol tests isolate the earlier stages. Semantic review has its own
+// tests with explicit reject/approve responses and independent request checks.
+vi.mock('../../services/programming-assistant/semantic-audit',()=>({auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
 import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -507,7 +510,8 @@ it('preserves only a read-verified draft as partial if coverage review exceeds t
  const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:'unused',model:'mock'},client as any);
  expect(result.report.certainty).toBe('falta_informacion');
  expect(result.report.summary).toContain('Revisión parcial');
- expect(result.report.evidence).toEqual(report.evidence);
+ expect(result.report.evidence.map(({path,start,end})=>({path,start,end}))).toEqual(report.evidence.map(({path,start,end})=>({path,start,end})));
+ expect(result.report.cause).toBe('');
  expect(result.report.dataRepair).toBe('');
  expect(result.report.proposal).not.toContain('Cambiar');
  expect(round).toBe(2);

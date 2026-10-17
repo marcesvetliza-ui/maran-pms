@@ -26,9 +26,10 @@ it("retains the first full reading, range metadata and tool protocol while repla
 });
 
 it("reserves closure before five large requests can consume 102731 tokens", () => {
-  expect(reserveClosure(41092, 40000, 19500)).toBe(false);
+  expect(reserveClosure(30000, 40000, 19500)).toBe(false);
+  expect(reserveClosure(41092, 40000, 19500)).toBe(true);
   expect(reserveClosure(61638, 55000, 20000)).toBe(true);
-  // Close after three research rounds: two 20400-token responses fit below 100k.
+  // Close earlier to reserve the separate audit as well.
   expect(61638 + 2 * 18400).toBeLessThan(100000);
 });
 

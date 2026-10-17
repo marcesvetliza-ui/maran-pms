@@ -60,6 +60,14 @@ export function diagnosisFailure(error: unknown) {
       message:
         "No se pudo conectar con OpenAI. Revisá la conexión del servicio y reintentá más tarde.",
     };
+  if(e.code === "evidence_semantic_rejected")return {
+    code:"diagnosis_coherence",
+    message:"La revisión detectó contradicciones que el diagnóstico no corrigió. No se publicó una conclusión válida ni se aplicó ningún cambio; soporte debe revisar este resultado.",
+  };
+  if(e.code === "evidence_audit_invalid")return {
+    code:"diagnosis_audit",
+    message:"No se pudo completar la revisión independiente del diagnóstico. No se publicó como una propuesta válida; podés reintentar.",
+  };
   if (e.name === "ZodError" || e.name === "SyntaxError")
     return {
       code: "report_format",

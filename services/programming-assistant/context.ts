@@ -44,8 +44,8 @@ export function compactContext(messages: OpenAI.Chat.Completions.ChatCompletionM
 }
 
 export function reserveClosure(tokens: number, contextCharacters: number, measuredPromptTokens: number) {
-  // Two responses remain necessary: a draft and its mandatory coverage review.
+  // Reserve draft, coverage review and a separate semantic audit.
   // Allow space for tools/schema and the draft added to that second request.
   const prompt = Math.max(Math.ceil(contextCharacters / 3) + 4000, measuredPromptTokens);
-  return tokens + 2 * (prompt + 4200) + 4200 >= 100000;
+  return tokens + 2 * (prompt + 4200) + 4200 + 12000 >= 100000;
 }
