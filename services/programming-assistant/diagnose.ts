@@ -113,7 +113,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     },
   },
 ];
-export type DiagnosisResult={report:SupportDiagnosis;tokens:number;calls:number;readFiles:string[];searches:string[];semanticAudits?:number};
+export type DiagnosisResult={report:SupportDiagnosis;tokens:number;calls:number;readFiles:string[];searches:string[];semanticAudits?:number;partialReason?:string};
 export async function diagnose(
   ticket: SupportTicket,
   source: CodeSource,
@@ -143,7 +143,7 @@ export async function diagnose(
   const completedCalls=new Map<string,string>();
   const tracedEndpoints=new Set<string>(orientation.endpointContext.map(context => context.endpoint));
   let verifiedDraft: SupportDiagnosis | undefined;
-  const partialResult = () => ({report:partialDiagnosis(verifiedDraft!),tokens,calls,semanticAudits,readFiles:[...source.readRanges.keys()],searches:source.searches});
+  const partialResult = (partialReason:string) => ({partialReason,report:partialDiagnosis(verifiedDraft!),tokens,calls,semanticAudits,readFiles:[...source.readRanges.keys()],searches:source.searches});
   let measuredPromptTokens = 0;
   let tokens = 0,
     calls = 0,
@@ -165,7 +165,7 @@ export async function diagnose(
       messages.push({role:"system",content:"Cierre de investigación: no quedan consultas de código. Entregá un diagnóstico con evidencia ya leída, limitando la conclusión y marcando falta_informacion si un requisito central sigue sin verificar."});
     // A final review must not consume the last budget merely to lose a
     // read-verified draft. Leave it explicitly partial when closure cannot fit.
-    if (verifiedDraft && tokens + Math.max(Math.ceil(JSON.stringify(compactContext(messages)).length / 3) + 4000, measuredPromptTokens) + 8400 + 12000 >= 100000) return partialResult();
+    if (verifiedDraft && tokens + Math.max(Math.ceil(JSON.stringify(compactContext(messages)).length / 3) + 4000, measuredPromptTokens) + 8400 + 12000 >= 100000) return partialResult("closure_budget");
     const response = await ai.chat.completions.create(
       {
         model: options.model,
@@ -267,9 +267,15 @@ export async function diagnose(
       if (!coverageReviewed) {
         if (round === 13) throw Object.assign(new Error("Se alcanzó el límite antes de revisar la cobertura del diagnóstico."), { code: "investigation_rounds" });
         coverageReviewed=true;
-        messages.push({...answer,role:"assistant"});
-        messages.push({role:"system",content:coverageReviewInstruction});
-        messages.push({role:"user",content:JSON.stringify(await buildCoverageReview(report,source,orientation.coverageChecklist))});
+        // Review the draft against refreshed evidence, without replaying the
+        // entire exploratory tool transcript on every finalization request.
+        // CodeSource retains verified ranges and tools remain read-only.
+        const review=await buildCoverageReview(report,source,orientation.coverageChecklist);
+        messages.splice(0,messages.length,
+          {role:"system",content:instruction+"\n"+coverageReviewInstruction},
+          {role:"user",content:JSON.stringify({...review,case:investigationCase(ticket),draft:report})},
+        );
+        measuredPromptTokens=0;
         continue;
       }
       let audit:Awaited<ReturnType<typeof auditDiagnosis>>;
@@ -366,7 +372,7 @@ export async function diagnose(
     // Only controlled research limits may preserve a draft. Authentication,
     // network, malformed output and invalid citations remain explicit failures.
     if (verifiedDraft && error && typeof error === "object" && "code" in error &&
-        ["investigation_tokens","investigation_rounds","diagnosis_length","audit_budget"].includes(String(error.code))) return partialResult();
+        ["investigation_tokens","investigation_rounds","diagnosis_length","audit_budget"].includes(String(error.code))) return partialResult(String(error.code));
     if (error && typeof error === "object") Object.assign(error, {
       investigation: { rounds, calls, tokens, phase: coverageReviewed ? "coverage_review" : researchClosed ? "closing" : "research" },
     });

@@ -306,6 +306,7 @@ export async function createService(
             tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
             readFileCount:result.readFiles.length,
             certainty:result.report.certainty,
+            partialReason:result.partialReason,
           });
           ticket.report = result.report;
           ticket.reportId = randomUUID();

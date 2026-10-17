@@ -92,3 +92,26 @@ it.each([
  }}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:reason,auditTokens:500,message:'No se pudo verificar la evidencia en la auditoría de coherencia.'});
 });
+it('completes final validation on compact evidence after an expensive research prompt',async()=>{
+ const source=await setup();const safe=report('Consultar comprobantes y Caja para conocer los cobros reales.');
+ let writer=0,audits=0;
+ const client={chat:{completions:{create:async(request:any)=>{
+  if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response({approved:true,issues:[]});}
+  writer++;
+  if(writer===1)return {...response(safe,65000),usage:{total_tokens:65000,prompt_tokens:22000}};
+  expect(request.messages.filter((m:any)=>m.role==='tool')).toHaveLength(0);
+  expect(request.messages.filter((m:any)=>m.role==='user')).toHaveLength(1);
+  const payload=JSON.parse(request.messages[1].content);
+  expect(payload.case.title).toBe(ticket.title);
+  expect(payload.draft).toEqual(safe);
+  expect(payload.citedCode[0].content).toContain('saldo suficiente para facturar');
+  expect(payload.allowedReadRanges.length).toBeGreaterThan(0);
+  expect(payload.interfaceScope).toBeDefined();
+  expect(JSON.stringify(request.messages).length).toBeLessThan(32000);
+  return response(safe,5000);
+ }}}};
+ const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
+ expect(result.report.proposal).toBe(safe.proposal);
+ expect(result.partialReason).toBeUndefined();
+ expect(result.tokens).toBe(70500);expect(writer).toBe(2);expect(audits).toBe(1);
+});

@@ -354,3 +354,26 @@ ahora `auditReason` con seis etiquetas permitidas, sin texto del modelo ni códi
 consultado. Regresiones simuladas cubren cada etiqueta y el límite de salida;
 queda pendiente repetir el caso con el modelo real tras desplegar ambos servicios
 en la misma revisión.
+
+### Revisión parcial con 63.824 tokens
+
+El siguiente intento real devolvió sólo referencias, con 12 consultas de código,
+9 archivos y una auditoría intentada. No había agotado los 100.000 tokens; el
+control de reserva podía detener el cierre antes del límite total. El log no
+registraba cuál de las salidas parciales lo provocó; no demuestra si la auditoría
+consumió tokens o sólo llegó a su preflight.
+
+Se compactó el paso de autorrevisión: recibe caso, borrador, checklist, código
+citado refrescado, tests consultados y rangos autorizados, sin volver a transmitir
+el historial exploratorio completo. Conserva herramientas de sólo lectura y el
+registro de procedencia en CodeSource. El costo medido del contexto anterior ya
+no se usa como estimación de ese contexto nuevo. Se mantienen validadores,
+auditoría separada y límite global. El log de finalización agrega `partialReason`
+para diferenciar reserva de cierre, reserva de auditoría y límites efectivamente
+alcanzados.
+
+Una regresión simulada reproduce un prompt previo de 22.000 tokens y 65.000 ya
+consumidos: el contexto de revisión conserva caso y evidencia, y termina con
+aprobación independiente dentro del presupuesto (70.500 tokens simulados).
+124 pruebas aprobadas, TypeScript y compilación del servicio correctos. Esto
+verifica el protocolo y el manejo del presupuesto, no la calidad del modelo real.

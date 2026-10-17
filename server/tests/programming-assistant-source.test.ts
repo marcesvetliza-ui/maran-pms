@@ -148,8 +148,13 @@ describe("read-only code investigator", () => {
       if(round++===0)return {choices:[{message:{role:"assistant",content:null,tool_calls:Array.from({length:28},(_,i)=>({id:`budget-${i}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/budget.ts",start:i+1,end:i+1})}}))}}]};
       expect(request.tool_choice).toBe("none");
       const toolMessages=request.messages.filter((m:any)=>m.role==="tool");
-      expect(toolMessages).toHaveLength(28);
-      expect(toolMessages.filter((m:any)=>JSON.parse(m.content).researchClosed)).toHaveLength(8);
+      if(round===2){
+        expect(toolMessages).toHaveLength(28);
+        expect(toolMessages.filter((m:any)=>JSON.parse(m.content).researchClosed)).toHaveLength(8);
+      }else{
+        expect(toolMessages).toHaveLength(0);
+        expect(JSON.parse(request.messages[1].content).draft).toEqual(report);
+      }
       return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
