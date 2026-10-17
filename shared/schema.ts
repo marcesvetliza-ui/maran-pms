@@ -487,6 +487,10 @@ export type ReservationWithDetails = Reservation & {
   isGroup?: boolean;
   contactName?: string;
   contactPhone?: string;
+  // Populated by buildGroupWithDetails (group rooming) from reservation_companions —
+  // the one real source of named companions for a reservation. Absent on other
+  // enrichReservations callers, which don't need it.
+  companions?: ReservationCompanion[];
 };
 
 export type RoomWithType = Room & {

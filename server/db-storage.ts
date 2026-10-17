@@ -2774,6 +2774,25 @@ export class DatabaseStorage implements IStorage {
     if (resIds.length > 0) {
       const rawReservations = await db.select().from(reservations).where(inArray(reservations.id, resIds));
       reservationsList = await this.enrichReservations(rawReservations);
+
+      // Rooming list needs named companions per room (see group-detail.tsx
+      // printRoomingList / Rooming List dialog). reservation_companions is
+      // the one real source — scoped by reservationId, so rooms/reservations
+      // never mix. Excludes any row whose guestId matches the reservation's
+      // own titular, guarding against the titular also appearing as its own
+      // companion through a data inconsistency.
+      const companionRows = await db.select().from(reservationCompanions)
+        .where(inArray(reservationCompanions.reservationId, resIds))
+        .orderBy(asc(reservationCompanions.createdAt));
+      const companionsByReservation = new Map<string, typeof companionRows>();
+      for (const c of companionRows) {
+        if (!companionsByReservation.has(c.reservationId)) companionsByReservation.set(c.reservationId, []);
+        companionsByReservation.get(c.reservationId)!.push(c);
+      }
+      reservationsList = reservationsList.map(r => ({
+        ...r,
+        companions: (companionsByReservation.get(r.id) ?? []).filter(c => !c.guestId || c.guestId !== r.guestId),
+      }));
     }
 
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
